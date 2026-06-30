@@ -2,7 +2,7 @@
 
 > 面向电商内容创作的 AI 桌面工作站 — 视频下载 · 智能混剪 · 声音克隆 · 素材检索 · AI 图像生成
 
-**跨平台**：Windows / Linux  |  **GUI**：PySide6  |  **版本**：v2.0.0 RC
+**跨平台**：Windows / Linux  |  **GUI**：PySide6  |  **版本**：v2.1.0
 
 ---
 
@@ -107,6 +107,16 @@ make install          # 创建 .venv + 安装 pip 包 + Playwright Chromium
 | **素材检索** (`material_clip_page`) | CLIP 向量搜索 + 关键词匹配 → 预览/下载 |
 | **产品库** (`product_library_page`) | 电商产品资料管理 |
 | **知识库** (`my_knowledge_page`) | 个人知识库 (RAG 检索) |
+
+### ⚙️ 系统配置（侧边栏 v2.1 重组）
+
+| 菜单 | Tab 子模块 |
+|------|-----------|
+| **🖥️ 运行环境** | Python/GPU/CUDA 检测 · 硬件自动优化 · 备份还原 · 终端 |
+| **🔌 平台接入** | ComfyUI · RunningHub · 即梦 · 飞书 |
+| **🧠 模型配置** | Ollama · VoxCPM · Whisper · CLIP · PaddleOCR · rembg |
+| **📊 系统信息** | 硬件信息 · 日志 · 帮助 · 素材目录 |
+| **📦 资源配置** | 声音样本 · 素材目录 (NAS/本地) |
 
 ---
 

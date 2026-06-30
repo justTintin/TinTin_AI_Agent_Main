@@ -121,7 +121,11 @@ class PageSetupMixin:
         lg2 = QVBoxLayout(g2); lg2.setContentsMargins(16,20,16,16); lg2.setSpacing(10)
         lg2.addWidget(QLabel("配置 NAS 根目录和入库资源目录。素材入库时将从此处扫描。"))
         r = QHBoxLayout(); r.addWidget(QLabel("NAS 根目录:"))
-        self.res_nas_root = QLineEdit(); self.res_nas_root.setPlaceholderText(r"例: \\192.168.111.17  (留空不启用)")
+        self.res_nas_root = QLineEdit()
+        if sys.platform == "win32":
+            self.res_nas_root.setPlaceholderText(r"例: \\192.168.111.17  (留空不启用)")
+        else:
+            self.res_nas_root.setPlaceholderText("例: //192.168.111.17 或 /mnt/nas  (留空不启用)")
         r.addWidget(self.res_nas_root, 1); lg2.addLayout(r)
         lg2.addWidget(QLabel("入库资源目录列表:"))
         r2 = QHBoxLayout()
@@ -131,6 +135,18 @@ class PageSetupMixin:
         r2.addStretch()
         b_save = QPushButton("💾 保存目录配置"); b_save.setObjectName("primary_button"); b_save.clicked.connect(self._res_save_nas_config); r2.addWidget(b_save)
         lg2.addLayout(r2); l2.addWidget(g2)
+
+        # 素材管理开关
+        self.chk_show_material = QCheckBox("🗄️ 启用素材管理（向量入库/标注/检索）")
+        self.chk_show_material.setStyleSheet("font-size:14px; font-weight:bold; color:#a855f7; margin-top:8px;")
+        self.chk_show_material.toggled.connect(self._res_toggle_material)
+        l2.addWidget(self.chk_show_material)
+
+        # 素材管理容器
+        self.res_material_container = QWidget()
+        self.res_material_container.setStyleSheet("background: transparent;")
+        self.res_material_container.setVisible(False)
+        l2.addWidget(self.res_material_container, 1)
         l2.addStretch()
         tabs.addTab(p2, "🗄️ 素材资源")
 
@@ -612,7 +628,7 @@ class PageSetupMixin:
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30,30,30,30)
         l4.addWidget(QLabel("即梦 (Dreamina) AI 图片生成"))
         l4.addWidget(QLabel(f"输出目录: {DREAMINA_OUTPUT_DIR}"))
-        has = "✅ 已就位" if os.path.isfile(DREAMINA_EXE) else "❌ 未找到 (bin/dreamina.exe)"
+        has = "✅ 已就位" if os.path.isfile(DREAMINA_EXE) else f"❌ 未找到 ({DREAMINA_EXE})"
         l4.addWidget(QLabel(f"引擎: {has}"))
         self.dr_status = QLabel(""); self.dr_status.setObjectName("muted_text"); l4.addWidget(self.dr_status)
         r4 = QHBoxLayout()
@@ -1006,16 +1022,23 @@ class PageSetupMixin:
                     d = json.load(f)
                 self.res_nas_root.setText(d.get("nas_root", ""))
                 self.res_index_dirs.clear()
-                for dd in d.get("index_dirs", []):
-                    self.res_index_dirs.addItem(dd)
+                for dd in d.get("index_directories", []):
+                    if isinstance(dd, dict):
+                        self.res_index_dirs.addItem(dd.get("local_path", str(dd)))
+                    else:
+                        self.res_index_dirs.addItem(str(dd))
             except Exception: pass
 
     def _res_toggle_material(self, checked):
         if checked:
-            from gui.material_clip_page import MaterialClipPage
-            if not hasattr(self, "material_clip_tool") or not self.material_clip_tool:
-                self.material_clip_tool = MaterialClipPage(self.res_material_container, self)
-                self.material_clip_tool.setup()
-            self.res_material_container.setVisible(True)
+            try:
+                from gui.material_clip_page import MaterialClipPage
+                if not hasattr(self, "material_clip_tool") or not self.material_clip_tool:
+                    self.material_clip_tool = MaterialClipPage(self.res_material_container, self)
+                    self.material_clip_tool.setup()
+                self.res_material_container.setVisible(True)
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                QMessageBox.critical(self, "启动失败", f"素材管理加载失败：{e}")
         else:
             self.res_material_container.setVisible(False)

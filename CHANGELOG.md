@@ -1,5 +1,29 @@
 # 版本日志
 
+## v2.1.0 (2026-06-30)
+
+### 系统配置重构
+- 「⚙️ 环境配置」拆分为 5 个独立侧边栏菜单，每个内部用 Tab 组织子模块：
+  - **🖥️ 运行环境**：Python/GPU/CUDA 检测 + 硬件自动优化 + 一键修复 + 备份还原 + Python 终端
+  - **🔌 平台接入**：ComfyUI 启停/测试 + RunningHub API + 即梦 + 飞书配置
+  - **🧠 模型配置**：Ollama / VoxCPM / Whisper / CLIP / PaddleOCR / rembg — 每个模型独立 Tab，含启动/停止/测试/下载
+  - **📊 系统信息**：硬件信息 + 系统日志 + 帮助文档 + 素材目录
+  - **📦 资源配置**：声音样本 + 素材目录（支持多目录、NAS 入库）
+- 合并冗余菜单：AI 设置→平台接入、大模型配置→模型配置、系统日志→系统信息、备份还原/Python终端→运行环境
+- `env_config_page.py` 拆为 `EnvRuntimePage / ComfyUIConfigPage / ModelConfigPage / SystemInfoPage` 4 个独立页面类
+
+### 跨平台适配
+- README 重写为完整跨平台文档（Linux/Windows），新增 `docs/DEVELOPMENT.md`
+- 素材目录平台默认值：Linux 自动含 `/mnt/nas/Photos`，Windows 仅本地路径
+- NAS 路径提示按平台区分（`\\192.168.xxx` vs `//192.168.xxx 或 /mnt/nas`）
+- `config/paths.py` 新增 `MATERIALS_PLATFORM_DEFAULTS`
+
+### 修复
+- 素材浏览器 Electron 依赖修复：`node_modules/electron` 缺失二进制
+- `.gitignore` 添加 `node_modules/` 防止万级文件误提交
+- CLIP 混合搜索优化：关键词字段权重分级，过滤低质向量结果
+- 侧边栏双击预览：委托事件替代内联属性
+
 ## v2.0.0 RC (2026-06-23)
 
 ### 视频AI智能重命名

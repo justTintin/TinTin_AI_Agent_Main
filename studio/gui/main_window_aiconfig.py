@@ -1,0 +1,349 @@
+# -*- coding: utf-8 -*-
+"""MainWindow 的 AI / 大模型配置 mixin（ai_config 读写、连接测试、Ollama 后端切换），从 gui_main 拆出。"""
+
+import subprocess
+import time
+import json
+import sys
+import os
+from config.paths import (
+    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
+    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_INI_FILE
+)
+import threading
+import uuid
+import configparser
+from ui import gui_styles
+from gui.transcription_page import TranscriptionToolPage
+from gui.env_config_page import EnvConfigPage, EnvInstallWorker
+from gui.subtitle_removal_page import SubtitleRemovalPage
+from gui.live_clip_page import LiveClipPage
+from gui.voice_clone_page import VoiceClonePage
+from gui.voice_samples_page import VoiceSamplesPage
+from gui.video_ocr_page import VideoOcrPage
+from gui.image_folder_ocr_page import ImageFolderOcrPage
+from utils.logger_utils import log, get_last_logs
+from utils.account_manager import AccountManager
+from core.creator_browser_controller import CreatorBrowserController
+from utils.thread_worker import TaskWorker as Worker
+from gui.threads import SystemMonitorThread, ComfyWSThread
+from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
+                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
+                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
+                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
+                                 QListWidgetItem, QGridLayout, QFileDialog, 
+                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
+                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
+                                 QSpinBox)
+from PySide6.QtGui import QIcon, QFont, QPixmap
+from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QFont
+
+
+class AIConfigMixin:
+    def save_llm_config(self):
+        self.ai_config["llm_provider"] = self.llm_provider_combo.currentData()
+        self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
+        self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
+        self.ai_config["llm_model"] = self.llm_model_input.text().strip()
+        vision_url = self.llm_vision_api_url_input.text().strip()
+        vision_model = self.llm_vision_model_input.currentText().strip()
+        if vision_model and not vision_url:
+            vision_url = "http://127.0.0.1:11434"
+            self.llm_vision_api_url_input.setText(vision_url)
+        self.ai_config["llm_vision_api_url"] = vision_url
+        self.ai_config["llm_vision_model"] = vision_model
+        try:
+            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
+            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "成功", "大模型配置已保存。")
+            log.info("LLM configuration saved successfully.")
+        except Exception as e:
+            log.error(f"保存大模型配置失败: {e}")
+            QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
+
+    def refresh_llm_page_status(self):
+        if not hasattr(self, "env_config_tool"):
+            return
+            
+        # If we have cached info already, show it immediately first
+        if self.env_config_tool.cached_info:
+            self._update_llm_page_ui(self.env_config_tool.cached_info)
+            
+        # Trigger an async refresh to update the cache and UI in background
+        self.env_config_tool.refresh_status_async(self._on_llm_env_checked)
+
+        # 刷新内置 Ollama 服务检测
+        if hasattr(self, "_ollama_refresh_status"):
+            self._ollama_refresh_status()
+
+    def _on_llm_env_checked(self, info):
+        self._update_llm_page_ui(info)
+
+    def _update_llm_page_ui(self, info):
+        if not info:
+            return
+        # Update Whisper status labels
+        if info.get("whisper_ok", False):
+            whisper_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('whisper_version', '')})"
+        else:
+            whisper_status = "<font color='#dc2626'><b>❌ 未就绪</b></font> (缺少 whisperx 依赖)"
+        self.llm_whisper_status_val.setText(whisper_status)
+        
+        if info.get("dll_ok", False):
+            dll_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('dll_status', '')})"
+        else:
+            dll_status = f"<font color='#d97706'><b>⚠️ {info.get('dll_status', '')}</b></font>"
+        self.llm_dll_status_val.setText(dll_status)
+        
+        models_status = f"<font color='#2563eb'><b>{', '.join(info.get('found_models', []))}</b></font> (存放目录: {info.get('models_dir', '')})"
+        self.llm_models_status_val.setText(models_status)
+        
+        # Update VoxCPM status label
+        if info.get("voxcpm_ok", False):
+            vox_status = f"<font color='#16a34a'><b>✅ {info.get('voxcpm_status', '')}</b></font>"
+        elif info.get("voxcpm_installed", False):
+            vox_status = f"<font color='#d97706'><b>⚠️ {info.get('voxcpm_status', '')}</b></font>"
+        else:
+            vox_status = f"<font color='#dc2626'><b>❌ {info.get('voxcpm_status', '')}</b></font>"
+        self.llm_vox_status_val.setText(vox_status)
+
+        # Update PaddleOCR status labels
+        if info.get("paddleocr_ok", False):
+            paddle_status = f"<font color='#16a34a'><b>✅ {info.get('paddleocr_status', '')}</b></font>"
+        else:
+            paddle_status = f"<font color='#dc2626'><b>❌ {info.get('paddleocr_status', '')}</b></font>"
+        self.llm_paddle_status_val.setText(paddle_status)
+        
+        p_models_status = f"<font color='#2563eb'><b>{', '.join(info.get('paddleocr_models', []))}</b></font> (存放目录: {info.get('paddleocr_models_dir', '')})"
+        self.llm_paddle_models_val.setText(p_models_status)
+
+    def load_ai_config(self):
+        default_config = {
+            "comfyui_addr": "http://192.168.111.36:8188",
+            "voice_clone_addr": "http://192.168.111.36:7860",
+            "runninghub_api_key": "",
+            "runninghub_base_url": "https://www.runninghub.cn",
+            "llm_provider": "deepseek",
+            "llm_api_key": "",
+            "llm_api_url": "https://api.deepseek.com",
+            "llm_model": "deepseek-v4-flash",
+            "llm_vision_api_url": "",
+            "llm_vision_model": "",
+            "vox_api_url": "http://127.0.0.1:7861/v1/tts",
+            "vox_mode": "api",
+            "vox_timesteps": 20,
+            "vox_cfg": 2.0
+        }
+        config_path = self.ai_config_file if os.path.exists(self.ai_config_file) else None
+        if not config_path and hasattr(self, "ai_config_legacy_file") and os.path.exists(self.ai_config_legacy_file):
+            config_path = self.ai_config_legacy_file
+
+        if config_path:
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    self.ai_config = json.load(f)
+                for k, v in default_config.items():
+                    if k not in self.ai_config:
+                        self.ai_config[k] = v
+                if config_path != self.ai_config_file:
+                    try:
+                        os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
+                        with open(self.ai_config_file, 'w', encoding='utf-8') as wf:
+                            json.dump(self.ai_config, wf, indent=4, ensure_ascii=False)
+                    except Exception as e:
+                        log.error(f"迁移 AI 配置失败: {e}")
+                return
+            except Exception as e:
+                log.error(f"加载 AI 配置失败: {e}")
+        self.ai_config = default_config
+
+    def save_ai_config(self):
+        self.ai_config["comfyui_addr"] = self.comfyui_input.text().strip()
+        self.ai_config["voice_clone_addr"] = self.voice_clone_input.text().strip()
+        self.ai_config["runninghub_api_key"] = self.rh_api_key_input.text().strip()
+        self.ai_config["runninghub_base_url"] = self.rh_base_url_input.text().strip()
+        
+        # Update runninghub manager instance
+        self.runninghub.update_config(
+            self.ai_config["runninghub_api_key"],
+            self.ai_config["runninghub_base_url"]
+        )
+        
+        try:
+            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
+            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "成功", "AI 配置已保存。")
+            log.info("AI configuration saved successfully.")
+        except Exception as e:
+            log.error(f"保存 AI 配置失败: {e}")
+            QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
+
+    def test_ai_connections(self):
+        comfyui_addr = self.comfyui_input.text().strip().rstrip("/")
+        voice_addr = self.voice_clone_input.text().strip().rstrip("/")
+        rh_api_key = self.rh_api_key_input.text().strip()
+        rh_base_url = self.rh_base_url_input.text().strip().rstrip("/")
+        
+        results = []
+        try:
+            import requests
+            from utils import comfyui_client as comfy
+            # Test ComfyUI：外部地址 + 本地引擎双后端
+            if comfyui_addr and comfy.is_alive(comfyui_addr):
+                results.append("ComfyUI(外部): ✅ 在线")
+            elif comfyui_addr:
+                results.append("ComfyUI(外部): ❌ 无法连接")
+            else:
+                results.append("ComfyUI(外部): ⚪ 未配置")
+            local = comfy.ComfyUILocal.get()
+            if not local.is_present():
+                results.append("ComfyUI(本地): ⚪ 未安装 (apps/comfyui)")
+            elif local.is_running():
+                results.append("ComfyUI(本地): ✅ 运行中")
+            else:
+                results.append("ComfyUI(本地): 🟡 已就位 (未运行，提交任务时自动启动)")
+
+            # Test Voice Clone
+            try:
+                res = requests.get(voice_addr, timeout=5)
+                results.append(f"克隆声音: {'✅ 在线' if res.status_code == 200 else '❌ 异常 ('+str(res.status_code)+')'}")
+            except:
+                results.append("克隆声音: ❌ 无法连接")
+            
+            # Test RunningHub
+            if rh_api_key:
+                try:
+                    url = f"{rh_base_url}/openapi/v1/workflow/list"
+                    headers = {"Authorization": f"Bearer {rh_api_key}"}
+                    res = requests.get(url, headers=headers, params={"page": 1, "size": 1}, timeout=5)
+                    if res.status_code == 200 and res.json().get("code") == 0:
+                        results.append("RunningHub: ✅ 认证成功")
+                    else:
+                        msg = res.json().get("msg", "认证失败")
+                        results.append(f"RunningHub: ❌ {msg} (HTTP {res.status_code})")
+                except Exception as e:
+                    results.append(f"RunningHub: ❌ 连接失败 ({str(e)})")
+            else:
+                results.append("RunningHub: ⚠️ 未配置 API Key")
+            
+            QMessageBox.information(self, "测试结果", "\n".join(results))
+        except Exception as e:
+            QMessageBox.critical(self, "测试失败", str(e))
+
+    def _on_llm_provider_changed(self, index):
+        provider = self.llm_provider_combo.currentData()
+        presets = {
+            "deepseek": ("https://api.deepseek.com", "deepseek-v4-flash"),
+            "openai": ("https://api.openai.com", "gpt-3.5-turbo"),
+            "custom": ("", ""),
+        }
+        url, model = presets.get(provider, ("", ""))
+        if url:
+            self.llm_api_url_input.setText(url)
+        if model:
+            self.llm_model_input.setText(model)
+        if provider == "custom":
+            self.llm_api_url_input.setPlaceholderText("https://your-api-endpoint.com")
+            self.llm_model_input.setPlaceholderText("your-model-name")
+
+    # ──────────────────── Ollama 管理 ────────────────────
+
+    def _test_llm_connection(self):
+        self.btn_test_llm.setEnabled(False)
+        self.llm_status_lbl.setText("正在测试...")
+        self.llm_status_lbl.setStyleSheet("color: #f39c12;")
+        try:
+            import requests
+            api_url = self.llm_api_url_input.text().strip()
+            api_key = self.llm_api_key_input.text().strip()
+            model = self.llm_model_input.text().strip()
+            if not api_key or not api_url:
+                self.llm_status_lbl.setText("⚠️ 请填写 API Key 和接口地址")
+                self.llm_status_lbl.setStyleSheet("color: #f39c12;")
+                self.btn_test_llm.setEnabled(True)
+                return
+            url = f"{api_url.rstrip('/')}/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            payload = {"model": model, "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                self.llm_status_lbl.setText(f"✅ 连接成功 ({model})")
+                self.llm_status_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            elif res.status_code == 401:
+                self.llm_status_lbl.setText(f"❌ API Key 无效，请检查")
+                self.llm_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            elif res.status_code == 404:
+                self.llm_status_lbl.setText(f"❌ 接口地址或模型名错误 (404)")
+                self.llm_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            else:
+                msg = res.json().get("error", {}).get("message", res.text[:60])
+                self.llm_status_lbl.setText(f"❌ HTTP {res.status_code}: {msg}")
+                self.llm_status_lbl.setStyleSheet("color: #e74c3c;")
+        except Exception as e:
+            err = str(e)[:80]
+            self.llm_status_lbl.setText(f"❌ 连接失败: {err}")
+            self.llm_status_lbl.setStyleSheet("color: #e74c3c;")
+        self.btn_test_llm.setEnabled(True)
+
+    def on_backend_changed(self, index):
+        is_rh = (index == 1)
+        # ComfyUI section now includes image/audio inputs
+        self.comfy_section.setVisible(not is_rh)
+        self.rh_section.setVisible(is_rh)
+        
+        # Update run button visibility and text
+        if not is_rh:
+            self.btn_run_local.setEnabled(self.current_workflow_data is not None)
+
+    def load_feishu_config(self):
+        config = configparser.ConfigParser()
+        appid = ""; appsecret = ""; apptoken = ""; tableid = ""
+        topicfield = "选题"; scriptfield = "脚本"; foldertoken = ""
+        try:
+            if os.path.exists(CONFIG_INI_FILE):
+                config.read(CONFIG_INI_FILE, encoding='utf-8')
+                if config.has_section('Feishu'):
+                    appid = config.get('Feishu', 'AppId', fallback="")
+                    appsecret = config.get('Feishu', 'AppSecret', fallback="")
+                    apptoken = config.get('Feishu', 'AppToken', fallback="")
+                    tableid = config.get('Feishu', 'TableId', fallback="")
+                    topicfield = config.get('Feishu', 'TopicField', fallback="选题")
+                    scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
+                    foldertoken = config.get('Feishu', 'FolderToken', fallback="")
+        except Exception as e:
+            log.error(f"加载飞书配置失败: {e}")
+        if hasattr(self, 'edit_feishu_appid'):
+            self.edit_feishu_appid.setText(appid)
+            self.edit_feishu_appsecret.setText(appsecret)
+            self.edit_feishu_apptoken.setText(apptoken)
+            self.edit_feishu_tableid.setText(tableid)
+            self.edit_feishu_topicfield.setText(topicfield)
+            self.edit_feishu_scriptfield.setText(scriptfield)
+            self.edit_feishu_foldertoken.setText(foldertoken)
+
+    def save_feishu_config(self):
+        config = configparser.ConfigParser()
+        try:
+            if os.path.exists(CONFIG_INI_FILE):
+                config.read(CONFIG_INI_FILE, encoding='utf-8')
+            if not config.has_section('Feishu'):
+                config.add_section('Feishu')
+            config.set('Feishu', 'AppId', self.edit_feishu_appid.text().strip())
+            config.set('Feishu', 'AppSecret', self.edit_feishu_appsecret.text().strip())
+            config.set('Feishu', 'AppToken', self.edit_feishu_apptoken.text().strip())
+            config.set('Feishu', 'TableId', self.edit_feishu_tableid.text().strip())
+            config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())
+            config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())
+            config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())
+            with open(CONFIG_INI_FILE, 'w', encoding='utf-8') as f:
+                config.write(f)
+            QMessageBox.information(self, "提示", "飞书配置参数保存成功！")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")
+            log.error(f"保存飞书配置失败: {e}")

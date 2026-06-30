@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TInTIn 素材下载浏览器</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 左栏：账号与创作者追踪 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 18.5C8.41 18.5 5.5 15.59 5.5 12C5.5 8.41 8.41 5.5 12 5.5C15.59 5.5 18.5 8.41 18.5 12C18.5 15.59 15.59 18.5 12 18.5ZM12.5 7H11V13L16.25 16.15L17 14.92L12.5 12.25V7Z" fill="currentColor"/>
+        </svg>
+        <span>TInTIn</span>
+      </div>
+
+      <!-- 导航模式 -->
+      <section class="section">
+        <h3 class="section-title">模式切换</h3>
+        <div class="mode-buttons" style="display: flex; flex-direction: column; gap: 8px;">
+          <button class="platform-btn mode-btn active" id="btn-mode-browser">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary);"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            <span>网页浏览器</span>
+          </button>
+          <button class="platform-btn mode-btn" id="btn-mode-knowledge">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            <span>收藏记录</span>
+          </button>
+          <button class="platform-btn mode-btn" id="btn-mode-materials">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            <span>素材浏览器</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 快速导航平台 -->
+      <section class="section">
+        <h3 class="section-title">常用平台</h3>
+        <div class="platform-grid">
+          <button class="platform-btn" data-url="https://www.xiaohongshu.com" data-platform="xiaohongshu">
+            <span class="platform-badge xhs">小</span>
+            <span>小红书</span>
+          </button>
+          <button class="platform-btn" data-url="https://www.bilibili.com" data-platform="bilibili">
+            <span class="platform-badge bili">B</span>
+            <span>哔哩哔哩</span>
+          </button>
+          <button class="platform-btn" data-url="https://www.douyin.com" data-platform="douyin">
+            <span class="platform-badge dy">抖</span>
+            <span>抖音</span>
+          </button>
+          <button class="platform-btn" data-url="https://www.youtube.com" data-platform="youtube">
+            <span class="platform-badge yt">Y</span>
+            <span>YouTube</span>
+          </button>
+          <button class="platform-btn" data-url="https://www.zhihu.com" data-platform="zhihu">
+            <span class="platform-badge zh">知</span>
+            <span>知乎</span>
+          </button>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- 中间：浏览器视图 -->
+    <main class="main-browser" id="browser-view">
+      <header class="browser-navbar">
+        <div class="nav-controls">
+          <button class="nav-btn" id="btn-back" title="后退">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          </button>
+          <button class="nav-btn" id="btn-forward" title="前进">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          </button>
+          <button class="nav-btn" id="btn-refresh" title="刷新">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+          </button>
+        </div>
+
+        <div class="address-bar-container">
+          <input type="text" id="address-input" class="address-input" placeholder="输入网址或搜索内容...">
+        </div>
+
+        <!-- 收藏/点赞页自动滚动到底，触发全部分页加载 -->
+        <button class="action-btn" id="btn-auto-scroll" title="在你的收藏/点赞页点此，自动滚动到底加载全部历史">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+          <span>自动加载到底</span>
+        </button>
+
+        <!-- 一键采集各平台今日热榜 -->
+        <button class="action-btn" id="btn-capture-hotspot" title="依次打开 抖音/知乎/小红书/B站 热榜页采集今日热点">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+          <span>抓取今日热点</span>
+        </button>
+
+      </header>
+
+      <!-- Electron Webview Tag -->
+      <div class="webview-container">
+        <webview 
+          id="browser-webview"
+          src="https://www.google.com"
+          preload="../preload-webview.js"
+          partition="persist:tintin-browser"
+          allowpopups
+        ></webview>
+      </div>
+    </main>
+
+    <!-- 中间：收藏记录视图 -->
+    <main class="main-browser" id="knowledge-base-view" style="display: none; padding: 20px 24px; overflow-y: auto;">
+      <header class="kb-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+        <h2 style="font-size: 1.4rem; font-weight: 700; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-family: var(--font-family);">收藏记录同步</h2>
+        <div style="display: flex; gap: 15px; align-items: center;">
+          <!-- 登录状态 -->
+          <div id="login-status-container" style="display: flex; gap: 8px; font-size: 0.75rem; color: var(--text-secondary);">
+            <!-- 动态填充 -->
+          </div>
+          <button class="panel-btn primary" id="btn-sync-knowledge" style="padding: 8px 16px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer; border: none; font-family: var(--font-family); font-weight: 600;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+            抓取收藏数据
+          </button>
+        </div>
+      </header>
+
+      <!-- 搜索和过滤器 -->
+      <div class="kb-filter-bar" style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; padding: 14px 16px; background-color: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); align-items: center;">
+        <input type="text" id="kb-search-input" placeholder="搜索标题、作者..." style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 7px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); width: 220px; outline: none; transition: border-color 0.2s;">
+        
+        <select id="kb-platform-filter" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); cursor: pointer; outline: none;">
+          <option value="all">所有平台</option>
+          <option value="xiaohongshu">小红书</option>
+          <option value="bilibili">哔哩哔哩</option>
+          <option value="douyin">抖音</option>
+          <option value="youtube">YouTube</option>
+          <option value="zhihu">知乎</option>
+        </select>
+        
+        <select id="kb-type-filter" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); cursor: pointer; outline: none;">
+          <option value="all">所有类型</option>
+          <option value="video">视频</option>
+          <option value="image">文章/图片</option>
+        </select>
+
+        <select id="kb-creator-filter" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); cursor: pointer; outline: none; max-width: 160px;">
+          <option value="all">所有创作者</option>
+        </select>
+
+        <button id="btn-collect-creator-all" title="进入此达人主页，一键加载并收藏其所有作品（需先在创作者筛选中选定某个人）"
+          style="display:none; padding:6px 12px; font-size:0.78rem; border-radius:6px; cursor:pointer; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); font-family:var(--font-family); white-space:nowrap;">
+          📥 收藏此达人全部
+        </button>
+
+        <select id="kb-sort" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); cursor: pointer; outline: none;">
+          <option value="date">按发布时间</option>
+          <option value="like">按点赞</option>
+          <option value="play">按播放量</option>
+          <option value="comment">按评论数</option>
+          <option value="collect">按收藏数</option>
+          <option value="share">按转发数</option>
+        </select>
+
+        <div style="margin-left: auto; display: flex; gap: 12px; align-items: center;">
+          <span style="font-size: 0.78rem; color: var(--text-secondary);">已选 <span id="kb-selected-count" style="color: var(--color-primary); font-weight: 700;">0</span> / <span id="kb-total-count">0</span> 项</span>
+          <button class="panel-btn primary" id="btn-kb-download-selected" style="padding: 7px 14px; font-size: 0.8rem; border-radius: 6px; cursor: pointer; border: none; font-family: var(--font-family); font-weight: 600;">批量下载</button>
+        </div>
+      </div>
+
+      <!-- 同步中状态遮罩 -->
+      <div id="kb-loading-overlay" style="display: none; flex-direction: column; align-items: center; justify-content: center; padding: 50px 20px; background-color: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); text-align: center; gap: 18px; margin-bottom: 18px;">
+        <div class="loader" style="border: 3px solid var(--border-color); border-top: 3px solid var(--color-primary); border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite;"></div>
+        <div id="kb-loading-text" style="font-size: 0.85rem; color: var(--text-secondary); font-family: var(--font-family);">正在同步中...</div>
+        <div style="width: 100%; max-width: 320px; height: 4px; background-color: var(--bg-tertiary); border-radius: 2px; overflow: hidden; position: relative;">
+          <div id="kb-sync-progress-bar" style="width: 0%; height: 100%; background: var(--gradient-primary); transition: width 0.3s; border-radius: 2px;"></div>
+        </div>
+      </div>
+
+      <!-- 数据内容展示列表 -->
+      <div id="kb-list-container" style="background-color: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); overflow-y: auto; display: flex; flex-direction: column; min-height: 350px; max-height: calc(100vh - 360px);">
+        <div class="empty-state" id="kb-empty-state" style="padding: 100px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--text-muted); font-size: 0.8rem; line-height: 1.6; height: 100%;">
+          暂无抓取数据<br>请点击右上角“抓取收藏数据”，或在网页浏览器打开你的收藏页后点“自动加载到底”
+        </div>
+        
+        <table id="kb-table" style="width: 100%; border-collapse: collapse; text-align: left; display: none; font-size: 0.82rem; font-family: var(--font-family);">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-color); background-color: rgba(0,0,0,0.15); color: var(--text-secondary); font-weight: 600;">
+              <th style="padding: 12px 16px; width: 45px; text-align: center;"><input type="checkbox" id="kb-select-all" style="cursor: pointer;"></th>
+              <th style="padding: 12px 16px; width: 75px;">封面</th>
+              <th style="padding: 12px 16px; width: 140px;">创作者 / 平台</th>
+              <th style="padding: 12px 16px;">标题 / 链接</th>
+              <th style="padding: 12px 16px; width: 90px; text-align: center;">内容类型</th>
+              <th style="padding: 12px 16px; width: 100px; text-align: center;">热度数据</th>
+              <th style="padding: 12px 16px; width: 145px; text-align: center;">发布时间</th>
+            </tr>
+          </thead>
+          <tbody id="kb-table-body">
+            <!-- 动态生成行内容 -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 分页 -->
+      <div id="kb-pagination" style="display: none; justify-content: center; align-items: center; gap: 14px; padding: 12px;">
+        <button id="kb-prev" class="panel-btn" style="padding: 6px 14px; font-size: 0.8rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">上一页</button>
+        <span id="kb-page-info" style="font-size: 0.8rem; color: var(--text-secondary);">第 1 / 1 页</span>
+        <button id="kb-next" class="panel-btn" style="padding: 6px 14px; font-size: 0.8rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary);">下一页</button>
+      </div>
+    </main>
+
+    <!-- 中间：素材浏览器视图 -->
+    <main class="main-browser" id="materials-view" style="display: none; padding: 20px 24px; overflow-y: auto;">
+      <header class="kb-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+        <h2 style="font-size: 1.4rem; font-weight: 700; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-family: var(--font-family);">本地素材浏览器</h2>
+        <button class="panel-btn primary" id="btn-refresh-materials" style="padding: 8px 16px; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer; border: none; font-family: var(--font-family); font-weight: 600;">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+          刷新列表
+        </button>
+      </header>
+      
+      <div id="materials-container" style="display: flex; flex-direction: column; gap: 24px;">
+        <!-- 动态生成每日素材目录 -->
+      </div>
+    </main>
+
+    <!-- 用于后台同步和详情抓取的隐藏 Webview (使用离屏绝对定位防止 Chromium 挂起后台 JavaScript 执行) -->
+    <webview 
+      id="scraper-webview" 
+      preload="../preload-webview.js"
+      partition="persist:tintin-browser"
+      style="position: absolute; left: -9999px; top: -9999px; width: 1200px; height: 900px;"
+    ></webview>
+
+    <!-- 右栏：嗅探面板与下载器 -->
+    <aside class="right-panel">
+      <!-- Tabs -->
+      <div class="tab-header">
+        <button class="tab-btn active" data-tab="tab-sniffer">素材嗅探</button>
+        <button class="tab-btn" data-tab="tab-downloads">
+          下载管理
+          <span class="badge" id="download-active-count" style="display: none;">0</span>
+        </button>
+      </div>
+
+      <div class="tab-content-container">
+        <!-- Tab 1: Sniffer -->
+        <div class="tab-pane active" id="tab-sniffer">
+          <div class="pane-actions">
+            <div class="checkbox-container">
+              <input type="checkbox" id="select-all-sniffed">
+              <label for="select-all-sniffed">全选 (<span id="sniffed-count">0</span>)</label>
+            </div>
+            <div class="btn-group">
+              <button class="panel-btn secondary" id="btn-manual-sniff" title="手动嗅探页面素材">手动嗅探</button>
+              <button class="panel-btn danger" id="btn-clear-sniffed" title="清空列表">清空</button>
+              <button class="panel-btn primary" id="btn-download-selected">下载所选</button>
+            </div>
+          </div>
+
+          <div class="sniffer-list-container">
+            <div class="empty-state" id="sniffer-empty">
+              当前页面没有嗅探到素材<br>浏览帖子或滑动页面会自动捕获
+            </div>
+            <div class="sniffer-grid" id="sniffer-grid">
+              <!-- Sniffed items load here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Downloads -->
+        <div class="tab-pane" id="tab-downloads">
+          <div class="pane-actions">
+            <button class="panel-btn secondary" id="btn-clear-downloads">清空历史</button>
+            <button class="panel-btn primary" id="btn-open-dir">打开下载目录</button>
+          </div>
+
+          <div class="download-list-container">
+            <div class="empty-state" id="downloads-empty">
+              无下载历史任务
+            </div>
+            <div class="download-list" id="download-list">
+              <!-- Download items load here -->
+            </div>
+          </div>
+
+          <!-- Bottom: Path settings -->
+          <div class="path-settings">
+            <span class="path-label">下载保存路径：</span>
+            <div class="path-input-group">
+              <span class="path-text" id="download-path-display">未设置</span>
+              <button class="path-btn" id="btn-change-path">更改</button>
+            </div>
+          </div>
+
+          <!-- Bottom: Proxy settings -->
+          <div class="path-settings" style="margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <span class="path-label" style="margin-bottom: 0;">启用 v2rayN 代理：</span>
+              <label class="switch">
+                <input type="checkbox" id="checkbox-use-proxy">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <span class="path-label">v2rayN.exe 路径：</span>
+            <div class="path-input-group">
+              <input type="text" id="input-v2ray-path" style="flex:1; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:4px; padding:6px 8px; color:var(--text-primary); font-size:12px; font-family:var(--font-family);" placeholder="已集成内置代理 (留空使用内置，亦可填入自定义绝对路径)">
+              <button class="path-btn" id="btn-save-proxy" style="margin-left: 5px;">保存</button>
+            </div>
+            <div style="margin-top: 12px;">
+              <button class="panel-btn primary" id="btn-open-proxy" style="width: 100%; font-size: 12px; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; border: none; border-radius: 4px;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                打开 v2rayN 客户端
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>

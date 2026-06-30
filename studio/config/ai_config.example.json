@@ -1,0 +1,6 @@
+{
+  "comfyui_addr": "http://127.0.0.1:8188",
+  "voice_clone_addr": "http://127.0.0.1:7860",
+  "runninghub_api_key": "",
+  "runninghub_base_url": "https://www.runninghub.cn"
+}

@@ -1,0 +1,32 @@
+{
+  "_comment": "素材向量索引配置 — 按实际环境修改后保存即生效，_comment 行会被忽略",
+  "db_host": "192.168.111.17",
+  "db_port": 15432,
+  "db_name": "material_index",
+  "db_user": "Justin",
+  "db_password": "sfs.66778899",
+  "_comment_tags": [
+    "目录层级标签（相对 nas_root，0 = 第一级子目录，-1 = 不取该字段）",
+    "例: \\\\NAS\\素材\\鼠标\\罗技\\G502\\video.mp4",
+    "  depth 0 → product=鼠标  depth 1 → brand=罗技  depth 2 → model=G502"
+  ],
+  "tag_depth_product": 0,
+  "tag_depth_brand": 1,
+  "tag_depth_model": 2,
+  "tag_depth_category": -1,
+  "fps": 1,
+  "_comment_clip": "clip_model 可选: ViT-B-16 / ViT-L-14 / ViT-H-14（越大越准但越慢）",
+  "clip_model": "ViT-B-16",
+  "clip_model_dir": "D:\\code_workspace\\TinTin_AI_Agent\\apps\\clip-models\\damo\\multi-modal_clip-vit-base-patch16_zh",
+  "device": "auto",
+  "batch_size": 16,
+  "ffmpeg_path": null,
+  "save_thumbs": false,
+  "thumb_dir": null,
+  "nas_root": "\\\\192.168.111.17",
+  "index_directories": [
+    "R:/",
+    "T:/",
+    "W:/"
+  ]
+}

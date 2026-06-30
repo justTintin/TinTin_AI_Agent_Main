@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  app:
+    build: 
+      context: ..
+      dockerfile: deployment/Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../video_path:/app/video_path
+      - ../config.ini:/app/config.ini
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - mongodb
+      - mysql
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: handling_video
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mongo_data:
+  mysql_data:

@@ -56,6 +56,14 @@ COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 ASSET_BROWSER_DIR = os.path.join(APPS_DIR, "asset-browser")
 MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")
+
+# 素材目录平台默认值
+_MATERIALS_DEFAULTS = {
+    "linux": [os.path.join(MATERIALS_DIR, "knowledge"), "/mnt/nas/Photos"],
+    "win32": [os.path.join(MATERIALS_DIR, "knowledge")],
+    "darwin": [os.path.join(MATERIALS_DIR, "knowledge")],
+}
+MATERIALS_PLATFORM_DEFAULTS = _MATERIALS_DEFAULTS.get(sys.platform, _MATERIALS_DEFAULTS["linux"])
 HOTSPOTS_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "hotspots")
 HOTSPOTS_FILE = os.path.join(DATA_DIR, "hotspots.json")
 VIDEO_PREDICTIONS_FILE = os.path.join(DATA_DIR, "video_predictions.json")

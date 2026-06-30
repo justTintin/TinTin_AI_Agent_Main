@@ -31,38 +31,20 @@ from utils.logger_utils import log
 from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT
 
 def get_voxcpm_python():
-    possible_paths = [
-        os.path.join(VOXCPM2_DIR, "venv", "python.exe"),
-        os.path.join(VOXCPM2_DIR, "venv", "Scripts", "python.exe"),
-        os.path.join(VOXCPM2_DIR, "venv", "bin", "python"),
-    ]
-    for p in possible_paths:
-        if os.path.isfile(p):
-            return os.path.abspath(p)
-    return sys.executable
+    from utils.platform_utils import find_venv_python
+    return find_venv_python(VOXCPM2_DIR)
 
 
 def find_ffmpeg():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(curr_dir)
-    workspace_root = os.path.dirname(project_root)
-    candidates = [
-        os.path.join(curr_dir, "ffmpeg.exe"),
-        os.path.join(project_root, "ffmpeg.exe"),
-        os.path.join(workspace_root, "ffmpeg.exe"),
-        os.path.join(workspace_root, "python_embeded", "ffmpeg.exe"),
-        os.path.join(workspace_root, "python_embeded", "Scripts", "ffmpeg.exe"),
-    ]
-    for c in candidates:
-        if os.path.exists(c) and os.path.isfile(c):
-            return os.path.abspath(c)
-    return shutil.which("ffmpeg")
+    from utils.platform_utils import find_ffmpeg as _ff
+    return _ff()
 
 
 def get_media_duration(filepath):
     try:
-        creationflags = 0x08000000 if sys.platform == "win32" else 0
-        ffprobe_exe = os.path.join(os.path.dirname(find_ffmpeg()), "ffprobe.exe")
+        from utils.platform_utils import create_no_window_flag, binary_name
+        creationflags = create_no_window_flag()
+        ffprobe_exe = os.path.join(os.path.dirname(find_ffmpeg()), binary_name("ffprobe"))
         if not os.path.exists(ffprobe_exe):
             ffprobe_exe = find_ffmpeg().replace("ffmpeg", "ffprobe")
         cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration",

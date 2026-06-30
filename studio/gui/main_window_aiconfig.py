@@ -8,11 +8,12 @@ import sys
 import os
 from config.paths import (
     PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_INI_FILE
+    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_INI_FILE, DREAMINA_EXE
 )
 import threading
 import uuid
 import configparser
+from utils.platform_utils import create_no_window_flag
 from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
@@ -347,3 +348,69 @@ class AIConfigMixin:
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")
             log.error(f"保存飞书配置失败: {e}")
+
+    def _test_feishu(self):
+        self.fs_test_status.setText("⏳ 测试中…")
+        import requests as req
+        app_id = self.edit_feishu_appid.text().strip()
+        app_secret = self.edit_feishu_appsecret.text().strip()
+        if not app_id or not app_secret:
+            self.fs_test_status.setText("<font color='#dc2626'>❌ 请填入 App ID 和 Secret</font>")
+            return
+        try:
+            r = req.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
+            if r.status_code == 200 and r.json().get("tenant_access_token"):
+                self.fs_test_status.setText("<font color='#16a34a'>✅ 连接成功</font>")
+            else:
+                self.fs_test_status.setText(f"<font color='#dc2626'>❌ HTTP {r.status_code}</font>")
+        except Exception as e:
+            self.fs_test_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+
+    def _dreamina_login(self):
+        self.dr_status.setText("⏳ 发起登录…")
+        try:
+            from utils.dreamina_client import DreaminaClient
+            client = DreaminaClient()
+            if not client.is_installed():
+                self.dr_status.setText("<font color='#dc2626'>❌ 即梦 CLI 未安装</font>")
+                return
+            ok, kv = client.login_headless()
+            if not ok:
+                self.dr_status.setText(f"<font color='#dc2626'>❌ {kv}</font>")
+                return
+            device_code = kv.get("device_code", "")
+            verify_url = kv.get("verification_uri", "")
+            self.dr_status.setText(f"<font color='#f59e0b'>请在浏览器打开验证: {verify_url}</font>")
+            import webbrowser
+            try:
+                if verify_url:
+                    webbrowser.open(verify_url)
+            except: pass
+            # 轮询等待认证
+            import threading
+            def poll():
+                ok2, msg = client.checklogin(device_code, poll=30)
+                if ok2:
+                    self.dr_status.setText("<font color='#16a34a'>✅ 登录成功</font>")
+                else:
+                    self.dr_status.setText(f"<font color='#dc2626'>❌ 登录失败: {msg[:100]}</font>")
+            threading.Thread(target=poll, daemon=True).start()
+        except Exception as e:
+            self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+
+    def _dreamina_check(self):
+        self.dr_status.setText("⏳ 检测中…")
+        try:
+            from utils.dreamina_client import DreaminaClient
+            client = DreaminaClient()
+            if not client.is_installed():
+                self.dr_status.setText("<font color='#dc2626'>❌ CLI 未安装</font>")
+                return
+            ok, msg = client.is_logged_in()
+            if ok:
+                self.dr_status.setText(f"<font color='#16a34a'>✅ 已登录 · 额度: {msg}</font>")
+            else:
+                self.dr_status.setText("<font color='#f59e0b'>⚠ 未登录</font>")
+        except Exception as e:
+            self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")

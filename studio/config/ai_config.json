@@ -1,5 +1,5 @@
 {
-    "comfyui_addr": "http://192.168.111.36:8188",
+    "comfyui_addr": "http://192.168.111.19:8188",
     "voice_clone_addr": "http://192.168.111.36:7860",
     "runninghub_api_key": "",
     "runninghub_base_url": "https://www.runninghub.cn",
@@ -14,5 +14,9 @@
     "rustfs_secret_key": "sfs.66778899",
     "rustfs_bucket": "photos",
     "ollama_num_parallel": 4,
-    "vision_concurrency": 4
+    "vision_concurrency": 4,
+    "vox_api_url": "http://127.0.0.1:7861/v1/tts",
+    "vox_mode": "api",
+    "vox_timesteps": 20,
+    "vox_cfg": 2.0
 }

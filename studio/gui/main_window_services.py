@@ -203,6 +203,8 @@ class ServicesMixin:
         checkpoint = self.edit_voxcpm_model_path.text().strip()
         if not checkpoint:
             checkpoint = "openbmb/VoxCPM2"
+        elif checkpoint and not checkpoint.startswith("openbmb/"):
+            checkpoint = os.path.abspath(checkpoint)
             log.info(f"[VoxCPM] 模型路径为空，使用默认: {checkpoint}")
         else:
             log.info(f"[VoxCPM] 模型路径: {checkpoint}")

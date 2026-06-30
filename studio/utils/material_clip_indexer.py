@@ -2159,6 +2159,11 @@ class MaterialClipIndexer:
     def __exit__(self, *_):
         self.close()
 
+    def __getattr__(self, name):
+        if name in ("_connect", "_conn"):
+            return getattr(self._db, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 相似度检索（返回 frames 级别，连接 materials 取路径）

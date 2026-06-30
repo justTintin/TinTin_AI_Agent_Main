@@ -131,18 +131,6 @@ class PageSetupMixin:
         r2.addStretch()
         b_save = QPushButton("💾 保存目录配置"); b_save.setObjectName("primary_button"); b_save.clicked.connect(self._res_save_nas_config); r2.addWidget(b_save)
         lg2.addLayout(r2); l2.addWidget(g2)
-
-        # 素材管理开关
-        self.chk_show_material = QCheckBox("🗄️ 启用素材管理（向量入库/标注/检索）")
-        self.chk_show_material.setStyleSheet("font-size:14px; font-weight:bold; color:#a855f7; margin-top:8px;")
-        self.chk_show_material.toggled.connect(self._res_toggle_material)
-        l2.addWidget(self.chk_show_material)
-
-        # 素材管理容器
-        self.res_material_container = QWidget()
-        self.res_material_container.setStyleSheet("background: transparent;")
-        self.res_material_container.setVisible(False)
-        l2.addWidget(self.res_material_container, 1)
         l2.addStretch()
         tabs.addTab(p2, "🗄️ 素材资源")
 
@@ -592,10 +580,6 @@ class PageSetupMixin:
         try: self.refresh_comfyui_local_status()
         except Exception: pass
         self.btn_open_comfyui_editor = QPushButton("🎨 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)
-        l1.addSpacing(12)
-        l1.addWidget(QLabel("克隆声音服务地址:"))
-        self.voice_clone_input = QLineEdit(); self.voice_clone_input.setPlaceholderText("http://192.168.111.36:7860")
-        self.voice_clone_input.setText(self.ai_config.get("voice_clone_addr","http://192.168.111.36:7860")); l1.addWidget(self.voice_clone_input)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
 
         # ── Tab 2: RunningHub ──
@@ -619,7 +603,9 @@ class PageSetupMixin:
         self.edit_feishu_scriptfield.setText("脚本")
         r3 = QHBoxLayout(); r3.addStretch()
         b3 = QPushButton("💾 保存飞书配置"); b3.setObjectName("primary_button"); b3.clicked.connect(self.save_feishu_config); r3.addWidget(b3)
+        b4 = QPushButton("🔌 测试连接"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._test_feishu); r3.addWidget(b4)
         l3.addLayout(r3)
+        self.fs_test_status = QLabel(""); self.fs_test_status.setObjectName("muted_text"); l3.addWidget(self.fs_test_status)
         l3.addStretch(); tabs.addTab(p3, "📝 飞书")
 
         # ── Tab 4: 即梦 ──
@@ -628,6 +614,11 @@ class PageSetupMixin:
         l4.addWidget(QLabel(f"输出目录: {DREAMINA_OUTPUT_DIR}"))
         has = "✅ 已就位" if os.path.isfile(DREAMINA_EXE) else "❌ 未找到 (bin/dreamina.exe)"
         l4.addWidget(QLabel(f"引擎: {has}"))
+        self.dr_status = QLabel(""); self.dr_status.setObjectName("muted_text"); l4.addWidget(self.dr_status)
+        r4 = QHBoxLayout()
+        b_login = QPushButton("🔑 登录"); b_login.setObjectName("primary_button"); b_login.clicked.connect(self._dreamina_login); r4.addWidget(b_login)
+        b_check = QPushButton("🔌 检测状态"); b_check.setObjectName("secondary_button"); b_check.clicked.connect(self._dreamina_check); r4.addWidget(b_check)
+        r4.addStretch(); l4.addLayout(r4)
         l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
 
         layout.addWidget(tabs, 1)

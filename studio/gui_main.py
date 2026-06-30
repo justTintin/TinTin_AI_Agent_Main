@@ -432,10 +432,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.monitor = SystemMonitorThread(
             lambda: comfy.resolve_addr(self.ai_config, auto_start=False))
         self.monitor.stats_updated.connect(self.update_system_stats)
-        self.monitor.start()
+        # ComfyUI 默认不启动检测，用户可在「AI 设置」手动开启
+        # self.monitor.start()
         
         self.comfy_ws = None
-        self.start_comfyui_websocket()
+        # self.start_comfyui_websocket()
         
         # 启动后台大模型状态监测线程
         self._models_ready = False
@@ -854,6 +855,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_terminal_page()
         self.content_stack.addWidget(self.page_terminal)
 
+        # 42: Material Clip (素材管理) Page
+        self.page_material_clip = QWidget()
+        from gui.material_clip_page import MaterialClipPage
+        self.material_clip_tool = MaterialClipPage(self.page_material_clip, self)
+        self.material_clip_tool.setup()
+        self.content_stack.addWidget(self.page_material_clip)
+
         # 42: Marketing Video Detection Page
         self.page_marketing_detect = QWidget()
         self.setup_marketing_detect_page()
@@ -934,6 +942,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "_res_load_configs"):
                 try: self._res_load_configs()
                 except Exception as e: log.error(f"加载资源配置失败: {e}")
+        elif index == 42: # 素材管理
+            if hasattr(self, "material_clip_tool"):
+                try: self.material_clip_tool._reload_dir_config()
+                except Exception as e: log.error(f"刷新素材目录失败: {e}")
                 
         # Stop VoxCPM timer if switched away from System Config page
         if index != 7:

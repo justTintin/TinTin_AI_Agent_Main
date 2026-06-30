@@ -46,7 +46,8 @@ Thumbs.db
 *.pem
 credentials*
 
-# Binary / compiled
+# Node
+node_modules/
 *.exe
 *.dll
 *.so

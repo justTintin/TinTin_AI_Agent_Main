@@ -21,9 +21,8 @@ from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.video_compiler import _probe_duration
+from utils.video_compiler import _find, _probe_duration
 from config.paths import TMP_DIR
-from utils.platform_utils import find_ffmpeg, create_no_window_flag
 
 
 def _sample_times(dur):
@@ -87,8 +86,8 @@ class MarketingDetectWorker(BaseWorker):
         os.makedirs(frames_dir, exist_ok=True)
         
         frames = []
-        ffmpeg = find_ffmpeg()
-        flags = create_no_window_flag()
+        ffmpeg = _find("ffmpeg.exe")
+        flags = 0x08000000 if os.name == "nt" else 0
         
         for i, t in enumerate(times):
             self.phase.emit(f"正在提取关键帧 {i + 1}/{len(times)}（{t}s）…")

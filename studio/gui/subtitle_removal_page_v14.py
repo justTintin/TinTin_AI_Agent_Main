@@ -976,7 +976,7 @@ class SubtitleRemovalPageV14(BasePage):
             return
 
         vsr_dir = VSR_V14_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", "python.exe" if sys.platform == "win32" else "bin/python")
+        vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "vsr_run.py")
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):

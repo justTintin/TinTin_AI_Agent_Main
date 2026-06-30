@@ -148,19 +148,16 @@ class ProductLibraryPage(BasePage):
         heading.setObjectName("heading")
         root.addWidget(heading)
 
+        subtitle = QLabel("基础数据从旺店通仓库同步（库存 + 品类自动归类），按 品类 → 品牌 → 型号 统一管理，供后续 AI 文案创作调用")
+        subtitle.setObjectName("muted_text")
+        root.addWidget(subtitle)
+
         # 顶部：仓库同步条
         sync_bar = QHBoxLayout()
         self.btn_sync = QPushButton("🔄 从仓库同步库存")
         self.btn_sync.setObjectName("primary_button")
         self.btn_sync.clicked.connect(self._on_sync)
         sync_bar.addWidget(self.btn_sync)
-
-        btn_info = QPushButton("ℹ")
-        btn_info.setToolTip("查看同步说明")
-        btn_info.setFixedSize(24, 24)
-        btn_info.setStyleSheet("QPushButton { font-size: 14px; padding: 0; border-radius: 12px; }")
-        btn_info.clicked.connect(self._show_sync_info)
-        sync_bar.addWidget(btn_info)
         self.btn_mine_all = QPushButton("⚡ 一键挖掘")
         self.btn_mine_all.setObjectName("secondary_button")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
@@ -610,13 +607,6 @@ class ProductLibraryPage(BasePage):
                 w.blockSignals(False)
 
     # ---------------- 仓库同步 ----------------
-    def _show_sync_info(self):
-        QMessageBox.information(self.parent_widget,
-            "仓库同步说明",
-            "基础数据从旺店通仓库同步（库存 + 品类自动归类），\n"
-            "按 品类 → 品牌 → 型号 统一管理，\n"
-            "供后续 AI 文案创作调用。")
-
     def _on_sync(self):
         if self.sync_worker and self.sync_worker.isRunning():
             return

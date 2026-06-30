@@ -10,7 +10,6 @@ from PySide6.QtCore import Signal, QThread, QUrl
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QDesktopServices
 from utils.logger_utils import log
-from utils.platform_utils import create_no_window_flag
 from config.paths import RUNTIME_DIR, TMP_DIR, OUTPUTS_DIR, WHISPER_MODELS_DIR
 
 WHISPER_MODELS = {
@@ -448,13 +447,13 @@ class TranscriptionToolPage(BasePage):
 
                     def run_pip(args):
                         cmd = [sys.executable, "-m", "pip"] + args
-                        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=create_no_window_flag())
+                        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
                         if p.returncode != 0:
                             raise RuntimeError((p.stdout or "") + "\n" + (p.stderr or ""))
 
                     def run_pip_allow_fail(args):
                         cmd = [sys.executable, "-m", "pip"] + args
-                        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=create_no_window_flag())
+                        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
 
                     self.stage.emit("正在清理旧版本 torch")
                     self.busy.emit(True)

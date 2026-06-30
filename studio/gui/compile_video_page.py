@@ -23,7 +23,6 @@ from utils.media_library_manager import MediaLibraryManager
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts, ensure_running, start_server, stop_server, is_running as tts_is_running
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
-from utils.platform_utils import open_path
 from config.paths import FINAL_OUTPUT_DIR
 
 
@@ -382,8 +381,8 @@ class CompileVideoPage(BasePage):
         self.show_error(str(e), "一键成片失败")
 
     def _open(self):
-        if self._last_out and os.path.isfile(self._last_out):
-            open_path(self._last_out)
+        if self._last_out and os.path.isfile(self._last_out) and os.name == "nt":
+            os.startfile(self._last_out)  # noqa
 
     def _to_media(self):
         if self._last_out and os.path.isfile(self._last_out):

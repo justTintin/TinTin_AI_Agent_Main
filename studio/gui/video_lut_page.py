@@ -20,11 +20,24 @@ from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
-from utils.platform_utils import find_ffmpeg as _find_ffmpeg_util, open_path, create_no_window_flag
 
+
+# ─── 工具函数 ────────────────────────────────────────────────────────────────
 
 def _find_ffmpeg():
-    return _find_ffmpeg_util()
+    """查找 ffmpeg 可执行文件（与主模块保持同样的搜索顺序）。"""
+    import shutil
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "ffmpeg.exe"),
+        "ffmpeg",
+        "ffmpeg.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    found = shutil.which("ffmpeg")
+    return found or "ffmpeg"
 
 
 def _escape_lut_path(path):
@@ -102,7 +115,7 @@ class VideoLutWorker(BaseWorker):
                             dst,
                         ]
 
-                    creationflags = create_no_window_flag()
+                    creationflags = 0x08000000 if sys.platform == "win32" else 0
                     r = subprocess.run(
                         cmd, capture_output=True, text=True,
                         creationflags=creationflags)
@@ -326,7 +339,8 @@ class VideoLutPage(BasePage):
     def _open_output(self):
         out = self.output_dir_edit.text().strip()
         if out and os.path.isdir(out):
-            open_path(out)
+            if sys.platform == "win32":
+                os.startfile(out)
 
     # ── 开始转换 ─────────────────────────────────────────────────────────────
 

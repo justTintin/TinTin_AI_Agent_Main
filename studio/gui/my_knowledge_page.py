@@ -13,8 +13,6 @@ import os
 import subprocess
 import time as _time
 
-from utils.platform_utils import open_path
-
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
     QFrame, QListWidget, QListWidgetItem, QMessageBox, QComboBox,
@@ -185,7 +183,7 @@ class SampleDetailDialog(QDialog):
             btn_play = QPushButton("▶️ 用本地播放器播放")
             btn_play.setObjectName("primary_button")
             _mp = media_path
-            btn_play.clicked.connect(lambda: open_path(_mp))
+            btn_play.clicked.connect(lambda: os.startfile(_mp))
             local_row.addWidget(btn_play)
             
             btn_folder = QPushButton("📁 打开本地文件夹")
@@ -390,21 +388,7 @@ class _BatchTranscribeWorker(BaseWorker):
             raise RuntimeError("faster_whisper 未安装，请在「视频转字幕」页面安装转写依赖。")
         from config.paths import WHISPER_MODELS_DIR
         self.progress.emit("正在加载 Whisper 模型…")
-        # 优先使用本地已有模型
-        model_name_local = self._model_name
-        local_files_only = False
-        for candidate in [
-            os.path.join(WHISPER_MODELS_DIR, f"faster-whisper-{self._model_name}"),
-            os.path.join(WHISPER_MODELS_DIR, self._model_name),
-            os.path.join(WHISPER_MODELS_DIR, f"models--Systran--faster-whisper-{self._model_name}"),
-        ]:
-            if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "model.bin")):
-                model_name_local = candidate
-                local_files_only = True
-                break
-        model = WhisperModel(model_name_local, device="auto",
-                             download_root=WHISPER_MODELS_DIR,
-                             local_files_only=local_files_only)
+        model = WhisperModel(self._model_name, device="auto", download_root=WHISPER_MODELS_DIR)
         count = 0
         for sample in self._samples:
             src = sample.get("source") or {}

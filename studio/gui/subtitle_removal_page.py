@@ -16,6 +16,7 @@ from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
+from utils.platform_utils import python_binary
 
 class SubtitleRemovalWorker(BaseWorker):
     progress_updated = Signal(int)
@@ -757,7 +758,7 @@ class SubtitleRemovalPage(BasePage):
 
         # Resolve paths to VSR local modules
         vsr_dir = VSR_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
+        vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):

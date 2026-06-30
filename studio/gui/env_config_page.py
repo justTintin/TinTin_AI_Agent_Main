@@ -18,15 +18,9 @@ from config.paths import (WORKSPACE_ROOT, APPS_DIR, PYTHON_EMBEDED_DIR, WHISPER_
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE)
 
 def get_voxcpm_python():
-    possible_paths = [
-        os.path.join(VOXCPM2_DIR, "venv", "python.exe"),
-        os.path.join(VOXCPM2_DIR, "venv", "Scripts", "python.exe"),
-        os.path.join(VOXCPM2_DIR, "venv", "bin", "python"),
-    ]
-    for p in possible_paths:
-        if os.path.isfile(p):
-            return os.path.abspath(p)
-    return sys.executable
+    from utils.platform_utils import find_venv_python
+    from config.paths import VOXCPM2_DIR
+    return find_venv_python(VOXCPM2_DIR)
 
 class EnvInstallWorker(BaseWorker):
     log_line = Signal(str)

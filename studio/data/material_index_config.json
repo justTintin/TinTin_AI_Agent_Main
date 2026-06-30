@@ -1,0 +1,8 @@
+{
+  "nas_root": "\\\\192.168.111.17",
+  "index_dirs": [
+    "/mnt/nas/公共素材",
+    "/mnt/nas/鼠标键盘",
+    "/mnt/nas/Photos"
+  ]
+}

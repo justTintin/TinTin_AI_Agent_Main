@@ -43,22 +43,12 @@ def _startupinfo():
 
 
 def _ffmpeg():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(curr_dir)
-    workspace_root = os.path.dirname(project_root)
-    candidates = [
-        os.path.join(curr_dir, "ffmpeg.exe"),
-        os.path.join(project_root, "ffmpeg.exe"),
-        os.path.join(workspace_root, "ffmpeg.exe"),
-        os.path.join(workspace_root, "python_embeded", "ffmpeg.exe"),
-        os.path.join(workspace_root, "python_embeded", "Scripts", "ffmpeg.exe"),
-    ]
-    for c in candidates:
-        if os.path.exists(c) and os.path.isfile(c):
-            return os.path.abspath(c)
-    p = shutil.which("ffmpeg")
+    from utils.platform_utils import find_ffmpeg, binary_name
+    p = find_ffmpeg()
+    if not p or p == binary_name("ffmpeg"):
+        p = shutil.which("ffmpeg")
     if not p:
-        raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入系统环境变量 PATH")
+        raise RuntimeError("未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH")
     return p
 
 

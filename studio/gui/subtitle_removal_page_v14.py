@@ -15,6 +15,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_V14_DIR
+from utils.platform_utils import python_binary
 
 class SubtitleRemovalWorkerV14(QThread):
     progress_updated = Signal(int)
@@ -976,7 +977,7 @@ class SubtitleRemovalPageV14(BasePage):
             return
 
         vsr_dir = VSR_V14_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
+        vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         vsr_script = os.path.join(vsr_dir, "vsr_run.py")
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):

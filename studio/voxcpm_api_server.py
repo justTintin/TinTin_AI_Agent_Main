@@ -208,6 +208,11 @@ if __name__ == "__main__":
     # 如果路径是本地目录，转为绝对路径（避免被当成 HuggingFace repo ID）
     if not _checkpoint_path.startswith("openbmb/"):
         _abs = os.path.abspath(_checkpoint_path)
+        if not os.path.isdir(_abs):
+            # 可能相对路径基于工作区根目录而非 studio/
+            _abs = os.path.abspath(os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "..", _checkpoint_path))
         if os.path.isdir(_abs):
             _checkpoint_path = _abs
 

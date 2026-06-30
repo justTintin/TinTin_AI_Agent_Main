@@ -17,7 +17,7 @@
   "fps": 1,
   "_comment_clip": "clip_model 可选: ViT-B-16 / ViT-L-14 / ViT-H-14（越大越准但越慢）",
   "clip_model": "ViT-B-16",
-  "clip_model_dir": "D:\\code_workspace\\TinTin_AI_Agen_Mini\\apps\\clip-models\\damo\\multi-modal_clip-vit-base-patch16_zh",
+  "clip_model_dir": "/home/tintin/Project/TinTin_AI_Agent_Main/apps/clip-models/damo/multi-modal_clip-vit-base-patch16_zh",
   "device": "auto",
   "batch_size": 16,
   "ffmpeg_path": null,
@@ -26,16 +26,18 @@
   "nas_root": "\\\\192.168.111.17",
   "index_directories": [
     {
-      "local_path": "O:/",
+      "local_path": "Photos",
       "nas_folder": "Photos"
     },
     {
-      "local_path": "Q:/",
+      "local_path": "公共素材",
       "nas_folder": "公共素材"
     },
     {
-      "local_path": "R:/",
+      "local_path": "鼠标键盘",
       "nas_folder": "鼠标键盘"
     }
-  ]
+  ],
+  "nas_user": "WXJB-0001",
+  "nas_password": "WXJB-0001"
 }

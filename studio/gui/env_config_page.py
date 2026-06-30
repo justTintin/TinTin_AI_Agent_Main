@@ -201,43 +201,6 @@ class EnvConfigPage(BasePage):
         
         scroll_layout.addWidget(group_other)
 
-        # Group 6: 素材目录配置
-        group_mat = QGroupBox("📂 素材存储目录配置")
-        group_mat.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #a855f7; }
-        """)
-        layout_mat = QVBoxLayout(group_mat)
-        layout_mat.setContentsMargins(16, 20, 16, 16)
-        layout_mat.setSpacing(10)
-
-        mat_desc = QLabel(
-            "素材文件（视频/图片/字幕）默认存储在项目内 outputs/materials/knowledge 目录。\n"
-            "若素材体积较大，可映射到外置盘或网络盘，设置后重启应用生效。\n"
-            "浏览器下载、视频转文字（字幕文件）均会自动使用此目录。"
-        )
-        mat_desc.setObjectName("muted_text")
-        mat_desc.setWordWrap(True)
-        layout_mat.addWidget(mat_desc)
-
-        mat_row = QHBoxLayout()
-        mat_row.addWidget(QLabel("当前目录："))
-        self.edit_mat_dir = QLineEdit()
-        self.edit_mat_dir.setReadOnly(True)
-        self.edit_mat_dir.setText(KNOWLEDGE_MATERIALS_DIR)
-        mat_row.addWidget(self.edit_mat_dir, 1)
-        btn_choose_mat = QPushButton("📁 选择目录")
-        btn_choose_mat.setObjectName("secondary_button")
-        btn_choose_mat.clicked.connect(self._choose_materials_dir)
-        mat_row.addWidget(btn_choose_mat)
-        btn_reset_mat = QPushButton("↩ 恢复默认")
-        btn_reset_mat.setObjectName("secondary_button")
-        btn_reset_mat.clicked.connect(self._reset_materials_dir)
-        mat_row.addWidget(btn_reset_mat)
-        layout_mat.addLayout(mat_row)
-
-        scroll_layout.addWidget(group_mat)
-
         # Group 7: RustFS 对象存储配置
         group_rustfs = QGroupBox("🗄️ RustFS 对象存储配置")
         group_rustfs.setStyleSheet("""

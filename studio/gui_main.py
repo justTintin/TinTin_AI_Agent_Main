@@ -855,17 +855,17 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_terminal_page()
         self.content_stack.addWidget(self.page_terminal)
 
+        # 42: Marketing Video Detection Page
+        self.page_marketing_detect = QWidget()
+        self.setup_marketing_detect_page()
+        self.content_stack.addWidget(self.page_marketing_detect)
+
         # 42: Material Clip (素材管理) Page
         self.page_material_clip = QWidget()
         from gui.material_clip_page import MaterialClipPage
         self.material_clip_tool = MaterialClipPage(self.page_material_clip, self)
         self.material_clip_tool.setup()
         self.content_stack.addWidget(self.page_material_clip)
-
-        # 42: Marketing Video Detection Page
-        self.page_marketing_detect = QWidget()
-        self.setup_marketing_detect_page()
-        self.content_stack.addWidget(self.page_marketing_detect)
 
 
     def _start_clip_preload(self):
@@ -933,6 +933,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 41: # Marketing Video Detection
             if hasattr(self, "marketing_detect_tool"):
                 self.marketing_detect_tool.update_vision_model_display()
+        elif index == 42: # 素材管理
+            if hasattr(self, "material_clip_tool"):
+                try: self.material_clip_tool._reload_dir_config()
+                except Exception as e: log.error(f"刷新素材目录失败: {e}")
         elif index == 38: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()
@@ -942,10 +946,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "_res_load_configs"):
                 try: self._res_load_configs()
                 except Exception as e: log.error(f"加载资源配置失败: {e}")
-        elif index == 42: # 素材管理
-            if hasattr(self, "material_clip_tool"):
-                try: self.material_clip_tool._reload_dir_config()
-                except Exception as e: log.error(f"刷新素材目录失败: {e}")
                 
         # Stop VoxCPM timer if switched away from System Config page
         if index != 7:
@@ -1453,6 +1453,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
 if __name__ == "__main__":
+    # COSMIC Wayland 下 QComboBox 弹窗定位有 bug，强制 X11 后端
+    import os as _os
+    if _os.environ.get("XDG_SESSION_TYPE") == "wayland" and not _os.environ.get("QT_QPA_PLATFORM"):
+        _os.environ["QT_QPA_PLATFORM"] = "xcb"
     log.info("Application starting...")
     try:
         app = QApplication(sys.argv)

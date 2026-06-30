@@ -253,3 +253,35 @@ class NASClient:
             return None
         finally:
             tree.disconnect()
+
+    def download_file(self, share: str, remote_path: str, local_path: str):
+        """通过 SMB 下载文件到本地。"""
+        self.connect()
+        tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
+        tree.connect()
+        try:
+            op = Open(tree, remote_path)
+            op.create(
+                ImpersonationLevel.Impersonation,
+                FilePipePrinterAccessMask.GENERIC_READ,
+                FileAttributes.FILE_ATTRIBUTE_NORMAL,
+                ShareAccess.FILE_SHARE_READ,
+                CreateDisposition.FILE_OPEN,
+                CreateOptions.FILE_NON_DIRECTORY_FILE,
+            )
+            try:
+                offset = 0
+                with open(local_path, "wb") as f:
+                    while True:
+                        data = op.read(offset, 1048576)  # 1MB chunks
+                        if not data:
+                            break
+                        f.write(data)
+                        offset += len(data)
+            finally:
+                try:
+                    op.close(False)
+                except Exception:
+                    pass
+        finally:
+            tree.disconnect()

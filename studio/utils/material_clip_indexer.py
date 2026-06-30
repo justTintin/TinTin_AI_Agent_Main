@@ -43,22 +43,30 @@ from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger(__name__)
 
-import ctypes
+import sys as _sys
 
 _DRIVE_UNC_CACHE = {}
 
+
 def to_relative_path(local_path: str, nas_root: str) -> str:
+    """
+    Convert a local filesystem path to a relative NAS path.
+    Windows: resolves drive letters to UNC paths via mpr.dll.
+    Linux:   strips nas_root prefix from local_path, or returns the full path.
+    """
     if not local_path:
         return ""
-    local_path = local_path.replace('/', '\\')
+
+    local_path = local_path.replace("\\", "/")
     unc_path = local_path
-    if len(local_path) >= 2 and local_path[1] == ':':
+
+    if _sys.platform == "win32" and len(local_path) >= 2 and local_path[1] == ":":
         drive = local_path[:2].upper()
         if drive in _DRIVE_UNC_CACHE:
             unc_path = _DRIVE_UNC_CACHE[drive] + local_path[2:]
         else:
             try:
-                mpr = ctypes.WinDLL('mpr.dll')
+                mpr = ctypes.WinDLL("mpr.dll")
                 buffer = ctypes.create_unicode_buffer(512)
                 length = ctypes.c_ulong(512)
                 res = mpr.WNetGetConnectionW(drive, buffer, ctypes.byref(length))
@@ -67,30 +75,64 @@ def to_relative_path(local_path: str, nas_root: str) -> str:
                     unc_path = buffer.value + local_path[2:]
             except Exception:
                 pass
-    unc_norm = unc_path.replace('\\', '/')
-    nas_norm = nas_root.replace('\\', '/').rstrip('/')
+
+    unc_norm = unc_path.replace("\\", "/")
+    nas_norm = nas_root.replace("\\", "/").rstrip("/")
     if nas_norm and unc_norm.lower().startswith(nas_norm.lower()):
-        return unc_path[len(nas_norm):].replace('\\', '/').lstrip('/')
-    return unc_path.replace('\\', '/').lstrip('/')
+        return unc_path[len(nas_norm):].replace("\\", "/").lstrip("/")
+    # Linux: also strip /mnt/nas prefix
+    if unc_norm.lower().startswith("/mnt/nas/"):
+        return unc_norm[len("/mnt/nas/"):].lstrip("/")
+    return unc_path.replace("\\", "/").lstrip("/")
+
 
 def to_local_path(rel_path: str, nas_root: str) -> str:
+    """
+    Convert a relative NAS path back to a local filesystem path.
+    Windows: resolves UNC paths to drive letters via mpr.dll.
+    Linux:   replaces UNC/SMB prefix with local mount point.
+    """
     if not rel_path:
         return ""
-    if (len(rel_path) >= 2 and rel_path[1] == ':') or rel_path.startswith('//') or rel_path.startswith('\\\\'):
+
+    rel_path = rel_path.replace("\\", "/")
+
+    # Handle Windows drive letters / UNC paths on Linux
+    if _sys.platform != "win32" and (rel_path.startswith("//") or (len(rel_path) >= 2 and rel_path[1] == ":")):
+        # Strip known NAS host prefixes → /mnt/nas
+        for prefix in ["//192.168.111.17", "//192.168.111.17/"]:
+            if rel_path.lower().startswith(prefix.lower()):
+                rel_path = "/mnt/nas/" + rel_path[len(prefix):].lstrip("/")
+                break
+        return os.path.abspath(rel_path)
+
+    if (len(rel_path) >= 2 and rel_path[1] == ":"):
         return os.path.normpath(rel_path)
+
     unc_path = os.path.normpath(os.path.join(nas_root, rel_path.lstrip("/\\")))
-    try:
-        mpr = ctypes.WinDLL('mpr.dll')
-        for drive_letter in [f"{chr(c)}:" for c in range(ord('A'), ord('Z')+1)]:
-            buffer = ctypes.create_unicode_buffer(512)
-            length = ctypes.c_ulong(512)
-            res = mpr.WNetGetConnectionW(drive_letter, buffer, ctypes.byref(length))
-            if res == 0:
-                unc_drive = os.path.normpath(buffer.value)
-                if unc_path.lower().startswith(unc_drive.lower()):
-                    return os.path.normpath(drive_letter + unc_path[len(unc_drive):])
-    except Exception:
-        pass
+
+    # Linux: convert UNC host prefix to /mnt/nas mount path
+    if _sys.platform != "win32":
+        unc_norm = unc_path.replace("\\", "/")
+        for prefix in ["//192.168.111.17/", "//192.168.111.17"]:
+            if unc_norm.startswith(prefix):
+                unc_path = "/mnt/nas/" + unc_norm[len(prefix):].lstrip("/")
+                break
+
+    if _sys.platform == "win32":
+        try:
+            mpr = ctypes.WinDLL("mpr.dll")
+            for drive_letter in [f"{chr(c)}:" for c in range(ord("A"), ord("Z") + 1)]:
+                buffer = ctypes.create_unicode_buffer(512)
+                length = ctypes.c_ulong(512)
+                res = mpr.WNetGetConnectionW(drive_letter, buffer, ctypes.byref(length))
+                if res == 0:
+                    unc_drive = os.path.normpath(buffer.value)
+                    if unc_path.lower().startswith(unc_drive.lower()):
+                        return os.path.normpath(drive_letter + unc_path[len(unc_drive):])
+        except Exception:
+            pass
+
     return unc_path
 
 # 鈹鈹 鍏ㄥ眬缂栫爜鍣ㄥ崟渚嬶紙閬垮厤姣忔℃悳绱㈤噸澶嶅姞杞芥ā鍨嬶級鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
@@ -888,7 +930,7 @@ class _MaterialDB:
             from pgvector.psycopg2 import register_vector
         except ImportError as e:
             raise RuntimeError(
-                f"缂哄皯渚濊禆: {e}\n璇峰畨瑁: pip install psycopg2-binary pgvector"
+                f"缺少依赖: {e}\n请安装: pip install psycopg2-binary pgvector"
             ) from e
         c = self._cfg
         self._conn = psycopg2.connect(
@@ -1045,48 +1087,6 @@ class _MaterialDB:
             cur.execute("DELETE FROM materials WHERE path = %s", (path,))
         self._conn.commit()
 
-    def search_by_keyword(self, keyword: str, limit: int = 200,
-                          file_type: str = "", brand: str = None,
-                          model: str = None, category: str = None,
-                          ai_status: str = None) -> list:
-        """LIKE 模糊搜索：匹配文件名、画面描述、品牌、型号、类目、路径"""
-        self._connect()
-        like = f"%{keyword}%"
-        conds = [
-            "(filename ILIKE %s OR scene_desc_primary ILIKE %s OR scene_desc_secondary ILIKE %s "
-            "OR brand ILIKE %s OR model ILIKE %s OR category ILIKE %s OR path ILIKE %s)"
-        ]
-        params = [like]*7
-        if file_type == "视频":
-            conds.append("(path ILIKE '%.mp4' OR path ILIKE '%.mov' OR path ILIKE '%.avi' OR path ILIKE '%.mkv' OR path ILIKE '%.webm')")
-        elif file_type == "图片":
-            conds.append("(path ILIKE '%.jpg' OR path ILIKE '%.jpeg' OR path ILIKE '%.png' OR path ILIKE '%.gif' OR path ILIKE '%.webp' OR path ILIKE '%.bmp')")
-        if brand:
-            conds.append("brand ILIKE %s"); params.append(f"%{brand}%")
-        if model:
-            conds.append("model ILIKE %s"); params.append(f"%{model}%")
-        if category:
-            conds.append("category ILIKE %s"); params.append(f"%{category}%")
-        if ai_status:
-            conds.append("ai_status = %s"); params.append(ai_status)
-        sql = f"""
-            SELECT path, filename, scene_desc_primary, scene_desc_secondary,
-                   brand, model, category, ai_confidence, ai_status, file_hash, 0 as score
-            FROM materials WHERE {' AND '.join(conds)}
-            ORDER BY ai_confidence DESC NULLS LAST
-            LIMIT %s
-        """
-        params.append(limit)
-        with self._conn.cursor() as cur:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-        return [
-            {"path": r[0], "filename": r[1], "scene_desc_primary": r[2],
-             "scene_desc_secondary": r[3], "brand": r[4], "model": r[5],
-             "category": r[6], "ai_confidence": r[7], "ai_status": r[8],
-             "file_hash": r[9], "score": r[10]} for r in rows
-        ]
-
     def list_materials(self, path_prefix: str = "", limit: int = 10000,
                        offset: int = 0, ai_status: Optional[str] = None,
                        hash_prefix: str = "", media_type: Optional[str] = None,
@@ -1140,7 +1140,8 @@ class _MaterialDB:
                 SELECT id, path, filename, media_type, duration_s,
                        brand, product, model, category,
                        COALESCE(ai_status,'pending') AS ai_status,
-                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary
+                       ai_confidence, file_hash, file_size,
+                       scene_desc_primary, scene_desc_secondary
                 FROM materials
                 {where}
                 ORDER BY id DESC
@@ -2105,12 +2106,6 @@ class MaterialClipIndexer:
                        limit: int = 10000, hash_prefix: str = "") -> list:
         return self._db.search_by_tags(brand, model, category, ai_status, limit, hash_prefix)
 
-    def search_by_keyword(self, keyword: str, limit: int = 200,
-                          file_type: str = "", brand: str = None,
-                          model: str = None, category: str = None,
-                          ai_status: str = None) -> list:
-        return self._db.search_by_keyword(keyword, limit, file_type, brand, model, category, ai_status)
-
     def index_directory(
         self, directory: str, *, force: bool = False,
         nas_root: Optional[str] = None
@@ -2175,10 +2170,12 @@ def search_by_text(
     filter_category: Optional[str] = None,
     filter_hash: Optional[str] = None,
     cfg: Optional[dict] = None,
+    comprehensive: bool = True,
 ) -> list[dict]:
     """
     用文字描述向量检索，返回最相似的 top_k 帧记录（含来源文件路径）。
     可附加 brand / category / file_hash 筛选。
+    comprehensive=True 时综合匹配文件名、画面描述、品牌、型号，并按置信度加权。
     返回字段: material_id, path, filename, ts_s, brand, product, model, category, score, file_hash, scene_desc_primary, scene_desc_secondary
     """
     if cfg is None:
@@ -2195,6 +2192,30 @@ def search_by_text(
         db._connect()
         conditions = ["f.embedding IS NOT NULL"]
         params: list = []
+
+        # 综合文本匹配模式
+        text_score_parts = []
+        if comprehensive and query:
+            like_q = f"%{query}%"
+            # 关键词拆分为单个词，每个词分别匹配
+            keywords = [k.strip() for k in query.replace("，", ",").replace("、", ",").replace(" ", ",").split(",") if k.strip()]
+            if not keywords:
+                keywords = [query]
+
+            for kw in keywords:
+                kw_like = f"%{kw}%"
+                # 文件名、画面描述、品牌、型号、品类 都做 ILIKE 匹配
+                text_score_parts.append(
+                    f"(CASE WHEN m.filename ILIKE %s THEN 1.0 ELSE 0 END +"
+                    f" CASE WHEN m.scene_desc_primary ILIKE %s THEN 0.8 ELSE 0 END +"
+                    f" CASE WHEN m.scene_desc_secondary ILIKE %s THEN 0.6 ELSE 0 END +"
+                    f" CASE WHEN f.brand ILIKE %s THEN 0.9 ELSE 0 END +"
+                    f" CASE WHEN f.model ILIKE %s THEN 0.9 ELSE 0 END +"
+                    f" CASE WHEN f.category ILIKE %s THEN 0.7 ELSE 0 END +"
+                    f" CASE WHEN f.product ILIKE %s THEN 0.7 ELSE 0 END)"
+                )
+                params.extend([kw_like] * 7)
+
         if filter_brand:
             conditions.append("f.brand = %s")
             params.append(filter_brand)
@@ -2205,15 +2226,30 @@ def search_by_text(
             conditions.append("m.file_hash ILIKE %s")
             params.append(filter_hash.strip() + "%")
         where = " AND ".join(conditions)
+
+        # 组合分数: 向量相似度 60% + 文本匹配 30% + 置信度 10%
+        if text_score_parts:
+            text_sum = " + ".join(text_score_parts)
+            score_sql = f"""
+                (0.6 * (1 - (f.embedding <=> %s)) +
+                 0.3 * ({text_sum}) / GREATEST(1, {len(keywords)} * 3.0) +
+                 0.1 * COALESCE(m.ai_confidence, 0.5))
+                AS score
+            """
+        else:
+            score_sql = "1 - (f.embedding <=> %s) AS score"
+
         sql = f"""
             SELECT m.id, m.path, m.filename, f.ts_s,
                    f.brand, f.product, f.model, f.category,
-                   1 - (f.embedding <=> %s) AS score,
-                   m.file_hash, m.scene_desc_primary, m.scene_desc_secondary
+                   {score_sql},
+                   m.file_hash, m.scene_desc_primary, m.scene_desc_secondary,
+                   COALESCE(m.ai_confidence, 0.5) AS confidence,
+                   COALESCE(m.media_type, '') AS media_type
             FROM frames f
             JOIN materials m ON m.id = f.material_id
             WHERE {where}
-            ORDER BY f.embedding <=> %s
+            ORDER BY score DESC
             LIMIT %s
         """
         params = [query_vec] + params + [query_vec, top_k]
@@ -2226,6 +2262,8 @@ def search_by_text(
                 "ts_s": r[3], "brand": r[4], "product": r[5],
                 "model": r[6], "category": r[7], "score": float(r[8]),
                 "file_hash": r[9], "scene_desc_primary": r[10], "scene_desc_secondary": r[11],
+                "confidence": float(r[12]) if r[12] is not None else 0.5,
+                "media_type": r[13] or "",
             }
             for r in rows
         ]

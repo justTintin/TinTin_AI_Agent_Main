@@ -1,0 +1,43 @@
+{
+  "check_time": "2026-04-09 23:13:11",
+  "sku_file": "Y:\\自动上架workbuddy\\上架数据\\2026040914-上架数据\\sku.xls",
+  "erp_file": "C:\\Users\\tintin\\WorkBuddy\\Claw\\erp_suites_data.json",
+  "total_sku_codes": 5,
+  "existing_count": 0,
+  "not_existing_count": 5,
+  "existing_codes": [],
+  "not_existing_codes": [
+    "dyc-080",
+    "dyc-081",
+    "dyc-082",
+    "dyc-083",
+    "dyc-084"
+  ],
+  "details": [
+    {
+      "商家编码": "dyc-080",
+      "状态": "❌ 不存在",
+      "是否在ERP": false
+    },
+    {
+      "商家编码": "dyc-081",
+      "状态": "❌ 不存在",
+      "是否在ERP": false
+    },
+    {
+      "商家编码": "dyc-082",
+      "状态": "❌ 不存在",
+      "是否在ERP": false
+    },
+    {
+      "商家编码": "dyc-083",
+      "状态": "❌ 不存在",
+      "是否在ERP": false
+    },
+    {
+      "商家编码": "dyc-084",
+      "状态": "❌ 不存在",
+      "是否在ERP": false
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+FROM {base_image}
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV arch=x86_64
+
+COPY docker/scripts/modelscope_env_init.sh /usr/local/bin/ms_env_init.sh
+RUN apt-get update && \
+    apt-get install -y libsox-dev unzip libaio-dev zip iputils-ping telnet sudo git net-tools zstd libzstd-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+{extra_content}
+
+COPY {meta_file} /tmp/install.sh
+
+ARG INSTALL_MS_DEPS={install_ms_deps}
+
+ARG IMAGE_TYPE={image_type}
+
+# install dependencies
+COPY requirements /var/modelscope
+
+RUN pip uninstall ms-swift modelscope -y && pip --no-cache-dir install pip==23.* -U && \
+if [ "$INSTALL_MS_DEPS" = "True" ]; then \
+    pip --no-cache-dir install omegaconf==2.0.6 && \
+    pip install 'editdistance==0.8.1' && \
+    pip install --no-cache-dir 'cython<=0.29.36' versioneer 'numpy<2.0' && \
+    pip install --no-cache-dir -r /var/modelscope/framework.txt && \
+    pip install --no-cache-dir -r /var/modelscope/audio.txt -f https://modelscope.oss-cn-beijing.aliyuncs.com/releases/repo.html && \
+    pip install --no-cache-dir -r /var/modelscope/tests.txt && \
+    pip install --no-cache-dir -r /var/modelscope/server.txt && \
+    pip install --no-cache-dir https://modelscope.oss-cn-beijing.aliyuncs.com/packages/imageio_ffmpeg-0.4.9-py3-none-any.whl --no-dependencies --force && \
+    pip install --no-cache-dir 'scipy<1.13.0' && \
+    pip install --no-cache-dir funtextprocessing typeguard==2.13.3 scikit-learn -f https://modelscope.oss-cn-beijing.aliyuncs.com/releases/repo.html && \
+    pip install --no-cache-dir 'decord>=0.6.0' mpi4py paint_ldm ipykernel fasttext -f https://modelscope.oss-cn-beijing.aliyuncs.com/releases/repo.html && \
+    pip install --no-cache-dir 'blobfile>=1.0.5' && \
+    pip uninstall MinDAEC -y && \
+    pip install https://modelscope.oss-cn-beijing.aliyuncs.com/releases/dependencies/MinDAEC-0.0.2-py3-none-any.whl && \
+    pip cache purge; \
+else \
+    pip install --no-cache-dir -r /var/modelscope/framework.txt && \
+    pip cache purge; \
+fi
+
+ARG CUR_TIME={cur_time}
+RUN echo $CUR_TIME
+
+RUN bash /tmp/install.sh {version_args} && \
+    pip install --no-cache-dir -U funasr scikit-learn && \
+    pip install --no-cache-dir -U qwen_vl_utils qwen_omni_utils librosa timm transformers accelerate peft trl safetensors && \
+    cd /tmp && GIT_LFS_SKIP_SMUDGE=1 git clone -b {swift_branch}  --single-branch https://github.com/modelscope/ms-swift.git && \
+    cd ms-swift && pip install .[llm] && \
+    pip install .[eval] && pip install evalscope -U --no-dependencies && pip install ms-agent -U --no-dependencies && \
+    cd / && rm -fr /tmp/ms-swift && pip cache purge; \
+    cd /tmp && GIT_LFS_SKIP_SMUDGE=1 git clone -b  {modelscope_branch}  --single-branch https://github.com/modelscope/modelscope.git && \
+    cd modelscope && pip install . -f https://modelscope.oss-cn-beijing.aliyuncs.com/releases/repo.html && \
+    cd / && rm -fr /tmp/modelscope && pip cache purge; \
+    pip install --no-cache-dir torch=={torch_version} torchvision=={torchvision_version} torchaudio=={torchaudio_version} {index_url} && \
+    pip install --no-cache-dir transformers diffusers 'timm>=0.9.0' && pip cache purge; \
+    pip install --no-cache-dir omegaconf==2.3.0 && pip cache purge; \
+    pip config set global.index-url https://mirrors.aliyun.com/pypi/simple && \
+    pip config set global.extra-index-url https://pypi.org/simple && \
+    pip config set install.trusted-host mirrors.aliyun.com && \
+    cp /tmp/resources/ubuntu2204.aliyun /etc/apt/sources.list
+
+
+RUN if [ "$IMAGE_TYPE" = "gpu" ]; then \
+    pip install --no-cache-dir math_verify "gradio<5.33" "deepspeed<0.18" ray -U && \
+    pip install --no-cache-dir liger_kernel wandb swanlab nvitop pre-commit "transformers" "trl<0.25" "peft<0.18" huggingface-hub -U && \
+    pip install --no-cache-dir --no-build-isolation transformer_engine[pytorch]; \
+    cd /tmp && GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/NVIDIA/apex && \
+    cd apex && pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./ && \
+    cd / && rm -fr /tmp/apex && pip cache purge; \
+    pip install --no-cache-dir "megatron-core==0.15.*"; \
+    pip uninstall autoawq -y; \
+elif [ "$IMAGE_TYPE" = "cpu" ]; then \
+    pip install --no-cache-dir huggingface-hub transformers peft diffusers -U; \
+else \
+    pip install "transformers<5.0" "tokenizers<0.22" "trl<0.23" "diffusers<0.35" --no-dependencies; \
+fi
+
+# install nvm and set node version to 18
+ENV NVM_DIR=/root/.nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && \
+    . $NVM_DIR/nvm.sh && \
+    nvm install 22 && \
+    nvm use 22
+
+RUN rm -f /etc/apt/sources.list.d/cuda-*.list && apt-get update
+
+ENV VLLM_USE_MODELSCOPE=True
+ENV LMDEPLOY_USE_MODELSCOPE=True
+ENV MODELSCOPE_CACHE=/mnt/workspace/.cache/modelscope/hub
+SHELL ["/bin/bash", "-c"]

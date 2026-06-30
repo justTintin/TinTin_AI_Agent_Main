@@ -1,0 +1,69 @@
+# Python environments
+.venv/
+venv/
+python_embeded/
+__pycache__/
+*.pyc
+
+# Bundled Python in apps
+apps/*/Python/
+apps/*/Lib/
+apps/*/venv/
+apps/*/.venv/
+
+# Models / large files
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.pkl
+models/
+checkpoints/
+whisper-models/
+clip-models/
+
+# Generated / cache
+output/
+outputs/
+temp/
+tmp/
+*.cache
+.runtime/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.key
+*.pem
+credentials*
+
+# Binary / compiled
+*.exe
+*.dll
+*.so
+*.whl
+*.dylib
+ffmpeg
+ffplay
+ffprobe
+
+# Ollama models and CUDA libs
+studio/assets/ollama_models/
+studio/bin/
+
+# Bundled binaries
+apps/pw-browsers/
+apps/asset-browser/bin/
+ai_skills/*/dist/
+
+# pip cache
+apps/*/opt/packages/

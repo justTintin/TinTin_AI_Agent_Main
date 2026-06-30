@@ -20,7 +20,6 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.media_library_manager import MediaLibraryManager
 from utils.remotion_client import TEMPLATES, install, render, is_installed, node_ok
-from utils.platform_utils import open_path
 from config.paths import MG_OUTPUT_DIR
 
 
@@ -225,8 +224,8 @@ class MGAnimationPage(BasePage):
         self.show_error(str(e), "MG 渲染失败")
 
     def _open(self):
-        if self._last_out and os.path.isfile(self._last_out):
-            open_path(self._last_out)
+        if self._last_out and os.path.isfile(self._last_out) and os.name == "nt":
+            os.startfile(self._last_out)  # noqa
 
     def _to_media(self):
         if self._last_out and os.path.isfile(self._last_out):

@@ -183,15 +183,10 @@ class StartupSplash(QWidget):
         self.card_layout.setContentsMargins(30, 35, 30, 35)
         self.card_layout.setSpacing(16)
         
-        title_lbl = QLabel("🤖 <b>AI电商智能体</b>")
+        title_lbl = QLabel("🤖 <b>思维向量 - 自动化 AI 视频助手</b>")
         title_lbl.setStyleSheet("font-size: 18px; color: #ffffff;")
         title_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(title_lbl)
-        
-        developer_lbl = QLabel("by 大怪")
-        developer_lbl.setStyleSheet("font-size: 12px; color: #94a3b8;")
-        developer_lbl.setAlignment(Qt.AlignCenter)
-        self.card_layout.addWidget(developer_lbl)
         
         self.status_lbl = QLabel("正在启动程序，准备系统核心中...")
         self.status_lbl.setStyleSheet("font-size: 13px; color: #3b82f6;")

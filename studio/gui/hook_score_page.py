@@ -27,8 +27,7 @@ from PySide6.QtCore import Signal, Qt, QPointF, QRectF
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.video_compiler import _probe_duration
-from utils.platform_utils import find_ffmpeg, create_no_window_flag
+from utils.video_compiler import _find, _probe_duration
 from utils.video_prediction_manager import (
     VideoPredictionManager, PLATFORMS, DIMENSIONS, PLAY_LEVELS)
 from config.paths import TMP_DIR
@@ -177,8 +176,8 @@ class HookScoreWorker(BaseWorker):
         shutil.rmtree(frames_dir, ignore_errors=True)
         os.makedirs(frames_dir, exist_ok=True)
         frames = []
-        ffmpeg = find_ffmpeg()
-        flags = create_no_window_flag()
+        ffmpeg = _find("ffmpeg.exe")
+        flags = 0x08000000 if os.name == "nt" else 0
         for i, t in enumerate(times):
             self.phase.emit(f"抽帧 {i + 1}/{len(times)}（{t}s）…")
             out = os.path.join(frames_dir, f"f{i:02d}_{t}s.jpg")

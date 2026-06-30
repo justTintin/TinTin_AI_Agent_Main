@@ -20,7 +20,6 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils import backup_manager as bm
 from utils.data_registry import summarize
-from utils.platform_utils import open_path
 from config.paths import BACKUP_DIR
 
 
@@ -165,7 +164,8 @@ class BackupPage(BasePage):
 
     def _open_backup_dir(self):
         os.makedirs(BACKUP_DIR, exist_ok=True)
-        open_path(BACKUP_DIR)
+        if os.name == "nt":
+            os.startfile(BACKUP_DIR)  # noqa
 
     # ---------- 还原 ----------
     def _browse_zip(self):

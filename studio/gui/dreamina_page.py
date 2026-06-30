@@ -24,8 +24,7 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.dreamina_client import DreaminaClient
 from utils.media_library_manager import MediaLibraryManager
-from utils.platform_utils import open_path
-from config.paths import DREAMINA_OUTPUT_DIR, get_bin
+from config.paths import DREAMINA_OUTPUT_DIR
 
 RATIOS = ["(默认)", "9:16", "16:9", "1:1", "3:4", "4:3", "2:3", "3:2", "21:9"]
 MODELS = ["(默认)", "5.0", "4.7", "4.6", "4.5", "4.1", "4.0", "3.1", "3.0"]
@@ -121,8 +120,7 @@ class DreaminaPage(BasePage):
         root.addWidget(heading)
 
         if not self.client.is_installed():
-            dreamina_bin = get_bin("dreamina")
-            warn = QLabel(f"⚠️ 未检测到 dreamina 可执行文件（{dreamina_bin}）。"
+            warn = QLabel("⚠️ 未检测到 dreamina 可执行文件（studio/bin/dreamina.exe）。"
                           "请先放置即梦 CLI 二进制后重启。")
             warn.setObjectName("muted_text"); warn.setWordWrap(True)
             root.addWidget(warn)
@@ -317,5 +315,5 @@ class DreaminaPage(BasePage):
         self.show_info(msg if ok else f"未添加：{msg}")
 
     def _open_out_dir(self):
-        if self._last_out_dir and os.path.isdir(self._last_out_dir):
-            open_path(self._last_out_dir)
+        if self._last_out_dir and os.path.isdir(self._last_out_dir) and os.name == "nt":
+            os.startfile(self._last_out_dir)  # noqa

@@ -67,13 +67,10 @@ class ComfyWSThread(QThread):
         if not websocket:
             log.error("websocket-client library is not installed. ComfyUI progress monitoring will not work.")
             return
-
-        retries = 0
-        max_retries = 3
-        while self.running and retries < max_retries:
+            
+        while self.running:
             try:
-                ws = websocket.create_connection(self.server_addr, timeout=5)
-                retries = 0  # reset on success
+                ws = websocket.create_connection(self.server_addr)
                 while self.running:
                     out = ws.recv()
                     data = json.loads(out)
@@ -92,12 +89,8 @@ class ComfyWSThread(QThread):
                             self.status_received.emit(prompt_id, f"正在执行节点: {node}")
                 ws.close()
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
-                    log.warning(f"ComfyUI WebSocket 连接失败 {max_retries} 次，停止重试 ({self.server_addr}): {e}")
-                else:
-                    log.warning(f"ComfyUI WebSocket 连接失败 ({retries}/{max_retries}) : {e}")
-                    time.sleep(5)
+                log.error(f"WebSocket error connecting to ComfyUI ({self.server_addr}): {e}")
+                time.sleep(5)
 
 
 class AIStatusCheckThread(QThread):

@@ -17,8 +17,6 @@ import subprocess
 import shutil
 from datetime import datetime
 
-from utils.platform_utils import create_no_window_flag
-
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame,
     QWidget, QComboBox, QListWidget, QListWidgetItem, QGraphicsView, QGraphicsScene,
@@ -32,7 +30,6 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.media_library_manager import MediaLibraryManager
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
-from utils.platform_utils import find_ffmpeg as _find_ffmpeg_util
 
 CANVAS_SIZES = {"16:9（横版）": (1280, 720), "9:16（竖版）": (720, 1280), "1:1（方形）": (1080, 1080)}
 # 安全区内边距（左, 上, 右, 下，占画布比例）。竖版按短视频平台预留右侧按钮、底部字幕/进度。
@@ -54,7 +51,11 @@ SAFE_PRESETS = {
 
 
 def _find_ffmpeg():
-    return _find_ffmpeg_util()
+    for c in (os.path.join(WORKSPACE_ROOT, "ffmpeg.exe"),
+              os.path.join(PROJECT_ROOT, "ffmpeg.exe"), "ffmpeg", "ffmpeg.exe"):
+        if os.path.isfile(c):
+            return c
+    return shutil.which("ffmpeg") or "ffmpeg"
 
 
 class FrameExtractWorker(BaseWorker):
@@ -70,7 +71,7 @@ class FrameExtractWorker(BaseWorker):
         os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
         cmd = [_find_ffmpeg(), "-y", "-ss", str(self.time_sec), "-i", self.video_path,
                "-vframes", "1", "-q:v", "2", self.out_path]
-        flags = create_no_window_flag()
+        flags = 0x08000000 if os.name == "nt" else 0
         r = subprocess.run(cmd, capture_output=True, creationflags=flags)
         if r.returncode != 0 or not os.path.isfile(self.out_path):
             raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[-300:] or "抽帧失败")

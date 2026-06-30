@@ -9,7 +9,7 @@
     "dist": "electron-packager . \"TInTIn素材下载浏览器\" --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=bin"
   },
   "devDependencies": {
-    "electron": "^30.0.0",
+    "electron": "^30.5.1",
     "electron-packager": "^17.1.2"
   }
 }

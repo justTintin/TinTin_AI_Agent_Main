@@ -266,7 +266,7 @@ def main():
         if args.task_type:
             transcribe_options["task"] = args.task_type
 
-        result = model.transcribe(audio, batch_size=16, **transcribe_options)
+        result = model.transcribe(audio, batch_size=8, **transcribe_options)
 
         # Step 4: 对齐时间轴 (Word-level timestamps)
         print("[STAGE] 正在对齐时间轴（精确至毫秒级）...")

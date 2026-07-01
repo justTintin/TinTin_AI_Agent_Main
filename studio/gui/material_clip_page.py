@@ -91,6 +91,69 @@ class _StatsLightWorker(BaseWorker):
         self.finished.emit(stats)
 
 
+class _LoadBrandsWorker(BaseWorker):
+    """从 PostgreSQL 加载去重品牌列表并归一化。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        from utils.brand_normalizer import canonical_name
+        import json, psycopg2
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "material_index_config.json")
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        conn = psycopg2.connect(
+            host=cfg["db_host"], port=cfg["db_port"], dbname=cfg["db_name"],
+            user=cfg["db_user"], password=cfg["db_password"]
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT brand FROM materials WHERE brand IS NOT NULL AND brand != '' AND brand != '—' ORDER BY brand")
+        raw_brands = [r[0] for r in cur.fetchall()]
+        conn.close()
+        seen = set()
+        result = []
+        for b in raw_brands:
+            canon = canonical_name(b)
+            if canon and canon not in seen:
+                seen.add(canon)
+                result.append(canon)
+        result.sort(key=lambda x: x.lower())
+        self.finished.emit(result)
+
+
+class _LoadCategoriesWorker(BaseWorker):
+    """从 PostgreSQL 加载去重类别列表。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        import json, psycopg2
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "material_index_config.json")
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        conn = psycopg2.connect(
+            host=cfg["db_host"], port=cfg["db_port"], dbname=cfg["db_name"],
+            user=cfg["db_user"], password=cfg["db_password"]
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT product FROM materials WHERE product IS NOT NULL AND product != '' AND product != '—' ORDER BY product")
+        cats = [r[0] for r in cur.fetchall()]
+        conn.close()
+        # category normalization map
+        _cat_map = {
+            "键盘+鼠标": "键鼠套装", "手机": "手机", "平板电脑": "平板",
+            "笔记本电脑": "笔记本", "智能手表": "手表", "软件界面": "软件",
+            "游戏界面": "游戏", "服饰": "服饰", "其他": "其他", "未知": "未知",
+        }
+        seen = set()
+        result = []
+        for c in cats:
+            canon = _cat_map.get(c, c)
+            if canon not in seen:
+                seen.add(canon)
+                result.append(canon)
+        result.sort(key=lambda x: x.lower())
+        self.finished.emit(result)
+
+
 class _StatsWorker(BaseWorker):
     """对齐并查询统计数据。"""
     finished = Signal(dict)
@@ -227,7 +290,8 @@ class _QueryMaterialsWorker(BaseWorker):
 
     def __init__(self, path_prefix: str = "", ai_status_filter: str = "",
                  limit: int = 10000, hash_prefix: str = "", media_type: str = "",
-                 brand: str = "", scene_desc: str = "", conf_filter: str = ""):
+                 brand: str = "", scene_desc: str = "", conf_filter: str = "",
+                 product: str = ""):
         super().__init__()
         self.path_prefix      = path_prefix
         self.ai_status_filter = ai_status_filter or None
@@ -237,6 +301,7 @@ class _QueryMaterialsWorker(BaseWorker):
         self.brand            = brand
         self.scene_desc       = scene_desc
         self.conf_filter      = conf_filter
+        self.product          = product
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
@@ -250,6 +315,7 @@ class _QueryMaterialsWorker(BaseWorker):
                 brand=self.brand,
                 scene_desc=self.scene_desc,
                 conf_filter=self.conf_filter,
+                product=self.product,
             )
         self.finished.emit(rows)
 
@@ -428,6 +494,8 @@ class MaterialClipPage(BasePage):
         # 初始加载
         self._reload_dir_config()
         self._refresh_stats_light()
+        self._load_brand_list()
+        self._load_category_list()
 
     def _switch_tab(self, index):
         self.stacked_widget.setCurrentIndex(index)
@@ -566,7 +634,7 @@ class MaterialClipPage(BasePage):
         db_hdr_row.addWidget(self.lbl_stats_analyze)
         lay.addLayout(db_hdr_row)
 
-        # 筛选行：全选 + 品牌 + 描述 + 置信度 + 类型 + AI状态 + Hash
+        # 筛选行：全选 + 品牌 + 类别 + 描述 + 置信度 + 类型 + AI状态 + Hash
         filter_row = QHBoxLayout()
         
         self.chk_select_all = QCheckBox("全选")
@@ -575,16 +643,27 @@ class MaterialClipPage(BasePage):
         filter_row.addSpacing(5)
         
         filter_row.addWidget(QLabel("品牌："))
-        self.db_brand_filter = QLineEdit()
-        self.db_brand_filter.setPlaceholderText("品牌关键字")
-        self.db_brand_filter.setFixedWidth(110)
-        self.db_brand_filter.returnPressed.connect(self._refresh_db_table)
+        self.db_brand_filter = QComboBox()
+        self.db_brand_filter.addItem("全部", "")
+        self.db_brand_filter.setFixedWidth(100)
+        self.db_brand_filter.setEditable(True)
+        self.db_brand_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.db_brand_filter.currentIndexChanged.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_brand_filter)
+
+        filter_row.addWidget(QLabel("类别："))
+        self.db_category_filter = QComboBox()
+        self.db_category_filter.addItem("全部", "")
+        self.db_category_filter.setFixedWidth(80)
+        self.db_category_filter.setEditable(True)
+        self.db_category_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.db_category_filter.currentIndexChanged.connect(self._refresh_db_table)
+        filter_row.addWidget(self.db_category_filter)
 
         filter_row.addWidget(QLabel("描述："))
         self.db_desc_filter = QLineEdit()
         self.db_desc_filter.setPlaceholderText("画面描述")
-        self.db_desc_filter.setFixedWidth(120)
+        self.db_desc_filter.setFixedWidth(90)
         self.db_desc_filter.returnPressed.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_desc_filter)
 
@@ -1165,6 +1244,34 @@ class MaterialClipPage(BasePage):
         w.error.connect(lambda _: self.lbl_stats_ingest.setText("统计失败"))
         w.start()
 
+    def _load_brand_list(self):
+        """从数据库加载品牌列表到品牌下拉框。"""
+        w = self.track_worker(_LoadBrandsWorker())
+        w.finished.connect(self._on_brands_loaded)
+        w.start()
+
+    def _on_brands_loaded(self, brands: list):
+        self.db_brand_filter.blockSignals(True)
+        self.db_brand_filter.clear()
+        self.db_brand_filter.addItem("全部", "")
+        for brand in brands:
+            self.db_brand_filter.addItem(brand)
+        self.db_brand_filter.blockSignals(False)
+
+    def _load_category_list(self):
+        """从数据库加载类别列表到类别下拉框。"""
+        w = self.track_worker(_LoadCategoriesWorker())
+        w.finished.connect(self._on_categories_loaded)
+        w.start()
+
+    def _on_categories_loaded(self, categories: list):
+        self.db_category_filter.blockSignals(True)
+        self.db_category_filter.clear()
+        self.db_category_filter.addItem("全部", "")
+        for cat in categories:
+            self.db_category_filter.addItem(cat)
+        self.db_category_filter.blockSignals(False)
+
     def _align_and_ingest(self):
         """对齐入库按钮：扫描目录，将新文件 Hash 对齐后批量入库，完成后自动刷新统计。"""
         dirs = self._get_index_directories()
@@ -1474,14 +1581,16 @@ class MaterialClipPage(BasePage):
         status_filter = self.db_status_filter.currentData() or ""
         type_filter   = self.db_type_filter.currentData() or ""
         hash_prefix  = self.db_hash_filter.text().strip()
-        brand_filter = self.db_brand_filter.text().strip()
+        brand_filter = self.db_brand_filter.currentText().strip() if self.db_brand_filter.currentIndex() > 0 else ""
         desc_filter  = self.db_desc_filter.text().strip()
         conf_filter  = self.db_conf_filter.currentData() or ""
+        cat_filter   = self.db_category_filter.currentText().strip() if self.db_category_filter.currentIndex() > 0 else ""
         
         self._query_worker = self.track_worker(
             _QueryMaterialsWorker(
                 path_prefix, status_filter, hash_prefix=hash_prefix, media_type=type_filter,
-                brand=brand_filter, scene_desc=desc_filter, conf_filter=conf_filter
+                brand=brand_filter, scene_desc=desc_filter, conf_filter=conf_filter,
+                product=cat_filter
             )
         )
         self._query_worker.finished.connect(self._on_db_loaded)

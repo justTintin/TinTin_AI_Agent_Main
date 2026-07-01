@@ -66,5 +66,9 @@ apps/pw-browsers/
 apps/asset-browser/bin/
 ai_skills/*/dist/
 
+# Studio logs
+studio/logs/
+studio/ollama_run.log
+
 # pip cache
 apps/*/opt/packages/

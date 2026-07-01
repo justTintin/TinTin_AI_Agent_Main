@@ -156,6 +156,9 @@ def transcribe_audio(video_path: str, models_dir: str,
     使用全局字典缓存模型，避免每个视频重复加载模型文件。
     """
     try:
+        import os as _os
+        _os.environ["LANG"] = "zh_CN.UTF-8"
+        _os.environ["LC_ALL"] = "zh_CN.UTF-8"
         from faster_whisper import WhisperModel
 
         device = "auto"

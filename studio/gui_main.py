@@ -487,6 +487,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 QApplication.processEvents()
             except Exception:
                 pass
+
+    def _on_theme_changed(self):
+        """主题切换回调（立即保存，重启生效）。"""
+        theme = self.theme_combo.currentData()
+        from utils.theme_manager import save_theme
+        save_theme(theme)
+        self.theme_hint.setText(f"✅ 已保存为「{self.theme_combo.currentText()}」(重启后生效)")
         
 
 
@@ -1477,18 +1484,8 @@ if __name__ == "__main__":
     try:
         app = QApplication(sys.argv)
         app.setStyle("Fusion")
-        from PySide6.QtGui import QPalette, QColor
-        dark_palette = QPalette()
-        dark_palette.setColor(QPalette.Window, QColor("#1a1a1c"))
-        dark_palette.setColor(QPalette.WindowText, QColor("#ffffff"))
-        dark_palette.setColor(QPalette.Base, QColor("#222224"))
-        dark_palette.setColor(QPalette.AlternateBase, QColor("#1c1c1e"))
-        dark_palette.setColor(QPalette.Text, QColor("#ffffff"))
-        dark_palette.setColor(QPalette.Button, QColor("#2c2c2e"))
-        dark_palette.setColor(QPalette.ButtonText, QColor("#ffffff"))
-        dark_palette.setColor(QPalette.Highlight, QColor("#3b82f6"))
-        dark_palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-        app.setPalette(dark_palette)
+        from utils.theme_manager import apply_theme
+        apply_theme(app)
         try:
             from PySide6.QtGui import QFont
             font = QFont("Microsoft YaHei UI", 10)

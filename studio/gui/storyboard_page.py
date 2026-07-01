@@ -136,7 +136,7 @@ class ShotMaterialDialog(QDialog):
         lt.setSpacing(8)
         row = QHBoxLayout()
         self.local_input = QLineEdit()
-        self.local_input.setPlaceholderText("关键词（空格分隔），匹配素材管理库文件名及标签")
+        self.local_input.setPlaceholderText("关键词搜索素材库（匹配文件名、品牌、型号、画面描述）")
         self.local_input.setText(shot_desc[:60] if shot_desc else "")
         self.local_input.returnPressed.connect(self._search_local)
         row.addWidget(self.local_input, 1)
@@ -149,7 +149,7 @@ class ShotMaterialDialog(QDialog):
         self.local_list.itemSelectionChanged.connect(self._on_local_sel_changed)
         lt.addWidget(self.local_list, 1)
         lt.addWidget(self._muted("双击选择素材；或搜索框留空浏览所有挂载目录"))
-        self.tabs.addTab(local_tab, "🗂️ 本地素材")
+        self.tabs.addTab(local_tab, "🗂️ 素材库")
 
         # ── Tab 2: 即梦生成 ──────────────────────────────────────────
         dreamina_tab = QWidget()
@@ -262,53 +262,99 @@ class ShotMaterialDialog(QDialog):
         if not query:
             self._browse_mounts()
             return
-        keywords = [k.lower() for k in query.split() if k]
-        mgr = MediaLibraryManager()
+        keywords = [k.lower().strip() for k in query.split() if k.strip()]
+        if not keywords:
+            self._browse_mounts()
+            return
+        # Use MaterialClipIndexer for keyword search across filename/brand/model/description
+        from utils.material_clip_indexer import MaterialClipIndexer
         found = []
-        for mount in mgr.mounts:
-            dir_path = mount.get("path", "")
-            if not dir_path or not os.path.isdir(dir_path):
-                continue
-            tags_str = " ".join(mount.get("tags", [])).lower()
-            name_str = (mount.get("name", "") + " " + mount.get("group", "")).lower()
-            mount_hay = tags_str + " " + name_str
-            mount_match = all(k in mount_hay for k in keywords)
-            for f in scan_directory(dir_path, limit=500):
-                file_hay = f["name"].lower() + " " + mount_hay
-                if mount_match or all(k in file_hay for k in keywords):
-                    f["_mount_name"] = mount.get("name", "")
-                    f["_mount_tags"] = mount.get("tags", [])
-                    found.append(f)
-                if len(found) >= 150:
-                    break
-            if len(found) >= 150:
-                break
+        try:
+            with MaterialClipIndexer() as idx:
+                conn = idx._conn
+                if conn is None:
+                    idx._connect()
+                    conn = idx._conn
+                if conn is None:
+                    self.local_list.addItem(QListWidgetItem("素材库未连接"))
+                    return
+                cur = conn.cursor()
+                conds = []
+                params = []
+                for kw in keywords:
+                    like = "%" + kw + "%"
+                    conds.append(
+                        "(LOWER(COALESCE(filename,'')) LIKE %s OR "
+                        " LOWER(COALESCE(brand,'')) LIKE %s OR "
+                        " LOWER(COALESCE(model,'')) LIKE %s OR "
+                        " LOWER(COALESCE(scene_desc_primary,'')) LIKE %s OR "
+                        " LOWER(COALESCE(scene_desc_secondary,'')) LIKE %s OR "
+                        " LOWER(COALESCE(product,'')) LIKE %s)"
+                    )
+                    params.extend([like, like, like, like, like, like])
+                sql = ("SELECT id, path, filename, media_type, file_hash, brand, model, product, "
+                       "scene_desc_primary, scene_desc_secondary, ai_confidence, file_size "
+                       "FROM materials WHERE " + " AND ".join(conds) +
+                       " ORDER BY COALESCE(ai_confidence, 0) DESC LIMIT 200")
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                found = [dict(zip(cols, r)) for r in rows]
+        except Exception as e:
+            self.local_list.addItem(QListWidgetItem(f"搜索失败: {e}"))
+            return
         if not found:
             self.local_list.addItem(QListWidgetItem("未找到匹配素材，请换关键词"))
         else:
             for f in found:
-                tags = f.get("_mount_tags", [])
-                tag_str = "  [" + "/".join(tags) + "]" if tags else ""
-                item = QListWidgetItem(f"[{f['type']}]  {f['name']}{tag_str}  —  {f.get('_mount_name','')}")
+                b = f.get("brand", "") or ""
+                m = f.get("model", "") or ""
+                info = f"{b} {m}".strip()
+                label = f"[{f.get('media_type','?')}]  {f.get('filename','?')}"
+                if info:
+                    label += f"  —  {info}"
+                item = QListWidgetItem(label)
                 item.setData(Qt.UserRole, f)
-                item.setToolTip(f["path"])
+                item.setToolTip(f.get("path", ""))
                 self.local_list.addItem(item)
 
     def _browse_mounts(self):
-        mgr = MediaLibraryManager()
-        if not mgr.mounts:
-            self.local_list.addItem(QListWidgetItem("素材管理库为空，请先在「素材管理」页添加目录"))
-            return
-        for m in mgr.mounts:
-            tags = m.get("tags", [])
-            tag_str = "  [" + "/".join(tags) + "]" if tags else ""
-            item = QListWidgetItem(f"📁  {m.get('name','')}  {tag_str}  —  {m.get('group','')}")
-            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-            item.setToolTip(m.get("path", ""))
-            self.local_list.addItem(item)
-        hint = QListWidgetItem("↑ 输入关键词后点「搜索」查找具体文件")
-        hint.setFlags(hint.flags() & ~Qt.ItemIsSelectable)
-        self.local_list.addItem(hint)
+        # Show recent materials from DB when no search term
+        from utils.material_clip_indexer import MaterialClipIndexer
+        try:
+            with MaterialClipIndexer() as idx:
+                conn = idx._conn
+                if conn is None:
+                    idx._connect()
+                    conn = idx._conn
+                if conn is None:
+                    self.local_list.addItem(QListWidgetItem("素材库未连接"))
+                    return
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id, path, filename, media_type, file_hash, brand, model, product "
+                    "FROM materials WHERE ai_status = 'analyzed' "
+                    "ORDER BY COALESCE(ai_confidence, 0) DESC LIMIT 100"
+                )
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                for r in rows:
+                    f = dict(zip(cols, r))
+                    b = f.get("brand", "") or ""
+                    m = f.get("model", "") or ""
+                    p = f.get("product", "") or ""
+                    info = "  —  ".join(x for x in [p, f"{b} {m}".strip()] if x)
+                    label = f"[{f.get('media_type','?')}]  {f.get('filename','?')}"
+                    if info:
+                        label += f"  [{info}]"
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.UserRole, f)
+                    item.setToolTip(f.get("path", ""))
+                    self.local_list.addItem(item)
+                if not rows:
+                    self.local_list.addItem(QListWidgetItem("素材库为空，请先在素材管理页执行入库与分析"))
+        except Exception as e:
+            self.local_list.addItem(QListWidgetItem(f"加载素材库失败: {e}"))
 
     def _on_local_sel_changed(self):
         if self.tabs.currentIndex() != 0:
@@ -319,7 +365,12 @@ class ShotMaterialDialog(QDialog):
     def _select_local_item(self, item):
         data = item.data(Qt.UserRole)
         if data:
-            self.selected_material = {"type": "local", "path": data["path"], "name": data["name"]}
+            self.selected_material = {
+                "type": "local",
+                "path": data.get("path", ""),
+                "name": data.get("filename", ""),
+                "hash": data.get("file_hash", ""),
+            }
             self.accept()
 
     # ── 即梦生成 ─────────────────────────────────────────────────────

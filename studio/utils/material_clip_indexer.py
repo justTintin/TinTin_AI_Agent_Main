@@ -1091,7 +1091,7 @@ class _MaterialDB:
                        offset: int = 0, ai_status: Optional[str] = None,
                        hash_prefix: str = "", media_type: Optional[str] = None,
                        brand: str = "", scene_desc: str = "",
-                       conf_filter: str = "") -> list:
+                       conf_filter: str = "", product: str = "") -> list:
         self._connect()
         conds = []
         params = []
@@ -1119,6 +1119,13 @@ class _MaterialDB:
             else:
                 conds.append("brand ILIKE %s")
                 params.append(f"%{brand_val}%")
+        if product:
+            prod_val = product.strip()
+            if prod_val in ("—", "null", "无", "empty", "NULL"):
+                conds.append("(product IS NULL OR product = '' OR product = '—')")
+            else:
+                conds.append("product ILIKE %s")
+                params.append(f"%{prod_val}%")
         if scene_desc:
             desc_val = scene_desc.strip()
             if desc_val in ("—", "null", "无", "empty", "NULL"):
@@ -2095,10 +2102,10 @@ class MaterialClipIndexer:
                        offset: int = 0, ai_status: Optional[str] = None,
                        hash_prefix: str = "", media_type: Optional[str] = None,
                        brand: str = "", scene_desc: str = "",
-                       conf_filter: str = "") -> list:
+                       conf_filter: str = "", product: str = "") -> list:
         return self._db.list_materials(
             path_prefix, limit, offset, ai_status, hash_prefix, media_type,
-            brand=brand, scene_desc=scene_desc, conf_filter=conf_filter
+            brand=brand, scene_desc=scene_desc, conf_filter=conf_filter, product=product
         )
 
     def search_by_tags(self, brand: str = None, model: str = None,

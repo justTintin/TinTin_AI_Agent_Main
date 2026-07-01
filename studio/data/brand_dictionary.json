@@ -1,0 +1,1229 @@
+{
+  "_comment": "品牌归一化字典 — canonical_name 是标准名，aliases 是变体列表。AI 识别出的品牌先在此字典匹配，命中则统一成 canonical_name。",
+  "brands": {
+    "罗技": {
+      "canonical": "罗技 (Logitech)",
+      "aliases": ["Logitech", "logitech", "LOGITECH", "logi", "Logitech G", "Logitech 罗技", "logitech 罗技", "罗技(Logitech)", "罗技 (Logitech)", "罗技G", "GPW", "GPW4", "GPW4朱雀", "G", "LGPW"]
+    },
+    "Apple": {
+      "canonical": "Apple",
+      "aliases": ["苹果", "MacBook Pro", "AirPods", "iPhone"]
+    },
+    "南孚": {
+      "canonical": "南孚",
+      "aliases": ["南孚电池", "南孚传应", "南孚|传应"]
+    },
+    "ROG": {
+      "canonical": "ROG (华硕)",
+      "aliases": ["ASUS ROG", "华硕"]
+    },
+    "HyperX": {
+      "canonical": "HyperX (极度未知)",
+      "aliases": []
+    },
+    "JBL": {
+      "canonical": "JBL",
+      "aliases": []
+    },
+    "Razer": {
+      "canonical": "Razer (雷蛇)",
+      "aliases": ["雷蛇"]
+    },
+    "传应": {
+      "canonical": "传应",
+      "aliases": ["传应奔驰"]
+    },
+    "CHERRY": {
+      "canonical": "CHERRY (樱桃)",
+      "aliases": ["Cherry", "樱桃", "CHERRY XTRFY"]
+    },
+    "GP超霸": {
+      "canonical": "GP超霸",
+      "aliases": ["GP", "超霸", "CP超霸", "GP Batteries", "GPI"]
+    },
+    "HP": {
+      "canonical": "HP (惠普)",
+      "aliases": ["惠普", "暗影精灵", "VICTUS", "OMEN", "Omen", "星Book"]
+    },
+    "BMW": {
+      "canonical": "BMW (宝马)",
+      "aliases": ["宝马"]
+    },
+    "MSI": {
+      "canonical": "MSI (微星)",
+      "aliases": ["Msi"]
+    },
+    "奔驰": {
+      "canonical": "Mercedes-Benz (奔驰)",
+      "aliases": ["Mercedes", "奔驰/Audi"]
+    },
+    "小米": {
+      "canonical": "小米 (Xiaomi)",
+      "aliases": ["Xiaomi"]
+    },
+    "Audi": {
+      "canonical": "Audi (奥迪)",
+      "aliases": ["奥迪"]
+    },
+    "OLO": {
+      "canonical": "OLO",
+      "aliases": ["olo", "OOL"]
+    },
+    "Kzzi": {
+      "canonical": "Kzzi (珂芝)",
+      "aliases": ["KZzi", "KZZI", "珂芝", "Kzzi珂芝", "KZi", "K2zi", "Kizzi"]
+    },
+    "AOC": {
+      "canonical": "AOC",
+      "aliases": ["AGON"]
+    },
+    "Dell": {
+      "canonical": "Dell (戴尔)",
+      "aliases": ["DELL", "戴尔", "DELL INC.", "Alienware", "ALIENWARE"]
+    },
+    "华为": {
+      "canonical": "华为 (HUAWEI)",
+      "aliases": ["HUAWEI", "Huawei"]
+    },
+    "黑峡谷": {
+      "canonical": "黑峡谷 (HYEKU)",
+      "aliases": ["HYEKU", "黑峡谷 HYEKU"]
+    },
+    "DJI": {
+      "canonical": "DJI (大疆)",
+      "aliases": ["大疆"]
+    },
+    "任天堂": {
+      "canonical": "Nintendo (任天堂)",
+      "aliases": ["Nintendo", "Switch"]
+    },
+    "Blue": {
+      "canonical": "Blue Microphones",
+      "aliases": ["BLUE", "Blue Microphones", "Blue Yeti", "Blue Voice", "Yeti", "Snowball"]
+    },
+    "特斯拉": {
+      "canonical": "Tesla (特斯拉)",
+      "aliases": []
+    },
+    "Samsung": {
+      "canonical": "Samsung (三星)",
+      "aliases": ["三星"]
+    },
+    "ASUS": {
+      "canonical": "ASUS (华硕)",
+      "aliases": ["华硕", "TUF Gaming", "VivoBook"]
+    },
+    "Lenovo": {
+      "canonical": "Lenovo (联想)",
+      "aliases": ["联想", "ThinkPad"]
+    },
+    "ROYALAXE": {
+      "canonical": "ROYALAXE (御斧)",
+      "aliases": ["ROYAL AXE", "ROYALAX", "御斧"]
+    },
+    "得力": {
+      "canonical": "得力 (Deli)",
+      "aliases": ["Deli", "Deli 得力", "晨光", "M&G 晨光文具", "晨光文具"]
+    },
+    "Nikon": {
+      "canonical": "Nikon (尼康)",
+      "aliases": ["尼康"]
+    },
+    "剪映": {
+      "canonical": "剪映 (CapCut)",
+      "aliases": ["剪映云", "剪映专业版", "剪映小助手"]
+    },
+    "龙膜": {
+      "canonical": "LLumar (龙膜)",
+      "aliases": ["LLumar", "LLumar 龙膜", "Lumar 龙膜", "龙膜"]
+    },
+    "AULA": {
+      "canonical": "AULA",
+      "aliases": []
+    },
+    "Brokenstone": {
+      "canonical": "BROKENSTONE (碎石电竞)",
+      "aliases": ["brokenstone", "碎石电竞", "碎石电竞 BROKENSTONE", "碎石电竞生活馆", "Brokenshine", "Broakenstone", "破碎石", "TRAKENSTONE"]
+    },
+    "OPPO": {
+      "canonical": "OPPO",
+      "aliases": ["oppo"]
+    },
+    "Intel": {
+      "canonical": "Intel (英特尔)",
+      "aliases": ["intel", "英特尔"]
+    },
+    "Acer": {
+      "canonical": "Acer (宏碁)",
+      "aliases": []
+    },
+    "RK": {
+      "canonical": "ROYAL KLUDGE (RK)",
+      "aliases": ["ROYAL KLUDGE"]
+    },
+    "机械师": {
+      "canonical": "机械师 (MACHENIKE)",
+      "aliases": ["MACHENIKE", "Machenike"]
+    },
+    "Jabra": {
+      "canonical": "Jabra",
+      "aliases": []
+    },
+    "TTC": {
+      "canonical": "TTC (正牌科电)",
+      "aliases": ["TTC快银"]
+    },
+    "山由": {
+      "canonical": "SANYOU (山由)",
+      "aliases": ["SANYOU", "SANYOU山由", "SANYOU 山由"]
+    },
+    "Freewell": {
+      "canonical": "Freewell",
+      "aliases": []
+    },
+    "Nike": {
+      "canonical": "Nike (耐克)",
+      "aliases": ["耐克"]
+    },
+    "雷神": {
+      "canonical": "雷神 (THUNDEROBOT)",
+      "aliases": ["THUNDEROBOT", "THUNDERROBOT", "THUNDERBOT"]
+    },
+    "vivo": {
+      "canonical": "vivo",
+      "aliases": ["Vivo"]
+    },
+    "Google": {
+      "canonical": "Google",
+      "aliases": ["Pixel"]
+    },
+    "凯华": {
+      "canonical": "凯华 (Kailh)",
+      "aliases": ["Kailh"]
+    },
+    "LEOBOG": {
+      "canonical": "LEOBOG",
+      "aliases": []
+    },
+    "Fitbit": {
+      "canonical": "Fitbit",
+      "aliases": []
+    },
+    "Sony": {
+      "canonical": "Sony",
+      "aliases": ["SONY", "Sony PlayStation", "PlayStation", "SONY/Samsung"]
+    },
+    "UGREEN": {
+      "canonical": "UGREEN (绿联)",
+      "aliases": ["绿联", "UGREEN 绿联"]
+    },
+    "ROCCAT": {
+      "canonical": "ROCCAT (冰豹)",
+      "aliases": []
+    },
+    "环诺": {
+      "canonical": "环诺 (Huanuo)",
+      "aliases": []
+    },
+    "NVIDIA": {
+      "canonical": "NVIDIA (英伟达)",
+      "aliases": ["英伟达"]
+    },
+    "佳达隆": {
+      "canonical": "佳达隆 (Gateron)",
+      "aliases": []
+    },
+    "大众": {
+      "canonical": "Volkswagen (大众)",
+      "aliases": ["Volkswagen"]
+    },
+    "本田": {
+      "canonical": "Honda (本田)",
+      "aliases": ["Honda"]
+    },
+    "洛斐": {
+      "canonical": "洛斐 (LOFREE)",
+      "aliases": []
+    },
+    "比亚迪": {
+      "canonical": "BYD (比亚迪)",
+      "aliases": ["BYD"]
+    },
+    "吉利": {
+      "canonical": "吉利 (Geely)",
+      "aliases": []
+    },
+    "沃尔沃": {
+      "canonical": "Volvo (沃尔沃)",
+      "aliases": []
+    },
+    "HexGears": {
+      "canonical": "HexGears",
+      "aliases": ["HEXGEARS"]
+    },
+    "高特": {
+      "canonical": "高特 (Outemu)",
+      "aliases": []
+    },
+    "Insta360": {
+      "canonical": "Insta360",
+      "aliases": []
+    },
+    "BenQ": {
+      "canonical": "BenQ (明基)",
+      "aliases": []
+    },
+    "AJAZZ": {
+      "canonical": "AJAZZ (黑爵)",
+      "aliases": []
+    },
+    "Bose": {
+      "canonical": "Bose",
+      "aliases": []
+    },
+    "SteelSeries": {
+      "canonical": "SteelSeries (赛睿)",
+      "aliases": []
+    },
+    "GoPro": {
+      "canonical": "GoPro",
+      "aliases": []
+    },
+    "Blackmagic": {
+      "canonical": "Blackmagic Design",
+      "aliases": ["Blackmagic Design", "DaVinci Resolve"]
+    },
+    "Philips": {
+      "canonical": "Philips (飞利浦)",
+      "aliases": ["PHILIPS", "飞利浦"]
+    },
+    "Panasonic": {
+      "canonical": "Panasonic (松下)",
+      "aliases": []
+    },
+    "Canon": {
+      "canonical": "Canon (佳能)",
+      "aliases": []
+    },
+    "Corsair": {
+      "canonical": "Corsair (海盗船)",
+      "aliases": []
+    },
+    "Cooler Master": {
+      "canonical": "Cooler Master (酷冷至尊)",
+      "aliases": []
+    },
+    "Secretlab": {
+      "canonical": "Secretlab",
+      "aliases": []
+    },
+    "Sennheiser": {
+      "canonical": "Sennheiser (森海塞尔)",
+      "aliases": []
+    },
+    "Anker": {
+      "canonical": "Anker (安克)",
+      "aliases": []
+    },
+    "科大讯飞": {
+      "canonical": "科大讯飞 (iFLYTEK)",
+      "aliases": []
+    },
+    "狼蛛": {
+      "canonical": "狼蛛 (AULA?)",
+      "aliases": []
+    },
+    "漫步者": {
+      "canonical": "漫步者 (Edifier)",
+      "aliases": []
+    },
+    "Greencell": {
+      "canonical": "Greencell",
+      "aliases": ["GREENCELL", "SUPERCELL/GREENCELL"]
+    },
+    "Porsche": {
+      "canonical": "Porsche (保时捷)",
+      "aliases": ["保时捷"]
+    },
+    "Lamborghini": {
+      "canonical": "Lamborghini (兰博基尼)",
+      "aliases": []
+    },
+    "Cadillac": {
+      "canonical": "Cadillac (凯迪拉克)",
+      "aliases": []
+    },
+    "Jaguar": {
+      "canonical": "Jaguar (捷豹)",
+      "aliases": []
+    },
+    "Jeep": {
+      "canonical": "Jeep",
+      "aliases": []
+    },
+    "福特": {
+      "canonical": "Ford (福特)",
+      "aliases": ["Ford"]
+    },
+    "红旗": {
+      "canonical": "红旗 (Hongqi)",
+      "aliases": []
+    },
+    "长安": {
+      "canonical": "长安 (Changan)",
+      "aliases": []
+    },
+    "奇瑞": {
+      "canonical": "奇瑞 (Chery)",
+      "aliases": []
+    },
+    "小鹏": {
+      "canonical": "小鹏 (XPeng)",
+      "aliases": []
+    },
+    "蔚来": {
+      "canonical": "蔚来 (NIO)",
+      "aliases": []
+    },
+    "极氪": {
+      "canonical": "极氪 (Zeekr)",
+      "aliases": []
+    },
+    "理想": {
+      "canonical": "理想 (Li Auto)",
+      "aliases": []
+    },
+    "LYNK&CO": {
+      "canonical": "LYNK&CO (领克)",
+      "aliases": []
+    },
+    "现代": {
+      "canonical": "Hyundai (现代)",
+      "aliases": []
+    },
+    "马自达": {
+      "canonical": "Mazda (马自达)",
+      "aliases": []
+    },
+    "三菱": {
+      "canonical": "Mitsubishi (三菱)",
+      "aliases": []
+    },
+    "Toyota": {
+      "canonical": "Toyota (丰田)",
+      "aliases": ["丰田"]
+    },
+    "雷克萨斯": {
+      "canonical": "Lexus (雷克萨斯)",
+      "aliases": []
+    },
+    "KIA": {
+      "canonical": "KIA (起亚)",
+      "aliases": []
+    },
+    "LAND ROVER": {
+      "canonical": "Land Rover (路虎)",
+      "aliases": []
+    },
+    "Adidas": {
+      "canonical": "Adidas (阿迪达斯)",
+      "aliases": []
+    },
+    "Champion": {
+      "canonical": "Champion",
+      "aliases": []
+    },
+    "The North Face": {
+      "canonical": "The North Face (北面)",
+      "aliases": []
+    },
+    "Vans": {
+      "canonical": "Vans",
+      "aliases": []
+    },
+    "Stussy": {
+      "canonical": "Stussy",
+      "aliases": []
+    },
+    "CHANEL": {
+      "canonical": "CHANEL (香奈儿)",
+      "aliases": ["Chanel"]
+    },
+    "Arcteryx": {
+      "canonical": "Arc'teryx (始祖鸟)",
+      "aliases": []
+    },
+    "李宁": {
+      "canonical": "李宁 (Li-Ning)",
+      "aliases": []
+    },
+    "名创优品": {
+      "canonical": "名创优品 (MINISO)",
+      "aliases": ["Sanrio", "Hello Kitty", "My Melody", "Kuromi", "Cinnamoroll", "Pochacco", "Loopy", "Kawaii"]
+    },
+    "农夫山泉": {
+      "canonical": "农夫山泉",
+      "aliases": []
+    },
+    "Coca-Cola": {
+      "canonical": "Coca-Cola (可口可乐)",
+      "aliases": []
+    },
+    "安太医": {
+      "canonical": "安太医",
+      "aliases": []
+    },
+    "名流": {
+      "canonical": "名流",
+      "aliases": []
+    },
+    "阳顶天": {
+      "canonical": "阳顶天",
+      "aliases": []
+    },
+    "久战": {
+      "canonical": "久战",
+      "aliases": []
+    },
+    "益口": {
+      "canonical": "益口",
+      "aliases": []
+    },
+    "海氏海诺": {
+      "canonical": "海氏海诺",
+      "aliases": []
+    },
+    "杜蕾斯": {
+      "canonical": "杜蕾斯 (Durex)",
+      "aliases": ["Durex"]
+    },
+    "冈本": {
+      "canonical": "冈本 (Okamoto)",
+      "aliases": ["Okamoto"]
+    },
+    "杰士邦": {
+      "canonical": "杰士邦 (Jissbon)",
+      "aliases": ["Jissbon"]
+    },
+    "SO! EASY": {
+      "canonical": "SO! EASY",
+      "aliases": ["SO! easy"]
+    },
+    "Monster": {
+      "canonical": "Monster (魔声)",
+      "aliases": []
+    },
+    "AKG": {
+      "canonical": "AKG",
+      "aliases": []
+    },
+    "Edifier": {
+      "canonical": "漫步者 (Edifier)",
+      "aliases": []
+    },
+    "南孚益圆": {
+      "canonical": "益圆",
+      "aliases": ["益圆"]
+    },
+    "丰蓝": {
+      "canonical": "丰蓝",
+      "aliases": ["丰蓝一号"]
+    },
+    "TENAVOLTS": {
+      "canonical": "TENAVOLTS",
+      "aliases": []
+    },
+    "Pisen": {
+      "canonical": "Pisen (品胜)",
+      "aliases": []
+    },
+    "ROMOSS": {
+      "canonical": "ROMOSS (罗马仕)",
+      "aliases": []
+    },
+    "Black Shark": {
+      "canonical": "Black Shark (黑鲨)",
+      "aliases": ["BlackShark"]
+    },
+    "iQOO": {
+      "canonical": "iQOO",
+      "aliases": []
+    },
+    "POCO": {
+      "canonical": "POCO",
+      "aliases": []
+    },
+    "Motorola": {
+      "canonical": "Motorola (摩托罗拉)",
+      "aliases": []
+    },
+    "TCL": {
+      "canonical": "TCL",
+      "aliases": []
+    },
+    "腾讯": {
+      "canonical": "腾讯 (Tencent)",
+      "aliases": ["微信"]
+    },
+    "字节跳动": {
+      "canonical": "字节跳动 (ByteDance)",
+      "aliases": ["抖音"]
+    },
+    "阿里巴巴": {
+      "canonical": "阿里巴巴 (Alibaba)",
+      "aliases": ["天猫", "淘宝", "菜鸟", "菜鸟速递", "饿了么", "88VIP", "阿里妈妈"]
+    },
+    "京东": {
+      "canonical": "京东 (JD.com)",
+      "aliases": []
+    },
+    "苏宁": {
+      "canonical": "苏宁 (SUNING)",
+      "aliases": ["SUNING", "苏宁易购", "苏宁易购|得力", "喵速达"]
+    },
+    "申通": {
+      "canonical": "申通快递",
+      "aliases": ["申通快递"]
+    },
+    "中通": {
+      "canonical": "中通快递",
+      "aliases": ["中通快递"]
+    },
+    "极兔": {
+      "canonical": "极兔速递 (J&T)",
+      "aliases": ["J&T", "J&T极兔速递"]
+    },
+    "Microsoft": {
+      "canonical": "Microsoft (微软)",
+      "aliases": ["Xbox"]
+    },
+    "Adobe": {
+      "canonical": "Adobe",
+      "aliases": []
+    },
+    "BUBM": {
+      "canonical": "BUBM",
+      "aliases": []
+    },
+    "DAREU": {
+      "canonical": "DAREU (达尔优)",
+      "aliases": []
+    },
+    "A4Tech": {
+      "canonical": "A4Tech (双飞燕)",
+      "aliases": []
+    },
+    "前行者": {
+      "canonical": "前行者 (EWEADN)",
+      "aliases": []
+    },
+    "AutoFull": {
+      "canonical": "AutoFull (傲风)",
+      "aliases": []
+    },
+    "卓威": {
+      "canonical": "ZOWIE (卓威)",
+      "aliases": ["ZOWIE"]
+    },
+    "北通": {
+      "canonical": "北通 (Betop)",
+      "aliases": ["Betop"]
+    },
+    "八位堂": {
+      "canonical": "8BitDo (八位堂)",
+      "aliases": ["8BitDo", "8bitdo"]
+    },
+    "Turtle Beach": {
+      "canonical": "Turtle Beach",
+      "aliases": []
+    },
+    "HORI": {
+      "canonical": "HORI",
+      "aliases": ["Hori"]
+    },
+    "PDP": {
+      "canonical": "PDP",
+      "aliases": []
+    },
+    "PowerA": {
+      "canonical": "PowerA",
+      "aliases": []
+    },
+    "英飞克": {
+      "canonical": "英飞克 (Inphic)",
+      "aliases": ["INPHIC", "INPHI"]
+    },
+    "格之格": {
+      "canonical": "格之格 (G&G)",
+      "aliases": []
+    },
+    "极米": {
+      "canonical": "极米 (XGIMI)",
+      "aliases": []
+    },
+    "Leica": {
+      "canonical": "Leica (徕卡)",
+      "aliases": ["徕卡"]
+    },
+    "Fujifilm": {
+      "canonical": "Fujifilm (富士)",
+      "aliases": ["富士"]
+    },
+    "哈苏": {
+      "canonical": "Hasselblad (哈苏)",
+      "aliases": []
+    },
+    "TITAN ARROW": {
+      "canonical": "泰坦军团 (TITAN ARMY)",
+      "aliases": ["泰坦军团"]
+    },
+    "超频三": {
+      "canonical": "超频三 (PCCOOLER)",
+      "aliases": []
+    },
+    "宁德时代": {
+      "canonical": "宁德时代 (CATL)",
+      "aliases": []
+    },
+    "三一重工": {
+      "canonical": "三一重工 (SANY)",
+      "aliases": []
+    },
+    "Bosch": {
+      "canonical": "Bosch (博世)",
+      "aliases": []
+    },
+    "原神": {
+      "canonical": "原神 (Genshin Impact)",
+      "aliases": ["miHoYo"]
+    },
+    "黑神话悟空": {
+      "canonical": "黑神话：悟空 (Black Myth: Wukong)",
+      "aliases": ["Black Myth: Wukong", "Black Myth: Wu Kong", "黑神话", "游戏科学"]
+    },
+    "三角洲行动": {
+      "canonical": "三角洲行动 (Delta Force)",
+      "aliases": []
+    },
+    "英雄联盟": {
+      "canonical": "英雄联盟 (League of Legends)",
+      "aliases": ["Riot Games", "KDA", "Seraphine", "EDG"]
+    },
+    "CS:GO": {
+      "canonical": "CS:GO / CS2",
+      "aliases": []
+    },
+    "Forza Horizon": {
+      "canonical": "Forza Horizon (极限竞速)",
+      "aliases": []
+    },
+    "PlayStation": {
+      "canonical": "PlayStation",
+      "aliases": []
+    },
+    "Pokémon": {
+      "canonical": "Pokémon (宝可梦)",
+      "aliases": []
+    },
+    "Supercell": {
+      "canonical": "Supercell",
+      "aliases": ["SUPERCELL"]
+    },
+    "大富翁": {
+      "canonical": "大富翁 (Monopoly)",
+      "aliases": ["Monopoly"]
+    },
+    "漫步者电竞": {
+      "canonical": "漫步者电竞 (HECATE)",
+      "aliases": ["HECATE"]
+    },
+    "雷柏": {
+      "canonical": "雷柏 (Rapoo)",
+      "aliases": ["Rapoo"]
+    },
+    "韶音": {
+      "canonical": "韶音 (Shokz)",
+      "aliases": ["Shokz", "AfterShokz"]
+    },
+    "Beyerdynamic": {
+      "canonical": "Beyerdynamic (拜亚动力)",
+      "aliases": ["拜亚动力"]
+    },
+    "Audio-Technica": {
+      "canonical": "Audio-Technica (铁三角)",
+      "aliases": ["铁三角"]
+    },
+    "Sades": {
+      "canonical": "Sades (赛德斯)",
+      "aliases": []
+    },
+    "GIGABYTE": {
+      "canonical": "GIGABYTE (技嘉)",
+      "aliases": ["技嘉"]
+    },
+    "AOC/AGON": {
+      "canonical": "AGON by AOC",
+      "aliases": []
+    },
+    "ViewSonic": {
+      "canonical": "ViewSonic (优派)",
+      "aliases": ["优派"]
+    },
+    "EIZO": {
+      "canonical": "EIZO (艺卓)",
+      "aliases": ["艺卓"]
+    },
+    "Hohem": {
+      "canonical": "Hohem (浩瀚)",
+      "aliases": []
+    },
+    "ZHIYUN": {
+      "canonical": "ZHIYUN (智云)",
+      "aliases": ["智云"]
+    },
+    "DJI Ronin": {
+      "canonical": "DJI Ronin (如影)",
+      "aliases": ["Ronin"]
+    },
+    "MOFT": {
+      "canonical": "MOFT",
+      "aliases": []
+    },
+    "Nillkin": {
+      "canonical": "Nillkin (耐尔金)",
+      "aliases": []
+    },
+    "Mujjo": {
+      "canonical": "Mujjo",
+      "aliases": []
+    },
+    "PITAKA": {
+      "canonical": "PITAKA",
+      "aliases": []
+    },
+    "海帝星": {
+      "canonical": "海帝星 (HAIDIXING)",
+      "aliases": ["HAIDIXING"]
+    },
+    "QIRESAIL": {
+      "canonical": "QIRESAIL",
+      "aliases": ["Qiresail", "QIRE", "Qiresa", "Qiresai", "QIREGAIL", "IRESAIL", "Diresail", "Tiresail"]
+    },
+    "SIAILIN": {
+      "canonical": "SIAILIN",
+      "aliases": ["SAILIN", "XIAOLIN", "Xsailin"]
+    },
+    "Yifang": {
+      "canonical": "Yifang",
+      "aliases": ["YiFang"]
+    },
+    "ZLAR": {
+      "canonical": "ZLAR",
+      "aliases": []
+    },
+    "纬达斯": {
+      "canonical": "纬达斯 (Weidasi)",
+      "aliases": ["Weidasi", "伟达斯", "Weidasii"]
+    },
+    "晶华": {
+      "canonical": "晶华",
+      "aliases": []
+    },
+    "远途": {
+      "canonical": "远途汽车膜业",
+      "aliases": ["远途汽车膜业"]
+    },
+    "汽仕": {
+      "canonical": "汽仕车品",
+      "aliases": ["汽仕车品", "汽佳"]
+    },
+    "HAAVK": {
+      "canonical": "HAAVK",
+      "aliases": ["HAAVIK", "HAAVK TECHNOLOGY"]
+    },
+    "KAPSA": {
+      "canonical": "KAPSA",
+      "aliases": []
+    },
+    "普林": {
+      "canonical": "普林",
+      "aliases": []
+    },
+    "益品": {
+      "canonical": "益品",
+      "aliases": []
+    },
+    "旭华": {
+      "canonical": "旭华",
+      "aliases": []
+    },
+    "航洲": {
+      "canonical": "航洲",
+      "aliases": []
+    },
+    "广力": {
+      "canonical": "广力",
+      "aliases": []
+    },
+    "SHAKE": {
+      "canonical": "SHAKE (鲨壳)",
+      "aliases": ["shake", "SHAKE鲨壳", "SHAKE 鲨壳", "鲨壳"]
+    },
+    "SUYA": {
+      "canonical": "SUYA",
+      "aliases": []
+    },
+    "Kena": {
+      "canonical": "Kena",
+      "aliases": []
+    },
+    "TopPlayer": {
+      "canonical": "TopPlayer",
+      "aliases": []
+    },
+    "TCOMAS": {
+      "canonical": "TCOMAS",
+      "aliases": []
+    },
+    "ZCAM": {
+      "canonical": "ZCAM",
+      "aliases": ["ZCAN", "ZCANY", "ZCAR"]
+    },
+    "MECHREVO": {
+      "canonical": "MECHREVO (机械革命)",
+      "aliases": []
+    },
+    "MINISFORUM": {
+      "canonical": "MINISFORUM (铭凡)",
+      "aliases": []
+    },
+    "Vilcan": {
+      "canonical": "Vilcan",
+      "aliases": []
+    },
+    "BOYA": {
+      "canonical": "BOYA (博雅)",
+      "aliases": []
+    },
+    "T-WOLF": {
+      "canonical": "T-WOLF",
+      "aliases": []
+    },
+    "EDRGN": {
+      "canonical": "EDRGN",
+      "aliases": []
+    },
+    "SKG": {
+      "canonical": "SKG",
+      "aliases": []
+    },
+    "RayNeo": {
+      "canonical": "RayNeo",
+      "aliases": []
+    },
+    "Delmara": {
+      "canonical": "德尔玛 (Deerma)",
+      "aliases": ["德尔玛"]
+    },
+    "HITTEKU": {
+      "canonical": "HITTEKU",
+      "aliases": []
+    },
+    "HY320": {
+      "canonical": "HY320",
+      "aliases": []
+    },
+    "MyLife": {
+      "canonical": "MYLIFE",
+      "aliases": ["MYLIFE"]
+    },
+    "声阔": {
+      "canonical": "Soundcore (声阔)",
+      "aliases": ["Soundcore"]
+    },
+    "倍思": {
+      "canonical": "Baseus (倍思)",
+      "aliases": ["Baseus"]
+    },
+    "小米有品": {
+      "canonical": "小米有品",
+      "aliases": []
+    },
+    "网易严选": {
+      "canonical": "网易严选 (Yanxuan)",
+      "aliases": ["Yanxuan"]
+    },
+    "京东京造": {
+      "canonical": "京东京造",
+      "aliases": []
+    },
+    "GREENCELL误": {
+      "canonical": "Greencell",
+      "aliases": ["GRENCCELL"]
+    },
+    "Ugreen": {
+      "canonical": "UGREEN (绿联)",
+      "aliases": []
+    },
+    "KTT": {
+      "canonical": "KTT",
+      "aliases": ["KTTI"]
+    },
+    "LLANO": {
+      "canonical": "llano",
+      "aliases": ["llano"]
+    },
+    "Orico": {
+      "canonical": "ORICO (奥睿科)",
+      "aliases": ["ORICO"]
+    },
+    "ROCK": {
+      "canonical": "ROCK",
+      "aliases": []
+    },
+    "MOMAX": {
+      "canonical": "MOMAX (摩米士)",
+      "aliases": ["摩米士"]
+    },
+    "Remax": {
+      "canonical": "REMAX (睿量)",
+      "aliases": ["REMAX", "睿量"]
+    },
+    "Torras": {
+      "canonical": "TORRAS (图拉斯)",
+      "aliases": ["TORRAS", "图拉斯"]
+    },
+    "Spigen": {
+      "canonical": "Spigen",
+      "aliases": []
+    },
+    "OtterBox": {
+      "canonical": "OtterBox",
+      "aliases": []
+    },
+    "Casetify": {
+      "canonical": "Casetify",
+      "aliases": []
+    },
+    "ESR": {
+      "canonical": "ESR (亿色)",
+      "aliases": ["亿色"]
+    },
+    "Benks": {
+      "canonical": "Benks (邦克仕)",
+      "aliases": ["邦克仕"]
+    },
+    "闪魔": {
+      "canonical": "SmartDevil (闪魔)",
+      "aliases": ["SmartDevil"]
+    },
+    "第一卫": {
+      "canonical": "第一卫 (DIVI)",
+      "aliases": ["DIVI"]
+    },
+    "洛克": {
+      "canonical": "洛克 (ROCK)",
+      "aliases": ["Rock"]
+    },
+    "毕亚兹": {
+      "canonical": "毕亚兹 (Biaze)",
+      "aliases": ["Biaze"]
+    },
+    "山泽": {
+      "canonical": "山泽 (SAMZHE)",
+      "aliases": ["SAMZHE"]
+    },
+    "秋叶原": {
+      "canonical": "秋叶原 (Choseal)",
+      "aliases": ["Choseal"]
+    },
+    "开博尔": {
+      "canonical": "开博尔 (Kaiboer)",
+      "aliases": ["Kaiboer"]
+    },
+    "菲伯尔": {
+      "canonical": "菲伯尔 (FIBBR)",
+      "aliases": ["FIBBR"]
+    },
+    "魔兽": {
+      "canonical": "魔兽 (Moshou)",
+      "aliases": ["Moshou"]
+    },
+    "HYPERICE": {
+      "canonical": "Hyperice",
+      "aliases": ["Hyperice"]
+    },
+    "Fitbit误": {
+      "canonical": "Fitbit",
+      "aliases": []
+    },
+    "Jabra误": {
+      "canonical": "Jabra",
+      "aliases": []
+    },
+    "TENAVOLTS1": {
+      "canonical": "TENAVOLTS",
+      "aliases": []
+    },
+    "松下": {
+      "canonical": "Panasonic (松下)",
+      "aliases": []
+    },
+    "飞利浦": {
+      "canonical": "Philips (飞利浦)",
+      "aliases": []
+    },
+    "博世": {
+      "canonical": "Bosch (博世)",
+      "aliases": []
+    },
+    "戴森": {
+      "canonical": "Dyson (戴森)",
+      "aliases": ["Dyson"]
+    },
+    "美的": {
+      "canonical": "Midea (美的)",
+      "aliases": ["Midea"]
+    },
+    "格力": {
+      "canonical": "Gree (格力)",
+      "aliases": ["Gree"]
+    },
+    "海尔": {
+      "canonical": "Haier (海尔)",
+      "aliases": ["Haier"]
+    },
+    "TCL电视": {
+      "canonical": "TCL",
+      "aliases": []
+    },
+    "海信": {
+      "canonical": "Hisense (海信)",
+      "aliases": ["Hisense"]
+    },
+    "创维": {
+      "canonical": "创维 (Skyworth)",
+      "aliases": ["Skyworth"]
+    },
+    "康佳": {
+      "canonical": "康佳 (Konka)",
+      "aliases": ["Konka"]
+    },
+    "长虹": {
+      "canonical": "长虹 (Changhong)",
+      "aliases": ["Changhong"]
+    },
+    "Supreme": {
+      "canonical": "Supreme",
+      "aliases": []
+    },
+    "Balenciaga": {
+      "canonical": "Balenciaga (巴黎世家)",
+      "aliases": ["巴黎世家"]
+    },
+    "Gucci": {
+      "canonical": "Gucci (古驰)",
+      "aliases": ["古驰"]
+    },
+    "Louis Vuitton": {
+      "canonical": "Louis Vuitton (路易威登)",
+      "aliases": ["LV"]
+    },
+    "Hermès": {
+      "canonical": "Hermès (爱马仕)",
+      "aliases": ["爱马仕"]
+    },
+    "Prada": {
+      "canonical": "Prada (普拉达)",
+      "aliases": ["普拉达"]
+    },
+    "Dior": {
+      "canonical": "Dior (迪奥)",
+      "aliases": ["迪奥"]
+    },
+    "Burberry": {
+      "canonical": "Burberry (博柏利)",
+      "aliases": ["博柏利"]
+    },
+    "Rolex": {
+      "canonical": "Rolex (劳力士)",
+      "aliases": ["劳力士"]
+    },
+    "Omega": {
+      "canonical": "Omega (欧米茄)",
+      "aliases": ["欧米茄"]
+    },
+    "CASIO": {
+      "canonical": "CASIO (卡西欧)",
+      "aliases": ["卡西欧"]
+    },
+    "G-Shock": {
+      "canonical": "G-Shock",
+      "aliases": []
+    },
+    "Swatch": {
+      "canonical": "Swatch (斯沃琪)",
+      "aliases": ["斯沃琪"]
+    },
+    "DW": {
+      "canonical": "Daniel Wellington",
+      "aliases": ["Daniel Wellington"]
+    },
+    "星巴克": {
+      "canonical": "Starbucks (星巴克)",
+      "aliases": ["Starbucks"]
+    },
+    "瑞幸": {
+      "canonical": "Luckin Coffee (瑞幸)",
+      "aliases": ["Luckin", "瑞幸咖啡"]
+    },
+    "蜜雪冰城": {
+      "canonical": "蜜雪冰城 (Mixue)",
+      "aliases": ["Mixue"]
+    },
+    "喜茶": {
+      "canonical": "喜茶 (Heytea)",
+      "aliases": ["Heytea"]
+    },
+    "奈雪": {
+      "canonical": "奈雪的茶 (Nayuki)",
+      "aliases": ["Nayuki"]
+    },
+    "霸王茶姬": {
+      "canonical": "霸王茶姬",
+      "aliases": []
+    },
+    "肯德基": {
+      "canonical": "KFC (肯德基)",
+      "aliases": ["KFC"]
+    },
+    "麦当劳": {
+      "canonical": "McDonald's (麦当劳)",
+      "aliases": ["McDonald's", "McDonalds"]
+    },
+    "汉堡王": {
+      "canonical": "Burger King (汉堡王)",
+      "aliases": ["Burger King"]
+    },
+    "海底捞": {
+      "canonical": "海底捞 (Haidilao)",
+      "aliases": ["Haidilao"]
+    },
+    "美团外卖": {
+      "canonical": "美团",
+      "aliases": ["美团"]
+    },
+    "滴滴": {
+      "canonical": "滴滴 (DiDi)",
+      "aliases": ["DiDi"]
+    },
+    "携程": {
+      "canonical": "携程 (Trip.com)",
+      "aliases": ["Trip.com", "Ctrip"]
+    },
+    "美的1": {
+      "canonical": "Midea (美的)",
+      "aliases": []
+    }
+  }
+}

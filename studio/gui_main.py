@@ -153,7 +153,6 @@ except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     print("Please install PySide6 using: pip install PySide6 shiboken6")
     sys.exit(1)
-from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.subtitle_removal_page import SubtitleRemovalPage
@@ -635,8 +634,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.task_status_items[pid].setText(status)
 
     def setup_ui(self):
-        # Apply Global Styles
-        self.setStyleSheet(gui_styles.STYLE_SHEET)
+        # Stylesheet is applied globally by apply_theme() at startup
         
         # Main Layout
         self.central_widget = QWidget()

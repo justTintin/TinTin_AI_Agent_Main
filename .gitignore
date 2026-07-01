@@ -70,5 +70,9 @@ ai_skills/*/dist/
 studio/logs/
 studio/ollama_run.log
 
+# License keys (private key MUST NOT be committed)
+studio/config/license_private.pem
+studio/config/license.dat
+
 # pip cache
 apps/*/opt/packages/

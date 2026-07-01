@@ -1457,6 +1457,22 @@ if __name__ == "__main__":
     import os as _os
     if _os.environ.get("XDG_SESSION_TYPE") == "wayland":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+    # ── License 许可证验证 ──
+    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1"
+    if not _LICENSE_CHECK_DISABLED:
+        try:
+            from utils.license import verify_license, LicenseError, LicenseInfo
+            _lic = verify_license()
+            print(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
+        except LicenseError as _e:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            _app = QApplication([])
+            QMessageBox.critical(None, "许可证错误", str(_e))
+            _app.quit()
+            import sys; sys.exit(1)
+        except ImportError:
+            pass  # cryptography 未安装，跳过验证（开发环境）
     log.info("Application starting...")
     try:
         app = QApplication(sys.argv)

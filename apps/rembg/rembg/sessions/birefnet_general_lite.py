@@ -24,7 +24,7 @@ class BiRefNetSessionGeneralLite(BiRefNetSessionGeneral):
         """
         fname = f"{cls.name(*args, **kwargs)}.onnx"
         pooch.retrieve(
-            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
+            "https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
             (
                 None
                 if cls.checksum_disabled(*args, **kwargs)

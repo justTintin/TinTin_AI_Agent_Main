@@ -212,6 +212,7 @@ class HookScoreWorker(BaseWorker):
                 b64 = base64.b64encode(f.read()).decode()
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
         payload = {"model": model, "temperature": 0.4,
+                   "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
                    "messages": [{"role": "system", "content": sys_prompt},
                                 {"role": "user", "content": content}]}
         try:

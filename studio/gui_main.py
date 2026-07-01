@@ -1455,7 +1455,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 if __name__ == "__main__":
     # COSMIC Wayland 下 QComboBox 弹窗定位有 bug，强制 X11 后端
     import os as _os
-    if _os.environ.get("XDG_SESSION_TYPE") == "wayland" and not _os.environ.get("QT_QPA_PLATFORM"):
+    if _os.environ.get("XDG_SESSION_TYPE") == "wayland":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
     log.info("Application starting...")
     try:

@@ -16,7 +16,7 @@ from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
-from utils.platform_utils import python_binary
+from utils.platform_utils import python_binary, IS_WIN
 
 class SubtitleRemovalWorker(BaseWorker):
     progress_updated = Signal(int)
@@ -760,6 +760,10 @@ class SubtitleRemovalPage(BasePage):
         vsr_dir = VSR_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
+
+        # On Linux, the bundled Python is Windows-only; fall back to project venv
+        if not os.path.exists(vsr_python) and not IS_WIN:
+            vsr_python = sys.executable
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
             QMessageBox.critical(

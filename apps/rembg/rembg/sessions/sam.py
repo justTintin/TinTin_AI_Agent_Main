@@ -321,7 +321,7 @@ class SamSession(BaseSession):
             fname_decoder = f"{model_name}.decoder.quant.onnx"
 
         pooch.retrieve(
-            f"https://github.com/danielgatis/rembg/releases/download/v0.0.0/{fname_encoder}",
+            f"https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/{fname_encoder}",
             None,
             fname=fname_encoder,
             path=cls.u2net_home(*args, **kwargs),
@@ -329,7 +329,7 @@ class SamSession(BaseSession):
         )
 
         pooch.retrieve(
-            f"https://github.com/danielgatis/rembg/releases/download/v0.0.0/{fname_decoder}",
+            f"https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/{fname_decoder}",
             None,
             fname=fname_decoder,
             path=cls.u2net_home(*args, **kwargs),
@@ -345,7 +345,7 @@ class SamSession(BaseSession):
 
             for i in range(1, 4):
                 pooch.retrieve(
-                    f"https://github.com/danielgatis/rembg/releases/download/v0.0.0/sam_vit_h_4b8939.encoder_data.{i}.bin",
+                    f"https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/sam_vit_h_4b8939.encoder_data.{i}.bin",
                     None,
                     fname=f"sam_vit_h_4b8939.encoder_data.{i}.bin",
                     path=cls.u2net_home(*args, **kwargs),

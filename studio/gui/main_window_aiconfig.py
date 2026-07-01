@@ -372,30 +372,35 @@ class AIConfigMixin:
         try:
             from utils.dreamina_client import DreaminaClient
             client = DreaminaClient()
-            if not client.is_installed():
-                self.dr_status.setText("<font color='#dc2626'>❌ 即梦 CLI 未安装</font>")
-                return
-            ok, kv = client.login_headless()
-            if not ok:
-                self.dr_status.setText(f"<font color='#dc2626'>❌ {kv}</font>")
-                return
-            device_code = kv.get("device_code", "")
-            verify_url = kv.get("verification_uri", "")
-            self.dr_status.setText(f"<font color='#f59e0b'>请在浏览器打开验证: {verify_url}</font>")
-            import webbrowser
-            try:
-                if verify_url:
-                    webbrowser.open(verify_url)
-            except: pass
-            # 轮询等待认证
-            import threading
-            def poll():
-                ok2, msg = client.checklogin(device_code, poll=30)
-                if ok2:
-                    self.dr_status.setText("<font color='#16a34a'>✅ 登录成功</font>")
-                else:
-                    self.dr_status.setText(f"<font color='#dc2626'>❌ 登录失败: {msg[:100]}</font>")
-            threading.Thread(target=poll, daemon=True).start()
+            if client.is_installed():
+                # Windows: 使用 dreamina CLI 设备码 OAuth
+                ok, kv = client.login_headless()
+                if not ok:
+                    self.dr_status.setText(f"<font color='#dc2626'>❌ {kv}</font>")
+                    return
+                device_code = kv.get("device_code", "")
+                verify_url = kv.get("verification_uri", "")
+                self.dr_status.setText(f"<font color='#f59e0b'>请在浏览器打开验证: {verify_url}</font>")
+                import webbrowser
+                try:
+                    if verify_url:
+                        webbrowser.open(verify_url)
+                except: pass
+                # 轮询等待认证
+                import threading
+                def poll():
+                    ok2, msg = client.checklogin(device_code, poll=30)
+                    if ok2:
+                        self.dr_status.setText("<font color='#16a34a'>✅ 登录成功</font>")
+                    else:
+                        self.dr_status.setText(f"<font color='#dc2626'>❌ 登录失败: {msg[:100]}</font>")
+                threading.Thread(target=poll, daemon=True).start()
+            else:
+                # Linux: CLI 不可用，打开浏览器
+                self.dr_status.setText(
+                    "<font color='#f59e0b'>⏳ 即梦 CLI 未安装（Windows 专属）。建议使用素材浏览器左侧「即梦AI」标签直接访问。</font>")
+                import webbrowser
+                webbrowser.open("https://jimeng.jianying.com/ai-tool/image/generate")
         except Exception as e:
             self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
 

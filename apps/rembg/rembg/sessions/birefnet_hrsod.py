@@ -24,7 +24,7 @@ class BiRefNetSessionHRSOD(BiRefNetSessionGeneral):
         """
         fname = f"{cls.name(*args, **kwargs)}.onnx"
         pooch.retrieve(
-            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-HRSOD_DHU-epoch_115.onnx",
+            "https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-HRSOD_DHU-epoch_115.onnx",
             (
                 None
                 if cls.checksum_disabled(*args, **kwargs)

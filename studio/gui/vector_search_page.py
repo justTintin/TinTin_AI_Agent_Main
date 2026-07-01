@@ -167,7 +167,7 @@ class VectorSearchPage(BasePage):
         self._load_tag_options()
 
     def _on_tab_changed(self, index):
-        if index == 1:
+        if index in (0, 1):  # Tab 1 & 2: 文字语义检索 + 标签检索
             self._load_tag_options()
 
     # ── Tab 1：文字语义检索 ───────────────────────────────────────────────────
@@ -202,10 +202,17 @@ class VectorSearchPage(BasePage):
         self.txt_path.setPlaceholderText("可选，限定搜索目录范围")
         flt.addWidget(self.txt_path, 1)
         flt.addWidget(QLabel("品牌："))
-        self.txt_brand = QLineEdit()
-        self.txt_brand.setPlaceholderText("留空=不限")
-        self.txt_brand.setFixedWidth(80)
+        self.txt_brand = QComboBox()
+        self.txt_brand.setEditable(True)
+        self.txt_brand.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.txt_brand.setFixedWidth(110)
         flt.addWidget(self.txt_brand)
+        flt.addWidget(QLabel("类别："))
+        self.txt_category = QComboBox()
+        self.txt_category.setEditable(True)
+        self.txt_category.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.txt_category.setFixedWidth(90)
+        flt.addWidget(self.txt_category)
         flt.addWidget(QLabel("Hash："))
         self.txt_hash = QLineEdit()
         self.txt_hash.setPlaceholderText("Hash 过滤")
@@ -516,10 +523,16 @@ class VectorSearchPage(BasePage):
         self.txt_btn.setEnabled(False)
         self.txt_table.setRowCount(0)
         self.txt_stat.setText("检索中…")
+        brand = self.txt_brand.currentText().strip()
+        if brand == "全部":
+            brand = ""
+        category = self.txt_category.currentText().strip()
+        if category == "全部":
+            category = ""
         w = self.track_worker(_VectorSearchWorker(
             query, self.txt_topk.value(),
             self.txt_path.text().strip(),
-            self.txt_brand.text().strip(), "",
+            brand, category,
             hash_prefix=self.txt_hash.text().strip(),
         ))
         w.finished.connect(lambda rows: self._on_text_done(rows))
@@ -692,51 +705,54 @@ class VectorSearchPage(BasePage):
 
     def _load_tag_options(self):
         from utils.material_clip_indexer import MaterialClipIndexer
-        curr_brand = self.tag_brand.currentText()
-        curr_model = self.tag_model.currentText()
-        curr_cat = self.tag_category.currentText()
+        from utils.brand_normalizer import canonical_name
 
-        brands = ["全部"]
-        models = ["全部"]
-        categories = ["全部"]
+        curr_txt_brand = self.txt_brand.currentText()
+        curr_txt_cat = self.txt_category.currentText()
+        curr_tag_brand = self.tag_brand.currentText()
+        curr_tag_model = self.tag_model.currentText()
+        curr_tag_cat = self.tag_category.currentText()
+
+        brands = set()
+        models = set()
+        categories = set()
         try:
             with MaterialClipIndexer() as idx:
                 idx._connect()
                 with idx._conn.cursor() as cur:
                     cur.execute("SELECT DISTINCT brand FROM materials WHERE brand IS NOT NULL AND brand != '' ORDER BY brand")
-                    brands.extend([r[0] for r in cur.fetchall()])
+                    for r in cur.fetchall():
+                        b = canonical_name(r[0]) or r[0]
+                        if b:
+                            brands.add(b)
                     cur.execute("SELECT DISTINCT model FROM materials WHERE model IS NOT NULL AND model != '' ORDER BY model")
-                    models.extend([r[0] for r in cur.fetchall()])
+                    models.update(r[0] for r in cur.fetchall() if r[0])
                     cur.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL AND category != '' ORDER BY category")
-                    categories.extend([r[0] for r in cur.fetchall()])
+                    categories.update(r[0] for r in cur.fetchall() if r[0])
         except Exception as e:
             print(f"加载标签选项失败: {e}")
 
-        self.tag_brand.blockSignals(True)
-        self.tag_model.blockSignals(True)
-        self.tag_category.blockSignals(True)
+        brand_list = ["全部"] + sorted(brands)
+        model_list = ["全部"] + sorted(models)
+        cat_list = ["全部"] + sorted(categories)
 
-        self.tag_brand.clear()
-        self.tag_brand.addItems(brands)
-        idx_b = self.tag_brand.findText(curr_brand)
-        if idx_b >= 0:
-            self.tag_brand.setCurrentIndex(idx_b)
+        # Tab 1: 文字语义检索
+        self._fill_combo(self.txt_brand, brand_list, curr_txt_brand)
+        self._fill_combo(self.txt_category, cat_list, curr_txt_cat)
 
-        self.tag_model.clear()
-        self.tag_model.addItems(models)
-        idx_m = self.tag_model.findText(curr_model)
-        if idx_m >= 0:
-            self.tag_model.setCurrentIndex(idx_m)
+        # Tab 2: 标签检索
+        self._fill_combo(self.tag_brand, brand_list, curr_tag_brand)
+        self._fill_combo(self.tag_model, model_list, curr_tag_model)
+        self._fill_combo(self.tag_category, cat_list, curr_tag_cat)
 
-        self.tag_category.clear()
-        self.tag_category.addItems(categories)
-        idx_c = self.tag_category.findText(curr_cat)
-        if idx_c >= 0:
-            self.tag_category.setCurrentIndex(idx_c)
-
-        self.tag_brand.blockSignals(False)
-        self.tag_model.blockSignals(False)
-        self.tag_category.blockSignals(False)
+    def _fill_combo(self, combo, items: list, current: str):
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(items)
+        idx = combo.findText(current)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
 
     def _show_table_context_menu(self, table: QTableWidget, pos):
         item = table.itemAt(pos)

@@ -875,6 +875,11 @@ body {
   background: linear-gradient(135deg, #0084ff 0%, #0066cc 100%);
 }
 
+/* Jimeng AI platform badge */
+.platform-badge.jimeng {
+  background: linear-gradient(135deg, #6c5ce7 0%, #fd79a8 100%);
+}
+
 /* Mode Switch Buttons */
 .mode-btn {
   display: flex;

@@ -131,6 +131,7 @@ class MarketingDetectWorker(BaseWorker):
         payload = {
             "model": model,
             "temperature": 0.3,
+            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
             "messages": [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": content}

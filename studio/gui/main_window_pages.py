@@ -637,6 +637,31 @@ class PageSetupMixin:
         r4.addStretch(); l4.addLayout(r4)
         l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
 
+        # ── Tab 5: 外观主题 ──
+        p5 = QWidget(); l5 = QVBoxLayout(p5); l5.setContentsMargins(30, 30, 30, 30)
+        l5.addWidget(QLabel("🎨 界面主题"))
+        l5.addWidget(QLabel("选择应用程序的外观配色方案："))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("🌓 跟随系统", "system")
+        self.theme_combo.addItem("🌙 暗黑主题", "dark")
+        self.theme_combo.addItem("☀️ 炫白主题", "light")
+        self.theme_combo.setFixedWidth(200)
+        # Load current theme
+        from utils.theme_manager import get_saved_theme
+        current = get_saved_theme()
+        idx = self.theme_combo.findData(current)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        l5.addWidget(self.theme_combo)
+        l5.addSpacing(10)
+        self.theme_hint = QLabel("主题将在下次启动应用时完全生效（部分窗口可能需要重启）。")
+        self.theme_hint.setObjectName("muted_text")
+        self.theme_hint.setWordWrap(True)
+        l5.addWidget(self.theme_hint)
+        l5.addStretch()
+        tabs.addTab(p5, "🎨 外观")
+
         layout.addWidget(tabs, 1)
         # Load feishu config
         self.load_feishu_config()

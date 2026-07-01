@@ -73,6 +73,7 @@ studio/ollama_run.log
 # License keys (private key MUST NOT be committed)
 studio/config/license_private.pem
 studio/config/license.dat
+studio/config/theme.json
 
 # pip cache
 apps/*/opt/packages/

@@ -473,6 +473,7 @@ def _call_vision_for_product(
                 user_text += f"\n提示：该图片包含以下 OCR 识别到的文字内容（可用于辅助识别产品品牌、型号或做画面内容描述参考）:\n{ocr_text}"
             payload = {
                 "model": model,
+                "num_ctx": 32768,  # Ollama: override default 4096 context
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": [

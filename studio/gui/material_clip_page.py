@@ -1651,6 +1651,9 @@ class MaterialClipPage(BasePage):
                 f"共 {total} 条  缺少品牌/型号: {no_brand} 条  双击文件名播放，双击其他单元格打开目录"
             )
 
+            # 填充品牌/类别下拉筛选框
+            self._populate_filter_dropdowns(rows)
+
             # 同步填充素材入库面板的 diff 表（仅在素材入库 tab 激活时）
             if hasattr(self, "diff_table") and self.diff_table and self.stacked_widget.currentIndex() == 0:
                 type_filter = self.diff_type_filter.currentData() if hasattr(self, 'diff_type_filter') else ""
@@ -1691,6 +1694,43 @@ class MaterialClipPage(BasePage):
             if hasattr(self, "diff_table") and self.diff_table:
                 self.diff_table.setEnabled(True)
             log.error(f"_on_db_loaded 异常: {e}", exc_info=True)
+
+    def _populate_filter_dropdowns(self, rows: list):
+        """从查询结果中提取唯一品牌和类别，填充下拉筛选框。"""
+        from utils.brand_normalizer import canonical_name
+        brands = set()
+        categories = set()
+        for row in rows:
+            b = row.get("brand")
+            if b and b.strip():
+                brands.add(canonical_name(b) or b.strip())
+            c = row.get("category") or row.get("product")
+            if c and c.strip():
+                categories.add(c.strip())
+
+        # 品牌下拉
+        current_brand = self.db_brand_filter.currentText()
+        self.db_brand_filter.blockSignals(True)
+        self.db_brand_filter.clear()
+        self.db_brand_filter.addItem("全部", "")
+        for brand_name in sorted(brands):
+            self.db_brand_filter.addItem(brand_name)
+        idx = self.db_brand_filter.findText(current_brand)
+        if idx >= 0:
+            self.db_brand_filter.setCurrentIndex(idx)
+        self.db_brand_filter.blockSignals(False)
+
+        # 类别下拉
+        current_cat = self.db_category_filter.currentText()
+        self.db_category_filter.blockSignals(True)
+        self.db_category_filter.clear()
+        self.db_category_filter.addItem("全部", "")
+        for cat_name in sorted(categories):
+            self.db_category_filter.addItem(cat_name)
+        idx = self.db_category_filter.findText(current_cat)
+        if idx >= 0:
+            self.db_category_filter.setCurrentIndex(idx)
+        self.db_category_filter.blockSignals(False)
 
     def _start_reanalyze_selected(self):
         if not getattr(self.main_window, "_models_ready", False):

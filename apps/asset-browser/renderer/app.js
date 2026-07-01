@@ -280,6 +280,10 @@ function setupEventListeners() {
     browserView.style.display = 'flex';
     knowledgeBaseView.style.display = 'none';
     materialsView.style.display = 'none';
+    // Navigate to Pinterest by default
+    if (!webview.src || webview.src === 'about:blank') {
+      webview.src = 'https://www.pinterest.com/';
+    }
   });
 
   btnModeKnowledge.addEventListener('click', () => {

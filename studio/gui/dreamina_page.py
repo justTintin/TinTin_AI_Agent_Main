@@ -35,7 +35,13 @@ class LoginInitWorker(BaseWorker):
     finished = Signal(dict)
 
     def do_work(self):
-        ok, info = DreaminaClient().login_headless()
+        client = DreaminaClient()
+        if not client.is_installed():
+            import webbrowser
+            webbrowser.open("https://jimeng.jianying.com/ai-tool/image/generate")
+            self.error.emit("即梦 CLI 未安装（Windows 专属）。已打开浏览器。建议使用「素材下载浏览器」左侧「即梦AI」标签直接访问。")
+            return
+        ok, info = client.login_headless()
         if not ok:
             self.error.emit(info if isinstance(info, str) else "发起登录失败")
             return

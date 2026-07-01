@@ -51,11 +51,8 @@ SAFE_PRESETS = {
 
 
 def _find_ffmpeg():
-    for c in (os.path.join(WORKSPACE_ROOT, "ffmpeg.exe"),
-              os.path.join(PROJECT_ROOT, "ffmpeg.exe"), "ffmpeg", "ffmpeg.exe"):
-        if os.path.isfile(c):
-            return c
-    return shutil.which("ffmpeg") or "ffmpeg"
+    from utils.platform_utils import find_ffmpeg as _ff
+    return _ff()
 
 
 class FrameExtractWorker(BaseWorker):
@@ -116,6 +113,7 @@ class CoverTextAIWorker(BaseWorker):
             content = user_text
         payload = {
             "model": model,
+            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
             "messages": [{"role": "system", "content": sys_prompt},
                          {"role": "user", "content": content}],
             "temperature": 0.6,
@@ -174,6 +172,7 @@ class CoverLayoutAIWorker(BaseWorker):
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
         ]
         payload = {"model": model, "temperature": 0.4,
+                   "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
                    "messages": [{"role": "system", "content": sys_prompt},
                                 {"role": "user", "content": content}]}
         res = requests.post(f"{api_url.rstrip('/')}/v1/chat/completions", json=payload,

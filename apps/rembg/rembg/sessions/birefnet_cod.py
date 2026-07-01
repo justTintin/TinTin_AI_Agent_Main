@@ -24,7 +24,7 @@ class BiRefNetSessionCOD(BiRefNetSessionGeneral):
         """
         fname = f"{cls.name(*args, **kwargs)}.onnx"
         pooch.retrieve(
-            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-COD-epoch_125.onnx",
+            "https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-COD-epoch_125.onnx",
             (
                 None
                 if cls.checksum_disabled(*args, **kwargs)

@@ -707,9 +707,8 @@ class PySceneDetectWorker(BaseWorker):
             self.busy.emit(True)
 
             try:
-                from scenedetect import open_video, SceneManager
+                from scenedetect import open_video, SceneManager, split_video_ffmpeg
                 from scenedetect.detectors import ContentDetector
-                from scenedetect.video_splitter import split_video_ffmpeg
             except ImportError:
                 raise RuntimeError("未检测到 scenedetect 依赖。")
 

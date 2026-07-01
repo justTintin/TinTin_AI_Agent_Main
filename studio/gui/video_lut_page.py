@@ -25,19 +25,9 @@ from utils.logger_utils import log
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
 
 def _find_ffmpeg():
-    """查找 ffmpeg 可执行文件（与主模块保持同样的搜索顺序）。"""
-    import shutil
-    candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "ffmpeg.exe"),
-        "ffmpeg",
-        "ffmpeg.exe",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    found = shutil.which("ffmpeg")
-    return found or "ffmpeg"
+    """查找 ffmpeg 可执行文件（使用平台感知的统一查找）。"""
+    from utils.platform_utils import find_ffmpeg as _ff
+    return _ff()
 
 
 def _escape_lut_path(path):

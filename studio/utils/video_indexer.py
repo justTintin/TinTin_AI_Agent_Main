@@ -109,6 +109,7 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": model,
+            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},

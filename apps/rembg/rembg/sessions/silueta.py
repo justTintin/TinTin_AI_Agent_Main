@@ -62,7 +62,7 @@ class SiluetaSession(BaseSession):
         """
         fname = f"{cls.name()}.onnx"
         pooch.retrieve(
-            "https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx",
+            "https://gh.llkk.cc/https://github.com/danielgatis/rembg/releases/download/v0.0.0/silueta.onnx",
             (
                 None
                 if cls.checksum_disabled(*args, **kwargs)

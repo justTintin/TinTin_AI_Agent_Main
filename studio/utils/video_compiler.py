@@ -11,10 +11,14 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def _find(name):
+    # On non-Windows, always strip .exe suffix and prefer system binary
+    from utils.platform_utils import binary_name
+    if not IS_WIN:
+        name = name.replace(".exe", "")
     for c in (os.path.join(WORKSPACE_ROOT, name), os.path.join(PROJECT_ROOT, name), name):
         if os.path.isfile(c):
             return c
-    return shutil.which(name.replace(".exe", "")) or name
+    return shutil.which(name) or name
 
 
 def _run(args, cwd=None):

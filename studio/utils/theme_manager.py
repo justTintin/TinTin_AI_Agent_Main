@@ -85,9 +85,13 @@ def _create_light_palette() -> QPalette:
 
 
 def apply_theme(app: QApplication):
-    """根据保存的设置应用主题。"""
+    """根据保存的设置应用主题（调色板 + QSS 样式表）。"""
     effective = get_effective_theme()
     if effective == "light":
         app.setPalette(_create_light_palette())
+        from ui.gui_styles_light import LIGHT_STYLE_SHEET
+        app.setStyleSheet(LIGHT_STYLE_SHEET)
     else:
         app.setPalette(_create_dark_palette())
+        from ui.gui_styles import STYLE_SHEET
+        app.setStyleSheet(STYLE_SHEET)

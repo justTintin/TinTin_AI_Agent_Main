@@ -162,7 +162,7 @@ def transcribe_audio(video_path: str, models_dir: str,
         _os.environ["LC_ALL"] = "zh_CN.UTF-8"
         from faster_whisper import WhisperModel
 
-        device = "auto"
+        device = "cpu"  # 避免与 Ollama 抢显存
         compute_type = "int8"
         resolved = _resolve_whisper_model_path(models_dir, model_name)
         local_files_only = resolved != model_name  # 本地路径找到则禁止下载

@@ -799,4 +799,29 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
     background-color: rgba(255, 255, 255, 0.15);
     border: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   素材管理
+   ═══════════════════════════════════════════════════════════════ */
+
+#step_label {
+    color: #7f8c8d; padding: 4px 0; font-size: 13px;
+}
+#step_label[active="true"] {
+    color: #3498db; font-weight: bold;
+    background-color: rgba(52, 152, 219, 0.1); border-radius: 4px;
+}
+#nas_root_label { font-size: 13px; font-weight: bold; color: #ffffff; }
+#stats_analyze, #stats_ingest { font-size: 13px; color: #ffffff; }
+#btn_refresh_stats {
+    background-color: #27272a; border: 1px solid #3f3f46; border-radius: 4px;
+    color: #e4e4e7; padding: 3px 8px; font-size: 11px; font-weight: bold;
+}
+#btn_refresh_stats:hover { background-color: #3f3f46; border-color: #52525b; color: #ffffff; }
+#btn_align {
+    background-color: #1e3a5f; border: 1px solid #3b82f6; border-radius: 4px;
+    color: #93c5fd; padding: 3px 8px; font-size: 11px; font-weight: bold;
+}
+#btn_align:hover { background-color: #1e40af; border-color: #60a5fa; color: #ffffff; }
+#secondary_button[danger="true"] { color: #ef4444; font-weight: bold; }
 """

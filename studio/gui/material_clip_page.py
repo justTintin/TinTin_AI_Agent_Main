@@ -471,11 +471,10 @@ class MaterialClipPage(BasePage):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setCursor(Qt.PointingHandCursor)
+            lbl.setObjectName("step_label")
             lbl.mousePressEvent = lambda e, idx=i: self._switch_tab(idx)
             if i == 0:
-                lbl.setStyleSheet("color: #3498db; font-weight: bold; background-color: rgba(52, 152, 219, 0.1); border-radius: 4px; padding: 4px 0; font-size: 13px;")
-            else:
-                lbl.setStyleSheet("color: #7f8c8d; padding: 4px 0; font-size: 13px;")
+                lbl.setProperty("active", True)
             step_layout.addWidget(lbl, 1)
             self.step_labels.append(lbl)
         root.addWidget(self.step_bar, 0)
@@ -504,9 +503,11 @@ class MaterialClipPage(BasePage):
         self.log_box_analyze.setVisible(index == 1)
         for i, lbl in enumerate(self.step_labels):
             if i == index:
-                lbl.setStyleSheet("color: #3498db; font-weight: bold; background-color: rgba(52, 152, 219, 0.1); border-radius: 4px; padding: 4px 0; font-size: 13px;")
+                lbl.setProperty("active", True)
             else:
-                lbl.setStyleSheet("color: #7f8c8d; padding: 4px 0; font-size: 13px;")
+                lbl.setProperty("active", False)
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
 
     # ── 共享：目录树组件 ──
 
@@ -515,7 +516,7 @@ class MaterialClipPage(BasePage):
         nas_row = QHBoxLayout()
         nas_row.addWidget(QLabel("NAS 根目录："))
         nas_lbl = QLabel("（未配置）")
-        nas_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
+        nas_lbl.setObjectName("nas_root_label")
         nas_row.addWidget(nas_lbl, 1)
         setattr(self, f"lbl_nas_root_{tree_attr}", nas_lbl)
         btn_reload_cfg = QPushButton("↺")
@@ -630,7 +631,7 @@ class MaterialClipPage(BasePage):
         db_hdr_row.addWidget(QLabel("📊 数据库"))
         db_hdr_row.addStretch()
         self.lbl_stats_analyze = QLabel("—")
-        self.lbl_stats_analyze.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        self.lbl_stats_analyze.setObjectName("stats_analyze")
         db_hdr_row.addWidget(self.lbl_stats_analyze)
         lay.addLayout(db_hdr_row)
 
@@ -767,7 +768,7 @@ class MaterialClipPage(BasePage):
 
         self.btn_stop_reanalyze = QPushButton("⏹ 停止AI分析")
         self.btn_stop_reanalyze.setObjectName("secondary_button")
-        self.btn_stop_reanalyze.setStyleSheet("color: #ef4444; font-weight: bold;")
+        self.btn_stop_reanalyze.setProperty("danger", True)
         self.btn_stop_reanalyze.setToolTip("停止当前的 AI 分析任务")
         self.btn_stop_reanalyze.setEnabled(False)
         self.btn_stop_reanalyze.clicked.connect(self._stop_reanalyze)
@@ -1351,16 +1352,16 @@ class MaterialClipPage(BasePage):
         stats_hdr_row.addStretch()
         stats_hdr_row.addWidget(QLabel("素材统计："))
         self.lbl_stats_ingest = QLabel("—")
-        self.lbl_stats_ingest.setStyleSheet("font-size: 13px; color: #ffffff;")
+        self.lbl_stats_ingest.setObjectName("stats_ingest")
         stats_hdr_row.addWidget(self.lbl_stats_ingest)
         btn_refresh_stats = QPushButton("↺ 刷新")
         btn_refresh_stats.setToolTip("刷新统计（数据库 + 目录文件数），不扫描新文件")
-        btn_refresh_stats.setStyleSheet("QPushButton { background-color: #27272a; border: 1px solid #3f3f46; border-radius: 4px; color: #e4e4e7; padding: 3px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: #3f3f46; border-color: #52525b; color: #ffffff; }")
+        btn_refresh_stats.setObjectName("btn_refresh_stats")
         btn_refresh_stats.clicked.connect(self._reload_stats)
         stats_hdr_row.addWidget(btn_refresh_stats)
         btn_align = QPushButton("📂 对齐入库")
         btn_align.setToolTip("扫描磁盘目录，将新文件 Hash 对齐后批量入库")
-        btn_align.setStyleSheet("QPushButton { background-color: #1e3a5f; border: 1px solid #3b82f6; border-radius: 4px; color: #93c5fd; padding: 3px 8px; font-size: 11px; font-weight: bold; } QPushButton:hover { background-color: #1e40af; border-color: #60a5fa; color: #ffffff; }")
+        btn_align.setObjectName("btn_align")
         btn_align.clicked.connect(self._align_and_ingest)
         stats_hdr_row.addWidget(btn_align)
         lay.addLayout(stats_hdr_row)

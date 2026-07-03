@@ -241,22 +241,8 @@ from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browse
 class SystemStatusOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("status_overlay")
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: rgba(15, 23, 42, 0.75);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 6px;
-            }
-            QLabel {
-                background: transparent;
-                border: none;
-                color: #94a3b8;
-                font-family: 'Consolas', 'Segoe UI', monospace;
-                font-size: 11px;
-                font-weight: bold;
-            }
-        """)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 4, 12, 4)
@@ -278,7 +264,7 @@ class SystemStatusOverlay(QWidget):
             sep.setFrameShape(QFrame.VLine)
             sep.setFrameShadow(QFrame.Plain)
             sep.setFixedWidth(1)
-            sep.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); border: none;")
+            sep.setObjectName("status_separator")
             return sep
             
         layout.addWidget(self.ollama_lbl)

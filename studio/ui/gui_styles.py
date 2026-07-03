@@ -777,4 +777,26 @@ QDialog QPushButton, QMessageBox QPushButton {
 QDialog QPushButton:hover, QMessageBox QPushButton:hover {
     background-color: #3a3a40;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   状态栏
+   ═══════════════════════════════════════════════════════════════ */
+
+#status_overlay {
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+}
+#status_overlay QLabel {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-family: 'Consolas', 'Segoe UI', monospace;
+    font-size: 11px;
+    font-weight: bold;
+}
+#status_separator {
+    background-color: rgba(255, 255, 255, 0.15);
+    border: none;
+}
 """

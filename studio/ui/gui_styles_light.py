@@ -506,4 +506,26 @@ QSlider::sub-page:horizontal {
 }
 
 QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
+
+/* ═══════════════════════════════════════════════════════════════
+   状态栏
+   ═══════════════════════════════════════════════════════════════ */
+
+#status_overlay {
+    background-color: rgba(240, 240, 245, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
+}
+#status_overlay QLabel {
+    background: transparent;
+    border: none;
+    color: #6b7280;
+    font-family: 'Consolas', 'Segoe UI', monospace;
+    font-size: 11px;
+    font-weight: bold;
+}
+#status_separator {
+    background-color: rgba(0, 0, 0, 0.1);
+    border: none;
+}
 """

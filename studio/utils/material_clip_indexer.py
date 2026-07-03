@@ -351,7 +351,7 @@ def _extract_frames_ffmpeg(
         "-q:v", "3", "-y", pattern,
     ]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=600, check=True)
+        subprocess.run(cmd, capture_output=True, timeout=1800, check=True)
     except subprocess.CalledProcessError as e:
         log.error(f"ffmpeg 抽帧失败: {e.stderr.decode(errors='replace')[:300]}")
         return []

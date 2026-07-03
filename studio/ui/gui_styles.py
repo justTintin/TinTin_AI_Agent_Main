@@ -824,4 +824,42 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 }
 #btn_align:hover { background-color: #1e40af; border-color: #60a5fa; color: #ffffff; }
 #secondary_button[danger="true"] { color: #ef4444; font-weight: bold; }
+
+/* ═══════════════════════════════════════════════════════════════
+   live_clip_page 专用样式
+   ═══════════════════════════════════════════════════════════════ */
+
+#cover_edit_dialog { background-color: #121214; color: #f8fafc; }
+
+#cover_section_title { font-size: 13px; color: #94a3b8; }
+
+#cover_video_widget { background-color: #000000; border-radius: 6px; border: 1px solid #27272a; }
+
+#cover_time_label { color: #94a3b8; }
+
+#cover_preview_h,
+#cover_preview_v { background-color: #0c0a09; border-radius: 6px; border: 1px solid #27272a; }
+
+#clip_list_item_title { font-size: 13px; color: #f8fafc; }
+
+#clip_list_item_score { color: #eab308; font-weight: bold; }
+
+#clip_list_item_meta { color: #94a3b8; font-size: 11px; }
+
+#clip_list_separator { background-color: #2e2e32; max-height: 1px; }
+
+#clip_list_item_time { color: #94a3b8; font-size: 11px; }
+
+#export_step_label { padding: 6px 12px; }
+#export_step_label[status="active"] { color: #3498db; font-weight: bold; background-color: rgba(52,152,219,0.1); border-radius: 4px; }
+#export_step_label[status="done"] { color: #2ecc71; background-color: rgba(46,204,113,0.08); border-radius: 4px; }
+#export_step_label[status="pending"] { color: #7f8c8d; }
+
+#clip_page_title { font-size: 14px; color: #f8fafc; }
+
+#clip_status_label { color: #94a3b8; }
+
+#export_result_label { color: #10b981; font-weight: bold; }
+
+#video_info_label { color: #3b82f6; }
 """

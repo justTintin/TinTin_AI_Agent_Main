@@ -733,8 +733,8 @@ class CoverEditDialog(QDialog):
         self.setWindowTitle("编辑视频封面")
         self.resize(1100, 650)
         self.setModal(True)
-        self.setStyleSheet("background-color: #121214; color: #f8fafc;")
-        
+        self.setObjectName("cover_edit_dialog")
+       
         self.video_path = video_path
         self.original_title = title
         self.original_frame_path = frame_path
@@ -777,11 +777,11 @@ class CoverEditDialog(QDialog):
         col1_layout.setSpacing(10)
         
         player_title = QLabel("<b>🎥 视频截取区域 (拖动滑块定帧)</b>")
-        player_title.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        player_title.setObjectName("cover_section_title")
         col1_layout.addWidget(player_title)
         
         self.video_widget = QVideoWidget()
-        self.video_widget.setStyleSheet("background-color: #000000; border-radius: 6px; border: 1px solid #27272a;")
+        self.video_widget.setObjectName("cover_video_widget")
         col1_layout.addWidget(self.video_widget, 1)
         
         self.slider = QSlider(Qt.Horizontal)
@@ -837,7 +837,7 @@ class CoverEditDialog(QDialog):
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setFixedWidth(100)
         self.lbl_time.setAlignment(Qt.AlignCenter)
-        self.lbl_time.setStyleSheet("color: #94a3b8;")
+        self.lbl_time.setObjectName("cover_time_label")
         ctrl_layout.addWidget(self.lbl_time)
         
         ctrl_layout.addStretch()
@@ -870,12 +870,12 @@ class CoverEditDialog(QDialog):
         col2_layout.setAlignment(Qt.AlignTop)
         
         h_cover_title = QLabel("<b>🖼️ 横屏封面预览 (16:9)</b>")
-        h_cover_title.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        h_cover_title.setObjectName("cover_section_title")
         col2_layout.addWidget(h_cover_title)
         
         self.lbl_cover_preview_h = QLabel()
         self.lbl_cover_preview_h.setFixedSize(320, 180) # Large horizontal preview
-        self.lbl_cover_preview_h.setStyleSheet("background-color: #0c0a09; border-radius: 6px; border: 1px solid #27272a;")
+        self.lbl_cover_preview_h.setObjectName("cover_preview_h")
         self.lbl_cover_preview_h.setAlignment(Qt.AlignCenter)
         col2_layout.addWidget(self.lbl_cover_preview_h, 0, Qt.AlignCenter)
         
@@ -913,12 +913,12 @@ class CoverEditDialog(QDialog):
         col3_layout.setAlignment(Qt.AlignTop)
         
         v_cover_title = QLabel("<b>📱 竖屏封面预览 (9:16)</b>")
-        v_cover_title.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        v_cover_title.setObjectName("cover_section_title")
         col3_layout.addWidget(v_cover_title)
         
         self.lbl_cover_preview_v = QLabel()
         self.lbl_cover_preview_v.setFixedSize(180, 320) # Large vertical preview
-        self.lbl_cover_preview_v.setStyleSheet("background-color: #0c0a09; border-radius: 6px; border: 1px solid #27272a;")
+        self.lbl_cover_preview_v.setObjectName("cover_preview_v")
         self.lbl_cover_preview_v.setAlignment(Qt.AlignCenter)
         col3_layout.addWidget(self.lbl_cover_preview_v, 0, Qt.AlignCenter)
         
@@ -1107,20 +1107,20 @@ class ClipListItemWidget(QFrame):
         
         top_layout = QHBoxLayout()
         self.lbl_title = QLabel(f"<b>{self.clip_info.get('title', '精彩片段')}</b>")
-        self.lbl_title.setStyleSheet("font-size: 13px; color: #f8fafc;")
+        self.lbl_title.setObjectName("clip_list_item_title")
         self.lbl_title.setWordWrap(True)
         top_layout.addWidget(self.lbl_title, 1)
         
         score = self.clip_info.get('score', 0.0)
         self.lbl_score = QLabel(f"⭐ {score}")
-        self.lbl_score.setStyleSheet("color: #eab308; font-weight: bold;")
+        self.lbl_score.setObjectName("clip_list_item_score")
         top_layout.addWidget(self.lbl_score)
         layout.addLayout(top_layout)
         
         meta_layout = QHBoxLayout()
         meta_text = f"⏱ {self.clip_info.get('start_str', '00:00')} - {self.clip_info.get('end_str', '00:00')} ({self.clip_info.get('duration', 0)}s)"
         self.lbl_meta = QLabel(meta_text)
-        self.lbl_meta.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_meta.setObjectName("clip_list_item_meta")
         meta_layout.addWidget(self.lbl_meta, 1)
         
         from PySide6.QtWidgets import QCheckBox
@@ -1189,7 +1189,7 @@ class ClipListItemWidget(QFrame):
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setFrameShadow(QFrame.Sunken)
-        sep.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
+        sep.setObjectName("clip_list_separator")
         layout.addWidget(sep)
         
         play_layout = QHBoxLayout()
@@ -1218,7 +1218,7 @@ class ClipListItemWidget(QFrame):
         play_layout.addWidget(self.btn_play)
         
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_time.setObjectName("clip_list_item_time")
         self.lbl_time.setFixedWidth(80)
         self.lbl_time.setAlignment(Qt.AlignCenter)
         play_layout.addWidget(self.lbl_time)
@@ -1509,15 +1509,15 @@ class LiveClipPage(BasePage):
         for i, lbl in enumerate(self.step_labels):
             if i == index:
                 lbl.setFont(self._get_step_font(True))
-                lbl.setStyleSheet("color: #3498db; font-weight: bold; "
-                                  "background-color: rgba(52,152,219,0.1); border-radius: 4px; padding: 6px 12px;")
+                lbl.setProperty("status", "active")
             elif i < index:
                 lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #2ecc71; background-color: rgba(46,204,113,0.08); "
-                                  "border-radius: 4px; padding: 6px 12px;")
+                lbl.setProperty("status", "done")
             else:
                 lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #7f8c8d; padding: 6px 12px;")
+                lbl.setProperty("status", "pending")
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
 
     def _go_to_step(self, index):
         self.pause_all_players_except(-1)
@@ -1563,6 +1563,7 @@ class LiveClipPage(BasePage):
         for i, text in enumerate(["\U0001F4F9 视频分析与热点发现", "\u2702 切片与封面生成"]):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
+            lbl.setObjectName("export_step_label")
             lbl.setFont(self._get_step_font(i == 0))
             sl.addWidget(lbl)
             self.step_labels.append(lbl)
@@ -1604,7 +1605,7 @@ class LiveClipPage(BasePage):
         vr.addWidget(btn)
         
         self.video_info_lbl = QLabel("")
-        self.video_info_lbl.setObjectName("muted_text")
+        self.video_info_lbl.setObjectName("video_info_label")
         vr.addWidget(self.video_info_lbl)
         cl.addLayout(vr)
 
@@ -1765,11 +1766,11 @@ class LiveClipPage(BasePage):
         header_layout.setSpacing(16)
         
         title_lbl = QLabel("<b>\u2702 自动切片与封面编辑</b>")
-        title_lbl.setStyleSheet("font-size: 14px; color: #f8fafc;")
+        title_lbl.setObjectName("clip_page_title")
         header_layout.addWidget(title_lbl)
         
         self.clip_status_lbl = QLabel("已选 0 个片段待切片")
-        self.clip_status_lbl.setStyleSheet("color: #94a3b8;")
+        self.clip_status_lbl.setObjectName("clip_status_label")
         header_layout.addWidget(self.clip_status_lbl)
         
         self.btn_clip = QPushButton("\u2702 开始切片")
@@ -1828,7 +1829,7 @@ class LiveClipPage(BasePage):
 
         self.export_result_lbl = QLabel("")
         self.export_result_lbl.setWordWrap(True)
-        self.export_result_lbl.setStyleSheet("color: #10b981; font-weight: bold;")
+        self.export_result_lbl.setObjectName("export_result_label")
         evl.addWidget(self.export_result_lbl)
         
         layout.addWidget(export_card)
@@ -1863,7 +1864,6 @@ class LiveClipPage(BasePage):
             self.video_path_input.setText(path)
             gb = os.path.getsize(path) / (1024 ** 3)
             self.video_info_lbl.setText(f"\U0001F4E6 文件: {gb:.1f} GB  |  流式处理，内存安全")
-            self.video_info_lbl.setStyleSheet("color: #3b82f6;")
             
             # Auto-check if audio was already extracted previously
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

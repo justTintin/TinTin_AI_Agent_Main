@@ -553,4 +553,42 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 }
 #btn_align:hover { background-color: #bfdbfe; border-color: #2563eb; }
 #secondary_button[danger="true"] { color: #dc2626; font-weight: bold; }
+
+/* ═══════════════════════════════════════════════════════════════
+   live_clip_page 专用样式
+   ═══════════════════════════════════════════════════════════════ */
+
+#cover_edit_dialog { background-color: #ffffff; color: #1d1d1f; }
+
+#cover_section_title { font-size: 13px; color: #6b7280; }
+
+#cover_video_widget { background-color: #000000; border-radius: 6px; border: 1px solid #d2d2d7; }
+
+#cover_time_label { color: #6b7280; }
+
+#cover_preview_h,
+#cover_preview_v { background-color: #f0f0f5; border-radius: 6px; border: 1px solid #d2d2d7; }
+
+#clip_list_item_title { font-size: 13px; color: #1d1d1f; }
+
+#clip_list_item_score { color: #eab308; font-weight: bold; }
+
+#clip_list_item_meta { color: #6b7280; font-size: 11px; }
+
+#clip_list_separator { background-color: #e5e5ea; max-height: 1px; }
+
+#clip_list_item_time { color: #6b7280; font-size: 11px; }
+
+#export_step_label { padding: 6px 12px; }
+#export_step_label[status="active"] { color: #2563eb; font-weight: bold; background-color: rgba(37,99,235,0.1); border-radius: 4px; }
+#export_step_label[status="done"] { color: #059669; background-color: rgba(5,150,105,0.08); border-radius: 4px; }
+#export_step_label[status="pending"] { color: #86868b; }
+
+#clip_page_title { font-size: 14px; color: #1d1d1f; }
+
+#clip_status_label { color: #6b7280; }
+
+#export_result_label { color: #10b981; font-weight: bold; }
+
+#video_info_label { color: #3b82f6; }
 """

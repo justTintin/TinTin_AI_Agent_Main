@@ -528,4 +528,29 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
     background-color: rgba(0, 0, 0, 0.1);
     border: none;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   素材管理
+   ═══════════════════════════════════════════════════════════════ */
+
+#step_label {
+    color: #86868b; padding: 4px 0; font-size: 13px;
+}
+#step_label[active="true"] {
+    color: #2563eb; font-weight: bold;
+    background-color: rgba(37, 99, 235, 0.1); border-radius: 4px;
+}
+#nas_root_label { font-size: 13px; font-weight: bold; color: #1d1d1f; }
+#stats_analyze, #stats_ingest { font-size: 13px; color: #1d1d1f; }
+#btn_refresh_stats {
+    background-color: #f5f5f7; border: 1px solid #d2d2d7; border-radius: 4px;
+    color: #1d1d1f; padding: 3px 8px; font-size: 11px; font-weight: bold;
+}
+#btn_refresh_stats:hover { background-color: #e8e8ed; border-color: #b0b0b8; }
+#btn_align {
+    background-color: #dbeafe; border: 1px solid #3b82f6; border-radius: 4px;
+    color: #1e40af; padding: 3px 8px; font-size: 11px; font-weight: bold;
+}
+#btn_align:hover { background-color: #bfdbfe; border-color: #2563eb; }
+#secondary_button[danger="true"] { color: #dc2626; font-weight: bold; }
 """

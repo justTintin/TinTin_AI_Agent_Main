@@ -154,7 +154,7 @@ class TerminalPage(BasePage):
 
         self.prompt_lbl = QLabel(">")
         self.prompt_lbl.setFont(QFont("Consolas", 11))
-        self.prompt_lbl.setStyleSheet("color: #4ade80; min-width: 16px;")
+        self.prompt_lbl.setObjectName("terminalPrompt")
         inp_lay.addWidget(self.prompt_lbl)
 
         self.cmd_input = QLineEdit()

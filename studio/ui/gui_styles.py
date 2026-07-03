@@ -483,6 +483,107 @@ QTextEdit#log_viewer {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   缩略图占位 / 素材缩略图
+   ═══════════════════════════════════════════════════════════════ */
+
+#thumbnail_placeholder {
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    color: #6b6b7a;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   页面副标题 / 提示文字
+   ═══════════════════════════════════════════════════════════════ */
+
+#page_subtitle {
+    color: #aaaaaa;
+    font-size: 13px;
+}
+
+#page_section_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #e5e7eb;
+    margin-top: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模型状态卡片（hook_score / marketing_detect）
+   ═══════════════════════════════════════════════════════════════ */
+
+#model_status_card {
+    background-color: #1a1a26;
+    border: 1px solid #3a3a4a;
+    border-radius: 8px;
+}
+
+#model_info_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #e0e0e0;
+}
+
+#model_status_label {
+    font-weight: bold;
+    color: #a0aec0;
+}
+
+#model_status_label[state="green"] { color: #2ecc71; }
+#model_status_label[state="red"] { color: #e74c3c; }
+#model_status_label[state="yellow"] { color: #f1c40f; }
+
+/* ═══════════════════════════════════════════════════════════════
+   日志输出框（全页）
+   ═══════════════════════════════════════════════════════════════ */
+
+QTextEdit#log_box {
+    background-color: #1a1a2e;
+    color: #c8d6e5;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid #252530;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   登录状态标签
+   ═══════════════════════════════════════════════════════════════ */
+
+#login_status_label {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#login_status_label[state="green"] { color: #2ecc71; }
+#login_status_label[state="red"] { color: #e74c3c; }
+#login_status_label[state="yellow"] { color: #f39c12; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LLM 状态标签
+   ═══════════════════════════════════════════════════════════════ */
+
+#llm_status_label {
+    font-weight: bold;
+}
+
+#llm_status_label[state="green"] { color: #2ecc71; }
+#llm_status_label[state="red"] { color: #e74c3c; }
+#llm_status_label[state="yellow"] { color: #f39c12; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Ollama 状态标签
+   ═══════════════════════════════════════════════════════════════ */
+
+#ollama_status_lbl {
+    font-size: 12px;
+}
+
+#ollama_status_lbl[state="green"] { color: #34d399; }
+#ollama_status_lbl[state="red"] { color: #f87171; }
+#ollama_status_lbl[state="yellow"] { color: #fbbf24; }
+#ollama_status_lbl[state="gray"] { color: #9ca3af; }
+
+/* ═══════════════════════════════════════════════════════════════
    滚动条
    ═══════════════════════════════════════════════════════════════ */
 

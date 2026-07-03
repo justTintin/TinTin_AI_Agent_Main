@@ -305,6 +305,107 @@ QTextEdit#log_viewer {
     font-size: 12px;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   缩略图占位 / 素材缩略图
+   ═══════════════════════════════════════════════════════════════ */
+
+#thumbnail_placeholder {
+    border: 1px solid #d2d2d7;
+    border-radius: 4px;
+    color: #86868b;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   页面副标题 / 提示文字
+   ═══════════════════════════════════════════════════════════════ */
+
+#page_subtitle {
+    color: #86868b;
+    font-size: 13px;
+}
+
+#page_section_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #3a3a3f;
+    margin-top: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模型状态卡片（hook_score / marketing_detect）
+   ═══════════════════════════════════════════════════════════════ */
+
+#model_status_card {
+    background-color: #f0f0f5;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+}
+
+#model_info_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #1d1d1f;
+}
+
+#model_status_label {
+    font-weight: bold;
+    color: #86868b;
+}
+
+#model_status_label[state="green"] { color: #059669; }
+#model_status_label[state="red"] { color: #dc2626; }
+#model_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   日志输出框（全页）
+   ═══════════════════════════════════════════════════════════════ */
+
+QTextEdit#log_box {
+    background-color: #f5f5f7;
+    color: #3a3a3f;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid #e5e5ea;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   登录状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#login_status_label {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#login_status_label[state="green"] { color: #059669; }
+#login_status_label[state="red"] { color: #dc2626; }
+#login_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LLM 状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#llm_status_label {
+    font-weight: bold;
+}
+
+#llm_status_label[state="green"] { color: #059669; }
+#llm_status_label[state="red"] { color: #dc2626; }
+#llm_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Ollama 状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#ollama_status_lbl {
+    font-size: 12px;
+}
+
+#ollama_status_lbl[state="green"] { color: #059669; }
+#ollama_status_lbl[state="red"] { color: #dc2626; }
+#ollama_status_lbl[state="yellow"] { color: #d97706; }
+#ollama_status_lbl[state="gray"] { color: #86868b; }
+
 QScrollBar:vertical { width: 8px; background: transparent; margin: 4px 2px; }
 QScrollBar::handle:vertical {
     background: #c7c7cc;

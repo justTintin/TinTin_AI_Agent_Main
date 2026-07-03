@@ -150,39 +150,16 @@ class TextEditDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
+        # Theme-consistent dialog: only style widget-specific elements
         self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a1a;
-                color: #ffffff;
-            }
-            QLabel {
-                color: #bdc3c7;
-                font-size: 13px;
-                font-weight: bold;
-            }
             QTextEdit {
-                background-color: rgba(255, 255, 255, 0.05);
-                border: 1px solid rgba(255, 255, 255, 0.15);
+                border: 1px solid rgba(128,128,128,0.15);
                 border-radius: 4px;
-                color: #ecf0f1;
                 font-size: 13px;
                 padding: 6px;
             }
             QTextEdit:focus {
                 border: 1px solid #2ecc71;
-                background-color: rgba(255, 255, 255, 0.08);
-            }
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 4px;
-                color: #ecf0f1;
-                padding: 6px 16px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.12);
-                border-color: rgba(255, 255, 255, 0.25);
             }
         """)
 
@@ -229,7 +206,7 @@ class VoiceRowDetailWidget(QWidget):
         top_layout.setSpacing(4)
         
         lbl_video = QLabel(f"🎥 视频: {basename}")
-        lbl_video.setStyleSheet("color: #ecf0f1; font-weight: bold; font-size: 11px;")
+        lbl_video.setObjectName("card_title")
         lbl_video.setToolTip(filepath)
         top_layout.addWidget(lbl_video)
 
@@ -250,7 +227,7 @@ class VoiceRowDetailWidget(QWidget):
         row_original = QHBoxLayout()
         row_original.setContentsMargins(0, 0, 0, 0)
         lbl_orig_tag = QLabel("📝 原文: ")
-        lbl_orig_tag.setStyleSheet("color: #9ca3af; font-size: 11px; font-weight: bold;")
+        lbl_orig_tag.setObjectName("muted_text")
         lbl_orig_tag.setFixedWidth(48)
         orig_val = ReadOnlyDoubleClickLineEdit(original_text if original_text else "(无)")
         row_original.addWidget(lbl_orig_tag)
@@ -267,7 +244,7 @@ class VoiceRowDetailWidget(QWidget):
         row_edit = QHBoxLayout()
         row_edit.setContentsMargins(0, 0, 0, 0)
         lbl_edit_tag = QLabel("✨ 修改后: ")
-        lbl_edit_tag.setStyleSheet("color: #3b82f6; font-size: 11px; font-weight: bold;")
+        lbl_edit_tag.setObjectName("accent_text")
         row_edit.addWidget(lbl_edit_tag)
         row_edit.addWidget(edit, 1)
         voice_dur_str = ""
@@ -291,41 +268,14 @@ class ScriptCompareDialog(QDialog):
         self.setMinimumSize(700, 400)
         self.resize(800, 480)
         
-        # Dark style stylesheet
+        # Theme-consistent dialog style
         self.setStyleSheet("""
-            QDialog {
-                background-color: #121212;
-                color: #e5e7eb;
-                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            }
-            QLabel {
-                color: #9ca3af;
-                font-size: 13px;
-                font-weight: bold;
-            }
             QPlainTextEdit {
-                background-color: #1e1e1e;
-                color: #f3f4f6;
                 border: 1px solid #374151;
                 border-radius: 6px;
                 font-size: 13px;
                 line-height: 1.4;
                 padding: 8px;
-            }
-            QPushButton {
-                background-color: #3b82f6;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #2563eb;
-            }
-            QPushButton:pressed {
-                background-color: #1d4ed8;
             }
         """)
         
@@ -417,39 +367,15 @@ class DubbedVideosDialog(QDialog):
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
+        # Theme-consistent dialog (no custom QDialog/QPushButton base style)
         self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a1c;
-            }
-            QLabel {
-                color: #e5e7eb;
-            }
             QListWidget {
-                background-color: #222224;
                 border: 1px solid #2e2e32;
                 border-radius: 8px;
                 padding: 5px;
             }
-            QPushButton {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: #ffffff;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a3c;
-            }
             QPushButton#primary_button {
-                background-color: #3b82f6;
-                border: 1px solid #3b82f6;
-                color: #ffffff;
                 font-weight: 700;
-            }
-            QPushButton#primary_button:hover {
-                background-color: #2563eb;
-                border: 1px solid #2563eb;
             }
         """)
 
@@ -551,39 +477,15 @@ class FinalMixedVideosDialog(QDialog):
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
+        # Theme-consistent dialog (no custom QDialog/QPushButton base style)
         self.setStyleSheet("""
-            QDialog {
-                background-color: #1a1a1c;
-            }
-            QLabel {
-                color: #e5e7eb;
-            }
             QListWidget {
-                background-color: #222224;
                 border: 1px solid #2e2e32;
                 border-radius: 8px;
                 padding: 5px;
             }
-            QPushButton {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
-                border-radius: 6px;
-                padding: 6px 12px;
-                color: #ffffff;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a3c;
-            }
             QPushButton#primary_button {
-                background-color: #3b82f6;
-                border: 1px solid #3b82f6;
-                color: #ffffff;
                 font-weight: 700;
-            }
-            QPushButton#primary_button:hover {
-                background-color: #2563eb;
-                border: 1px solid #2563eb;
             }
         """)
 
@@ -3045,7 +2947,7 @@ class VideoMontagePage(BasePage):
         
         # Video title
         self.preview_title = QLabel("🎥 视频播放预览")
-        self.preview_title.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px;")
+        self.preview_title.setObjectName("muted_text")
         player_vbox.addWidget(self.preview_title)
         
         from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -3292,7 +3194,7 @@ class VideoMontagePage(BasePage):
         row_table_title = QHBoxLayout()
         row_table_title.setContentsMargins(0, 4, 0, 4)
         lbl_title = QLabel("📹 待合成视频列表与配音文案映射 (在配音文案栏直接输入):")
-        lbl_title.setStyleSheet("font-weight: bold; color: #ecf0f1; font-size: 13px;")
+        lbl_title.setObjectName("card_title")
         row_table_title.addWidget(lbl_title)
         row_table_title.addStretch()
 
@@ -3324,7 +3226,7 @@ class VideoMontagePage(BasePage):
         row_subtitle_opt = QHBoxLayout()
         self.chk_add_subtitles = QCheckBox("在配音视频中同时添加/烧录字幕 (逐行按时间显示, 字号随视频高度自适应, 白色 50%透明背景)")
         self.chk_add_subtitles.setChecked(False)
-        self.chk_add_subtitles.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: bold;")
+        self.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")
         row_subtitle_opt.addWidget(self.chk_add_subtitles)
         card_layout.addLayout(row_subtitle_opt)
 
@@ -3549,7 +3451,7 @@ class VideoMontagePage(BasePage):
         self.lbl_bgm_time = QLabel("00:00 / 00:00")
         self.lbl_bgm_time.setFixedWidth(90)
         self.lbl_bgm_time.setAlignment(Qt.AlignCenter)
-        self.lbl_bgm_time.setStyleSheet("color: #bdc3c7; font-size: 11px;")
+        self.lbl_bgm_time.setObjectName("muted_text")
         row_bgm_play.addWidget(self.lbl_bgm_time)
         
         card_layout.addLayout(row_bgm_play)

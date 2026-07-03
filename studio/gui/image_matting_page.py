@@ -166,7 +166,7 @@ class ImageMattingPage(BasePage):
         
         # 2. Workspace splitter
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
+        splitter.setObjectName("themeSplitter")
         
         # Left Panel (Controls)
         left_panel = QFrame()
@@ -297,7 +297,7 @@ class ImageMattingPage(BasePage):
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
+        line.setObjectName("themeSeparator")
         return line
         
     def choose_image(self):

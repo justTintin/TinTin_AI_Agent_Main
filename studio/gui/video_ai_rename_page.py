@@ -666,32 +666,7 @@ class BatchFindReplaceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("🔄 批量查找替换（新文件名）")
         self.setMinimumWidth(420)
-        self.setStyleSheet("""
-            QDialog { background-color: #1a1a1a; color: #e5e7eb; }
-            QLabel  { color: #9ca3af; font-size: 13px; }
-            QLineEdit {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
-                border-radius: 5px;
-                padding: 5px 8px;
-                color: #ffffff;
-                font-size: 13px;
-            }
-            QPushButton {
-                background-color: #3b82f6;
-                color: white; border: none;
-                padding: 7px 18px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #2563eb; }
-            QPushButton#cancel_btn {
-                background-color: transparent;
-                color: #d1d5db;
-                border: 1px solid #4b5563;
-            }
-            QPushButton#cancel_btn:hover { background-color: rgba(255,255,255,0.06); }
-        """)
+        self.setObjectName("batchReplaceDialog")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
@@ -767,7 +742,7 @@ class VideoPlayerDialog(QDialog):
 
         # ── Left: video ──────────────────────────
         left_w = QWidget()
-        left_w.setStyleSheet("background: #000;")
+        left_w.setObjectName("videoPlayerLeft")
         left_v = QVBoxLayout(left_w)
         left_v.setContentsMargins(0, 0, 0, 8)
         left_v.setSpacing(6)
@@ -788,7 +763,7 @@ class VideoPlayerDialog(QDialog):
         ctrl_h.addWidget(self.btn_play)
         ctrl_h.addStretch()
         self.lbl_time = QLabel("0:00 / 0:00")
-        self.lbl_time.setStyleSheet("color: #9ca3af; font-size: 12px; font-family: monospace;")
+        self.lbl_time.setObjectName("videoPlayerTime")
         ctrl_h.addWidget(self.lbl_time)
         left_v.addLayout(ctrl_h)
 
@@ -797,20 +772,20 @@ class VideoPlayerDialog(QDialog):
         # Vertical divider
         div = QFrame()
         div.setFrameShape(QFrame.VLine)
-        div.setStyleSheet("QFrame { color: #2d2d2d; }")
+        div.setObjectName("videoPlayerDivider")
         div.setFixedWidth(1)
         main_h.addWidget(div)
 
         # ── Right: analysis panel ────────────────
         right_w = QWidget()
         right_w.setFixedWidth(270)
-        right_w.setStyleSheet("background-color: #1c1c1e;")
+        right_w.setObjectName("videoPlayerRight")
         right_v = QVBoxLayout(right_w)
         right_v.setContentsMargins(14, 14, 14, 14)
         right_v.setSpacing(8)
 
         hint = QLabel("拖动时间轴选帧，暂停后\n点击按钮识别当前产品：")
-        hint.setStyleSheet("color: #6b7280; font-size: 12px;")
+        hint.setObjectName("videoPlayerHint")
         right_v.addWidget(hint)
 
         can_analyze = bool(self.vision_model and self.vision_api_url)
@@ -822,12 +797,12 @@ class VideoPlayerDialog(QDialog):
         right_v.addWidget(self.btn_analyze_frame)
 
         self.lbl_frame_status = QLabel("")
-        self.lbl_frame_status.setStyleSheet("color: #fbbf24; font-size: 11px;")
+        self.lbl_frame_status.setObjectName("videoPlayerFrameStatus")
         self.lbl_frame_status.setWordWrap(True)
         right_v.addWidget(self.lbl_frame_status)
 
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("QFrame { color: #2d2d2d; }")
+        sep.setObjectName("videoPlayerDivider")
         right_v.addWidget(sep)
 
         for label_text, attr_name in [
@@ -836,7 +811,7 @@ class VideoPlayerDialog(QDialog):
             ("型号:", "edit_model"),
         ]:
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #9ca3af; font-size: 12px;")
+            lbl.setObjectName("videoPlayerInfoLabel")
             right_v.addWidget(lbl)
             edit = QLineEdit()
             edit.setPlaceholderText("unknown")
@@ -848,7 +823,7 @@ class VideoPlayerDialog(QDialog):
         right_v.addWidget(sep2)
 
         lbl_fn = QLabel("新文件名:")
-        lbl_fn.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        lbl_fn.setObjectName("videoPlayerFileLabel")
         right_v.addWidget(lbl_fn)
         self.edit_filename = QLineEdit()
         self.edit_filename.setPlaceholderText("分析后自动填写，可编辑")
@@ -1054,7 +1029,7 @@ class VideoAiRenamePage(BasePage):
             "选择文件夹 → AI 分析视频内容 → 预览新文件名 → 手动调整 → 批量重命名\n"
             "命名规则：品牌_品类_型号_视频日期_视频分辨率_横竖屏"
         )
-        desc.setStyleSheet("color: #9ca3af; font-size: 12px; line-height: 1.5;")
+        desc.setObjectName("aiRenameDesc")
         layout.addWidget(desc)
 
         # ── 文件夹选择行 ──
@@ -1079,7 +1054,7 @@ class VideoAiRenamePage(BasePage):
 
         # 文本模型（只读标签）
         self.lbl_model_info = QLabel("")
-        self.lbl_model_info.setStyleSheet("color: #60a5fa; font-size: 12px;")
+        self.lbl_model_info.setObjectName("aiRenameModelInfo")
         row_config.addWidget(self.lbl_model_info)
 
         # 视觉模型选择下拉框（纯选择，不可手动输入）
@@ -1210,31 +1185,7 @@ class VideoAiRenamePage(BasePage):
         # 双击第 3 列（新文件名）→ 内联编辑；播放按钮（第 9 列）打开播放器
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.table.setMinimumHeight(300)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1e1e1e;
-                alternate-background-color: #232323;
-                gridline-color: #2d2d2d;
-            }
-            QHeaderView::section {
-                background-color: #2a2a2a;
-                color: #9ca3af;
-                padding: 5px;
-                border: none;
-                border-right: 1px solid #3a3a3c;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QTableWidget QLineEdit {
-                background-color: #1e293b;
-                color: #f0f9ff;
-                font-size: 13px;
-                border: 1px solid #3b82f6;
-                padding: 2px 6px;
-                selection-background-color: #2563eb;
-                selection-color: #ffffff;
-            }
-        """)
+        self.table.setObjectName("aiRenameTable")
         layout.addWidget(self.table, 1)
 
         # ── 进度条 + 状态标签 ──
@@ -1245,13 +1196,13 @@ class VideoAiRenamePage(BasePage):
         layout.addWidget(self.progress_bar)
 
         self.status_lbl = QLabel("请选择文件夹，然后点击「分析并预览」")
-        self.status_lbl.setStyleSheet("color: #9ca3af; font-size: 12px;")
+        self.status_lbl.setObjectName("aiRenameStatus")
         layout.addWidget(self.status_lbl)
 
         # ── 实时日志面板 ──
         log_header_row = QHBoxLayout()
         lbl_log_title = QLabel("📋 实时日志")
-        lbl_log_title.setStyleSheet("color: #6b7280; font-size: 11px;")
+        lbl_log_title.setObjectName("aiRenameLogTitle")
         log_header_row.addWidget(lbl_log_title)
         log_header_row.addStretch()
         btn_clear_log = QPushButton("清空日志")
@@ -1266,15 +1217,7 @@ class VideoAiRenamePage(BasePage):
         self.log_panel = QTextEdit()
         self.log_panel.setReadOnly(True)
         self.log_panel.setFixedHeight(140)
-        self.log_panel.setStyleSheet("""
-            QTextEdit {
-                background-color: #0d0d0d;
-                color: #c8c8c8;
-                border: 1px solid #2d2d2d;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 11px;
-            }
-        """)
+        self.log_panel.setObjectName("aiRenameLogPanel")
         layout.addWidget(self.log_panel)
 
     # ──────────────────────── 配置加载 ────────────────────────
@@ -1293,12 +1236,14 @@ class VideoAiRenamePage(BasePage):
             self._vision_api_url = cfg.get("llm_vision_api_url","").strip()
             self._vision_model   = cfg.get("llm_vision_model",  "").strip()
             self.lbl_model_info.setText(f"🤖 文本: {self._model}" if self._model else "⚠ 未配置文本模型")
-            self.lbl_model_info.setStyleSheet(
-                "color: #60a5fa; font-size: 12px;" if self._model else "color: #f87171; font-size: 12px;"
-            )
+            self.lbl_model_info.setProperty("status", "" if self._model else "error")
+            self.lbl_model_info.style().unpolish(self.lbl_model_info)
+            self.lbl_model_info.style().polish(self.lbl_model_info)
         except Exception:
             self.lbl_model_info.setText("⚠ 无法读取 AI 配置")
-            self.lbl_model_info.setStyleSheet("color: #f87171; font-size: 12px;")
+            self.lbl_model_info.setProperty("status", "error")
+            self.lbl_model_info.style().unpolish(self.lbl_model_info)
+            self.lbl_model_info.style().polish(self.lbl_model_info)
 
         # 刷新视觉模型下拉框：尝试从 Ollama 获取已下载列表
         cur = self._vision_model
@@ -1468,10 +1413,7 @@ class VideoAiRenamePage(BasePage):
             # Col 9: 播放按钮（随时可用，打开 VideoPlayerDialog）
             btn_play_row = QPushButton("▶")
             btn_play_row.setToolTip("播放视频，拖拽到任意帧后可分析命名")
-            btn_play_row.setStyleSheet(
-                "padding: 0px; font-size: 12px;"
-                "background-color: #1d4ed8; color: #fff; border-radius: 3px;"
-            )
+            btn_play_row.setObjectName("aiRenamePlayBtn")
             btn_play_row.setFixedWidth(30)
             btn_play_row.setFixedHeight(24)
             btn_play_row.clicked.connect(lambda checked=False, r=row: self._open_video_player(r))

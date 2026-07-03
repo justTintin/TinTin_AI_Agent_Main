@@ -656,4 +656,24 @@ QFrame[frameShape="4"],
 QFrame[frameShape="5"] {
     color: #1e1e26;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   对话框
+   ═══════════════════════════════════════════════════════════════ */
+
+QDialog, QMessageBox { background-color: #1a1a1c; color: #e4e4e7; }
+QDialog QLabel, QMessageBox QLabel { color: #e4e4e7; }
+
+QDialog QPushButton, QMessageBox QPushButton {
+    background-color: #2c2c2e;
+    border: 1px solid #3a3a40;
+    border-radius: 8px;
+    padding: 8px 20px;
+    color: #e4e4e7;
+    min-width: 80px;
+}
+
+QDialog QPushButton:hover, QMessageBox QPushButton:hover {
+    background-color: #3a3a40;
+}
 """

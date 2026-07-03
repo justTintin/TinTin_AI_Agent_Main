@@ -1481,6 +1481,7 @@ if __name__ == "__main__":
     log.info("Application starting...")
     try:
         app = QApplication(sys.argv)
+        app.setAttribute(Qt.AA_DontUseNativeDialogs, True)  # 主题对话框
         app.setStyle("Fusion")
         from utils.theme_manager import apply_theme
         apply_theme(app)

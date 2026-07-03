@@ -759,33 +759,7 @@ class VideoPlayerDialog(QDialog):
     def _setup_ui(self):
         self.setWindowTitle(f"视频预览 — {os.path.basename(self.fpath)}")
         self.resize(1040, 640)
-        self.setStyleSheet("""
-            QDialog            { background-color: #141414; color: #e5e7eb; }
-            QLabel             { color: #e5e7eb; font-size: 13px; }
-            QLineEdit {
-                background-color: #2c2c2e; border: 1px solid #3a3a3c;
-                border-radius: 4px; padding: 4px 8px;
-                color: #fff; font-size: 13px;
-            }
-            QPushButton {
-                background-color: #3b82f6; color: white; border: none;
-                padding: 6px 14px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover    { background-color: #2563eb; }
-            QPushButton:disabled { background-color: #374151; color: #6b7280; }
-            QPushButton#close_btn {
-                background-color: transparent; border: 1px solid #4b5563; color: #d1d5db;
-            }
-            QPushButton#close_btn:hover { background-color: rgba(255,255,255,0.06); }
-            QSlider::groove:horizontal {
-                height: 4px; background: #374151; border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #60a5fa; width: 14px; height: 14px;
-                border-radius: 7px; margin: -5px 0;
-            }
-            QSlider::sub-page:horizontal { background: #3b82f6; border-radius: 2px; }
-        """)
+        self.setObjectName("videoPlayerDialog")
 
         main_h = QHBoxLayout(self)
         main_h.setContentsMargins(0, 0, 0, 0)

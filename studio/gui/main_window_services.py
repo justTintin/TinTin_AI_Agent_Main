@@ -371,7 +371,7 @@ class ServicesMixin:
         mgr = OllamaManager.get()
         if not mgr.is_binary_present():
             self.ollama_status_lbl.setText("● ollama.exe 未找到")
-            self.ollama_status_lbl.setStyleSheet("color: #f87171; font-size: 12px;")
+            self._set_ollama_status_state("red")
             self.ollama_models_lbl.setText(f"请将 ollama.exe 放到：{OLLAMA_BIN}")
             self.lbl_runners_warn.setVisible(False)
             self.btn_fix_runners.setVisible(False)
@@ -385,9 +385,9 @@ class ServicesMixin:
         if mgr.is_running():
             models = mgr.list_local_models()
             status = "● 运行中" if runners_ok else "● 运行中（推理不可用）"
-            color  = "#34d399" if runners_ok else "#fbbf24"
+            state = "green" if runners_ok else "yellow"
             self.ollama_status_lbl.setText(status)
-            self.ollama_status_lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
+            self._set_ollama_status_state(state)
             self.ollama_models_lbl.setText(
                 "已下载模型: " + ("、".join(models) if models else "（无）")
             )
@@ -402,7 +402,7 @@ class ServicesMixin:
             self.llm_vision_model_input.blockSignals(False)
         else:
             self.ollama_status_lbl.setText("● 未运行")
-            self.ollama_status_lbl.setStyleSheet("color: #9ca3af; font-size: 12px;")
+            self._set_ollama_status_state("gray")
             self.ollama_models_lbl.setText("已下载模型: (需启动后查看)")
 
     def _ollama_start(self):
@@ -416,7 +416,7 @@ class ServicesMixin:
 
         self.btn_ollama_start.setEnabled(False)
         self.ollama_status_lbl.setText("● 启动中...")
-        self.ollama_status_lbl.setStyleSheet("color: #fbbf24; font-size: 12px;")
+        self._set_ollama_status_state("yellow")
         self._ollama_start_worker = _Worker()
         self._ollama_start_worker.done.connect(self._ollama_start_done)
         self._ollama_start_worker.start()
@@ -429,12 +429,17 @@ class ServicesMixin:
                 self.llm_vision_api_url_input.setText("http://127.0.0.1:11434")
         else:
             self.ollama_status_lbl.setText(f"● 启动失败: {msg}")
-            self.ollama_status_lbl.setStyleSheet("color: #f87171; font-size: 12px;")
+            self._set_ollama_status_state("red")
 
     def _ollama_stop(self):
         from utils.ollama_manager import OllamaManager
         OllamaManager.get().stop()
         self._ollama_refresh_status()
+
+    def _set_ollama_status_state(self, state):
+        self.ollama_status_lbl.setProperty("state", state)
+        self.ollama_status_lbl.style().unpolish(self.ollama_status_lbl)
+        self.ollama_status_lbl.style().polish(self.ollama_status_lbl)
 
     def _ollama_fix_runners(self):
         """下载 Ollama 完整包，解压 lib/（llama-server.exe）到 bin/。"""

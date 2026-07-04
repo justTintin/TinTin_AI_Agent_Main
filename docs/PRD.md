@@ -244,3 +244,27 @@ GET  /api/analytics/dashboard → 数据看板
 - **Git + Gitea** 代码管理（jckunji.com:3000）
 - **Windows 为主**运行平台，Linux 开发环境
 - 最低硬件：RTX 3060 12G + 16GB RAM + 500GB SSD
+
+---
+
+## 十一、AI 性能优化（硬件自适应）
+
+### Ollama 视觉模型
+根据 GPU 显存自动选择模型和参数：
+
+| 显存 | 模型 | 并行数 | 帧数 |
+|------|------|--------|------|
+| < 6GB | moondream:1.8b | 1 | 3 |
+| 6-12GB | qwen2.5vl:7b | 2 | 6 |
+| 12-16GB | qwen2.5vl:7b / internvl2.5:8b | 4 | 8 |
+| ≥ 16GB | internvl2.5:26b | 4 | 12 |
+
+### Whisper 模型
+| 显存 | 模型 | Batch |
+|------|------|-------|
+| < 6GB | tiny | 4 |
+| 6-12GB | medium | 8 |
+| ≥ 12GB | large-v3 | 16 |
+
+- 显存不足时自动 `device=cpu` 降级
+- 语音转写与视觉识别错峰运行

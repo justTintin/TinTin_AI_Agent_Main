@@ -123,6 +123,29 @@ def get_bin(name: str) -> str:
     return _get_bin(name)
 
 
+def _ffmpeg_platform_dir() -> str:
+    """Return the platform-specific subdirectory name used under apps/*/ffmpeg/."""
+    if IS_WIN:
+        return "win_x64"
+    else:
+        return "linux_x64"
+
+
+def _ffmpeg_fallback_candidates(exe: str) -> list:
+    """Return a list of fallback paths to search for ffmpeg/ffprobe executables."""
+    try:
+        from config.paths import WORKSPACE_ROOT
+    except Exception:
+        return []
+    plat = _ffmpeg_platform_dir()
+    return [
+        os.path.join(WORKSPACE_ROOT, exe),
+        os.path.join(WORKSPACE_ROOT, "apps", "asset-browser", "bin", exe),
+        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.4.0", "backend", "ffmpeg", plat, exe),
+        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.1.1-windows-nvidia-cuda", "resources", "backend", "ffmpeg", plat, exe),
+    ]
+
+
 def find_ffmpeg() -> str:
     exe = binary_name("ffmpeg")
     local = get_bin("ffmpeg")
@@ -130,7 +153,13 @@ def find_ffmpeg() -> str:
         return local
     found = shutil.which(exe)
     if found:
-        return found
+        return os.path.abspath(found)
+
+    # Fallbacks for finding ffmpeg in project root or sub-applications
+    for c in _ffmpeg_fallback_candidates(exe):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+
     return exe
 
 
@@ -143,7 +172,13 @@ def find_ffprobe() -> str:
             return sibling
     found = shutil.which(exe)
     if found:
-        return found
+        return os.path.abspath(found)
+
+    # Fallbacks for finding ffprobe in project root or sub-applications
+    for c in _ffmpeg_fallback_candidates(exe):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+
     return exe
 
 

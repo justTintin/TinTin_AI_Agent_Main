@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-扁平化暗色主题 · TinTin AI Agent v2.1
+扁平化暗色主题 · 丁大怪-电商智能体矩阵 v2.1
 设计语言：Flat Design Modern — 微阴影 · 大圆角 · 低对比边框 · 流畅过渡
 """
 

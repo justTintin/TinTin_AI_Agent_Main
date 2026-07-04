@@ -240,7 +240,7 @@ function createWindow() {
     },
     frame: true,
     show: false,
-    title: 'TInTIn 素材下载浏览器'
+    title: '丁大怪-电商智能体矩阵 素材下载浏览器'
   });
 
   // Load the frontend main interface

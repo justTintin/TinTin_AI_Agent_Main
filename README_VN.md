@@ -1,4 +1,4 @@
-# Tintin Video Toolkit (GUI / Web)
+# DingDaGuai E-commerce Agent Matrix (GUI / Web)
 
 Dự án dùng cho mục đích học tập và nội bộ.
 

@@ -618,6 +618,17 @@ class PySceneDetectWorker(BaseWorker):
             if not ffmpeg_path:
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
 
+            # Setup ffmpeg environment for scenedetect
+            if os.path.isfile(ffmpeg_path):
+                ffmpeg_dir = os.path.dirname(os.path.abspath(ffmpeg_path))
+                if ffmpeg_dir not in os.environ["PATH"]:
+                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+                try:
+                    import scenedetect.output.video
+                    scenedetect.output.video._FFMPEG_PATH = ffmpeg_path
+                except Exception as e:
+                    log.warning(f"无法为 scenedetect 设置 _FFMPEG_PATH: {e}")
+
             self.stage.emit("正在分析镜头切点...")
             self.progress.emit(30)
 
@@ -649,6 +660,17 @@ class PySceneDetectWorker(BaseWorker):
                 output_file_template=output_template,
                 show_progress=False
             )
+
+            # 验证输出文件是否生成，防止 ffmpeg 调用失败无输出却显示成功
+            created_files = []
+            if os.path.exists(self.output_dir):
+                created_files = [f for f in os.listdir(self.output_dir) if f.lower().endswith(".mp4")]
+            
+            if not created_files:
+                raise RuntimeError(
+                    "未能生成分割后的镜头视频文件。请检查 ffmpeg 是否工作正常。\n"
+                    "也可以尝试将 ffmpeg.exe 复制到软件根目录下。"
+                )
 
             scenes_sec = [(s[0].get_seconds(), s[1].get_seconds()) for s in scene_list]
             self.stage.emit("分割导出完成")
@@ -2522,6 +2544,13 @@ class VideoMontagePage(BasePage):
         # Split clips metadata cache
         self.split_clips_cache = {}
 
+        # Step 2 precompose state
+        self.precompose_plans = []
+        self.current_precompose_index = -1
+        self._confirming_plan_index = None
+        self._preview_sequence_clips = []
+        self._preview_sequence_idx = 0
+
     def setup(self):
         # Main layout
         layout = QVBoxLayout(self.parent_widget)
@@ -2641,11 +2670,9 @@ class VideoMontagePage(BasePage):
 
     def _on_enter_step_3(self):
         dir_path = ""
-        if self.assembled_clips_list_widget.count() > 0:
-            first_item_text = self.assembled_clips_list_widget.item(0).text()
-            if "   (" in first_item_text and first_item_text.endswith(")"):
-                p = first_item_text.split("   (")[-1][:-1]
-                dir_path = os.path.dirname(p)
+        confirmed_paths = self._collect_assembled_paths() if hasattr(self, "_collect_assembled_paths") else []
+        if confirmed_paths:
+            dir_path = os.path.dirname(confirmed_paths[0])
         
         if not dir_path:
             src_dir = self.folder_path_input.text().strip()
@@ -2711,22 +2738,23 @@ class VideoMontagePage(BasePage):
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(12)
 
-        # Input video dir
+        # Input source videos
         row_dir = QHBoxLayout()
-        row_dir.addWidget(QLabel("原始素材目录:"))
+        row_dir.addWidget(QLabel("原始素材:"))
         self.folder_path_input = QLineEdit()
-        self.folder_path_input.setPlaceholderText("选择包含原始视频素材的文件夹...")
+        self.folder_path_input.setPlaceholderText("选择一个或多个视频素材，可多次追加...")
+        self.folder_path_input.setReadOnly(True)
         row_dir.addWidget(self.folder_path_input)
-        btn_sel = QPushButton("选择目录")
+        btn_sel = QPushButton("选择素材")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_folder)
         row_dir.addWidget(btn_sel)
         card_layout.addLayout(row_dir)
 
         # Raw videos list
-        card_layout.addWidget(QLabel("扫描到的原始视频素材 (双击可播放预览，选中单条进行镜头分割):"))
+        card_layout.addWidget(QLabel("已选择的原始视频素材 (双击可播放预览，每条可删除):"))
         self.video_list = QListWidget()
-        self.video_list.setFixedHeight(80)
+        self.video_list.setFixedHeight(120)
         self.video_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.video_list.itemClicked.connect(self._check_split_clips_exist)
         self.video_list.itemDoubleClicked.connect(self._preview_video_item)
@@ -2736,12 +2764,6 @@ class VideoMontagePage(BasePage):
 
         # SceneDetect Config
         split_row = QHBoxLayout()
-        btn_scan = QPushButton("🔄 扫描目录")
-        btn_scan.setObjectName("secondary_button")
-        btn_scan.clicked.connect(self._scan_folder)
-        split_row.addWidget(btn_scan)
-
-        split_row.addSpacing(15)
         split_row.addWidget(QLabel("分割阈值 (10-100):"))
         self.threshold_spin = QDoubleSpinBox()
         self.threshold_spin.setRange(10.0, 100.0)
@@ -2779,24 +2801,23 @@ class VideoMontagePage(BasePage):
             dep_layout.addWidget(self.btn_install_deps)
             
         split_row.addWidget(self.dep_status_widget)
-        card_layout.addLayout(split_row)
 
-        # Trigger button (Split button only!)
-        row_trigger = QHBoxLayout()
+        # 仅保留批量分割入口（单条智能分割按钮隐藏，仅用于兼容旧逻辑）
         self.btn_split = QPushButton("✂️ 开始智能镜头分割")
         self.btn_split.setObjectName("action_button")
         self.btn_split.setFixedHeight(35)
         self.btn_split.clicked.connect(self._start_split)
-        row_trigger.addWidget(self.btn_split)
+        self.btn_split.setVisible(False)
 
-        self.btn_split_all = QPushButton("📚 批量分割全部")
-        self.btn_split_all.setObjectName("secondary_button")
+        self.btn_split_all = QPushButton("📚 批量分割镜头")
+        self.btn_split_all.setObjectName("action_button")
         self.btn_split_all.setFixedHeight(35)
-        self.btn_split_all.setToolTip("对列表中所有视频依次进行镜头分割+重命名（不自动转写/描述）")
+        self.btn_split_all.setToolTip("对列表中所有视频依次进行镜头分割（不自动转写/描述）")
         self.btn_split_all.clicked.connect(self._start_split_all)
-        row_trigger.addWidget(self.btn_split_all)
+        split_row.addWidget(self.btn_split_all)
 
-        row_trigger.addWidget(QLabel("精华时长:"))
+        split_row.addSpacing(12)
+        split_row.addWidget(QLabel("精华时长:"))
         self.spin_highlight_sec = QDoubleSpinBox()
         self.spin_highlight_sec.setRange(1.0, 30.0)
         self.spin_highlight_sec.setValue(5.0)
@@ -2804,17 +2825,17 @@ class VideoMontagePage(BasePage):
         self.spin_highlight_sec.setSuffix(" 秒")
         self.spin_highlight_sec.setFixedWidth(80)
         self.spin_highlight_sec.setToolTip("从每个视频里挑出多长的精华片段")
-        row_trigger.addWidget(self.spin_highlight_sec)
+        split_row.addWidget(self.spin_highlight_sec)
 
-        self.btn_pick_highlights = QPushButton("🌟 批量挑精华片段")
+        self.btn_pick_highlights = QPushButton("🌟 批量选精华")
         self.btn_pick_highlights.setObjectName("secondary_button")
         self.btn_pick_highlights.setFixedHeight(35)
         self.btn_pick_highlights.setToolTip(
             "对列表中所有视频，各挑出一段最佳（清晰+适度运动）片段，"
             "写入 splits 作为混剪拼接素材")
         self.btn_pick_highlights.clicked.connect(self._start_pick_highlights)
-        row_trigger.addWidget(self.btn_pick_highlights)
-        card_layout.addLayout(row_trigger)
+        split_row.addWidget(self.btn_pick_highlights)
+        card_layout.addLayout(split_row)
 
         # Split results table view
         card_layout.addWidget(QLabel("已分割出的最小单位镜头片段 (双击可播放预览，双击画面描述列可手动修改):"))
@@ -2975,6 +2996,7 @@ class VideoMontagePage(BasePage):
         for i in [3, 5, 8, 10, 15, 20]:
             self.clip_count_combo.addItem(f"{i} 个镜头", i)
         self.clip_count_combo.setCurrentIndex(2)
+        self.clip_count_combo.currentIndexChanged.connect(self._update_batch_count_recommendation)
         row_params.addWidget(self.clip_count_combo)
 
         row_params.addSpacing(15)
@@ -2990,13 +3012,23 @@ class VideoMontagePage(BasePage):
         self.randomness_combo.setVisible(False)
 
         row_params.addSpacing(15)
-        self.lbl_batch_count = QLabel("生成视频数量 (1-7):")
+        self.lbl_batch_count = QLabel("生成视频数量 (1-10):")
         row_params.addWidget(self.lbl_batch_count)
         self.batch_count_spin = QSpinBox()
-        self.batch_count_spin.setRange(1, 7)
+        self.batch_count_spin.setRange(1, 10)
         self.batch_count_spin.setValue(3)
         self.batch_count_spin.setFixedWidth(60)
         row_params.addWidget(self.batch_count_spin)
+
+        self.batch_count_hint_lbl = QLabel("推荐: 1")
+        self.batch_count_hint_lbl.setObjectName("muted_text")
+        row_params.addWidget(self.batch_count_hint_lbl)
+
+        self.btn_assemble_video = QPushButton("🎬 开始镜头组合排列")
+        self.btn_assemble_video.setObjectName("action_button")
+        self.btn_assemble_video.setFixedHeight(35)
+        self.btn_assemble_video.clicked.connect(self._start_assemble_video)
+        row_params.addWidget(self.btn_assemble_video)
 
         row_params.addStretch()
         card_layout.addLayout(row_params)
@@ -3010,12 +3042,6 @@ class VideoMontagePage(BasePage):
         self.match_script_edit.setFixedHeight(96)
         self.match_script_edit.setVisible(False)
         card_layout.addWidget(self.match_script_edit)
-
-        self.btn_assemble_video = QPushButton("🎬 开始镜头组合排列")
-        self.btn_assemble_video.setObjectName("action_button")
-        self.btn_assemble_video.setFixedHeight(35)
-        self.btn_assemble_video.clicked.connect(self._start_assemble_video)
-        card_layout.addWidget(self.btn_assemble_video)
 
         # Intermediate result viewer
         result_box = QFrame()
@@ -3051,11 +3077,29 @@ class VideoMontagePage(BasePage):
         self.assembled_clips_list_widget.itemClicked.connect(self._on_assembled_item_clicked)
         left_vbox.addWidget(self.assembled_clips_list_widget)
 
-        left_vbox.addWidget(QLabel("📋 视频组成镜头详情 (所选视频包含的原始分割片段):"))
+        detail_header = QHBoxLayout()
+        detail_header.setContentsMargins(0, 0, 0, 0)
+        detail_header.addWidget(QLabel("📋 视频组成镜头详情 (所选预合成包含的镜头片段):"), 1)
+        self.btn_source_up = QPushButton("↑ 上移")
+        self.btn_source_up.setObjectName("secondary_button")
+        self.btn_source_up.setFixedHeight(24)
+        self.btn_source_up.clicked.connect(lambda: self._move_selected_source_row(-1))
+        detail_header.addWidget(self.btn_source_up, 0)
+        self.btn_source_down = QPushButton("↓ 下移")
+        self.btn_source_down.setObjectName("secondary_button")
+        self.btn_source_down.setFixedHeight(24)
+        self.btn_source_down.clicked.connect(lambda: self._move_selected_source_row(1))
+        detail_header.addWidget(self.btn_source_down, 0)
+        self.btn_source_delete = QPushButton("🗑 删除镜头")
+        self.btn_source_delete.setObjectName("secondary_button")
+        self.btn_source_delete.setFixedHeight(24)
+        self.btn_source_delete.clicked.connect(self._delete_selected_source_row)
+        detail_header.addWidget(self.btn_source_delete, 0)
+        left_vbox.addLayout(detail_header)
         
         self.sources_detail_widget = QTableWidget()
-        self.sources_detail_widget.setColumnCount(3)
-        self.sources_detail_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "描述文案"])
+        self.sources_detail_widget.setColumnCount(4)
+        self.sources_detail_widget.setHorizontalHeaderLabels(["序号", "分割文件名", "时间戳", "描述文案"])
         self.sources_detail_widget.setFixedHeight(220)
         self.sources_detail_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.sources_detail_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -3064,7 +3108,8 @@ class VideoMontagePage(BasePage):
         header = self.sources_detail_widget.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
         
         left_vbox.addWidget(self.sources_detail_widget)
 
@@ -3084,6 +3129,15 @@ class VideoMontagePage(BasePage):
         self.preview_video_widget = QVideoWidget()
         self.preview_video_widget.setMinimumHeight(200)
         player_vbox.addWidget(self.preview_video_widget, 1)
+
+        self.preview_overlay_label = QLabel("#1")
+        self.preview_overlay_label.setParent(self.preview_video_widget)
+        self.preview_overlay_label.move(8, 8)
+        self.preview_overlay_label.setStyleSheet(
+            "background-color: rgba(0,0,0,0.55); color: #f8fafc; "
+            "border: 1px solid rgba(255,255,255,0.22); border-radius: 10px; "
+            "padding: 2px 8px; font-size: 12px; font-weight: bold;")
+        self.preview_overlay_label.hide()
         
         # Control buttons row
         player_controls = QHBoxLayout()
@@ -3111,6 +3165,7 @@ class VideoMontagePage(BasePage):
         self.preview_player.setVideoOutput(self.preview_video_widget)
         self.preview_player.positionChanged.connect(self._on_preview_position_changed)
         self.preview_player.durationChanged.connect(self._on_preview_duration_changed)
+        self.preview_player.mediaStatusChanged.connect(self._on_preview_media_status_changed)
 
         card_layout.addWidget(result_box)
 
@@ -3661,6 +3716,54 @@ class VideoMontagePage(BasePage):
 
 
     # ==================== STEP HELPER ACTIONS ====================
+    def _decorate_video_item_widget(self, item):
+        path = item.text().strip()
+        if not path:
+            return
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(6, 2, 6, 2)
+        h.setSpacing(8)
+
+        lbl = QLabel(os.path.basename(path))
+        lbl.setToolTip(path)
+        h.addWidget(lbl, 1)
+
+        btn_del = QPushButton("删除")
+        btn_del.setObjectName("secondary_button")
+        btn_del.setFixedWidth(58)
+        btn_del.clicked.connect(lambda _=False, it=item: self._remove_source_video_item(it))
+        h.addWidget(btn_del)
+
+        item.setSizeHint(row.sizeHint())
+        self.video_list.setItemWidget(item, row)
+
+    def _remove_source_video_item(self, item):
+        row = self.video_list.row(item)
+        if row < 0:
+            return
+        path = item.text().strip()
+        self.video_list.takeItem(row)
+        if getattr(self, "processing_video_path", "") == path:
+            self.processing_video_path = ""
+        self._refresh_source_root_hint()
+        self._check_split_clips_exist()
+
+    def _refresh_source_root_hint(self):
+        paths = []
+        for i in range(self.video_list.count()):
+            p = self.video_list.item(i).text().strip()
+            if p:
+                paths.append(p)
+        if not paths:
+            self.folder_path_input.clear()
+            return
+        try:
+            common_dir = os.path.commonpath([os.path.dirname(os.path.abspath(p)) for p in paths])
+        except Exception:
+            common_dir = os.path.dirname(os.path.abspath(paths[0]))
+        self.folder_path_input.setText(common_dir)
+
     def _select_folder(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self.parent_widget,
@@ -3668,33 +3771,42 @@ class VideoMontagePage(BasePage):
             "",
             "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v);;所有文件 (*.*)"
         )
-        if file_paths:
-            dir_path = os.path.dirname(file_paths[0])
-            self.folder_path_input.setText(dir_path)
-            self.selected_raw_video_files = file_paths
-            self._scan_folder()
+        if not file_paths:
+            return
+
+        existing = set()
+        for i in range(self.video_list.count()):
+            t = self.video_list.item(i).text().strip()
+            if t:
+                existing.add(os.path.abspath(t))
+
+        added = 0
+        for p in file_paths:
+            ap = os.path.abspath(p)
+            if ap in existing:
+                continue
+            existing.add(ap)
+            it = QListWidgetItem(ap)
+            self.video_list.addItem(it)
+            self._decorate_video_item_widget(it)
+            added += 1
+
+        if self.video_list.count() > 0 and self.video_list.currentItem() is None:
+            self.video_list.setCurrentRow(0)
+        self._refresh_source_root_hint()
+        self._check_split_clips_exist()
+        if added == 0:
+            self.stage_label.setText("所选素材已在列表中，无新增。")
+        else:
+            self.stage_label.setText(f"已新增 {added} 个素材到列表。")
 
     def _scan_folder(self):
-        dir_path = self.folder_path_input.text().strip()
-        if not dir_path or not os.path.exists(dir_path):
-            return
-        self.video_list.clear()
-        
-        files = []
-        if hasattr(self, "selected_raw_video_files") and self.selected_raw_video_files:
-            first_parent = os.path.abspath(os.path.dirname(self.selected_raw_video_files[0]))
-            current_dir = os.path.abspath(dir_path)
-            if first_parent == current_dir:
-                files = self.selected_raw_video_files
-                
-        if not files:
-            for f in os.listdir(dir_path):
-                if f.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v")):
-                    files.append(os.path.join(dir_path, f))
-                    
-        for p in files:
-            self.video_list.addItem(p)
-        
+        # 兼容旧调用：当前版本不再扫描目录，只基于用户选择的素材列表。
+        for i in range(self.video_list.count()):
+            it = self.video_list.item(i)
+            if it:
+                self._decorate_video_item_widget(it)
+        self._refresh_source_root_hint()
         self._check_split_clips_exist()
 
     def _get_split_scenes_times(self, splits_dir, files):
@@ -4754,7 +4866,8 @@ class VideoMontagePage(BasePage):
 
         reply = QMessageBox.question(
             self.parent_widget, "批量镜头分割",
-            f"将对列表中全部 {len(paths)} 个视频依次进行镜头分割+重命名。\n"
+            f"将对列表中全部 {len(paths)} 个视频依次进行镜头分割。\n"
+            f"（系统会自动整理片段文件名，便于后续步骤识别时间戳）\n"
             f"（不会自动转写字幕/生成画面描述）\n\n确认继续？",
             QMessageBox.Yes | QMessageBox.No
         )
@@ -5482,7 +5595,7 @@ class VideoMontagePage(BasePage):
             self.script_match_worker.start()
             return
 
-        # ── 随机洗牌（原有逻辑）──
+        # ── 随机洗牌：先生成“预合成方案”，供人工删改/调序并确认后再正式合成 ──
         target_clip_count = int(self.clip_count_combo.currentData())
         if len(self.split_clips_list) < target_clip_count:
             QMessageBox.warning(
@@ -5495,30 +5608,33 @@ class VideoMontagePage(BasePage):
 
         batch_count = int(self.batch_count_spin.value())
         randomness_val = self.randomness_combo.currentData() if hasattr(self, "randomness_combo") else "medium"
-        self._launch_concat_worker(
-            selected_clips=self.split_clips_list,
-            out_montage_dir=out_montage_dir,
-            recombine_mode="random",
+        plan_clips_list = self._build_precompose_plans(
+            clips=self.split_clips_list,
             target_clip_count=target_clip_count,
             batch_count=batch_count,
             randomness=randomness_val,
-            selected_descriptions_list=None,
+        )
+        self._load_precompose_plans(plan_clips_list, out_montage_dir)
+        self.stage_label.setText(f"✅ 预合成方案已生成：{len(plan_clips_list)} 条，请检查后确认合成")
+        self.progress_bar.setVisible(False)
+        QMessageBox.information(
+            self.parent_widget,
+            "预合成完成",
+            f"已生成 {len(plan_clips_list)} 条预合成方案。\n"
+            "可在下方删除/调序镜头，确认无误后点击“✅ 确认合成视频”。"
         )
 
     def _on_script_match_finished(self, matched_paths, matched_descs):
-        """LLM 匹配完成：按文案行序拼接（不洗牌、每批相同故只生成 1 个）。"""
-        self.stage_label.setText(f"🎯 匹配完成：{len(matched_paths)} 句文案已配齐镜头，开始拼接...")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self._launch_concat_worker(
-            selected_clips=matched_paths,
-            out_montage_dir=getattr(self, "_pending_out_montage_dir", ""),
-            recombine_mode="script",
-            target_clip_count=len(matched_paths),
-            batch_count=1,
-            randomness="low",
-            selected_descriptions_list=matched_descs,
-        )
+        """LLM 匹配完成：生成 1 条按文案顺序的预合成方案，待用户确认合成。"""
+        out_montage_dir = getattr(self, "_pending_out_montage_dir", "")
+        plan = [{
+            "clips": list(matched_paths),
+            "descriptions": list(matched_descs),
+            "mode": "script",
+        }]
+        self._load_precompose_plans(plan, out_montage_dir)
+        self.stage_label.setText(f"🎯 匹配完成：{len(matched_paths)} 句文案已配齐，请确认合成")
+        self.progress_bar.setVisible(False)
 
     def _on_script_match_error(self, err):
         self.btn_assemble_video.setEnabled(True)
@@ -5573,27 +5689,55 @@ class VideoMontagePage(BasePage):
         if not is_script:
             self.clip_count_combo.setEnabled(True)
             self.batch_count_spin.setEnabled(True)
-            self.batch_count_spin.setValue(3)
+            self.batch_count_spin.setValue(self._recommend_batch_count())
             if hasattr(self, "randomness_combo"):
                 self.randomness_combo.setEnabled(True)
                 self.randomness_combo.setCurrentIndex(0) # 中 (保留同场景)
+        self._update_batch_count_recommendation()
 
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)
         self.progress_bar.setValue(100)
+        if self._confirming_plan_index is not None:
+            idx = self._confirming_plan_index
+            self._confirming_plan_index = None
+            if 0 <= idx < len(self.precompose_plans) and paths:
+                out_path = paths[0]
+                plan = self.precompose_plans[idx]
+                plan["output_path"] = out_path
+                plan["confirmed"] = True
+                self.stage_label.setText(f"✅ 预合成 {idx + 1} 已确认合成")
+                self._refresh_precompose_list(select_index=idx)
+                if hasattr(self, "btn_batch_scene_copy"):
+                    self.btn_batch_scene_copy.setEnabled(bool(self._collect_assembled_paths()))
+                QMessageBox.information(
+                    self.parent_widget,
+                    "确认合成成功",
+                    f"预合成 {idx + 1} 已输出为视频：\n{out_path}"
+                )
+            return
+
         self.stage_label.setText(f"✅ 批量排列完成，共生成 {len(paths)} 个视频！")
-        
         self.assembled_clips_list_widget.clear()
+        self.precompose_plans = []
         if hasattr(self, "btn_batch_scene_copy"):
             self.btn_batch_scene_copy.setEnabled(bool(paths))
         if paths:
             for i, p in enumerate(paths):
+                self.precompose_plans.append({
+                    "clips": [],
+                    "mode": "random",
+                    "descriptions": [],
+                    "confirmed": True,
+                    "output_path": p,
+                    "out_dir": os.path.dirname(p),
+                })
                 self._add_assembled_row(i, p)
 
             first_item = self.assembled_clips_list_widget.item(0)
             self.assembled_clips_list_widget.setCurrentItem(first_item)
             self._on_assembled_item_clicked(first_item)
-            
+
             QMessageBox.information(
                 self.parent_widget,
                 "排列生成成功",
@@ -5602,6 +5746,7 @@ class VideoMontagePage(BasePage):
 
     def _on_concat_error(self, err):
         self.btn_assemble_video.setEnabled(True)
+        self._confirming_plan_index = None
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 排列失败")
@@ -6825,37 +6970,149 @@ class VideoMontagePage(BasePage):
                     self.clip_count_combo.addItem(f"{i} 个镜头", i)
             self.clip_count_combo.setCurrentIndex(0)
             self.clip_count_combo.blockSignals(False)
+        self._update_batch_count_recommendation()
         
         if checked_count > 0:
             self.btn_assemble_video.setEnabled(True)
         else:
             self.btn_assemble_video.setEnabled(False)
 
-    def _add_assembled_row(self, index, path):
-        """在生成列表中添加一行：文本（用于解析路径）+ 「生成文案」按钮。"""
-        text = f"[{index+1}] {os.path.basename(path)}   ({path})"
+    def _recommend_batch_count(self):
+        checked = max(1, len(self.split_clips_list))
+        target = int(self.clip_count_combo.currentData() or checked)
+        if target <= 0:
+            return 1
+        recommended = checked // target
+        if recommended <= 0:
+            recommended = 1
+        return max(1, min(10, recommended))
+
+    def _update_batch_count_recommendation(self):
+        if not hasattr(self, "batch_count_spin"):
+            return
+        rec = self._recommend_batch_count()
+        if hasattr(self, "batch_count_hint_lbl"):
+            self.batch_count_hint_lbl.setText(f"推荐: {rec} (最小重复度)")
+        cur = int(self.batch_count_spin.value())
+        if cur > 10:
+            self.batch_count_spin.setValue(10)
+
+    def _build_precompose_plans(self, clips, target_clip_count, batch_count, randomness="medium"):
+        base = [os.path.abspath(c) for c in clips if c]
+        if not base:
+            return []
+        unique = list(dict.fromkeys(base))
+        if randomness == "low":
+            deck = list(unique)
+        else:
+            deck = list(unique)
+            random.shuffle(deck)
+
+        plans = []
+        cursor = 0
+        for _i in range(batch_count):
+            if randomness == "high":
+                random.shuffle(deck)
+            seq = []
+            while len(seq) < target_clip_count:
+                if cursor >= len(deck):
+                    cursor = 0
+                    if randomness != "low":
+                        random.shuffle(deck)
+                need = target_clip_count - len(seq)
+                take = min(need, len(deck) - cursor)
+                if take <= 0:
+                    break
+                seq.extend(deck[cursor:cursor + take])
+                cursor += take
+            if len(seq) < target_clip_count:
+                while len(seq) < target_clip_count:
+                    seq.append(random.choice(unique))
+            plans.append({"clips": seq, "mode": "random"})
+        return plans
+
+    def _load_precompose_plans(self, plan_specs, out_montage_dir):
+        self.precompose_plans = []
+        self.current_precompose_index = -1
+        self.assembled_video_path = ""
+        self.btn_next_to_step_3.setEnabled(False)
+        self.assembled_clips_list_widget.clear()
+        if hasattr(self, "btn_batch_scene_copy"):
+            self.btn_batch_scene_copy.setEnabled(False)
+        self.sources_detail_widget.setRowCount(0)
+
+        for idx, spec in enumerate(plan_specs):
+            clips = list(spec.get("clips") or [])
+            plan = {
+                "clips": clips,
+                "mode": spec.get("mode", "random"),
+                "descriptions": list(spec.get("descriptions") or []),
+                "confirmed": False,
+                "output_path": "",
+                "out_dir": out_montage_dir,
+            }
+            self.precompose_plans.append(plan)
+            self._add_assembled_row(idx, "", plan)
+
+        if self.assembled_clips_list_widget.count() > 0:
+            item = self.assembled_clips_list_widget.item(0)
+            self.assembled_clips_list_widget.setCurrentItem(item)
+            self._on_assembled_item_clicked(item)
+
+    def _add_assembled_row(self, index, path, plan=None):
+        """在预合成列表中添加一行，支持确认合成状态与单条确认操作。"""
+        if plan is None:
+            plan = {
+                "clips": [],
+                "mode": "random",
+                "descriptions": [],
+                "confirmed": True,
+                "output_path": path,
+                "out_dir": os.path.dirname(path) if path else "",
+            }
+        text = f"预合成 {index + 1}"
+        if path:
+            text = f"预合成 {index + 1}   ({path})"
         item = QListWidgetItem()
-        item.setText(text)  # 供 _on_assembled_item_clicked / _preview_video_item 解析路径
+        item.setText(text)
+        item.setData(Qt.UserRole, index)
         self.assembled_clips_list_widget.addItem(item)
 
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(6, 2, 6, 2)
         h.setSpacing(8)
-        lbl = QLabel(f"[{index+1}] {os.path.basename(path)}")
-        lbl.setToolTip(path)
+        clip_count = len(plan.get("clips") or [])
+        out_path = (plan.get("output_path") or path or "").strip()
+        status_txt = "已合成" if (plan.get("confirmed") and out_path) else "待确认"
+        status_color = "#2ecc71" if status_txt == "已合成" else "#f1c40f"
+
+        file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
+        lbl = QLabel(f"[{index+1}] {file_text}")
+        lbl.setToolTip(out_path or f"预合成 {index+1}")
         lbl.setStyleSheet("color:#e5e7eb; font-size:12px;")
-        # 鼠标事件穿透，保留 QListWidget 行的单击选中 / 双击预览
         lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         h.addWidget(lbl, 1)
 
-        btn = QPushButton("✍ 重新生成文案" if self._assembled_has_copy(path) else "✍ 生成文案")
+        st = QLabel(status_txt)
+        st.setStyleSheet(f"color:{status_color}; font-size:12px; font-weight:bold;")
+        st.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        h.addWidget(st, 0)
+
+        btn_confirm = QPushButton("✅ 确认合成视频")
+        btn_confirm.setObjectName("secondary_button")
+        btn_confirm.setFixedHeight(24)
+        btn_confirm.setStyleSheet("padding:2px 8px; font-size:12px;")
+        btn_confirm.clicked.connect(lambda checked=False, idx=index: self._confirm_precompose(idx))
+        h.addWidget(btn_confirm, 0)
+
+        btn = QPushButton("✍ 重新生成文案" if (out_path and self._assembled_has_copy(out_path)) else "✍ 生成文案")
         btn.setObjectName("secondary_button")
         btn.setFixedHeight(24)
         btn.setStyleSheet("padding:2px 10px; font-size:12px;")
         btn.setToolTip("根据该组合视频的画面镜头描述 + 共用产品背景，用大模型生成口播文案"
                        "（保存为同名 .txt，下一步配音自动载入）")
-        btn.clicked.connect(lambda checked=False, pp=path: self._gen_copy_for_assembled(pp))
+        btn.clicked.connect(lambda checked=False, idx=index: self._gen_copy_for_plan(idx))
         h.addWidget(btn, 0)
 
         item.setSizeHint(row.sizeHint())
@@ -6877,24 +7134,198 @@ class VideoMontagePage(BasePage):
             row = w.itemWidget(item)
             if not row:
                 continue
-            text = item.text()
-            path = text.split("   (")[-1][:-1] if ("   (" in text and text.endswith(")")) else text
-            btn = row.findChild(QPushButton)
-            if btn:
-                btn.setText("✍ 重新生成文案" if self._assembled_has_copy(path) else "✍ 生成文案")
+            idx = item.data(Qt.UserRole)
+            if idx is None or idx < 0 or idx >= len(self.precompose_plans):
+                continue
+            plan = self.precompose_plans[idx]
+            out_path = (plan.get("output_path") or "").strip()
+            buttons = row.findChildren(QPushButton)
+            if len(buttons) >= 2:
+                copy_btn = buttons[-1]
+                copy_btn.setText("✍ 重新生成文案" if (out_path and self._assembled_has_copy(out_path)) else "✍ 生成文案")
 
     def _collect_assembled_paths(self):
-        """从已生成列表中按顺序取出所有组合视频的路径。"""
+        """按列表顺序返回已确认合成的视频路径。"""
         paths = []
-        w = self.assembled_clips_list_widget
-        for i in range(w.count()):
-            text = w.item(i).text()
-            path = text
-            if "   (" in text and text.endswith(")"):
-                path = text.split("   (")[-1][:-1]
-            if path:
-                paths.append(path)
+        for plan in self.precompose_plans:
+            out_path = (plan.get("output_path") or "").strip()
+            if plan.get("confirmed") and out_path and os.path.exists(out_path):
+                paths.append(out_path)
         return paths
+
+    def _gen_copy_for_plan(self, plan_index):
+        if plan_index < 0 or plan_index >= len(self.precompose_plans):
+            return
+        out_path = (self.precompose_plans[plan_index].get("output_path") or "").strip()
+        if not out_path or not os.path.exists(out_path):
+            QMessageBox.information(
+                self.parent_widget,
+                "请先确认合成",
+                "该预合成还没有生成实际视频文件，请先点击“✅ 确认合成视频”。"
+            )
+            return
+        self._gen_copy_for_assembled(out_path)
+
+    def _refresh_precompose_list(self, select_index=None):
+        self.assembled_clips_list_widget.clear()
+        for idx, plan in enumerate(self.precompose_plans):
+            self._add_assembled_row(idx, plan.get("output_path", ""), plan)
+        if select_index is None:
+            select_index = self.current_precompose_index
+        if select_index is not None and 0 <= select_index < self.assembled_clips_list_widget.count():
+            item = self.assembled_clips_list_widget.item(select_index)
+            self.assembled_clips_list_widget.setCurrentItem(item)
+            self._on_assembled_item_clicked(item)
+
+    def _confirm_precompose(self, index):
+        if self.concat_worker and self.concat_worker.isRunning():
+            QMessageBox.information(self.parent_widget, "处理中", "当前已有合成任务在执行，请稍候。")
+            return
+        if index < 0 or index >= len(self.precompose_plans):
+            return
+        plan = self.precompose_plans[index]
+        clips = list(plan.get("clips") or [])
+        if not clips:
+            QMessageBox.warning(self.parent_widget, "镜头为空", "该预合成没有可用镜头，请先在下方镜头列表调整。")
+            return
+
+        out_montage_dir = plan.get("out_dir") or getattr(self, "_pending_out_montage_dir", "")
+        if not out_montage_dir:
+            dir_path = self.concat_src_dir_input.text().strip() or self.folder_path_input.text().strip()
+            out_montage_dir = self._get_out_montage_dir(dir_path)
+        os.makedirs(out_montage_dir, exist_ok=True)
+        self._confirming_plan_index = index
+
+        selected_descs = list(plan.get("descriptions") or [])
+        if len(selected_descs) != len(clips):
+            selected_descs = []
+            for clip in clips:
+                desc = self.split_descriptions.get(os.path.abspath(clip), "")
+                selected_descs.append(desc)
+
+        self._launch_concat_worker(
+            selected_clips=clips,
+            out_montage_dir=out_montage_dir,
+            recombine_mode=plan.get("mode", "random"),
+            target_clip_count=len(clips),
+            batch_count=1,
+            randomness="low",
+            selected_descriptions_list=selected_descs,
+        )
+        self.stage_label.setText(f"🎬 正在确认合成预合成 {index + 1}...")
+
+    def _refresh_sources_for_plan(self, plan_index):
+        self.sources_detail_widget.setRowCount(0)
+        if plan_index < 0 or plan_index >= len(self.precompose_plans):
+            return
+        plan = self.precompose_plans[plan_index]
+        clips = list(plan.get("clips") or [])
+        self.sources_detail_widget.setRowCount(len(clips))
+        for idx, src_path in enumerate(clips):
+            filename = os.path.basename(src_path)
+            cache_item = getattr(self, "split_clips_cache", {}).get(os.path.abspath(src_path))
+            if cache_item:
+                time_str = cache_item.get("time_str", "N/A")
+                desc = cache_item.get("desc", "")
+            else:
+                parsed = self._parse_split_filename(filename)
+                if parsed:
+                    _, start_str, end_str, desc = parsed
+                    time_str = f"{start_str} --> {end_str}"
+                else:
+                    time_str = "N/A"
+                    desc = self.split_descriptions.get(os.path.abspath(src_path), "")
+
+            item_idx = QTableWidgetItem(str(idx + 1))
+            item_idx.setTextAlignment(Qt.AlignCenter)
+            item_idx.setData(Qt.UserRole, src_path)
+            self.sources_detail_widget.setItem(idx, 0, item_idx)
+
+            file_item = QTableWidgetItem(filename)
+            self.sources_detail_widget.setItem(idx, 1, file_item)
+
+            time_item = QTableWidgetItem(time_str)
+            time_item.setTextAlignment(Qt.AlignCenter)
+            self.sources_detail_widget.setItem(idx, 2, time_item)
+
+            desc_item = QTableWidgetItem(desc)
+            self.sources_detail_widget.setItem(idx, 3, desc_item)
+
+    def _mark_current_plan_dirty(self):
+        idx = self.current_precompose_index
+        if idx < 0 or idx >= len(self.precompose_plans):
+            return
+        plan = self.precompose_plans[idx]
+        plan["confirmed"] = False
+        plan["output_path"] = ""
+        self._refresh_precompose_list(select_index=idx)
+        if hasattr(self, "btn_batch_scene_copy"):
+            self.btn_batch_scene_copy.setEnabled(bool(self._collect_assembled_paths()))
+
+    def _move_selected_source_row(self, delta):
+        idx = self.current_precompose_index
+        if idx < 0 or idx >= len(self.precompose_plans):
+            return
+        row = self.sources_detail_widget.currentRow()
+        if row < 0:
+            return
+        plan = self.precompose_plans[idx]
+        clips = plan.get("clips") or []
+        target = row + delta
+        if target < 0 or target >= len(clips):
+            return
+        clips[row], clips[target] = clips[target], clips[row]
+        plan["clips"] = clips
+        plan["descriptions"] = []
+        self._mark_current_plan_dirty()
+        self._refresh_sources_for_plan(idx)
+        self.sources_detail_widget.selectRow(target)
+        self._start_sequence_preview(clips, target)
+
+    def _delete_selected_source_row(self):
+        idx = self.current_precompose_index
+        if idx < 0 or idx >= len(self.precompose_plans):
+            return
+        row = self.sources_detail_widget.currentRow()
+        if row < 0:
+            return
+        plan = self.precompose_plans[idx]
+        clips = plan.get("clips") or []
+        if len(clips) <= 1:
+            QMessageBox.warning(self.parent_widget, "无法删除", "至少保留 1 个镜头片段。")
+            return
+        clips.pop(row)
+        plan["clips"] = clips
+        plan["descriptions"] = []
+        self._mark_current_plan_dirty()
+        self._refresh_sources_for_plan(idx)
+        new_row = min(row, len(clips) - 1)
+        if new_row >= 0:
+            self.sources_detail_widget.selectRow(new_row)
+            self._start_sequence_preview(clips, new_row)
+
+    def _start_sequence_preview(self, clips, start_idx=0):
+        self._preview_sequence_clips = [os.path.abspath(p) for p in clips if p and os.path.exists(p)]
+        if not self._preview_sequence_clips:
+            self.preview_player.stop()
+            self.preview_overlay_label.hide()
+            self.btn_preview_play.setText("▶ 播放")
+            return
+        self._preview_sequence_idx = max(0, min(start_idx, len(self._preview_sequence_clips) - 1))
+        self._play_current_sequence_clip()
+
+    def _play_current_sequence_clip(self):
+        if not self._preview_sequence_clips:
+            return
+        clip = self._preview_sequence_clips[self._preview_sequence_idx]
+        from PySide6.QtCore import QUrl
+        self.preview_player.setSource(QUrl.fromLocalFile(clip))
+        self.preview_player.play()
+        self.btn_preview_play.setText("⏸ 暂停")
+        total = len(self._preview_sequence_clips)
+        self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")
+        self.preview_overlay_label.adjustSize()
+        self.preview_overlay_label.show()
 
     def _get_video_scene_descriptions(self, path):
         """读取某组合视频的 _sources.txt，按顺序解析出每个镜头画面的描述文案。"""
@@ -7025,7 +7456,7 @@ class VideoMontagePage(BasePage):
         paths = self._collect_assembled_paths()
         if not paths:
             QMessageBox.warning(self.parent_widget, "无可生成视频",
-                                "请先点击「开始镜头组合排列」生成组合视频。")
+                                "请先点击「开始镜头组合排列」生成预合成，并至少确认合成 1 条视频。")
             return
 
         targets = paths
@@ -7120,66 +7551,35 @@ class VideoMontagePage(BasePage):
         self._scene_copy_worker.start()
 
     def _on_assembled_item_clicked(self, item):
-        text = item.text()
-        path = text
-        if "   (" in text and text.endswith(")"):
-            path = text.split("   (")[-1][:-1]
-        
+        idx = item.data(Qt.UserRole)
+        if idx is None:
+            idx = -1
+        self.current_precompose_index = idx
+
+        path = ""
+        clips = []
+        if 0 <= idx < len(self.precompose_plans):
+            plan = self.precompose_plans[idx]
+            path = (plan.get("output_path") or "").strip()
+            clips = list(plan.get("clips") or [])
+        else:
+            text = item.text()
+            if "   (" in text and text.endswith(")"):
+                path = text.split("   (")[-1][:-1]
+                if path and os.path.exists(path):
+                    clips = [path]
+
         self.assembled_video_path = path
-        self.btn_next_to_step_3.setEnabled(True)
+        self.btn_next_to_step_3.setEnabled(bool(self._collect_assembled_paths()))
         self._update_final_inputs_label()
 
-        # Load and play in preview player
-        from PySide6.QtCore import QUrl
-        if os.path.exists(path):
-            self.preview_player.setSource(QUrl.fromLocalFile(path))
-            self.preview_player.play()
-            self.btn_preview_play.setText("⏸ 暂停")
+        self._refresh_sources_for_plan(idx)
+        if clips:
+            self._start_sequence_preview(clips, 0)
         else:
             self.preview_player.stop()
+            self.preview_overlay_label.hide()
             self.btn_preview_play.setText("▶ 播放")
-            
-        # Update sources detail table
-        self.sources_detail_widget.setRowCount(0)
-        sources_file = os.path.splitext(path)[0] + "_sources.txt"
-        if os.path.exists(sources_file):
-            try:
-                with open(sources_file, "r", encoding="utf-8") as sf:
-                    src_paths = [line.strip() for line in sf if line.strip()]
-                
-                self.sources_detail_widget.setRowCount(len(src_paths))
-                for idx, src_path in enumerate(src_paths):
-                    filename = os.path.basename(src_path)
-                    
-                    # Fetch from cache if available
-                    cache_item = getattr(self, "split_clips_cache", {}).get(os.path.abspath(src_path))
-                    if cache_item:
-                        time_str = cache_item["time_str"]
-                        desc = cache_item["desc"]
-                    else:
-                        # Fallback parsing
-                        parsed = self._parse_split_filename(filename)
-                        if parsed:
-                            _, start_str, end_str, desc = parsed
-                            time_str = f"{start_str} --> {end_str}"
-                        else:
-                            time_str = "N/A"
-                            desc = self.split_descriptions.get(os.path.abspath(src_path), "")
-                    
-                    # Column 0: Filename
-                    file_item = QTableWidgetItem(filename)
-                    self.sources_detail_widget.setItem(idx, 0, file_item)
-                    
-                    # Column 1: Timestamp
-                    time_item = QTableWidgetItem(time_str)
-                    time_item.setTextAlignment(Qt.AlignCenter)
-                    self.sources_detail_widget.setItem(idx, 1, time_item)
-                    
-                    # Column 2: Description
-                    desc_item = QTableWidgetItem(desc)
-                    self.sources_detail_widget.setItem(idx, 2, desc_item)
-            except Exception as e:
-                log.warning(f"加载视频源镜头列表失败: {e}")
 
     def _toggle_preview_video(self):
         from PySide6.QtMultimedia import QMediaPlayer
@@ -7199,11 +7599,35 @@ class VideoMontagePage(BasePage):
     def _on_preview_duration_changed(self, duration):
         self.preview_slider.setRange(0, duration)
 
+    def _on_preview_media_status_changed(self, status):
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if status == QMediaPlayer.EndOfMedia and self._preview_sequence_clips:
+                self._preview_sequence_idx += 1
+                if self._preview_sequence_idx >= len(self._preview_sequence_clips):
+                    self._preview_sequence_idx = 0
+                self._play_current_sequence_clip()
+        except Exception:
+            pass
+
     def _preview_video_item(self, item):
-        text = item.text()
-        path = text
-        if "   (" in text and text.endswith(")"):
-            path = text.split("   (")[-1][:-1]
+        path = ""
+        idx = item.data(Qt.UserRole)
+        if idx is not None and 0 <= idx < len(self.precompose_plans):
+            plan = self.precompose_plans[idx]
+            out_path = (plan.get("output_path") or "").strip()
+            if out_path and os.path.exists(out_path):
+                path = out_path
+            else:
+                clips = list(plan.get("clips") or [])
+                if clips:
+                    path = clips[0]
+        if not path:
+            text = item.text()
+            if "   (" in text and text.endswith(")"):
+                path = text.split("   (")[-1][:-1]
+            else:
+                path = text
         
         if os.path.exists(path):
             try:

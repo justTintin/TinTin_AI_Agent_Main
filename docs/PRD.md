@@ -82,12 +82,25 @@
 ### 需要改动
 | 功能 | 优先级 | 说明 |
 |---|---|---|
+| 试用白名单 | P0 | 试用期仅指定手机号可激活，其他人拒绝 |
 | 在线激活 | P0 | 启动时联网验证 License |
 | 试用机制 | P0 | 首次安装 7 天全功能试用，无需 License |
 | 功能开关 | P0 | 侧边栏/页面根据 `features` 显示/隐藏 |
 | 续费提醒 | P1 | 到期前 7 天界面提示 |
 | 离线宽容 | P1 | 断网时 72 小时内不锁死 |
 | 防分享 | P2 | 机器码+使用频率异常检测 |
+
+### 试用白名单
+```python
+# 组内试用期：仅白名单手机号可激活
+TRIAL_WHITELIST = {"138xxxxxxxx"}  # 大怪手机号
+
+def can_activate(phone: str) -> bool:
+    if TRIAL_WHITELIST and phone not in TRIAL_WHITELIST:
+        return False  # 不在白名单，拒绝激活
+    return True
+```
+- 试用结束后清空白名单，开放公测。
 
 ### 实现方式
 ```python

@@ -221,6 +221,11 @@ _DEFAULT_CFG = {
     # 鎶藉抚鐜囷紙姣忕掑抚鏁帮級
     "fps": 1,
 
+    # 自适应抽帧：根据视频时长/文件大小动态调整抽帧率，控制总帧数在合理区间
+    "adaptive_max_frames": 12,          # 视频分析时总帧数上限
+    "adaptive_min_frames": 6,           # 短 clip 或小文件时的最少帧数
+    "adaptive_size_threshold_mb": 200,  # 超过此大小进一步降帧
+
     # Chinese-CLIP 妯″瀷锛圚uggingFace model ID锛屾垨 ViT-B-16 / ViT-L-14 / ViT-H-14 绠绉帮級
     "clip_model": "ViT-B-16",
     "clip_model_dir": None,     # None 鈫 鐢 HuggingFace 榛樿ょ紦瀛樼洰褰
@@ -334,6 +339,52 @@ def _get_image_meta(file_path: str) -> tuple[int, int]:
             return img.width, img.height
     except Exception:
         return 0, 0
+
+
+def _compute_adaptive_fps(
+    duration_s: Optional[float],
+    file_size_bytes: Optional[int] = None,
+    cfg: Optional[dict] = None,
+) -> float:
+    """根据视频时长和文件大小自适应计算抽帧帧率，控制总帧数在合理区间。
+
+    策略：
+    - 无时长信息 → 回退配置的固定 fps
+    - 短视频（< min_frames 秒）→ 提升 fps 保证至少 min_frames 帧
+    - 长视频 / 大文件 → 降低 fps，总帧数不超过 max_frames
+    - fps 限制在 [0.05, 2.0] 之间（过密收益递减，过稀丢画面）
+    """
+    cfg = cfg or {}
+    max_frames = int(cfg.get("adaptive_max_frames", 12))
+    min_frames = int(cfg.get("adaptive_min_frames", 6))
+    size_thr_mb = int(cfg.get("adaptive_size_threshold_mb", 200))
+
+    if not duration_s or duration_s <= 0:
+        return float(cfg.get("fps", 1))
+
+    dur = max(1.0, float(duration_s))
+    size_mb = (file_size_bytes or 0) / (1024 * 1024)
+
+    # 大文件降目标帧数
+    target = max_frames
+    if size_mb > 500:
+        target = max(min_frames, max_frames - 4)
+    elif size_mb > size_thr_mb:
+        target = max(min_frames, max_frames - 2)
+
+    # 基础 fps：按目标帧数 / 时长
+    fps = target / dur
+    # 短视频保底：保证至少 min_frames 帧
+    min_fps = min_frames / dur
+    fps = max(fps, min_fps)
+    # 上限：不要过密（>2fps 收益递减）
+    fps = min(fps, 2.0)
+    # 若 2.0 上限导致帧数不足 min_frames（极短视频），放宽到 min_fps
+    if fps * dur < min_frames:
+        fps = min_fps
+    # 下限保护（ffmpeg 可支持极低 fps，0.01 = 每100秒1帧）
+    fps = max(0.01, fps)
+    return round(fps, 4)
 
 
 def _extract_frames_ffmpeg(
@@ -952,6 +1003,7 @@ class _MaterialDB:
         try:
             with self._conn.cursor() as cur:
                 for col, coltype in [
+                    ("duration_s",    "REAL"),
                     ("brand",         "TEXT"),
                     ("product",       "TEXT"),
                     ("model",         "TEXT"),
@@ -1463,8 +1515,13 @@ class MaterialClipIndexer:
                 })
 
             else:  # video
-                fps = self.cfg["fps"]
-                self._log(f"  ③ ffmpeg 抽帧（{fps}fps）")
+                try:
+                    _fsize = os.path.getsize(file_path)
+                except Exception:
+                    _fsize = 0
+                fps = _compute_adaptive_fps(duration_s, _fsize, self.cfg)
+                est = int(duration_s * fps) if duration_s else "?"
+                self._log(f"  ③ ffmpeg 抽帧（自适应 {fps}fps，预计约 {est} 帧，时长 {duration_s:.1f}s）")
                 frame_infos = _extract_frames_ffmpeg(
                     file_path, tmp_dir, fps, self.cfg.get("ffmpeg_path")
                 )
@@ -1828,8 +1885,17 @@ class MaterialClipIndexer:
         try:
             # ── 抽帧 ──────────────────────────────────────────────────────────
             if is_video:
-                fps = self.cfg["fps"]
-                self._log(f"  ③ 抽帧（{fps}fps）")
+                try:
+                    _vid_dur, _, _ = _get_video_meta(new_file_path, self.cfg.get("ffmpeg_path"))
+                except Exception:
+                    _vid_dur = 0.0
+                try:
+                    _vid_size = os.path.getsize(new_file_path)
+                except Exception:
+                    _vid_size = 0
+                fps = _compute_adaptive_fps(_vid_dur, _vid_size, self.cfg)
+                _est = int(_vid_dur * fps) if _vid_dur else "?"
+                self._log(f"  ③ 抽帧（自适应 {fps}fps，预计约 {_est} 帧，时长 {_vid_dur:.1f}s）")
                 frame_infos = _extract_frames_ffmpeg(
                     new_file_path, tmp_dir, fps, self.cfg.get("ffmpeg_path")
                 )

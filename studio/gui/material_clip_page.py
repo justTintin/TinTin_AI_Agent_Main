@@ -836,9 +836,9 @@ class MaterialClipPage(BasePage):
 
         # 数据表
         self.db_table = QTableWidget()
-        self.db_table.setColumnCount(12)
+        self.db_table.setColumnCount(13)
         self.db_table.setHorizontalHeaderLabels(
-            ["", "文件名", "主要画面描述", "次要画面描述", "类型", "品牌", "型号", "类别", "大小", "置信度", "AI状态", "Hash"]
+            ["", "文件名", "主要画面描述", "次要画面描述", "类型", "品牌", "型号", "类别", "大小", "时长", "置信度", "AI状态", "Hash"]
         )
         hh = self.db_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -853,17 +853,17 @@ class MaterialClipPage(BasePage):
         hh.setSectionResizeMode(3, QHeaderView.Interactive)
         self.db_table.setColumnWidth(3, 150)
         
-        # 类型、品牌、型号、类别、大小（列 4-8）
-        for c in range(4, 9):
+        # 类型、品牌、型号、类别、大小、时长（列 4-9）
+        for c in range(4, 10):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
             
-        # 置信度、AI状态（列 9-10）
-        for c in range(9, 11):
+        # 置信度、AI状态（列 10-11）
+        for c in range(10, 12):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         
-        # Hash（列 11）
-        hh.setSectionResizeMode(11, QHeaderView.Interactive)
-        self.db_table.setColumnWidth(11, 250)
+        # Hash（列 12）
+        hh.setSectionResizeMode(12, QHeaderView.Interactive)
+        self.db_table.setColumnWidth(12, 250)
         
         self.db_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.db_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1806,22 +1806,32 @@ class MaterialClipPage(BasePage):
 
                 conf_text = f"{conf:.0%}" if conf is not None else "—"
                 size_text = f"{fsize / 1048576:.1f} MB" if isinstance(fsize, (int, float)) and fsize > 0 else "—"
+                # 时长格式化：秒 → M:SS 或 Ss（图片无时长显示 —）
+                dur_val = row.get("duration_s")
+                if isinstance(dur_val, (int, float)) and dur_val > 0:
+                    mm = int(dur_val // 60)
+                    ss = int(dur_val % 60)
+                    dur_text = f"{mm}:{ss:02d}" if mm else f"{dur_val:.1f}s"
+                else:
+                    dur_text = "—"
 
                 chk_item = QTableWidgetItem()
                 chk_item.setCheckState(Qt.Unchecked)
                 chk_item.setData(Qt.UserRole, row)
                 self.db_table.setItem(r, 0, chk_item)
 
-                vals = [fname, desc_p, desc_s, mtype, brand, model, cat, size_text, conf_text, status, fhash]
+                vals = [fname, desc_p, desc_s, mtype, brand, model, cat, size_text, dur_text, conf_text, status, fhash]
                 for c, v in enumerate(vals):
                     cell = QTableWidgetItem(str(v))
                     cell.setData(Qt.UserRole, row)
-                    if c == 7:
+                    if c == 7:  # 大小右对齐
                         cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    if c == 8 and conf is not None:
+                    if c == 8:  # 时长右对齐
+                        cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    if c == 9 and conf is not None:  # 置信度
                         key = "high" if conf >= 0.7 else ("medium" if conf >= 0.4 else "low")
                         cell.setForeground(QColor(_CONF_COLOR[key]))
-                    if c == 9:
+                    if c == 10:  # AI状态
                         cell.setForeground(QColor(_STATUS_COLOR.get(status, "#9ca3af")))
                     self.db_table.setItem(r, c + 1, cell)
             self.db_table.setUpdatesEnabled(True)

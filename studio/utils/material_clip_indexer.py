@@ -39,7 +39,7 @@ import logging
 import threading
 from pathlib import Path
 from typing import Optional, Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 log = logging.getLogger(__name__)
 
@@ -1952,46 +1952,101 @@ class MaterialClipIndexer:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def analyze_directory(self, directory: str, *, limit: int = 10000) -> tuple:
-        """对目录下所有 pending 状态的素材进行 AI 分析。"""
+        """对目录下所有 pending 状态的素材进行 AI 分析（多素材并发）。
+
+        并发度由环境变量 TINTIN_AI_ANALYZE_WORKERS 控制（默认 2，上限 4）。
+        为保证线程安全，每个并发任务在自己的线程内新建独立 MaterialClipIndexer
+        实例（各自独立数据库连接），self 仅用于日志与结果汇总。
+        """
         self._log(f"\n━━━ 开始批量 AI 分析 ━━━  目录: {directory}")
         pending = self.get_pending_materials(directory, limit=limit)
         total = len(pending)
         if total == 0:
-            self._log("没有待分析 of 素材。")
+            self._log("没有待分析素材。")
             return 0, 0
 
-        self._log(f"待分析 {total} 个素材，开始 AI 分析…")
-        ok_count = fail_count = 0
-        for i, mat in enumerate(pending):
-            fp = self.to_local_path(mat["path"])
-            self._log(f"\n[{i+1}/{total}] {os.path.basename(fp)}")
-            if not os.path.isfile(fp):
-                self._log(f"  ✗ 文件不可访问，标记失败")
+        env_workers = os.environ.get("TINTIN_AI_ANALYZE_WORKERS", "2").strip()
+        try:
+            max_workers = int(env_workers)
+        except Exception:
+            max_workers = 2
+        max_workers = max(1, min(max_workers, 4, total))
+
+        self._log(f"待分析 {total} 个素材，AI 分析并发数: {max_workers}")
+
+        # 单素材内已并行请求视觉多帧，故整目录并发度不宜过高（默认 2，上限 4）
+        if max_workers == 1:
+            # 串行路径（兼容旧行为）
+            ok_count = fail_count = 0
+            for i, mat in enumerate(pending):
+                fp = self.to_local_path(mat["path"])
+                self._log(f"\n[{i+1}/{total}] {os.path.basename(fp)}")
+                if not os.path.isfile(fp):
+                    self._log(f"  ✗ 文件不可访问，标记失败")
+                    self._mark_material_failed(mat["id"])
+                    fail_count += 1
+                    continue
                 try:
-                    self._db.update_material_ai(
-                        mat["id"],
-                        brand=None, product=None, model=None, category=None,
-                        audio_script=None, ai_status="failed",
-                        ai_confidence=None, scene_desc_primary=None, scene_desc_secondary=None,
-                    )
+                    if self.analyze_material(mat["id"], fp):
+                        ok_count += 1
+                    else:
+                        fail_count += 1
+                except Exception as e:
+                    self._log(f"  ✗ 异常: {e}")
+                    fail_count += 1
+            self._log(f"\n━━━ AI批量分析完成 ━━━  成功:{ok_count}  失败:{fail_count}")
+            return ok_count, fail_count
+
+        # 并发路径
+        nas_root = self.nas_root
+
+        def _analyze_one(mat: dict):
+            fp = to_local_path(mat["path"], nas_root)
+            name = os.path.basename(fp)
+            if not os.path.isfile(fp):
+                try:
+                    with MaterialClipIndexer(nas_root=nas_root, progress_cb=None) as _idx:
+                        _idx._mark_material_failed(mat["id"])
                 except Exception:
                     pass
-                fail_count += 1
-                continue
-
+                return False, name, "文件不可访问"
             try:
-                if self.analyze_material(mat["id"], fp):
+                with MaterialClipIndexer(nas_root=nas_root, progress_cb=None) as _idx:
+                    success = _idx.analyze_material(mat["id"], fp)
+                return bool(success), name, None
+            except Exception as e:
+                return False, name, str(e)
+
+        ok_count = fail_count = 0
+        done = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_map = {pool.submit(_analyze_one, mat): mat for mat in pending}
+            for fut in as_completed(future_map):
+                success, name, err = fut.result()
+                done += 1
+                if success:
                     ok_count += 1
+                    self._log(f"[{done}/{total}] ✓ {name}")
                 else:
                     fail_count += 1
-            except Exception as e:
-                self._log(f"  ✗ 异常: {e}")
-                fail_count += 1
+                    self._log(f"[{done}/{total}] ✗ {name}" + (f" | {err}" if err else ""))
 
         self._log(
             f"\n━━━ AI批量分析完成 ━━━  成功:{ok_count}  失败:{fail_count}"
         )
         return ok_count, fail_count
+
+    def _mark_material_failed(self, material_id: int):
+        """把素材标记为分析失败（文件不可访问等场景）。"""
+        try:
+            self._db.update_material_ai(
+                material_id,
+                brand=None, product=None, model=None, category=None,
+                audio_script=None, ai_status="failed",
+                ai_confidence=None, scene_desc_primary=None, scene_desc_secondary=None,
+            )
+        except Exception:
+            pass
 
     def ocr_rename_material(self, material_id: int, file_path: str) -> tuple[bool, str]:
         """
@@ -2177,12 +2232,16 @@ def search_by_text(
     filter_brand: Optional[str] = None,
     filter_category: Optional[str] = None,
     filter_hash: Optional[str] = None,
+    filter_path_prefix: Optional[str] = None,
+    filter_color: Optional[str] = None,
     cfg: Optional[dict] = None,
     comprehensive: bool = True,
 ) -> list[dict]:
     """
     用文字描述向量检索，返回最相似的 top_k 帧记录（含来源文件路径）。
-    可附加 brand / category / file_hash 筛选。
+    可附加 brand / category / file_hash / color 筛选。
+    颜色维度：materials 表无独立颜色列，filter_color 对画面描述/文件名做 ILIKE 匹配，
+    支持逗号/空格分隔多个颜色（任一命中即通过）。
     comprehensive=True 时综合匹配文件名、画面描述、品牌、型号，并按置信度加权。
     返回字段: material_id, path, filename, ts_s, brand, product, model, category, score, file_hash, scene_desc_primary, scene_desc_secondary
     """
@@ -2225,14 +2284,35 @@ def search_by_text(
                 params.extend([kw_like] * 7)
 
         if filter_brand:
-            conditions.append("f.brand = %s")
-            params.append(filter_brand)
+            b = filter_brand.strip()
+            if b:
+                conditions.append("COALESCE(f.brand,'') ILIKE %s")
+                params.append(f"%{b}%")
         if filter_category:
-            conditions.append("f.category = %s")
-            params.append(filter_category)
+            c = filter_category.strip()
+            if c:
+                conditions.append("(COALESCE(f.category,'') ILIKE %s OR COALESCE(f.product,'') ILIKE %s)")
+                params.extend([f"%{c}%", f"%{c}%"])
         if filter_hash:
             conditions.append("m.file_hash ILIKE %s")
             params.append(filter_hash.strip() + "%")
+        if filter_path_prefix:
+            prefix = to_relative_path(filter_path_prefix, cfg.get("nas_root", ""))
+            conditions.append("m.path LIKE %s")
+            params.append(prefix.rstrip("/") + "%")
+        if filter_color:
+            colors = [c.strip() for c in filter_color.replace("，", ",").replace("、", ",").replace(" ", ",").split(",") if c.strip()]
+            if colors:
+                color_ors = []
+                for col in colors:
+                    like = f"%{col}%"
+                    color_ors.append(
+                        "(COALESCE(m.scene_desc_primary,'') ILIKE %s OR "
+                        " COALESCE(m.scene_desc_secondary,'') ILIKE %s OR "
+                        " COALESCE(m.filename,'') ILIKE %s)"
+                    )
+                    params.extend([like, like, like])
+                conditions.append("(" + " OR ".join(color_ors) + ")")
         where = " AND ".join(conditions)
 
         # 组合分数: 向量相似度 60% + 文本匹配 30% + 置信度 10%

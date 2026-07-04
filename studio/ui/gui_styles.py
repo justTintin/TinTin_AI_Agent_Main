@@ -389,6 +389,7 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: #6366f1;
     border: 2px solid #6366f1;
+    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -414,6 +415,20 @@ QTableView::item,
 QListWidget::item {
     color: #c8c8d0;
     padding: 6px 10px;
+}
+
+QTableView::indicator {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #353545;
+    border-radius: 4px;
+    background-color: #1a1a22;
+}
+
+QTableView::indicator:checked {
+    background-color: #6366f1;
+    border: 2px solid #6366f1;
+    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
 }
 
 QHeaderView::section {

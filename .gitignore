@@ -77,3 +77,25 @@ studio/config/theme.json
 
 # pip cache
 apps/*/opt/packages/
+
+# PaddleOCR models
+*.pdiparams
+apps/PaddleOCR/paddle-models/
+
+# Chrome user data
+chrome_user_data/
+chrome_user_data_debug/
+
+# Build artifacts
+*.zip
+*.7z
+*.rar
+
+# Test / demo media files
+resources/test/
+**/resources/test/*
+*.mp4
+*.gif
+
+# Large data / ERP exports
+*erp_suites_data.json

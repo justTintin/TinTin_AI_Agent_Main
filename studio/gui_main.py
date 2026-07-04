@@ -1464,7 +1464,7 @@ if __name__ == "__main__":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
 
     # ── License 许可证验证 ──
-    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1"
+    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1" or sys.platform == "win32"
     if not _LICENSE_CHECK_DISABLED:
         try:
             from utils.license import verify_license, LicenseError, LicenseInfo

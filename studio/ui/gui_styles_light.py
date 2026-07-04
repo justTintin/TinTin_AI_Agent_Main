@@ -591,4 +591,21 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #export_result_label { color: #10b981; font-weight: bold; }
 
 #video_info_label { color: #3b82f6; }
+
+/* ═══════════════════════════════════════════════════════════════
+   模型配置 Ollama
+   ═══════════════════════════════════════════════════════════════ */
+
+#model_groupbox {
+    font-size: 13px; font-weight: bold;
+    border: 1px solid #e5e5ea; border-radius: 8px; margin-top: 12px;
+}
+#model_groupbox::title {
+    subcontrol-origin: margin; subcontrol-position: top left;
+    padding: 0 8px;
+}
+#ollama_status_lbl { color: #86868b; font-size: 12px; }
+#ollama_models_lbl { color: #6b7280; font-size: 11px; }
+#ollama_runners_warn { color: #dc2626; font-size: 12px; }
+#ollama_progress_lbl { color: #d97706; font-size: 11px; }
 """

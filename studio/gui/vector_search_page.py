@@ -27,7 +27,8 @@ class _VectorSearchWorker(BaseWorker):
     finished = Signal(list)
 
     def __init__(self, query: str, top_k: int, path_prefix: str,
-                 brand: str, category: str, hash_prefix: str = ""):
+                 brand: str, category: str, hash_prefix: str = "",
+                 color: str = ""):
         super().__init__()
         self.query       = query
         self.top_k       = top_k
@@ -35,6 +36,7 @@ class _VectorSearchWorker(BaseWorker):
         self.brand       = brand or None
         self.category    = category or None
         self.hash_prefix = hash_prefix
+        self.color       = color or None
 
     def do_work(self):
         from utils.material_clip_indexer import search_by_text
@@ -42,13 +44,10 @@ class _VectorSearchWorker(BaseWorker):
             self.query, top_k=self.top_k,
             filter_brand=self.brand,
             filter_category=self.category,
+            filter_hash=self.hash_prefix,
+            filter_path_prefix=self.path_prefix,
+            filter_color=self.color,
         )
-        if self.path_prefix:
-            prefix = self.path_prefix.strip()
-            results = [r for r in results if r.get("path", "").startswith(prefix)]
-        if self.hash_prefix:
-            hp = self.hash_prefix.strip().lower()
-            results = [r for r in results if r.get("file_hash", "").lower().startswith(hp)]
         self.finished.emit(results)
 
 
@@ -213,6 +212,12 @@ class VectorSearchPage(BasePage):
         self.txt_category.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.txt_category.setFixedWidth(90)
         flt.addWidget(self.txt_category)
+        flt.addWidget(QLabel("颜色："))
+        self.txt_color = QLineEdit()
+        self.txt_color.setPlaceholderText("如：白色 黑色")
+        self.txt_color.setFixedWidth(100)
+        self.txt_color.returnPressed.connect(self._do_text_search)
+        flt.addWidget(self.txt_color)
         flt.addWidget(QLabel("Hash："))
         self.txt_hash = QLineEdit()
         self.txt_hash.setPlaceholderText("Hash 过滤")
@@ -534,6 +539,7 @@ class VectorSearchPage(BasePage):
             self.txt_path.text().strip(),
             brand, category,
             hash_prefix=self.txt_hash.text().strip(),
+            color=self.txt_color.text().strip(),
         ))
         w.finished.connect(lambda rows: self._on_text_done(rows))
         w.error.connect(lambda m: self._on_search_err(m, self.txt_btn, self.txt_stat))

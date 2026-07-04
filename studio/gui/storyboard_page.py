@@ -107,6 +107,95 @@ class SingleShotImageWorker(BaseWorker):
         raise RuntimeError("即梦生成超时（>4 分钟）")
 
 
+# ─────────────────────────── 相似度检索 Worker ──────────────────────────────
+
+class _SimilarSearchWorker(BaseWorker):
+    """按文案做 CLIP 向量相似度检索，返回按 score 排序的素材（已按 material 去重）。"""
+    finished = Signal(list)   # [dict, ...]
+
+    def __init__(self, query: str, top_k: int = 30,
+                 filter_brand: str = "", filter_category: str = "",
+                 filter_path_prefix: str = ""):
+        super().__init__()
+        self.query = query
+        self.top_k = top_k
+        self.filter_brand = filter_brand or None
+        self.filter_category = filter_category or None
+        self.filter_path_prefix = filter_path_prefix or None
+
+    def do_work(self):
+        from utils.material_clip_indexer import search_by_text
+        rows = search_by_text(
+            self.query,
+            top_k=max(self.top_k * 3, self.top_k),   # 多取一些用于按文件去重
+            filter_brand=self.filter_brand,
+            filter_category=self.filter_category,
+            filter_path_prefix=self.filter_path_prefix,
+            comprehensive=True,
+        )
+        # 按 material_id / path 去重，保留每个素材的最高分帧
+        best = {}
+        for r in rows:
+            key = r.get("material_id") or r.get("path")
+            if key is None:
+                continue
+            if key not in best or r.get("score", 0) > best[key].get("score", 0):
+                best[key] = r
+        merged = sorted(best.values(), key=lambda x: x.get("score", 0), reverse=True)
+        self.finished.emit(merged[: self.top_k])
+
+
+class _AutoBindShotsWorker(BaseWorker):
+    """为每个镜头按其画面描述做相似度检索，自动匹配最相似素材。"""
+    progress = Signal(int, int)          # done, total
+    finished = Signal(dict)              # {shot_index: material_dict}
+
+    def __init__(self, shots: list, min_score: float = 0.0,
+                 filter_brand: str = "", filter_category: str = "",
+                 filter_path_prefix: str = ""):
+        super().__init__()
+        # shots: [(shot_index, query_text), ...]
+        self.shots = shots
+        self.min_score = min_score
+        self.filter_brand = filter_brand or None
+        self.filter_category = filter_category or None
+        self.filter_path_prefix = filter_path_prefix or None
+
+    def do_work(self):
+        from utils.material_clip_indexer import search_by_text
+        result = {}
+        total = len(self.shots)
+        for n, (shot_idx, query) in enumerate(self.shots, 1):
+            self.progress.emit(n, total)
+            q = (query or "").strip()
+            if not q:
+                continue
+            try:
+                rows = search_by_text(
+                    q, top_k=5,
+                    filter_brand=self.filter_brand,
+                    filter_category=self.filter_category,
+                    filter_path_prefix=self.filter_path_prefix,
+                    comprehensive=True,
+                )
+            except Exception:
+                rows = []
+            if not rows:
+                continue
+            top = rows[0]
+            score = float(top.get("score", 0) or 0)
+            if score < self.min_score:
+                continue
+            result[shot_idx] = {
+                "type": "local",
+                "path": top.get("path", ""),
+                "name": top.get("filename", ""),
+                "hash": top.get("file_hash", ""),
+                "score": score,
+            }
+        self.finished.emit(result)
+
+
 # ─────────────────────────── 引用素材对话框 ─────────────────────────────────
 
 class ShotMaterialDialog(QDialog):
@@ -136,11 +225,11 @@ class ShotMaterialDialog(QDialog):
         lt.setSpacing(8)
         row = QHBoxLayout()
         self.local_input = QLineEdit()
-        self.local_input.setPlaceholderText("关键词搜索素材库（匹配文件名、品牌、型号、画面描述）")
-        self.local_input.setText(shot_desc[:60] if shot_desc else "")
+        self.local_input.setPlaceholderText("按镜头文案做相似度检索素材库（CLIP 向量匹配）")
+        self.local_input.setText(shot_desc[:120] if shot_desc else "")
         self.local_input.returnPressed.connect(self._search_local)
         row.addWidget(self.local_input, 1)
-        btn_local = QPushButton("搜索")
+        btn_local = QPushButton("🎯 相似度检索")
         btn_local.clicked.connect(self._search_local)
         row.addWidget(btn_local)
         lt.addLayout(row)
@@ -148,7 +237,7 @@ class ShotMaterialDialog(QDialog):
         self.local_list.itemDoubleClicked.connect(self._select_local_item)
         self.local_list.itemSelectionChanged.connect(self._on_local_sel_changed)
         lt.addWidget(self.local_list, 1)
-        lt.addWidget(self._muted("双击选择素材；或搜索框留空浏览所有挂载目录"))
+        lt.addWidget(self._muted("按相似度从高到低排序，双击选择；相似度越高越贴合镜头画面描述"))
         self.tabs.addTab(local_tab, "🗂️ 素材库")
 
         # ── Tab 2: 即梦生成 ──────────────────────────────────────────
@@ -254,107 +343,54 @@ class ShotMaterialDialog(QDialog):
         lbl.setWordWrap(True)
         return lbl
 
-    # ── 本地素材 ─────────────────────────────────────────────────────
+    # ── 本地素材（CLIP 相似度检索）────────────────────────────────────
     def _search_local(self):
         query = self.local_input.text().strip()
         self.local_list.clear()
         self.btn_confirm.setEnabled(False)
         if not query:
-            self._browse_mounts()
+            self.local_list.addItem(QListWidgetItem("请输入或保留镜头文案后点「相似度检索」"))
             return
-        keywords = [k.lower().strip() for k in query.split() if k.strip()]
-        if not keywords:
-            self._browse_mounts()
-            return
-        # Use MaterialClipIndexer for keyword search across filename/brand/model/description
-        from utils.material_clip_indexer import MaterialClipIndexer
-        found = []
-        try:
-            with MaterialClipIndexer() as idx:
-                conn = idx._conn
-                if conn is None:
-                    idx._connect()
-                    conn = idx._conn
-                if conn is None:
-                    self.local_list.addItem(QListWidgetItem("素材库未连接"))
-                    return
-                cur = conn.cursor()
-                conds = []
-                params = []
-                for kw in keywords:
-                    like = "%" + kw + "%"
-                    conds.append(
-                        "(LOWER(COALESCE(filename,'')) LIKE %s OR "
-                        " LOWER(COALESCE(brand,'')) LIKE %s OR "
-                        " LOWER(COALESCE(model,'')) LIKE %s OR "
-                        " LOWER(COALESCE(scene_desc_primary,'')) LIKE %s OR "
-                        " LOWER(COALESCE(scene_desc_secondary,'')) LIKE %s OR "
-                        " LOWER(COALESCE(product,'')) LIKE %s)"
-                    )
-                    params.extend([like, like, like, like, like, like])
-                sql = ("SELECT id, path, filename, media_type, file_hash, brand, model, product, "
-                       "scene_desc_primary, scene_desc_secondary, ai_confidence, file_size "
-                       "FROM materials WHERE " + " AND ".join(conds) +
-                       " ORDER BY COALESCE(ai_confidence, 0) DESC LIMIT 200")
-                cur.execute(sql, params)
-                rows = cur.fetchall()
-                cols = [d[0] for d in cur.description]
-                found = [dict(zip(cols, r)) for r in rows]
-        except Exception as e:
-            self.local_list.addItem(QListWidgetItem(f"搜索失败: {e}"))
-            return
-        if not found:
-            self.local_list.addItem(QListWidgetItem("未找到匹配素材，请换关键词"))
-        else:
-            for f in found:
-                b = f.get("brand", "") or ""
-                m = f.get("model", "") or ""
-                info = f"{b} {m}".strip()
-                label = f"[{f.get('media_type','?')}]  {f.get('filename','?')}"
-                if info:
-                    label += f"  —  {info}"
-                item = QListWidgetItem(label)
-                item.setData(Qt.UserRole, f)
-                item.setToolTip(f.get("path", ""))
-                self.local_list.addItem(item)
 
-    def _browse_mounts(self):
-        # Show recent materials from DB when no search term
-        from utils.material_clip_indexer import MaterialClipIndexer
-        try:
-            with MaterialClipIndexer() as idx:
-                conn = idx._conn
-                if conn is None:
-                    idx._connect()
-                    conn = idx._conn
-                if conn is None:
-                    self.local_list.addItem(QListWidgetItem("素材库未连接"))
-                    return
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT id, path, filename, media_type, file_hash, brand, model, product "
-                    "FROM materials WHERE ai_status = 'analyzed' "
-                    "ORDER BY COALESCE(ai_confidence, 0) DESC LIMIT 100"
-                )
-                rows = cur.fetchall()
-                cols = [d[0] for d in cur.description]
-                for r in rows:
-                    f = dict(zip(cols, r))
-                    b = f.get("brand", "") or ""
-                    m = f.get("model", "") or ""
-                    p = f.get("product", "") or ""
-                    info = "  —  ".join(x for x in [p, f"{b} {m}".strip()] if x)
-                    label = f"[{f.get('media_type','?')}]  {f.get('filename','?')}"
-                    if info:
-                        label += f"  [{info}]"
-                    item = QListWidgetItem(label)
-                    item.setData(Qt.UserRole, f)
-                    item.setToolTip(f.get("path", ""))
-                    self.local_list.addItem(item)
-                if not rows:
-                    self.local_list.addItem(QListWidgetItem("素材库为空，请先在素材管理页执行入库与分析"))
-        except Exception as e:
-            self.local_list.addItem(QListWidgetItem(f"加载素材库失败: {e}"))
+        self.local_list.addItem(QListWidgetItem("正在做相似度检索…"))
+        self._sim_worker = _SimilarSearchWorker(query, top_k=30)
+        self._sim_worker.finished.connect(self._on_similar_results)
+        self._sim_worker.error.connect(self._on_similar_error)
+        self._sim_worker.start()
+
+    def _on_similar_error(self, msg):
+        self.local_list.clear()
+        self.local_list.addItem(QListWidgetItem(f"检索失败: {msg}"))
+
+    def _on_similar_results(self, found):
+        self.local_list.clear()
+        if not found:
+            self.local_list.addItem(QListWidgetItem("未找到相似素材，请调整镜头文案或先入库分析素材"))
+            return
+        for f in found:
+            b = f.get("brand", "") or ""
+            m = f.get("model", "") or ""
+            info = f"{b} {m}".strip()
+            score = float(f.get("score", 0) or 0)
+            label = f"[{score*100:5.1f}%]  [{f.get('media_type','?')}]  {f.get('filename','?')}"
+            if info:
+                label += f"  —  {info}"
+            item = QListWidgetItem(label)
+            # 归一化成本地素材选择所需字段
+            item.setData(Qt.UserRole, {
+                "path": f.get("path", ""),
+                "filename": f.get("filename", ""),
+                "file_hash": f.get("file_hash", ""),
+                "media_type": f.get("media_type", ""),
+                "brand": b, "model": m,
+                "product": f.get("product", ""),
+                "score": score,
+            })
+            item.setToolTip(
+                f"{f.get('path','')}\n相似度: {score*100:.1f}%\n"
+                f"画面: {f.get('scene_desc_primary','') or '—'}"
+            )
+            self.local_list.addItem(item)
 
     def _on_local_sel_changed(self):
         if self.tabs.currentIndex() != 0:
@@ -463,7 +499,12 @@ class ShotMaterialDialog(QDialog):
             if items:
                 data = items[0].data(Qt.UserRole)
                 if data:
-                    self.selected_material = {"type": "local", "path": data["path"], "name": data["name"]}
+                    self.selected_material = {
+                        "type": "local",
+                        "path": data.get("path", ""),
+                        "name": data.get("filename") or data.get("name", ""),
+                        "hash": data.get("file_hash", ""),
+                    }
                     self.accept()
         elif tab == 1:
             self._select_dreamina()
@@ -599,7 +640,13 @@ class StoryboardPage(BasePage):
         hdr = QHBoxLayout()
         hdr.addWidget(QLabel("🎬 分镜脚本（可直接编辑各镜头字段）"))
         hdr.addStretch()
-        
+
+        self.btn_auto_bind = QPushButton("🎯 相似度自动绑定")
+        self.btn_auto_bind.setObjectName("secondary_button")
+        self.btn_auto_bind.setToolTip("按每个镜头的画面描述做 CLIP 相似度检索，自动绑定最相似素材")
+        self.btn_auto_bind.clicked.connect(self._auto_bind_materials)
+        hdr.addWidget(self.btn_auto_bind)
+
         lbl_ratio = QLabel("画幅")
         lbl_ratio.setObjectName("muted_text")
         hdr.addWidget(lbl_ratio)
@@ -723,6 +770,7 @@ class StoryboardPage(BasePage):
     def _collect_shots(self):
         shots = []
         for c in self.shot_cards:
+            mat = c.get("material") or {}
             shots.append({
                 "index": c["idx"],
                 "shot_type": c["combo_type"].currentText(),
@@ -730,7 +778,9 @@ class StoryboardPage(BasePage):
                 "sfx": c["edit_sfx"].text().strip(),
                 "visual": c["desc"].toPlainText().strip(),
                 "narration": c["narration"].toPlainText().strip(),
-                "material_path": (c.get("material") or {}).get("path", ""),
+                "material_type": mat.get("type", ""),
+                "material_path": mat.get("path", ""),
+                "material_hash": mat.get("hash", ""),
             })
         return shots
 
@@ -849,8 +899,8 @@ class StoryboardPage(BasePage):
 
         # Sheet 2：分镜脚本
         ws = wb.create_sheet("分镜脚本")
-        cols = ["镜号", "镜别", "时长(s)", "音效", "画面描述", "旁白/台词", "引用素材"]
-        widths = [6, 8, 8, 16, 40, 40, 30]
+        cols = ["镜号", "镜别", "时长(s)", "音效", "画面描述", "旁白/台词", "引用素材", "素材Hash"]
+        widths = [6, 8, 8, 16, 40, 40, 30, 20]
         thin = Side(style="thin", color="CCCCCC")
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
         hdr_fill = PatternFill("solid", fgColor="1E3A5F")
@@ -868,7 +918,7 @@ class StoryboardPage(BasePage):
         for ri, s in enumerate(shots, 2):
             row_data = [
                 s["index"], s["shot_type"], s["duration"],
-                s["sfx"], s["visual"], s["narration"], s["material_path"],
+                s["sfx"], s["visual"], s["narration"], s["material_path"], s.get("material_hash", ""),
             ]
             fill = alt_fill if ri % 2 == 0 else None
             for ci, val in enumerate(row_data, 1):
@@ -891,8 +941,8 @@ class StoryboardPage(BasePage):
             "",
             "---",
             "",
-            "| 镜号 | 镜别 | 时长 | 音效 | 画面描述 | 旁白/台词 | 引用素材 |",
-            "|:---:|:---:|:---:|------|---------|-----------|---------|",
+            "| 镜号 | 镜别 | 时长 | 音效 | 画面描述 | 旁白/台词 | 引用素材 | 素材Hash |",
+            "|:---:|:---:|:---:|------|---------|-----------|---------|---------|",
         ]
         for s in shots:
             def _esc(v):
@@ -900,7 +950,7 @@ class StoryboardPage(BasePage):
             lines.append(
                 f"| {s['index']} | {_esc(s['shot_type'])} | {s['duration']}s "
                 f"| {_esc(s['sfx']) or '—'} | {_esc(s['visual'])} "
-                f"| {_esc(s['narration']) or '—'} | {_esc(s['material_path']) or '—'} |"
+                f"| {_esc(s['narration']) or '—'} | {_esc(s['material_path']) or '—'} | {_esc(s.get('material_hash','')) or '—'} |"
             )
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
@@ -1062,6 +1112,70 @@ class StoryboardPage(BasePage):
             name = mat.get("name", "")
             card["mat_lbl"].setText(name[:18] + ("…" if len(name) > 18 else ""))
             card["mat_lbl"].setToolTip(mat.get("path", ""))
+
+    # ── 相似度自动绑定（全部镜头）────────────────────────────────────
+    def _auto_bind_materials(self):
+        if not self.shot_cards:
+            self.show_warning("当前没有分镜内容，请先生成分镜脚本。", "无内容")
+            return
+
+        # 收集每个镜头的检索文案：优先画面描述，其次旁白台词
+        shots = []
+        for c in self.shot_cards:
+            desc = c["desc"].toPlainText().strip()
+            narr = c["narration"].toPlainText().strip()
+            query = desc or narr
+            if query:
+                shots.append((c["idx"], query))
+
+        if not shots:
+            self.show_warning("所有镜头都没有画面描述/旁白，无法做相似度检索。", "无可用文案")
+            return
+
+        self.btn_auto_bind.setEnabled(False)
+        self.pbar.setVisible(True)
+        self.pbar.setRange(0, len(shots))
+        self.pbar.setValue(0)
+        self.lbl_status.setText("正在按镜头文案做相似度自动绑定…")
+
+        self._bind_worker = _AutoBindShotsWorker(shots, min_score=0.0)
+        self._bind_worker.progress.connect(self._on_auto_bind_progress)
+        self._bind_worker.finished.connect(self._on_auto_bind_finished)
+        self._bind_worker.error.connect(self._on_auto_bind_error)
+        self._bind_worker.start()
+
+    def _on_auto_bind_progress(self, done, total):
+        self.pbar.setRange(0, total)
+        self.pbar.setValue(done)
+        self.lbl_status.setText(f"相似度自动绑定中… {done}/{total}")
+
+    def _on_auto_bind_error(self, msg):
+        self.btn_auto_bind.setEnabled(True)
+        self.pbar.setVisible(False)
+        self.lbl_status.setText(f"自动绑定失败：{msg}")
+
+    def _on_auto_bind_finished(self, result):
+        self.btn_auto_bind.setEnabled(True)
+        self.pbar.setVisible(False)
+        bound = 0
+        for c in self.shot_cards:
+            mat = result.get(c["idx"])
+            if not mat:
+                continue
+            c["material"] = mat
+            name = mat.get("name", "") or ""
+            score = float(mat.get("score", 0) or 0)
+            c["mat_lbl"].setText((name[:14] + ("…" if len(name) > 14 else "")) + f" {score*100:.0f}%")
+            c["mat_lbl"].setToolTip(
+                f"{mat.get('path','')}\n相似度: {score*100:.1f}%\nHash: {mat.get('hash','')}"
+            )
+            bound += 1
+        total = len(self.shot_cards)
+        self.lbl_status.setText(f"相似度自动绑定完成：{bound}/{total} 个镜头已绑定素材。")
+        self.show_message(
+            f"相似度自动绑定完成！\n已绑定 {bound} / {total} 个镜头。\n"
+            f"未绑定的镜头多为无相似素材，可手动点「引用素材」补充。"
+        )
 
     def _render_shots(self, shots):
         for c in self.shot_cards:
@@ -1269,6 +1383,8 @@ class StoryboardPage(BasePage):
                 lines.append(f"  音效：{sfx}")
             if mat:
                 lines.append(f"  引用素材：{mat.get('name','')}  {mat.get('path','')}")
+                if mat.get("hash"):
+                    lines.append(f"  素材Hash：{mat.get('hash')}")
             lines.append("")
         # 统计汇总
         total = sum(c["spin_dur"].value() for c in self.shot_cards)

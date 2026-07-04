@@ -13,8 +13,11 @@
   - 多选行后可触发"重新AI分析"
 """
 import os
+import json
 import sys
 import subprocess
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.platform_utils import open_path
 from utils.logger_utils import log
 from PySide6.QtWidgets import (
@@ -284,6 +287,96 @@ class _BatchIndexMetaWorker(BaseWorker):
         self.finished.emit(ok, skip, fail)
 
 
+class _ImportMaterialTasksWorker(BaseWorker):
+    """导入素材浏览器写入的 material_import_tasks.json 任务清单。"""
+    log_line = Signal(str)
+    progress = Signal(int, int)       # current, total
+    finished = Signal(dict)           # {ok, skip, fail, missing, total, pending_left, file}
+
+    def __init__(self, tasks_file: str):
+        super().__init__()
+        self.tasks_file = tasks_file
+
+    def do_work(self):
+        from utils.material_clip_indexer import MaterialClipIndexer
+
+        if not os.path.isfile(self.tasks_file):
+            self.finished.emit({
+                "ok": 0, "skip": 0, "fail": 0, "missing": 0,
+                "total": 0, "pending_left": 0, "file": self.tasks_file,
+            })
+            return
+
+        try:
+            with open(self.tasks_file, "r", encoding="utf-8") as f:
+                tasks = json.load(f)
+            if not isinstance(tasks, list):
+                tasks = []
+        except Exception:
+            tasks = []
+
+        pending_idx = [
+            i for i, t in enumerate(tasks)
+            if isinstance(t, dict) and str(t.get("status", "pending")).lower() == "pending"
+        ]
+        total = len(pending_idx)
+        ok = skip = fail = missing = 0
+
+        if total == 0:
+            self.finished.emit({
+                "ok": 0, "skip": 0, "fail": 0, "missing": 0,
+                "total": 0, "pending_left": 0, "file": self.tasks_file,
+            })
+            return
+
+        self.log_line.emit(f"开始处理素材导入任务：{total} 条")
+        with MaterialClipIndexer(progress_cb=self.log_line.emit) as idx:
+            for n, ti in enumerate(pending_idx, start=1):
+                self.progress.emit(n, total)
+                task = tasks[ti]
+                fp = str(task.get("path", "")).strip()
+                task["updatedAt"] = datetime.now().isoformat(timespec="seconds")
+                if not fp or (not os.path.isfile(fp)):
+                    missing += 1
+                    task["status"] = "missing"
+                    task["error"] = "file_not_found"
+                    self.log_line.emit(f"  ⚠ 文件不存在，已标记 missing: {fp}")
+                    continue
+                try:
+                    inserted = idx.index_file_meta(fp, force=False)
+                    if inserted:
+                        ok += 1
+                        task["status"] = "ingested"
+                        task["error"] = ""
+                        self.log_line.emit(f"  ✓ 入库成功: {fp}")
+                    else:
+                        skip += 1
+                        task["status"] = "skipped"
+                        task["error"] = "already_exists"
+                except Exception as e:
+                    fail += 1
+                    task["status"] = "failed"
+                    task["error"] = str(e)
+                    self.log_line.emit(f"  ✗ 入库失败: {fp} | {e}")
+
+        pending_left = sum(1 for t in tasks if isinstance(t, dict) and str(t.get("status", "")).lower() == "pending")
+        try:
+            with open(self.tasks_file, "w", encoding="utf-8") as f:
+                json.dump(tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log_line.emit(f"  ✗ 回写任务清单失败: {e}")
+
+        self.finished.emit({
+            "ok": ok,
+            "skip": skip,
+            "fail": fail,
+            "missing": missing,
+            "total": total,
+            "pending_left": pending_left,
+            "file": self.tasks_file,
+        })
+
+
 class _QueryMaterialsWorker(BaseWorker):
     """从数据库查询素材列表（按路径前缀 + hash 前缀 + AI状态 + 类型筛选，新增品牌、描述、置信度筛选）。"""
     finished = Signal(list)
@@ -337,27 +430,55 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
-        with MaterialClipIndexer(nas_root=self.nas_root,
-                                  progress_cb=self.log_line.emit) as idx:
-            ok = fail = 0
-            total = len(self.materials)
-            for idx_num, mat in enumerate(self.materials):
+        ok = fail = 0
+        total = len(self.materials)
+        if total == 0:
+            self.finished.emit(0, 0)
+            return
+
+        env_workers = os.environ.get("TINTIN_AI_ANALYZE_WORKERS", "2").strip()
+        try:
+            max_workers = int(env_workers)
+        except Exception:
+            max_workers = 2
+        max_workers = max(1, min(max_workers, 4, total))
+
+        def _analyze_one(mat: dict):
+            if self._is_cancelled:
+                return False, None
+            try:
+                with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=None) as idx:
+                    success = idx.analyze_material(mat["id"], mat["path"])
+                return bool(success), None
+            except Exception as e:
+                return False, str(e)
+
+        self.log_line.emit(f"  🚀 AI 分析并发数: {max_workers}")
+        done = 0
+        future_map = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for mat in self.materials:
+                future_map[pool.submit(_analyze_one, mat)] = mat
+
+            for fut in as_completed(future_map):
+                mat = future_map[fut]
                 if self._is_cancelled:
                     self.log_line.emit("  ⚠️ 用户已终止 AI 分析任务")
+                    for f2 in future_map:
+                        f2.cancel()
                     break
-                self.progress.emit(idx_num, total)
-                try:
-                    # If analysis fails (returns False or raises exception), count as failure
-                    success = idx.analyze_material(mat["id"], mat["path"])
-                    if success:
-                        ok += 1
-                    else:
-                        fail += 1
-                except Exception as e:
-                    self.log_line.emit(f"  ✗ {os.path.basename(mat['path'])}: {e}")
+                success, err = fut.result()
+                if success:
+                    ok += 1
+                else:
                     fail += 1
-            if not self._is_cancelled:
-                self.progress.emit(total, total)
+                    if err:
+                        self.log_line.emit(f"  ✗ {os.path.basename(mat['path'])}: {err}")
+                done += 1
+                self.progress.emit(done, total)
+
+        if not self._is_cancelled:
+            self.progress.emit(total, total)
         self.finished.emit(ok, fail)
 
 
@@ -1060,6 +1181,8 @@ class MaterialClipPage(BasePage):
         self.btn_meta.setEnabled(not busy)
         self.btn_ocr_rename.setEnabled(not busy)
         self.btn_reanalyze.setEnabled(not busy)
+        if hasattr(self, "btn_import_tasks"):
+            self.btn_import_tasks.setEnabled(not busy)
 
     def _show_tree_context_menu(self, pos, tree=None):
         if tree is None:
@@ -1364,6 +1487,11 @@ class MaterialClipPage(BasePage):
         btn_align.setObjectName("btn_align")
         btn_align.clicked.connect(self._align_and_ingest)
         stats_hdr_row.addWidget(btn_align)
+        self.btn_import_tasks = QPushButton("📥 导入浏览器任务")
+        self.btn_import_tasks.setToolTip("读取 material_import_tasks.json，将待处理项批量快速入库")
+        self.btn_import_tasks.setObjectName("secondary_button")
+        self.btn_import_tasks.clicked.connect(self._start_import_material_tasks)
+        stats_hdr_row.addWidget(self.btn_import_tasks)
         lay.addLayout(stats_hdr_row)
 
         ctrl_row = QHBoxLayout()
@@ -1526,6 +1654,60 @@ class MaterialClipPage(BasePage):
         w.finished.connect(self._on_diff_ingest_finished)
         w.error.connect(self._on_diff_ingest_error)
         w.start()
+
+    def _material_import_tasks_file(self) -> str:
+        from config.paths import KNOWLEDGE_MATERIALS_DIR
+        return os.path.join(KNOWLEDGE_MATERIALS_DIR, "material_import_tasks.json")
+
+    def _start_import_material_tasks(self):
+        tasks_file = self._material_import_tasks_file()
+        if not os.path.isfile(tasks_file):
+            self.show_warning(f"未找到任务清单文件：\n{tasks_file}", "任务不存在")
+            return
+
+        self._set_busy(True)
+        self.db_pbar.setVisible(True)
+        self.db_pbar.setRange(0, 0)
+        self.lbl_db_pbar_status.setVisible(True)
+        self.lbl_db_pbar_status.setText("正在导入素材浏览器任务…")
+        self._active_log = "ingest"
+        self.log_box.append(f"开始导入素材浏览器任务清单：{tasks_file}")
+        if not self.log_dialog.isVisible():
+            self._toggle_log_box()
+
+        w = self.track_worker(_ImportMaterialTasksWorker(tasks_file))
+        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.progress.connect(self._on_import_material_tasks_progress)
+        w.finished.connect(self._on_import_material_tasks_finished)
+        w.error.connect(self._on_work_err)
+        w.start()
+
+    def _on_import_material_tasks_progress(self, current: int, total: int):
+        self.db_pbar.setRange(0, max(1, total))
+        self.db_pbar.setValue(current)
+        self.lbl_db_pbar_status.setText(f"正在导入素材浏览器任务：{current} / {total}")
+
+    def _on_import_material_tasks_finished(self, result: dict):
+        self._set_busy(False)
+        self.db_pbar.setVisible(False)
+        self.lbl_db_pbar_status.setVisible(False)
+        ok = int(result.get("ok", 0))
+        skip = int(result.get("skip", 0))
+        fail = int(result.get("fail", 0))
+        missing = int(result.get("missing", 0))
+        total = int(result.get("total", 0))
+        pending_left = int(result.get("pending_left", 0))
+        tasks_file = result.get("file", "")
+        self.log_box.append(
+            f"\n✅ 浏览器任务导入完成：总计 {total}，成功 {ok}，跳过 {skip}，失败 {fail}，文件缺失 {missing}"
+        )
+        if tasks_file:
+            self.log_box.append(f"任务清单已回写：{tasks_file}（剩余 pending: {pending_left}）")
+        self.show_message(
+            f"素材导入任务执行完成！\n总计: {total}\n成功: {ok}\n跳过: {skip}\n失败: {fail}\n文件缺失: {missing}\n剩余待处理: {pending_left}"
+        )
+        self._reload_stats()
+        self._refresh_db_table()
 
     def _on_diff_ingest_progress(self, current, total):
         self.db_pbar.setValue(current)

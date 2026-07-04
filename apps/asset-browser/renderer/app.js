@@ -16,6 +16,10 @@ let lastSniffedAssetsFallback = []; // Fallback for pages without active video p
 let allKnowledgeItems = [];
 let activeLoginStatus = {};
 
+// Local Materials State
+let allDailyMaterials = [];
+let selectedMaterialPaths = new Set();
+
 // DOM Elements
 const webview = document.getElementById('browser-webview');
 const addressInput = document.getElementById('address-input');
@@ -52,6 +56,17 @@ const btnModeKnowledge = document.getElementById('btn-mode-knowledge');
 const btnModeMaterials = document.getElementById('btn-mode-materials');
 const btnRefreshMaterials = document.getElementById('btn-refresh-materials');
 const materialsContainer = document.getElementById('materials-container');
+const materialsSearchInput = document.getElementById('materials-search-input');
+const materialsTypeFilter = document.getElementById('materials-type-filter');
+const materialsDateFilter = document.getElementById('materials-date-filter');
+const materialsSort = document.getElementById('materials-sort');
+const materialsSelectedCount = document.getElementById('materials-selected-count');
+const btnMaterialsSelectVisible = document.getElementById('btn-materials-select-visible');
+const btnMaterialsClearSelected = document.getElementById('btn-materials-clear-selected');
+const btnMaterialsCopyPaths = document.getElementById('btn-materials-copy-paths');
+const btnMaterialsImportSelected = document.getElementById('btn-materials-import-selected');
+const btnMaterialsDeleteSelected = document.getElementById('btn-materials-delete-selected');
+const btnMaterialsOpenSelected = document.getElementById('btn-materials-open-selected');
 const btnSyncKnowledge = document.getElementById('btn-sync-knowledge');
 const loginStatusContainer = document.getElementById('login-status-container');
 const kbSearchInput = document.getElementById('kb-search-input');
@@ -318,6 +333,111 @@ function setupEventListeners() {
   btnRefreshMaterials.addEventListener('click', () => {
     loadDailyMaterials();
   });
+
+  if (materialsSearchInput) {
+    let _materialsSearchTimer = null;
+    materialsSearchInput.addEventListener('input', () => {
+      clearTimeout(_materialsSearchTimer);
+      _materialsSearchTimer = setTimeout(() => renderDailyMaterials(), 220);
+    });
+  }
+  if (materialsTypeFilter) materialsTypeFilter.addEventListener('change', () => renderDailyMaterials());
+  if (materialsDateFilter) materialsDateFilter.addEventListener('change', () => renderDailyMaterials());
+  if (materialsSort) materialsSort.addEventListener('change', () => renderDailyMaterials());
+
+  if (btnMaterialsSelectVisible) {
+    btnMaterialsSelectVisible.addEventListener('click', () => {
+      const visibleCards = Array.from(document.querySelectorAll('.material-file-card'));
+      visibleCards.forEach((card) => {
+        const p = card.dataset.path;
+        if (p) selectedMaterialPaths.add(p);
+        const cb = card.querySelector('.material-item-check');
+        if (cb) cb.checked = true;
+        card.classList.add('selected');
+      });
+      updateMaterialsSelectedCount();
+    });
+  }
+
+  if (btnMaterialsClearSelected) {
+    btnMaterialsClearSelected.addEventListener('click', () => {
+      selectedMaterialPaths.clear();
+      updateMaterialsSelectionUI();
+    });
+  }
+
+  if (btnMaterialsCopyPaths) {
+    btnMaterialsCopyPaths.addEventListener('click', async () => {
+      const paths = Array.from(selectedMaterialPaths);
+      if (paths.length === 0) {
+        alert('请先勾选要复制的素材项');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(paths.join('\n'));
+        alert(`已复制 ${paths.length} 条路径`);
+      } catch (e) {
+        alert('复制失败，请检查系统剪贴板权限');
+      }
+    });
+  }
+
+  if (btnMaterialsOpenSelected) {
+    btnMaterialsOpenSelected.addEventListener('click', async () => {
+      const paths = Array.from(selectedMaterialPaths);
+      if (paths.length === 0) {
+        alert('请先勾选要打开目录的素材项');
+        return;
+      }
+      for (const p of paths) {
+        await window.api.openFileFolder(p);
+      }
+    });
+  }
+
+  if (btnMaterialsImportSelected) {
+    btnMaterialsImportSelected.addEventListener('click', async () => {
+      const paths = Array.from(selectedMaterialPaths);
+      if (paths.length === 0) {
+        alert('请先勾选要导入的素材项');
+        return;
+      }
+      try {
+        const res = await window.api.enqueueMaterialImport(paths);
+        if (res && res.ok) {
+          alert(`已写入素材导入任务：${res.count} 条\n任务文件：${res.file}`);
+        } else {
+          alert('写入素材导入任务失败');
+        }
+      } catch (e) {
+        alert('写入素材导入任务失败：' + (e && e.message ? e.message : e));
+      }
+    });
+  }
+
+  if (btnMaterialsDeleteSelected) {
+    btnMaterialsDeleteSelected.addEventListener('click', async () => {
+      const paths = Array.from(selectedMaterialPaths);
+      if (paths.length === 0) {
+        alert('请先勾选要删除的素材项');
+        return;
+      }
+      const ok = confirm(`确认删除已选 ${paths.length} 个本地文件？\n该操作不可撤销。`);
+      if (!ok) return;
+      try {
+        const res = await window.api.deleteLocalFiles(paths);
+        if (res && res.ok) {
+          selectedMaterialPaths.clear();
+          alert(`删除完成：成功 ${res.deleted}，失败 ${res.failed}`);
+          await loadDailyMaterials();
+        } else {
+          alert('删除失败');
+        }
+      } catch (e) {
+        alert('删除失败：' + (e && e.message ? e.message : e));
+      }
+    });
+  }
 
   // Knowledge Base Sync
   btnSyncKnowledge.addEventListener('click', () => {
@@ -1844,134 +1964,216 @@ async function downloadKnowledgeBaseItem(item, subDir) {
 // 以下为本地素材浏览器相关核心功能与逻辑
 // ----------------------------------------------------
 
+function updateMaterialsSelectedCount() {
+  if (materialsSelectedCount) {
+    materialsSelectedCount.textContent = String(selectedMaterialPaths.size);
+  }
+}
+
+function updateMaterialsSelectionUI() {
+  document.querySelectorAll('.material-file-card').forEach((card) => {
+    const p = card.dataset.path;
+    const checked = !!p && selectedMaterialPaths.has(p);
+    card.classList.toggle('selected', checked);
+    const cb = card.querySelector('.material-item-check');
+    if (cb) cb.checked = checked;
+  });
+  updateMaterialsSelectedCount();
+}
+
+function getFilteredDailyMaterials() {
+  const query = (materialsSearchInput?.value || '').trim().toLowerCase();
+  const typeVal = materialsTypeFilter?.value || 'all';
+  const dateVal = materialsDateFilter?.value || 'all';
+  const sortVal = materialsSort?.value || 'date_desc';
+
+  const out = [];
+  allDailyMaterials.forEach((group) => {
+    if (dateVal !== 'all' && group.date !== dateVal) return;
+    const files = (group.files || []).filter((file) => {
+      if (typeVal !== 'all' && file.type !== typeVal) return false;
+      if (!query) return true;
+      const name = (file.name || '').toLowerCase();
+      const p = (file.path || '').toLowerCase();
+      return name.includes(query) || p.includes(query);
+    });
+
+    files.sort((a, b) => {
+      const aName = (a.name || '').toLowerCase();
+      const bName = (b.name || '').toLowerCase();
+      if (sortVal === 'size_desc') return (b.size || 0) - (a.size || 0) || aName.localeCompare(bName);
+      if (sortVal === 'size_asc') return (a.size || 0) - (b.size || 0) || aName.localeCompare(bName);
+      if (sortVal === 'name_desc') return bName.localeCompare(aName);
+      if (sortVal === 'name_asc') return aName.localeCompare(bName);
+      if (sortVal === 'type_asc') {
+        const byType = (a.type || '').localeCompare(b.type || '');
+        return byType !== 0 ? byType : aName.localeCompare(bName);
+      }
+      return aName.localeCompare(bName);
+    });
+
+    if (files.length > 0) out.push({ date: group.date, files });
+  });
+
+  out.sort((a, b) => {
+    if (sortVal === 'date_asc') return (a.date || '').localeCompare(b.date || '');
+    return (b.date || '').localeCompare(a.date || '');
+  });
+  return out;
+}
+
+function _buildMaterialPreviewHtml(file, groupFiles) {
+  if (file.type === 'image') {
+    const safePath = 'file:///' + file.path.replace(/\\/g, '/');
+    return `<img src="${safePath}" alt="${file.name}" loading="lazy">`;
+  }
+  if (file.type === 'video') {
+    const dot = file.name.lastIndexOf('.');
+    const baseName = dot > 0 ? file.name.substring(0, dot) : file.name;
+    const coverFile = groupFiles.find((f) => f.type === 'image' && f.name.startsWith(baseName) && f.name.includes('cover'));
+    if (coverFile) {
+      const safeCoverPath = 'file:///' + coverFile.path.replace(/\\/g, '/');
+      return `
+        <img src="${safeCoverPath}" alt="${file.name}" loading="lazy">
+        <div class="video-play-overlay">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        </div>
+      `;
+    }
+    return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary);"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
+  }
+  if (file.type === 'text') {
+    return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+}
+
+function renderDailyMaterials() {
+  const data = getFilteredDailyMaterials();
+  materialsContainer.innerHTML = '';
+
+  if (!data || data.length === 0) {
+    const emptyEl = document.createElement('div');
+    emptyEl.className = 'empty-state';
+    emptyEl.style.cssText = 'padding:80px 20px;text-align:center;color:var(--text-muted);font-size:0.82rem;line-height:1.6;';
+    emptyEl.innerHTML = '暂无符合筛选条件的素材';
+    materialsContainer.appendChild(emptyEl);
+    updateMaterialsSelectedCount();
+    return;
+  }
+
+  data.forEach((group) => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'materials-group';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'materials-date-header';
+    headerEl.innerHTML = `
+      <span>📅 ${group.date}</span>
+      <span class="materials-group-count">${group.files.length} 个文件</span>
+    `;
+    groupEl.appendChild(headerEl);
+
+    const gridEl = document.createElement('div');
+    gridEl.className = 'materials-grid';
+
+    group.files.forEach((file) => {
+      const cardEl = document.createElement('div');
+      cardEl.className = 'material-file-card';
+      cardEl.dataset.path = file.path || '';
+      cardEl.title = `单击定位文件\n双击打开文件：${file.name}`;
+      cardEl.draggable = true;
+
+      let badgeText = '文件';
+      let badgeClass = 'file';
+      if (file.type === 'video') { badgeText = '视频'; badgeClass = 'video'; }
+      else if (file.type === 'image') { badgeText = '图片'; badgeClass = 'image'; }
+      else if (file.type === 'text') { badgeText = '图文'; badgeClass = 'text'; }
+
+      const previewHtml = _buildMaterialPreviewHtml(file, group.files);
+      const checked = selectedMaterialPaths.has(file.path);
+      if (checked) cardEl.classList.add('selected');
+
+      cardEl.innerHTML = `
+        <span class="material-badge ${badgeClass}">${badgeText}</span>
+        <label class="material-select-wrap" title="勾选用于批量操作">
+          <input type="checkbox" class="material-item-check" ${checked ? 'checked' : ''}>
+        </label>
+        <div class="material-preview-box">${previewHtml}</div>
+        <div class="material-info-box">
+          <div class="material-name" title="${file.name}">${file.name}</div>
+          <div class="material-size">${formatBytes(file.size || 0)}</div>
+        </div>
+      `;
+
+      const check = cardEl.querySelector('.material-item-check');
+      if (check) {
+        check.addEventListener('click', (e) => e.stopPropagation());
+        check.addEventListener('change', (e) => {
+          if (e.target.checked) selectedMaterialPaths.add(file.path);
+          else selectedMaterialPaths.delete(file.path);
+          cardEl.classList.toggle('selected', e.target.checked);
+          updateMaterialsSelectedCount();
+        });
+      }
+
+      cardEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.api.openFileFolder(file.path);
+      });
+
+      cardEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        window.api.openPath(file.path);
+      });
+
+      cardEl.addEventListener('dragstart', (e) => {
+        try {
+          const uri = 'file:///' + String(file.path || '').replace(/\\/g, '/');
+          e.dataTransfer.setData('text/plain', file.path || '');
+          e.dataTransfer.setData('text/uri-list', uri);
+          e.dataTransfer.effectAllowed = 'copy';
+        } catch (_) {}
+      });
+
+      gridEl.appendChild(cardEl);
+    });
+
+    groupEl.appendChild(gridEl);
+    materialsContainer.appendChild(groupEl);
+  });
+
+  updateMaterialsSelectionUI();
+}
+
+function refreshMaterialsDateFilter() {
+  if (!materialsDateFilter) return;
+  const prev = materialsDateFilter.value;
+  const dates = (allDailyMaterials || []).map((g) => g.date).filter(Boolean);
+  materialsDateFilter.innerHTML = '<option value="all">全部日期</option>' +
+    dates.map((d) => `<option value="${d}">${d}</option>`).join('');
+  if (prev && dates.includes(prev)) materialsDateFilter.value = prev;
+}
+
 async function loadDailyMaterials() {
   materialsContainer.innerHTML = `
-    <div style=”padding: 50px 20px; text-align: center; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px;”>
-      <div class=”loader” style=”border: 2px solid var(--border-color); border-top: 2px solid var(--color-primary); border-radius: 50%; width: 20px; height: 20px; animation: spin 0.8s linear infinite;”></div>
+    <div style="padding:50px 20px;text-align:center;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
+      <div class="loader" style="border:2px solid var(--border-color);border-top:2px solid var(--color-primary);border-radius:50%;width:20px;height:20px;animation:spin 0.8s linear infinite;"></div>
       <span>正在加载本地素材...</span>
     </div>
   `;
 
   try {
-    const [data, downloadDirs] = await Promise.all([
-      window.api.getDailyAssets(),
-      window.api.getDownloadDirs().catch(() => [])
-    ]);
-    materialsContainer.innerHTML = '';
-
-    // 显示正在扫描的目录列表
-    if (downloadDirs && downloadDirs.length > 0) {
-      const dirsInfo = document.createElement('div');
-      dirsInfo.style.cssText = 'font-size:0.75rem;color:var(--text-secondary);padding:8px 12px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border-color);margin-bottom:12px;line-height:1.6;';
-      dirsInfo.innerHTML = `<span style=”color:var(--text-muted);”>📁 扫描目录（共 ${downloadDirs.length} 个）：</span><br>` +
-        downloadDirs.map(d => `<span style=”color:var(--color-primary);word-break:break-all;”>${d}</span>`).join('<br>');
-      materialsContainer.appendChild(dirsInfo);
-    }
-
-    if (!data || data.length === 0) {
-      const emptyEl = document.createElement('div');
-      emptyEl.className = 'empty-state';
-      emptyEl.style.cssText = 'padding:80px 20px;text-align:center;color:var(--text-muted);font-size:0.82rem;line-height:1.6;';
-      emptyEl.innerHTML = '暂无每日下载素材<br>在”网页浏览器”或”收藏记录”中嗅探并下载的资源会呈现在这里';
-      materialsContainer.appendChild(emptyEl);
-      return;
-    }
-    
-    data.forEach(group => {
-      const groupEl = document.createElement('div');
-      groupEl.className = 'materials-group';
-      
-      const headerEl = document.createElement('div');
-      headerEl.className = 'materials-date-header';
-      headerEl.innerHTML = `
-        <span>📅 ${group.date}</span>
-        <span class="materials-group-count">${group.files.length} 个文件</span>
-      `;
-      groupEl.appendChild(headerEl);
-      
-      if (group.files.length === 0) {
-        const emptyEl = document.createElement('div');
-        emptyEl.style.padding = '20px';
-        emptyEl.style.color = 'var(--text-muted)';
-        emptyEl.style.fontSize = '0.78rem';
-        emptyEl.textContent = '该文件夹下暂无有效素材文件';
-        groupEl.appendChild(emptyEl);
-      } else {
-        const gridEl = document.createElement('div');
-        gridEl.className = 'materials-grid';
-        
-        group.files.forEach(file => {
-          const cardEl = document.createElement('div');
-          cardEl.className = 'material-file-card';
-          cardEl.title = `双击打开: ${file.name}\n单击在文件资源管理器中定位`;
-          
-          let badgeText = '文件';
-          let badgeClass = 'file';
-          if (file.type === 'video') { badgeText = '视频'; badgeClass = 'video'; }
-          else if (file.type === 'image') { badgeText = '图片'; badgeClass = 'image'; }
-          else if (file.type === 'text') { badgeText = '图文'; badgeClass = 'text'; }
-          
-          let previewHtml = '';
-          if (file.type === 'image') {
-            const safePath = 'file:///' + file.path.replace(/\\/g, '/');
-            previewHtml = `<img src="${safePath}" alt="${file.name}" loading="lazy">`;
-          } else if (file.type === 'video') {
-            // 查找同目录下是否存在同名_cover的图片作为封
-            const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
-            const coverFile = group.files.find(f => f.type === 'image' && f.name.startsWith(baseName) && f.name.includes('cover'));
-            if (coverFile) {
-              const safeCoverPath = 'file:///' + coverFile.path.replace(/\\/g, '/');
-              previewHtml = `
-                <img src="${safeCoverPath}" alt="${file.name}" loading="lazy">
-                <div class="video-play-overlay">
-                  <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                </div>
-              `;
-            } else {
-              previewHtml = `
-                <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary);"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-              `;
-            }
-          } else if (file.type === 'text') {
-            previewHtml = `
-              <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-            `;
-          } else {
-            previewHtml = `
-              <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-            `;
-          }
-          
-          cardEl.innerHTML = `
-            <span class="material-badge ${badgeClass}">${badgeText}</span>
-            <div class="material-preview-box">${previewHtml}</div>
-            <div class="material-info-box">
-              <div class="material-name" title="${file.name}">${file.name}</div>
-              <div class="material-size">${formatBytes(file.size)}</div>
-            </div>
-          `;
-          
-          cardEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            window.api.openFileFolder(file.path);
-          });
-          
-          cardEl.addEventListener('dblclick', (e) => {
-            e.stopPropagation();
-            window.api.openPath(file.path);
-          });
-          
-          gridEl.appendChild(cardEl);
-        });
-        groupEl.appendChild(gridEl);
-      }
-      materialsContainer.appendChild(groupEl);
-    });
+    const data = await window.api.getDailyAssets();
+    allDailyMaterials = Array.isArray(data) ? data : [];
+    refreshMaterialsDateFilter();
+    renderDailyMaterials();
   } catch (err) {
     console.error('加载本地素材失败:', err);
     materialsContainer.innerHTML = `
-      <div class="empty-state" style="padding: 100px 20px; text-align: center; color: var(--color-danger); font-size: 0.82rem; line-height: 1.6;">
-        加载本地素材失败，请检查控制台错误信息'br>或尝试点击右上角“刷新列表”重试'      </div>
+      <div class="empty-state" style="padding:100px 20px;text-align:center;color:var(--color-danger);font-size:0.82rem;line-height:1.6;">
+        加载本地素材失败，请检查控制台错误信息，或点击右上角“刷新列表”重试
+      </div>
     `;
   }
 }

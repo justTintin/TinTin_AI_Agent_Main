@@ -1130,17 +1130,6 @@ class ClipListItemWidget(QFrame):
                 color: #94a3b8;
                 font-size: 11px;
             }
-            QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-                border: 1px solid #4b5563;
-                border-radius: 3px;
-                background: #18181b;
-            }
-            QCheckBox::indicator:checked {
-                background: #10b981;
-                border-color: #10b981;
-            }
         """)
         self.chk_subtitles.setChecked(False)
         meta_layout.addWidget(self.chk_subtitles)

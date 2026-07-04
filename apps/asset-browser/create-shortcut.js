@@ -6,7 +6,7 @@ function createShortcut() {
   const projectDir = __dirname;
   const batPath = path.join(projectDir, '启动.bat');
   const desktopDir = path.join(os.homedir(), 'Desktop');
-  const shortcutPath = path.join(desktopDir, 'TInTIn 素材下载浏览器.lnk');
+  const shortcutPath = path.join(desktopDir, '丁大怪-电商智能体矩阵 素材下载浏览器.lnk');
   
   // PowerShell 脚本内容，用于创建指向 启动.bat 的快捷方式
   const psScript = `
@@ -15,7 +15,7 @@ $Shortcut = $Shell.CreateShortcut("${shortcutPath}")
 $Shortcut.TargetPath = "${batPath}"
 $Shortcut.WorkingDirectory = "${projectDir}"
 $Shortcut.WindowStyle = 7
-$Shortcut.Description = "启动 TInTIn 素材下载浏览器"
+$Shortcut.Description = "启动 丁大怪-电商智能体矩阵 素材下载浏览器"
 $Shortcut.Save()
   `.trim();
 

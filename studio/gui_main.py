@@ -43,7 +43,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("tintin.video.assistant.1.4")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("dingdaguai.ecommerce.agent.matrix.2.0")
     except Exception:
         pass
 
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         super().__init__()
         self.splash = splash
         self._update_splash("正在初始化窗口参数...", 15)
-        self.setWindowTitle("思维向量-视频助手 v2.0.0 RC")
+        self.setWindowTitle("丁大怪-电商智能体矩阵 v2.0.0 RC")
         self.resize(1300, 900)
         # Set Window Icon
         icon_path = os.path.join(PROJECT_ROOT, "assets", "app_icon.png")
@@ -858,6 +858,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.material_clip_tool.setup()
         self.content_stack.addWidget(self.page_material_clip)
 
+        # 43: Dreamina Assets (即梦素材) Page
+        self.page_dreamina_assets = QWidget()
+        self.setup_dreamina_assets_page()
+        self.content_stack.addWidget(self.page_dreamina_assets)
+
 
     def _start_clip_preload(self):
         """应用启动时在后台线程预热 CLIP 模型，避免首次搜索时卡顿。"""
@@ -928,6 +933,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "material_clip_tool"):
                 try: self.material_clip_tool._reload_dir_config()
                 except Exception as e: log.error(f"刷新素材目录失败: {e}")
+        elif index == 43: # 即梦素材
+            if hasattr(self, "dreamina_assets_tool"):
+                try:
+                    self.dreamina_assets_tool._scan_local_files()
+                except Exception as e:
+                    log.error(f"刷新即梦素材列表失败: {e}")
         elif index == 38: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cross-platform build script for TinTin AI Agent.
+Cross-platform build script for 丁大怪-电商智能体矩阵.
 
 Usage:
     python build.py win      Build Windows executable (PyInstaller)
@@ -28,7 +28,7 @@ ICON = os.path.join(STUDIO_DIR, "assets", "app_icon.png")
 
 def run_dev():
     """Run the application directly (dev mode)."""
-    print("[run] Starting TinTin AI Agent in dev mode...")
+    print("[run] Starting 丁大怪-电商智能体矩阵 in dev mode...")
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", os.pathsep.join([
         STUDIO_DIR,
@@ -123,7 +123,7 @@ def _ensure_pyinstaller():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TinTin AI Agent Build Tool")
+    parser = argparse.ArgumentParser(description="丁大怪-电商智能体矩阵 Build Tool")
     parser.add_argument("command", choices=["win", "linux", "run", "clean"],
                         help="Action to perform")
     args = parser.parse_args()

@@ -16,6 +16,7 @@ import re
 import sys
 import json
 import time
+import shutil
 import subprocess
 
 from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR
@@ -44,13 +45,70 @@ def is_present() -> bool:
 def _electron_exe() -> str | None:
     """定位可用的 electron 启动器（优先工程内 node_modules）。"""
     candidates = [
+        os.path.join(ASSET_BROWSER_DIR, "node_modules", "electron", "dist",
+                     "electron.exe" if sys.platform == "win32" else "electron"),
         os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin",
                      "electron.cmd" if sys.platform == "win32" else "electron"),
+        os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin", "electron"),
     ]
     for p in candidates:
         if os.path.isfile(p):
+            try:
+                if os.path.getsize(p) <= 0:
+                    continue
+            except Exception:
+                continue
             return p
     return None
+
+
+def _launch_asset_browser_process() -> tuple[bool, str]:
+    """启动素材浏览器进程；优先 electron 启动器，失败则回退 npm.cmd start。"""
+    flags = create_no_window_flag()
+    exe = _electron_exe()
+    launch_errors = []
+
+    if exe:
+        try:
+            p = subprocess.Popen([exe, "."], cwd=ASSET_BROWSER_DIR, creationflags=flags)
+            time.sleep(1.0)
+            if p.poll() is None:
+                return True, "ok"
+            launch_errors.append(f"electron 进程异常退出(code={p.returncode})")
+        except Exception as e:
+            launch_errors.append(f"electron 启动失败: {e}")
+
+    npm_candidates = []
+    if sys.platform == "win32":
+        npm_candidates.extend([
+            os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
+            os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
+            shutil.which("npm.cmd") or "",
+        ])
+    else:
+        npm_candidates.extend([
+            shutil.which("npm") or "",
+        ])
+
+    for npm in [x for x in npm_candidates if x]:
+        try:
+            if npm.lower().endswith("npm-cli.js"):
+                node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe" if sys.platform == "win32" else "node")
+                if not os.path.isfile(node_exe):
+                    continue
+                p = subprocess.Popen([node_exe, npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)
+            else:
+                p = subprocess.Popen([npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)
+            time.sleep(1.0)
+            if p.poll() is not None:
+                launch_errors.append(f"npm 进程异常退出(code={p.returncode})")
+                continue
+            return True, "ok"
+        except Exception as e:
+            launch_errors.append(f"npm 启动失败({npm}): {e}")
+
+    detail = "；".join(launch_errors) if launch_errors else "未找到可用的 electron 或 npm 启动器"
+    return False, detail
 
 
 def safe_name(name: str) -> str:
@@ -79,10 +137,6 @@ def launch_for_topic(topic: str, keyword: str | None = None,
         return False, (f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。\n"
                        "请确认 apps/asset-browser 已就位且已 npm install。"), ""
 
-    exe = _electron_exe()
-    if not exe:
-        return False, "未找到 electron 启动器（node_modules/.bin/electron）。", ""
-
     dl_dir = topic_dir(topic)
     handoff = {
         "topic": topic,
@@ -97,12 +151,10 @@ def launch_for_topic(topic: str, keyword: str | None = None,
     except Exception as e:
         return False, f"写入握手文件失败: {e}", ""
 
-    flags = create_no_window_flag()  # CREATE_NO_WINDOW（隐藏控制台，Electron 自带窗口）
-    try:
-        subprocess.Popen([exe, "."], cwd=ASSET_BROWSER_DIR, creationflags=flags)
-        log.info(f"素材浏览器已启动：topic={topic} platform={platform} dir={dl_dir}")
-    except Exception as e:
-        return False, f"启动素材浏览器失败: {e}", ""
+    ok_launch, msg_launch = _launch_asset_browser_process()
+    if not ok_launch:
+        return False, f"启动素材浏览器失败: {msg_launch}", ""
+    log.info(f"素材浏览器已启动：topic={topic} platform={platform} dir={dl_dir}")
 
     return True, f"已为选题「{topic}」打开{PLATFORMS.get(platform, platform)}搜索页", dl_dir
 
@@ -111,43 +163,63 @@ def launch() -> tuple[bool, str]:
     """直接打开素材浏览器（普通浏览模式，无握手）。返回 (ok, msg)。"""
     if not is_present():
         return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。"
-    exe = _electron_exe()
-    if not exe:
-        return False, "未找到 electron 启动器（node_modules/.bin/electron）。"
     # 清掉可能残留的握手，确保以普通浏览模式打开
     try:
         if os.path.exists(HANDOFF_FILE):
             os.remove(HANDOFF_FILE)
     except Exception:
         pass
-    flags = create_no_window_flag()
-    try:
-        subprocess.Popen([exe, "."], cwd=ASSET_BROWSER_DIR, creationflags=flags)
-        log.info("素材浏览器已启动（普通浏览模式）")
-    except Exception as e:
-        return False, f"启动素材浏览器失败: {e}"
+    ok_launch, msg_launch = _launch_asset_browser_process()
+    if not ok_launch:
+        return False, f"启动素材浏览器失败: {msg_launch}"
+    log.info("素材浏览器已启动（普通浏览模式）")
     return True, "已打开素材浏览器"
+
+
+def launch_dreamina_assets(download_dir: str) -> tuple[bool, str, str]:
+    """打开素材浏览器并直达即梦页面，下载目录指向 download_dir。"""
+    if not is_present():
+        return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。", ""
+    dl_dir = os.path.abspath(download_dir or "").strip()
+    if not dl_dir:
+        return False, "下载目录不能为空。", ""
+    os.makedirs(dl_dir, exist_ok=True)
+
+    handoff = {
+        "topic": "即梦素材",
+        "platform": "jimeng",
+        "searchUrl": "https://jimeng.jianying.com/ai-tool/image/generate",
+        "downloadDir": dl_dir,
+        "ts": int(time.time()),
+    }
+    try:
+        with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
+            json.dump(handoff, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return False, f"写入握手文件失败: {e}", ""
+
+    ok_launch, msg_launch = _launch_asset_browser_process()
+    if not ok_launch:
+        return False, f"启动素材浏览器失败: {msg_launch}", ""
+    log.info(f"素材浏览器已启动（即梦素材模式）dir={dl_dir}")
+
+    return True, "已打开素材浏览器并切到即梦页面", dl_dir
 
 
 def launch_hotspot_capture(auto_quit: bool = False) -> tuple[bool, str]:
     """启动素材浏览器并自动采集今日各平台热榜。auto_quit=True 时采集完自动关闭（供每日定时任务）。"""
     if not is_present():
         return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。"
-    exe = _electron_exe()
-    if not exe:
-        return False, "未找到 electron 启动器。"
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
             json.dump({"mode": "hotspot", "autoQuit": auto_quit, "ts": int(time.time())},
                       f, ensure_ascii=False)
     except Exception as e:
         return False, f"写入握手文件失败: {e}"
-    flags = create_no_window_flag()
-    try:
-        subprocess.Popen([exe, "."], cwd=ASSET_BROWSER_DIR, creationflags=flags)
-        log.info(f"素材浏览器已启动（热点采集模式 autoQuit={auto_quit}）")
-    except Exception as e:
-        return False, f"启动素材浏览器失败: {e}"
+    ok_launch, msg_launch = _launch_asset_browser_process()
+    if not ok_launch:
+        return False, f"启动素材浏览器失败: {msg_launch}"
+    log.info(f"素材浏览器已启动（热点采集模式 autoQuit={auto_quit}）")
     return True, "已启动热点采集（依次打开各平台热榜页，采集完成写入清单）"
 
 
@@ -155,18 +227,13 @@ def launch_knowledge_sync() -> tuple[bool, str]:
     """启动素材浏览器并直接进入「关注同步（我的知识库）」模式。返回 (ok, msg)。"""
     if not is_present():
         return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。"
-    exe = _electron_exe()
-    if not exe:
-        return False, "未找到 electron 启动器（node_modules/.bin/electron）。"
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
             json.dump({"mode": "knowledge", "ts": int(time.time())}, f, ensure_ascii=False)
     except Exception as e:
         return False, f"写入握手文件失败: {e}"
-    flags = create_no_window_flag()
-    try:
-        subprocess.Popen([exe, "."], cwd=ASSET_BROWSER_DIR, creationflags=flags)
-        log.info("素材浏览器已启动（关注同步模式）")
-    except Exception as e:
-        return False, f"启动素材浏览器失败: {e}"
+    ok_launch, msg_launch = _launch_asset_browser_process()
+    if not ok_launch:
+        return False, f"启动素材浏览器失败: {msg_launch}"
+    log.info("素材浏览器已启动（关注同步模式）")
     return True, "已打开素材浏览器（关注同步模式）"

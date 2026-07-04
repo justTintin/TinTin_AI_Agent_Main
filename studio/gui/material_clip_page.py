@@ -447,11 +447,12 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
             if self._is_cancelled:
                 return False, None
             try:
-                with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=None) as idx:
+                with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=self.log_line.emit) as idx:
                     success = idx.analyze_material(mat["id"], mat["path"])
                 return bool(success), None
             except Exception as e:
-                return False, str(e)
+                import traceback
+                return False, traceback.format_exc()
 
         self.log_line.emit(f"  🚀 AI 分析并发数: {max_workers}")
         done = 0
@@ -468,13 +469,15 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
                         f2.cancel()
                     break
                 success, err = fut.result()
+                done += 1
+                fname = os.path.basename(mat['path'])
                 if success:
                     ok += 1
+                    self.log_line.emit(f"  ✓ [{done}/{total}] {fname}: AI 分析完成")
                 else:
                     fail += 1
-                    if err:
-                        self.log_line.emit(f"  ✗ {os.path.basename(mat['path'])}: {err}")
-                done += 1
+                    err_msg = f": {err}" if err else " (分析失败)"
+                    self.log_line.emit(f"  ✗ [{done}/{total}] {fname}{err_msg}")
                 self.progress.emit(done, total)
 
         if not self._is_cancelled:
@@ -2121,6 +2124,13 @@ class MaterialClipPage(BasePage):
             act_copy_hash.triggered.connect(lambda: QGuiApplication.clipboard().setText(fhash))
             menu.addAction(act_copy_hash)
 
+        material_id = data.get("id")
+        if material_id is not None:
+            menu.addSeparator()
+            act_delete_db = QAction("🗑 从数据库删除该条目", menu)
+            act_delete_db.triggered.connect(lambda: self._delete_material_from_db(data))
+            menu.addAction(act_delete_db)
+
         menu.exec_(self.diff_table.viewport().mapToGlobal(pos))
 
     def _show_table_context_menu(self, pos):
@@ -2171,4 +2181,34 @@ class MaterialClipPage(BasePage):
             act_copy_hash.triggered.connect(lambda: QGuiApplication.clipboard().setText(fhash))
             menu.addAction(act_copy_hash)
 
+        material_id = data.get("id")
+        if material_id is not None:
+            menu.addSeparator()
+            act_delete_db = QAction("🗑 从数据库删除该条目", menu)
+            act_delete_db.triggered.connect(lambda: self._delete_material_from_db(data))
+            menu.addAction(act_delete_db)
+
         menu.exec_(self.db_table.viewport().mapToGlobal(pos))
+
+    def _delete_material_from_db(self, row_data: dict):
+        try:
+            material_id = int(row_data.get("id"))
+        except Exception:
+            self.show_warning("未找到素材 ID，无法删除数据库记录。")
+            return
+
+        fname = row_data.get("filename") or os.path.basename(row_data.get("path", "")) or f"ID={material_id}"
+        if not self.confirm(
+            f"确定从数据库删除该素材记录吗？\n\n文件: {fname}\nID: {material_id}\n\n仅删除数据库记录，不删除磁盘文件。",
+            "确认删除"
+        ):
+            return
+
+        try:
+            from utils.material_clip_indexer import MaterialClipIndexer
+            with MaterialClipIndexer(nas_root=getattr(self, "_nas_root", "")) as idx:
+                idx.delete_material_by_id(material_id)
+            self.log_box.append(f"🗑 已从数据库删除: {fname} (id={material_id})")
+            self._refresh_db_table()
+        except Exception as e:
+            self.show_error(f"删除数据库记录失败：\n{e}")

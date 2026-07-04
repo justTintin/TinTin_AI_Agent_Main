@@ -258,10 +258,11 @@ _KNOWN_BRANDS = [
     "apple", "苹果", "samsung", "三星", "xiaomi", "小米",
     "huawei", "鍗庝负", "asus", "鍗庣", "msi", "寰鏄",
     "anker", "安克", "hp", "惠普", "dell", "戴尔",
+    "gpw", "g pro wireless", "gpx", "g pro x superlight",
 ]
 
 _KNOWN_CATEGORIES = {
-    "鼠标":   ["mouse", "鼠标"],
+    "鼠标":   ["mouse", "鼠标", "dpi", "cpi", "灵敏度", "回报率", "polling rate", "双击", "左键", "右键"],
     "閿鐩":   ["keyboard", "閿鐩", "kbd", "鏈烘拌酱"],
     "手机":   ["phone", "手机", "mobile", "iphone", "安卓"],
     "耳机":   ["headset", "earphone", "耳机", "earbuds", "airpods"],
@@ -269,6 +270,58 @@ _KNOWN_CATEGORIES = {
     "榧犳爣鍨": ["mousepad", "榧犳爣鍨", "desk mat"],
     "闊崇":   ["speaker", "闊崇", "鍠囧彮"],
 }
+
+
+def _is_hidden_name(name: str) -> bool:
+    if not name:
+        return False
+    lower = name.lower()
+    if name.startswith("."):
+        return True
+    if lower in {"#recycle", "$recycle.bin", "system volume information", "thumbs.db", "desktop.ini"}:
+        return True
+    return False
+
+
+def _has_hidden_or_system_attr(path: str) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        st = os.stat(path, follow_symlinks=False)
+        attrs = getattr(st, "st_file_attributes", 0)
+        hidden = 0x2
+        system = 0x4
+        return bool(attrs & (hidden | system))
+    except Exception:
+        return False
+
+
+def _should_skip_path(path: str) -> bool:
+    name = os.path.basename(path.rstrip("/\\"))
+    return _is_hidden_name(name) or _has_hidden_or_system_attr(path)
+
+_SCRIPT_BRAND_PATTERNS = [
+    ("罗技", ["logitech", "logi", "罗技", "gpw", "g pro wireless", "g pro x superlight", "gpx"]),
+    ("雷蛇", ["razer", "雷蛇"]),
+]
+
+
+def _infer_scene_desc_from_script(text: str) -> tuple[Optional[str], Optional[str]]:
+    """根据台词提炼画面主描述（台词优先）。"""
+    if not text:
+        return None, None
+
+    lower = text.lower()
+    has_mouse = any(k in lower for k in ("鼠标", "mouse", "gpw", "gpx", "g pro"))
+    has_dpi = any(k in lower for k in ("dpi", "cpi", "灵敏度", "回报率", "polling"))
+
+    if has_mouse and has_dpi:
+        return "口播科普鼠标DPI", "台词聚焦DPI设置与手感"
+    if has_mouse:
+        return "口播讲解鼠标参数", "台词驱动的鼠标介绍"
+    if has_dpi:
+        return "口播科普DPI参数", "台词驱动的参数讲解"
+    return None, None
 
 
 # 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
@@ -613,10 +666,24 @@ def _call_vision_for_product(
     result["scene_desc_secondary"] = "；".join(unique_s) if unique_s else None
 
     n = len(sampled)
-    if n > 0 and (b or m_val):
-        hits = (brand_cnt.get(b, 0) if b else 0) + (model_cnt.get(m_val, 0) if m_val else 0)
-        slots = n * ((1 if b else 0) + (1 if m_val else 0))
-        result["ai_confidence"] = round(hits / slots, 2) if slots else 0.0
+    if n > 0:
+        hits = 0
+        slots = 0
+        if b:
+            hits += brand_cnt.get(b, 0)
+            slots += n
+        if c:
+            hits += cat_cnt.get(c, 0)
+            slots += n
+        if m_val:
+            hits += model_cnt.get(m_val, 0)
+            slots += n
+
+        if slots > 0:
+            result["ai_confidence"] = round(hits / slots, 2)
+        elif primary_list or secondary_list:
+            # 至少识别到稳定画面描述，但未识别品牌/型号/品类
+            result["ai_confidence"] = 0.3
 
     return result
 
@@ -626,18 +693,49 @@ def _extract_from_script(text: str) -> tuple:
     瑙嗚堿I鏈璇嗗埆鏃朵綔涓鸿ˉ鍏呭厹搴曪紝杩斿洖 (brand, product, model)锛屾湭璇嗗埆涓 None銆
     """
     if not text:
-        return None, None, None
+        return None, None, None, None, None
     lower = text.lower()
-    brand   = next((b for b in _KNOWN_BRANDS if b.lower() in lower), None)
+
+    brand = None
+    for canonical, patterns in _SCRIPT_BRAND_PATTERNS:
+        if any(p in lower for p in patterns):
+            brand = canonical
+            break
+
+    if not brand:
+        brand = next((b for b in _KNOWN_BRANDS if b.lower() in lower), None)
+        if brand:
+            b_lower = brand.lower()
+            if b_lower in ("logitech", "logi", "缃楁妧"):
+                brand = "罗技"
+            elif b_lower in ("razer", "闆疯泧"):
+                brand = "雷蛇"
+
     product = None
     for cat, keywords in _KNOWN_CATEGORIES.items():
         if any(kw.lower() in lower for kw in keywords):
             product = cat
             break
-    # 鍨嬪彿锛氬ぇ鍐欏瓧姣+鏁板瓧缁勫悎锛屽 G502 / MX3 / MH751
-    m = re.search(r'\b([A-Z]{1,4}\s?\d{2,5}[A-Za-z0-9]?)\b', text)
-    model = m.group(1).replace(" ", "") if m else None
-    return brand, product, model
+
+    model = None
+    model_patterns = [
+        (r"\bg\s*pro\s*wireless\b", "GPW"),
+        (r"\bgpw\b", "GPW"),
+        (r"\bg\s*pro\s*x\s*superlight\b", "GPX"),
+        (r"\bgpx\b", "GPX"),
+    ]
+    for pat, val in model_patterns:
+        if re.search(pat, lower, flags=re.IGNORECASE):
+            model = val
+            break
+
+    if model is None:
+        # 鍨嬪彿锛氬ぇ鍐欏瓧姣+鏁板瓧缁勫悎锛屽 G502 / MX3 / MH751
+        m = re.search(r'\b([A-Z]{1,4}\s?\d{2,5}[A-Za-z0-9]?)\b', text)
+        model = m.group(1).replace(" ", "") if m else None
+
+    scene_desc_primary, scene_desc_secondary = _infer_scene_desc_from_script(text)
+    return brand, product, model, scene_desc_primary, scene_desc_secondary
 
 
 # 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
@@ -1061,6 +1159,22 @@ class _MaterialDB:
                   scene_desc_primary, scene_desc_secondary, material_id))
         self._conn.commit()
 
+    def update_material_file_meta(self, material_id: int, *,
+                                  file_hash: Optional[str] = None,
+                                  file_size: Optional[int] = None,
+                                  mtime: Optional[float] = None) -> None:
+        """按 material_id 回填文件元信息，避免历史数据缺失 file_size/mtime。"""
+        self._connect()
+        with self._conn.cursor() as cur:
+            cur.execute("""
+                UPDATE materials
+                   SET file_hash = COALESCE(%s, file_hash),
+                       file_size = COALESCE(%s, file_size),
+                       mtime     = COALESCE(%s, mtime)
+                 WHERE id=%s
+            """, (file_hash, file_size, mtime, material_id))
+        self._conn.commit()
+
     def search_by_tags(self, brand: str = None, model: str = None,
                        category: str = None, ai_status: str = None,
                        limit: int = 10000, hash_prefix: str = "") -> list:
@@ -1138,6 +1252,14 @@ class _MaterialDB:
             # 级联删除 frames 记录
             cur.execute("DELETE FROM frames WHERE material_id IN (SELECT id FROM materials WHERE path = %s)", (path,))
             cur.execute("DELETE FROM materials WHERE path = %s", (path,))
+        self._conn.commit()
+
+    def delete_material_by_id(self, material_id: int) -> None:
+        """从数据库中完全删除指定 id 的素材及其对应的所有视频帧记录。"""
+        self._connect()
+        with self._conn.cursor() as cur:
+            cur.execute("DELETE FROM frames WHERE material_id = %s", (material_id,))
+            cur.execute("DELETE FROM materials WHERE id = %s", (material_id,))
         self._conn.commit()
 
     def list_materials(self, path_prefix: str = "", limit: int = 10000,
@@ -1376,6 +1498,15 @@ class MaterialClipIndexer:
         self.cfg = _load_config()
         self.nas_root = nas_root or self.cfg.get("nas_root", "")
         self._cb = progress_cb or (lambda msg: log.info(msg))
+        # Auto-resolve ffmpeg path if not explicitly configured
+        if not self.cfg.get("ffmpeg_path"):
+            try:
+                from utils.platform_utils import find_ffmpeg
+                resolved = find_ffmpeg()
+                if resolved and os.path.isfile(resolved):
+                    self.cfg["ffmpeg_path"] = resolved
+            except Exception:
+                pass
         self._db = _MaterialDB(self.cfg)
         self._encoder = _ClipEncoder(
             model_name=self.cfg["clip_model"],
@@ -1692,6 +1823,11 @@ class MaterialClipIndexer:
             subdirs = []
             try:
                 for entry in os.scandir(dpath):
+                    try:
+                        if _should_skip_path(entry.path):
+                            continue
+                    except Exception:
+                        continue
                     if entry.is_file():
                         ext = os.path.splitext(entry.name)[1].lower()
                         if ext in supported_exts:
@@ -1860,9 +1996,30 @@ class MaterialClipIndexer:
 
         # 计算并记录文件哈希与基本信息
         file_hash = _compute_hash(file_path) or "unknown"
+        file_size = None
+        file_mtime = None
+        try:
+            st = os.stat(file_path)
+            file_size = int(st.st_size)
+            file_mtime = float(st.st_mtime)
+        except Exception:
+            pass
+
+        try:
+            self._db.update_material_file_meta(
+                material_id,
+                file_hash=file_hash if file_hash != "unknown" else None,
+                file_size=file_size,
+                mtime=file_mtime,
+            )
+        except Exception as e:
+            self._log(f"  ⚠ 文件元信息回填失败（继续分析）: {e}")
+
         self._log(f"\n========================================================")
         self._log(f"📄 [AI 分析] 文件: {fname}")
         self._log(f"🔑 哈希值 (Hash): {file_hash}")
+        if isinstance(file_size, int) and file_size > 0:
+            self._log(f"📦 文件大小: {file_size / 1048576:.1f} MB")
         self._log(f"--------------------------------------------------------")
 
         # 1. OCR text extraction for images (No automatic renaming during AI analysis)
@@ -1900,6 +2057,11 @@ class MaterialClipIndexer:
                     new_file_path, tmp_dir, fps, self.cfg.get("ffmpeg_path")
                 )
                 img_paths = [fi[2] for fi in frame_infos] if frame_infos else []
+                if not img_paths:
+                    ffmpeg_used = self.cfg.get("ffmpeg_path") or "ffmpeg"
+                    self._log(f"     ⚠ 抽帧失败: 未能提取任何帧。ffmpeg路径: {ffmpeg_used}")
+                else:
+                    self._log(f"     抽帧成功: {len(img_paths)} 帧")
             else:
                 frame_infos = [(0, 0.0, new_file_path)]
                 img_paths = [new_file_path]
@@ -1934,20 +2096,36 @@ class MaterialClipIndexer:
                     from utils.video_indexer import transcribe_audio
                     audio_script = transcribe_audio(new_file_path, WHISPER_MODELS_DIR)
                     self._log(f"     转写 {len(audio_script)} 字")
-                    # 视觉未识别时从台词关键词补充
-                    if not (brand and model) and audio_script:
-                        s_brand, s_product, s_model = _extract_from_script(audio_script)
-                        brand   = brand   or s_brand
-                        product = product or s_product
-                        model   = model   or s_model
-                        if s_brand or s_model:
-                            self._log(
-                                f"     台词补充: brand={brand!r} model={model!r}"
-                            )
-                            if ai_confidence is None:
-                                ai_confidence = 0.4  # 台词关键词识别，置信度较低
+
+                    # 台词优先：有口播时，品牌/品类/型号/主画面描述优先采用台词结果
+                    if audio_script:
+                        s_brand, s_product, s_model, s_scene_p, s_scene_s = _extract_from_script(audio_script)
+
+                        if s_brand and s_brand != brand:
+                            self._log(f"     台词优先覆盖品牌: {brand!r} -> {s_brand!r}")
+                            brand = s_brand
+                        if s_product and s_product != product:
+                            self._log(f"     台词优先覆盖品类: {product!r} -> {s_product!r}")
+                            product = s_product
+                        if s_model and s_model != model:
+                            self._log(f"     台词优先覆盖型号: {model!r} -> {s_model!r}")
+                            model = s_model
+
+                        if s_scene_p:
+                            if scene_desc_primary and scene_desc_primary != s_scene_p:
+                                scene_desc_secondary = "；".join([
+                                    x for x in [s_scene_s, scene_desc_primary, scene_desc_secondary] if x
+                                ])
+                            elif s_scene_s and not scene_desc_secondary:
+                                scene_desc_secondary = s_scene_s
+                            scene_desc_primary = s_scene_p
+
+                        if s_brand or s_product or s_model or s_scene_p:
+                            ai_confidence = max(float(ai_confidence or 0.0), 0.75)
                 except Exception as e:
                     self._log(f"     转写失败（跳过）: {e}")
+
+            category = product
 
             # ── CLIP 向量编码（可选，失败不中断主流程）───────────────────────
             frame_records: list[dict] = []
@@ -1960,7 +2138,7 @@ class MaterialClipIndexer:
                     embs = self._encoder.encode_images(sample_paths)
                     tags_row = {
                         "brand": brand, "product": product,
-                        "model": model, "category": None,
+                        "model": model, "category": category,
                     }
                     for (fidx, ts, _), emb in zip(sample_infos, embs):
                         frame_records.append({
@@ -1979,10 +2157,13 @@ class MaterialClipIndexer:
                 self._log("  ✗ 视觉 AI 识别未生成主要画面描述，判定为分析失败")
                 status = "failed"
 
+            if ai_confidence is None:
+                ai_confidence = 0.0 if status == "failed" else 0.35
+
             self._db.update_material_ai(
                 material_id,
                 brand=brand, product=product, model=model,
-                category=None, audio_script=audio_script,
+                category=category, audio_script=audio_script,
                 ai_status=status,
                 ai_confidence=ai_confidence,
                 scene_desc_primary=scene_desc_primary,
@@ -2008,7 +2189,7 @@ class MaterialClipIndexer:
                     material_id,
                     brand=None, product=None, model=None, category=None,
                     audio_script=None, ai_status="failed",
-                    ai_confidence=None, scene_desc_primary=None, scene_desc_secondary=None,
+                    ai_confidence=0.0, scene_desc_primary=None, scene_desc_secondary=None,
                 )
             except Exception:
                 pass
@@ -2109,7 +2290,7 @@ class MaterialClipIndexer:
                 material_id,
                 brand=None, product=None, model=None, category=None,
                 audio_script=None, ai_status="failed",
-                ai_confidence=None, scene_desc_primary=None, scene_desc_secondary=None,
+                ai_confidence=0.0, scene_desc_primary=None, scene_desc_secondary=None,
             )
         except Exception:
             pass
@@ -2235,6 +2416,9 @@ class MaterialClipIndexer:
                        limit: int = 10000, hash_prefix: str = "") -> list:
         return self._db.search_by_tags(brand, model, category, ai_status, limit, hash_prefix)
 
+    def delete_material_by_id(self, material_id: int) -> None:
+        self._db.delete_material_by_id(material_id)
+
     def index_directory(
         self, directory: str, *, force: bool = False,
         nas_root: Optional[str] = None
@@ -2245,11 +2429,19 @@ class MaterialClipIndexer:
         
         # We need to collect files recursively
         files = []
-        for root, _, fs in os.walk(directory):
+        for root, ds, fs in os.walk(directory):
+            ds[:] = [d for d in ds if not _should_skip_path(os.path.join(root, d))]
+            if _should_skip_path(root):
+                continue
             for f in fs:
+                if _is_hidden_name(f):
+                    continue
                 ext = os.path.splitext(f)[1].lower()
                 if ext in VIDEO_EXTS or ext in IMAGE_EXTS:
-                    files.append(os.path.join(root, f))
+                    full_path = os.path.join(root, f)
+                    if _has_hidden_or_system_attr(full_path):
+                        continue
+                    files.append(full_path)
         
         total = len(files)
         if total == 0:

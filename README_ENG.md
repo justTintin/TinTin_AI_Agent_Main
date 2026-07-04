@@ -1,4 +1,4 @@
-# Tintin Video Toolkit (GUI / Web)
+# DingDaGuai E-commerce Agent Matrix (GUI / Web)
 
 This project is for learning and internal use only.
 

@@ -1,15 +1,18 @@
 {
-  "name": "tintin-asset-browser",
+  "name": "dingdaguai-asset-browser",
   "version": "1.0.0",
   "description": "Custom browser for asset sniffing and downloading.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "dist": "electron-packager . \"TInTIn素材下载浏览器\" --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=bin"
+    "dist": "electron-packager . \"丁大怪-电商智能体矩阵素材下载浏览器\" --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=bin"
   },
   "devDependencies": {
     "electron": "^30.5.1",
     "electron-packager": "^17.1.2"
+  },
+  "allowScripts": {
+    "electron@30.5.1": true
   }
 }

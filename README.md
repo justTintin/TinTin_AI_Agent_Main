@@ -1,4 +1,4 @@
-# AI 电商智能体 · TinTin AI Agent
+# 丁大怪-电商智能体矩阵
 
 > 面向电商内容创作的全栈 AI 桌面工作站
 >
@@ -11,7 +11,7 @@
 ## 架构
 
 ```
-TinTin_AI_Agent_Main/
+project-root/
 ├── studio/                    主应用 (Python)
 │   ├── gui_main.py            入口，侧边栏 + QStackedWidget 页面切换
 │   ├── gui/                   页面层 (20+ 功能页面)

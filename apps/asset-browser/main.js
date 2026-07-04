@@ -145,6 +145,7 @@ ipcMain.handle('get-handoff', () => pendingHandoff);
 // ── studio 集成：把同步到的关注/收藏样本写入 studio「我的知识库」可读的清单 ──
 // KNOWLEDGE_DIR 已在上方初始化（支持 knowledge_dir.json 自定义映射）
 const KB_MANIFEST = path.join(KNOWLEDGE_DIR, 'kb_sync.json');
+const MATERIAL_IMPORT_TASKS = path.join(KNOWLEDGE_DIR, 'material_import_tasks.json');
 
 // 热点追踪：把每天采集到的热榜快照写入 studio 可读的清单（含日期，供趋势合并）
 const HOTSPOT_DIR = path.join(__dirname, '..', '..', 'studio', 'outputs', 'materials', 'hotspots');
@@ -623,6 +624,127 @@ ipcMain.handle('open-path', async (event, dirPath) => {
 ipcMain.handle('open-v2ray-client', async () => {
   const db = getDatabase();
   return proxyManager.openV2rayN(db.settings.v2rayPath);
+});
+
+function _normalizePathLower(p) {
+  return path.resolve(String(p || '')).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+function _isPathInRoots(filePath, roots) {
+  const fp = _normalizePathLower(filePath);
+  return roots.some((r) => {
+    const root = _normalizePathLower(r);
+    return fp === root || fp.startsWith(root + path.sep);
+  });
+}
+
+function _classifyFileType(name) {
+  const ext = path.extname(String(name || '')).toLowerCase();
+  const VIDEO_EXT = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v']);
+  const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']);
+  const TEXT_EXT = new Set(['.txt', '.html', '.md', '.json']);
+  if (VIDEO_EXT.has(ext)) return 'video';
+  if (IMAGE_EXT.has(ext)) return 'image';
+  if (TEXT_EXT.has(ext)) return 'text';
+  return 'file';
+}
+
+ipcMain.handle('delete-local-files', async (event, paths) => {
+  try {
+    const arr = Array.isArray(paths) ? paths : [];
+    const unique = Array.from(new Set(arr.filter(Boolean).map((p) => path.resolve(String(p)))));
+    const db = getDatabase();
+    const allowedRoots = new Set();
+    if (db.settings && db.settings.downloadPath) allowedRoots.add(db.settings.downloadPath);
+    if (Array.isArray(db.downloadDirs)) db.downloadDirs.forEach((d) => allowedRoots.add(d));
+
+    let deleted = 0;
+    let failed = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const p of unique) {
+      try {
+        if (!_isPathInRoots(p, Array.from(allowedRoots))) {
+          skipped += 1;
+          continue;
+        }
+        if (!fs.existsSync(p)) {
+          skipped += 1;
+          continue;
+        }
+        const stat = fs.statSync(p);
+        if (!stat.isFile()) {
+          skipped += 1;
+          continue;
+        }
+        fs.unlinkSync(p);
+        deleted += 1;
+      } catch (e) {
+        failed += 1;
+        if (errors.length < 20) {
+          errors.push({ path: p, error: String(e && e.message ? e.message : e) });
+        }
+      }
+    }
+
+    return { ok: true, deleted, failed, skipped, errors };
+  } catch (e) {
+    console.error('delete-local-files failed', e);
+    return { ok: false, deleted: 0, failed: 0, skipped: 0, error: String(e) };
+  }
+});
+
+ipcMain.handle('enqueue-material-import', async (event, paths) => {
+  try {
+    const arr = Array.isArray(paths) ? paths : [];
+    const unique = Array.from(new Set(arr.filter(Boolean).map((p) => path.resolve(String(p)))));
+    fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
+
+    let existing = [];
+    if (fs.existsSync(MATERIAL_IMPORT_TASKS)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(MATERIAL_IMPORT_TASKS, 'utf-8'));
+      } catch (e) {
+        existing = [];
+      }
+      if (!Array.isArray(existing)) existing = [];
+    }
+
+    const existingSet = new Set(existing.map((it) => String(it.path || '').toLowerCase()).filter(Boolean));
+    const now = new Date().toISOString();
+    let added = 0;
+
+    for (const p of unique) {
+      if (!fs.existsSync(p)) continue;
+      let stat;
+      try {
+        stat = fs.statSync(p);
+      } catch (e) {
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const key = String(p).toLowerCase();
+      if (existingSet.has(key)) continue;
+      existing.push({
+        path: p,
+        name: path.basename(p),
+        size: stat.size,
+        type: _classifyFileType(p),
+        status: 'pending',
+        source: 'asset-browser',
+        enqueuedAt: now
+      });
+      existingSet.add(key);
+      added += 1;
+    }
+
+    fs.writeFileSync(MATERIAL_IMPORT_TASKS, JSON.stringify(existing, null, 2), 'utf-8');
+    return { ok: true, count: added, total: existing.length, file: MATERIAL_IMPORT_TASKS };
+  } catch (e) {
+    console.error('enqueue-material-import failed', e);
+    return { ok: false, count: 0, error: String(e) };
+  }
 });
 
 // IPC 处理器：扫描所有曾用过的下载目录，按日期分组返回文件列表

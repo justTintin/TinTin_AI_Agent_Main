@@ -226,6 +226,40 @@
           刷新列表
         </button>
       </header>
+
+      <section class="materials-toolbar">
+        <div class="materials-filter-row">
+          <input type="text" id="materials-search-input" class="materials-input" placeholder="搜索文件名或路径...">
+          <select id="materials-type-filter" class="materials-select">
+            <option value="all">全部类型</option>
+            <option value="video">视频</option>
+            <option value="image">图片</option>
+            <option value="text">图文</option>
+            <option value="file">其他</option>
+          </select>
+          <select id="materials-date-filter" class="materials-select">
+            <option value="all">全部日期</option>
+          </select>
+          <select id="materials-sort" class="materials-select">
+            <option value="date_desc">日期（新到旧）</option>
+            <option value="date_asc">日期（旧到新）</option>
+            <option value="size_desc">大小（大到小）</option>
+            <option value="size_asc">大小（小到大）</option>
+            <option value="name_asc">文件名（A-Z）</option>
+            <option value="name_desc">文件名（Z-A）</option>
+            <option value="type_asc">类型</option>
+          </select>
+        </div>
+        <div class="materials-actions-row">
+          <span class="materials-selection-hint">已选 <b id="materials-selected-count">0</b> 项</span>
+          <button class="panel-btn secondary" id="btn-materials-select-visible">全选当前结果</button>
+          <button class="panel-btn secondary" id="btn-materials-clear-selected">清空选择</button>
+          <button class="panel-btn secondary" id="btn-materials-copy-paths">复制路径</button>
+          <button class="panel-btn secondary" id="btn-materials-import-selected">导入素材管理</button>
+          <button class="panel-btn danger" id="btn-materials-delete-selected">批量删除文件</button>
+          <button class="panel-btn primary" id="btn-materials-open-selected">批量打开目录</button>
+        </div>
+      </section>
       
       <div id="materials-container" style="display: flex; flex-direction: column; gap: 24px;">
         <!-- 动态生成每日素材目录 -->

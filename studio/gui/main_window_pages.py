@@ -514,14 +514,14 @@ class PageSetupMixin:
 
         # ───── Tab 4: Ollama ─────
         p4 = _page(); l4 = QVBoxLayout(p4); l4.setContentsMargins(16,20,16,16); l4.setSpacing(10)
-        g4 = QGroupBox("🖥️ Ollama 本地视觉服务"); g4.setStyleSheet(_GS("#34d399")); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
-        lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setStyleSheet("color:#9ca3af;font-size:12px;"), r.addWidget(self.ollama_status_lbl),
-            setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setStyleSheet("color:#6b7280;font-size:11px;"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
+        g4 = QGroupBox("🖥️ Ollama 本地视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
+            setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
         lg4.addLayout(_row(lambda r: (setattr(self,'btn_ollama_start',QPushButton("▶ 启动")), self.btn_ollama_start.setObjectName("primary_button"), self.btn_ollama_start.setFixedWidth(70), self.btn_ollama_start.clicked.connect(self._ollama_start),
             setattr(self,'btn_ollama_stop',QPushButton("■ 停止")), self.btn_ollama_stop.setObjectName("secondary_button"), self.btn_ollama_stop.setFixedWidth(70), self.btn_ollama_stop.clicked.connect(self._ollama_stop),
             setattr(self,'btn_ollama_refresh',QPushButton("↺ 刷新")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
             r.addWidget(self.btn_ollama_start), r.addWidget(self.btn_ollama_stop), r.addWidget(self.btn_ollama_refresh), r.addStretch())))
-        setattr(self,'lbl_runners_warn',QLabel("⚠ 推理运行库缺失")); self.lbl_runners_warn.setStyleSheet("color:#f87171;font-size:12px;"); self.lbl_runners_warn.setVisible(False)
+        setattr(self,'lbl_runners_warn',QLabel("⚠ 推理运行库缺失")); self.lbl_runners_warn.setObjectName("ollama_runners_warn"); self.lbl_runners_warn.setVisible(False)
         setattr(self,'btn_fix_runners',QPushButton("🔧 修复")); self.btn_fix_runners.setObjectName("primary_button"); self.btn_fix_runners.setVisible(False); self.btn_fix_runners.clicked.connect(self._ollama_fix_runners)
         lg4.addLayout(_row(lambda r: (r.addWidget(self.lbl_runners_warn), r.addStretch(), r.addWidget(self.btn_fix_runners))))
         setattr(self,'runners_bar',QProgressBar()); self.runners_bar.setRange(0,100); self.runners_bar.setVisible(False); lg4.addWidget(self.runners_bar)
@@ -530,7 +530,7 @@ class PageSetupMixin:
             self.ollama_pull_input.setCurrentIndex(0), r.addWidget(self.ollama_pull_input),
             setattr(self,'btn_ollama_pull',QPushButton("⬇ 下载")), self.btn_ollama_pull.setObjectName("primary_button"), self.btn_ollama_pull.setFixedWidth(70), self.btn_ollama_pull.clicked.connect(self._ollama_pull), r.addWidget(self.btn_ollama_pull), r.addStretch())))
         setattr(self,'ollama_pull_bar',QProgressBar()); self.ollama_pull_bar.setRange(0,100); self.ollama_pull_bar.setFixedHeight(14); self.ollama_pull_bar.hide(); lg4.addWidget(self.ollama_pull_bar)
-        setattr(self,'ollama_progress_lbl',QLabel("")); self.ollama_progress_lbl.setStyleSheet("color:#fbbf24;font-size:11px;"); self.ollama_progress_lbl.setWordWrap(True); lg4.addWidget(self.ollama_progress_lbl)
+        setattr(self,'ollama_progress_lbl',QLabel("")); self.ollama_progress_lbl.setObjectName("ollama_progress_lbl"); self.ollama_progress_lbl.setWordWrap(True); lg4.addWidget(self.ollama_progress_lbl)
         l4.addWidget(g4); l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
 
         # ───── Tab 5: Whisper ─────

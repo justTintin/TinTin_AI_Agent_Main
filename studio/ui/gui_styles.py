@@ -862,4 +862,21 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #export_result_label { color: #10b981; font-weight: bold; }
 
 #video_info_label { color: #3b82f6; }
+
+/* ═══════════════════════════════════════════════════════════════
+   模型配置 Ollama
+   ═══════════════════════════════════════════════════════════════ */
+
+#model_groupbox {
+    font-size: 13px; font-weight: bold;
+    border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px;
+}
+#model_groupbox::title {
+    subcontrol-origin: margin; subcontrol-position: top left;
+    padding: 0 8px;
+}
+#ollama_status_lbl { color: #9ca3af; font-size: 12px; }
+#ollama_models_lbl { color: #6b7280; font-size: 11px; }
+#ollama_runners_warn { color: #f87171; font-size: 12px; }
+#ollama_progress_lbl { color: #fbbf24; font-size: 11px; }
 """

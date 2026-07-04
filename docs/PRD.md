@@ -252,12 +252,15 @@ GET  /api/analytics/dashboard → 数据看板
 ### Ollama 视觉模型
 根据 GPU 显存自动选择模型和参数：
 
-| 显存 | 模型 | 并行数 | 帧数 |
-|------|------|--------|------|
-| < 6GB | moondream:1.8b | 1 | 3 |
-| 6-12GB | qwen2.5vl:7b | 2 | 6 |
-| 12-16GB | qwen2.5vl:7b / internvl2.5:8b | 4 | 8 |
-| ≥ 16GB | internvl2.5:26b | 4 | 12 |
+| 显存 | 模型 | 并行数 | 帧数 | 上下文 |
+|------|------|--------|------|--------|
+| < 6GB | moondream:1.8b | 1 | 3 | 4K |
+| 6-12GB | qwen2.5vl:7b | 2 | 6 | 8K |
+| 12-16GB | qwen2.5vl:7b-16k | 4 | 8 | 16K |
+| ≥ 16GB | internvl2.5:26b | 4 | 12 | 32K |
+
+- 大上下文版本（16K/32K）用于高频画面+长视频分析
+- 默认用 16K context 的 `qwen2.5vl:7b-16k`
 
 ### Whisper 模型
 | 显存 | 模型 | Batch |
@@ -268,3 +271,25 @@ GET  /api/analytics/dashboard → 数据看板
 
 - 显存不足时自动 `device=cpu` 降级
 - 语音转写与视觉识别错峰运行
+
+### 一键环境部署
+商家安装 App 后自动完成环境搭建，无需手动操作：
+
+```
+启动检测 → 缺少 Ollama？→ 从 NAS/OSS 下载安装包
+         → 缺少模型？  → 从 NAS/OSS 下载 qwen2.5vl:7b-16k
+         → 缺少 Whisper？→ 自动下载 medium 模型
+         → 检测 CUDA？  → 自动配置 cuDNN/cuBLAS
+```
+
+**下载源优先级**：本地 NAS → 阿里云 OSS → HuggingFace 镜像
+
+| 组件 | 大小 | 来源 |
+|------|------|------|
+| Ollama 安装包 | ~800MB | NAS / OSS |
+| qwen2.5vl:7b-16k | ~14GB | NAS / OSS / Ollama 官方 |
+| Whisper medium | ~1.5GB | NAS / OSS / HuggingFace |
+| CLIP ViT-B-16 | ~600MB | NAS / OSS |
+
+- 支持断点续传 + 完整性校验（SHA256）
+- 进度条实时显示

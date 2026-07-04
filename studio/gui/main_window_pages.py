@@ -457,7 +457,7 @@ class PageSetupMixin:
             QTimer.singleShot(200, self.update_system_default_login_status)
 
     # ═══════════════════════════════════════════════════════════════
-    #  ⚙️ 系统配置 — 多 Tab，每 Tab 一个模块
+    #  ⚙️ 系统设置 — 多 Tab，每 Tab 一个模块
     # ═══════════════════════════════════════════════════════════════
     def setup_ai_settings_page(self):
         layout = QVBoxLayout(self.page_ai_settings)
@@ -470,11 +470,9 @@ class PageSetupMixin:
         def _page(): w = QWidget(); w.setStyleSheet("background: transparent;"); return w
         def _lr(p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch()
         def _row(w): r = QHBoxLayout(); w(r); return r
-        _GS = lambda c: f"QGroupBox {{ font-size:13px; font-weight:bold; border:1px solid #2e2e32; border-radius:8px; margin-top:12px; }} QGroupBox::title {{ subcontrol-origin:margin; subcontrol-position:top left; padding:0 8px; color:{c}; }}"
-
         # ───── Tab 1: LLM ─────
         p1 = _page(); l1 = QVBoxLayout(p1); l1.setContentsMargins(16,20,16,16); l1.setSpacing(10)
-        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setStyleSheet(_GS("#3b82f6")); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
+        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         def _rl(l, p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch(); l.addLayout(r)
         def _inp(l, p, a, ph): e = QLineEdit(); e.setPlaceholderText(ph); setattr(self,a,e); _rl(l, p, lambda r: r.addWidget(e))
         _rl(lg1, "提供商:", lambda r: (setattr(self,'llm_provider_combo',QComboBox()), self.llm_provider_combo.setView(QListView()),
@@ -496,7 +494,7 @@ class PageSetupMixin:
 
         # ───── Tab 2: VoxCPM ─────
         p3 = _page(); l3 = QVBoxLayout(p3); l3.setContentsMargins(16,20,16,16); l3.setSpacing(10)
-        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM"); g3.setStyleSheet(_GS("#a855f7")); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
+        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
         _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://127.0.0.1:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         _rl(lg3, "调用方式:", lambda r: (setattr(self,'vox_mode_combo',QComboBox()), self.vox_mode_combo.setView(QListView()),
             self.vox_mode_combo.addItem("API 接口服务调用","api"), self.vox_mode_combo.addItem("本地命令行直接调用","cli"), r.addWidget(self.vox_mode_combo)))
@@ -535,7 +533,7 @@ class PageSetupMixin:
 
         # ───── Tab 5: Whisper ─────
         p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
-        g5 = QGroupBox("🎙️ Whisper 语音转写"); g5.setStyleSheet(_GS("#10b981")); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
+        g5 = QGroupBox("🎙️ Whisper 语音转写"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
         _rl(lg5, "引擎:", lambda r: (setattr(self,'llm_whisper_status_val',QLabel("正在检测...")), r.addWidget(self.llm_whisper_status_val)))
         _rl(lg5, "DLL:", lambda r: (setattr(self,'llm_dll_status_val',QLabel("正在检测...")), r.addWidget(self.llm_dll_status_val)))
         _rl(lg5, "模型:", lambda r: (setattr(self,'llm_models_status_val',QLabel("正在检测...")), r.addWidget(self.llm_models_status_val)))
@@ -549,7 +547,7 @@ class PageSetupMixin:
 
         # ───── Tab 6: PaddleOCR ─────
         p6 = _page(); l6 = QVBoxLayout(p6); l6.setContentsMargins(16,20,16,16); l6.setSpacing(10)
-        g6 = QGroupBox("🔍 PaddleOCR 文本识别"); g6.setStyleSheet(_GS("#f59e0b")); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
+        g6 = QGroupBox("🔍 PaddleOCR 文本识别"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
         _rl(lg6, "环境:", lambda r: (setattr(self,'llm_paddle_status_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_status_val)))
         _rl(lg6, "模型:", lambda r: (setattr(self,'llm_paddle_models_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_models_val)))
         setattr(self,'paddle_stage_label',QLabel("系统就绪")); self.paddle_stage_label.setObjectName("muted_text"); lg6.addWidget(self.paddle_stage_label)
@@ -592,7 +590,7 @@ class PageSetupMixin:
         l1.addWidget(QLabel("ComfyUI 服务地址（留空则使用工程自带的本地 ComfyUI）:"))
         self.comfyui_input = QLineEdit(); self.comfyui_input.setPlaceholderText("留空=本地 127.0.0.1:8188；或填外部如 http://192.168.111.36:8188")
         self.comfyui_input.setText(self.ai_config.get("comfyui_addr","http://192.168.111.36:8188")); l1.addWidget(self.comfyui_input)
-        self.comfyui_local_status = QLabel(); self.comfyui_local_status.setStyleSheet("color:#666;font-size:12px;"); l1.addWidget(self.comfyui_local_status)
+        self.comfyui_local_status = QLabel(); self.comfyui_local_status.setObjectName("comfyui_local_status"); l1.addWidget(self.comfyui_local_status)
         try: self.refresh_comfyui_local_status()
         except Exception: pass
         self.btn_open_comfyui_editor = QPushButton("🎨 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)

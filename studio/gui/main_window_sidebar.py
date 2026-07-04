@@ -244,7 +244,7 @@ class SidebarMixin:
         system_layout.setContentsMargins(6, 8, 6, 8)
         system_layout.setSpacing(2)
         
-        system_header = QLabel("系统配置")
+        system_header = QLabel("系统设置")
         system_header.setObjectName("section_header")
         system_layout.addWidget(system_header)
         

@@ -1963,34 +1963,99 @@ class VoiceCloneWorker(BaseWorker):
                 writer.close()
         return out_io.getvalue()
 
+    @staticmethod
+    def _wav_bytes_duration(wav_bytes) -> float:
+        """读取一段 wav 字节的时长（秒）。"""
+        import io
+        import wave
+        with wave.open(io.BytesIO(wav_bytes), "rb") as w:
+            fr = w.getframerate() or 1
+            return w.getnframes() / float(fr)
+
+    @staticmethod
+    def _write_timing_sidecar(wav_path, timing):
+        """把句级时间轴写到 wav 同名 .timing.json（供字幕精确对轴）。"""
+        import json as _json
+        try:
+            with open(wav_path + ".timing.json", "w", encoding="utf-8") as f:
+                _json.dump(timing, f, ensure_ascii=False, indent=1)
+        except Exception:
+            log.warning(f"写入句级时间轴失败: {wav_path}.timing.json")
+
+    @staticmethod
+    def _scale_timing_sidecar(wav_path, factor):
+        """音频整体变速后，按 factor 缩放句级时间轴（new = old * factor）。"""
+        import json as _json
+        p = wav_path + ".timing.json"
+        if not os.path.exists(p):
+            return
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                timing = _json.load(f)
+            for t in timing:
+                t["start"] = round(float(t.get("start", 0)) * factor, 3)
+                t["end"] = round(float(t.get("end", 0)) * factor, 3)
+            with open(p, "w", encoding="utf-8") as f:
+                _json.dump(timing, f, ensure_ascii=False, indent=1)
+        except Exception:
+            log.warning(f"缩放句级时间轴失败: {p}")
+
     def _synthesize_item(self, text, ref_audio_b64, out_wav_path, row_idx):
-        """合成一条文案为 wav 文件：整体合成；失败则自动分句合成再拼接。"""
-        # 整体合成：多行用句号连接，保留自然停顿，避免多次调用导致音色漂移
+        """合成一条文案为 wav 文件。
+
+        多句文案 → 逐句合成并记录每句真实时长（写入 .timing.json，供字幕精确对轴），
+        再拼接为整段；逐句失败或单句文案 → 整体合成（时间轴退化为整段一条）。
+        """
+        gap = 0.15
+        segs = self._split_sentences(text)
+
+        # 逐句合成：拿到每句真实起止时间，字幕不再靠字数估算
+        if len(segs) >= 2:
+            try:
+                wavs = []
+                timing = []
+                cursor = 0.0
+                for si, seg in enumerate(segs):
+                    self.stage.emit(f"第 {row_idx + 1} 个声音逐句合成 {si + 1}/{len(segs)}...")
+                    wb = self._post_tts(seg, ref_audio_b64, row_idx, label="逐句")
+                    dur = self._wav_bytes_duration(wb)
+                    timing.append({"text": seg, "start": round(cursor, 3), "end": round(cursor + dur, 3)})
+                    cursor += dur + gap
+                    wavs.append(wb)
+                    time.sleep(0.2)
+                combined = self._concat_wav_bytes(wavs, gap_sec=gap)
+                with open(out_wav_path, "wb") as f:
+                    f.write(combined)
+                self._write_timing_sidecar(out_wav_path, timing)
+                return
+            except Exception:
+                self.stage.emit(f"第 {row_idx + 1} 个声音逐句合成失败，回退整体合成...")
+
+        # 整体合成（单句文案 / 逐句失败回退）
         merged_text = text.strip()
         if "\n" in merged_text:
             lines = [l.strip() for l in merged_text.split("\n") if l.strip()]
             merged_text = "。".join(lines) + "。"
-
+        content = self._post_tts(merged_text, ref_audio_b64, row_idx)
+        with open(out_wav_path, "wb") as f:
+            f.write(content)
         try:
-            content = self._post_tts(merged_text, ref_audio_b64, row_idx)
-            with open(out_wav_path, "wb") as f:
-                f.write(content)
-            return
-        except Exception:
-            # 整体合成失败（如文本过长触发 StopIteration），退化为分句合成再拼接
-            segs = self._split_sentences(text)
+            total_dur = self._wav_bytes_duration(content)
             if len(segs) <= 1:
-                raise
-            self.stage.emit(
-                f"第 {row_idx + 1} 个声音整体合成失败，改为分句合成（{len(segs)} 句）...")
-            wavs = []
-            for si, seg in enumerate(segs):
-                self.stage.emit(f"第 {row_idx + 1} 个声音分句合成 {si + 1}/{len(segs)}...")
-                wavs.append(self._post_tts(seg, ref_audio_b64, row_idx, label="分句"))
-                time.sleep(0.2)
-            combined = self._concat_wav_bytes(wavs)
-            with open(out_wav_path, "wb") as f:
-                f.write(combined)
+                timing = [{"text": merged_text, "start": 0.0, "end": round(total_dur, 3)}]
+            else:
+                # 回退场景：整段音频内按字数比例分配句时间（比无时间轴强）
+                char_counts = [max(1, len(s)) for s in segs]
+                total_chars = sum(char_counts)
+                timing = []
+                cursor = 0.0
+                for s, c in zip(segs, char_counts):
+                    d = total_dur * c / total_chars
+                    timing.append({"text": s, "start": round(cursor, 3), "end": round(cursor + d, 3)})
+                    cursor += d
+            self._write_timing_sidecar(out_wav_path, timing)
+        except Exception:
+            pass
 
     def run(self):
         try:
@@ -2049,6 +2114,8 @@ class VoiceCloneWorker(BaseWorker):
                                 sr = subprocess.run(speed_cmd, capture_output=True, creationflags=creationflags)
                                 if sr.returncode == 0 and os.path.exists(temp_wav):
                                     os.replace(temp_wav, out_wav_path)
+                                    # 音频变速后，句级时间轴同步缩放（atempo=X → 时长×1/X）
+                                    self._scale_timing_sidecar(out_wav_path, 1.0 / clamped)
 
                     results[video_path] = out_wav_path
                     self.row_progress.emit(row_idx, 100)
@@ -2132,12 +2199,26 @@ class FinalMixWorker(BaseWorker):
                             has_audio = True
                     except Exception:
                         has_audio = True
-                        
+
+                    # BGM 淡入淡出：开头 1s 淡入，结尾 2s 淡出（按视频时长定位）
+                    vid_dur = get_media_duration(video_path)
+                    fade_out_start = max(0.0, vid_dur - 2.0)
+                    bgm_fades = f"afade=t=in:st=0:d=1.0,afade=t=out:st={fade_out_start:.3f}:d=2.0" if vid_dur > 0 else "afade=t=in:st=0:d=1.0"
+
                     if has_audio:
+                        # 人声闪避（sidechain ducking）：BGM 在人声出现时自动压低，
+                        # 人声停顿时回升；最终 loudnorm 统一响度（EBU R128 -16 LUFS）。
+                        filter_complex = (
+                            f"[0:a]asplit=2[vo][sc];"
+                            f"[1:a]volume={bgm_vol},{bgm_fades}[bg];"
+                            f"[bg][sc]sidechaincompress=threshold=0.05:ratio=8:attack=50:release=400[duck];"
+                            f"[vo][duck]amix=inputs=2:duration=first:normalize=0,"
+                            f"loudnorm=I=-16:TP=-1.5:LRA=11[a]"
+                        )
                         cmd = [
                             ffmpeg_path, "-y", "-i", video_path,
                             "-stream_loop", "-1", "-i", self.bgm_path,
-                            "-filter_complex", f"[0:a]volume=1.0[voice];[1:a]volume={bgm_vol}[bgm];[voice][bgm]amix=inputs=2:duration=first[a]",
+                            "-filter_complex", filter_complex,
                             "-map", "0:v", "-map", "[a]",
                             "-c:v", "copy", "-c:a", "aac", "-shortest",
                             output_path
@@ -2146,7 +2227,7 @@ class FinalMixWorker(BaseWorker):
                         cmd = [
                             ffmpeg_path, "-y", "-i", video_path,
                             "-stream_loop", "-1", "-i", self.bgm_path,
-                            "-filter_complex", f"[1:a]volume={bgm_vol}[bgm]",
+                            "-filter_complex", f"[1:a]volume={bgm_vol},{bgm_fades},loudnorm=I=-16:TP=-1.5:LRA=11[bgm]",
                             "-map", "0:v", "-map", "[bgm]",
                             "-c:v", "copy", "-c:a", "aac", "-shortest",
                             output_path
@@ -2183,6 +2264,23 @@ class VideoDubbingWorker(BaseWorker):
         self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)
         self.add_subtitles = add_subtitles
         self.length_modes = length_modes or {}  # video_path -> "video" or "audio"
+
+    @staticmethod
+    def _load_timing_sidecar(voice_wav_path):
+        """读取逐句 TTS 生成的句级时间轴（.timing.json）；无效则返回 None。"""
+        import json as _json
+        p = (voice_wav_path or "") + ".timing.json"
+        if not os.path.exists(p):
+            return None
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                timing = _json.load(f)
+            if (isinstance(timing, list) and timing
+                    and all(isinstance(t, dict) and t.get("text") for t in timing)):
+                return timing
+        except Exception:
+            pass
+        return None
 
     def run(self):
         try:
@@ -2223,23 +2321,34 @@ class VideoDubbingWorker(BaseWorker):
                     if not os.path.exists("C:/Windows/Fonts/msyh.ttc"):
                         font_path = "msyh"
 
-                    # Split text by newlines for timed per-line subtitles
-                    raw_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
-                    if not raw_lines:
-                        raw_lines = [text.strip()]
-
-                    num_lines = len(raw_lines)
-                    # Proportional timing by character count
-                    char_counts = [max(1, len(line)) for line in raw_lines]
-                    total_chars = sum(char_counts)
-                    cum_t = 0.0
-                    line_starts, line_ends = [], []
-                    for c in char_counts:
-                        t0 = cum_t
-                        t1 = cum_t + (display_dur * c / total_chars if display_dur > 0 else 5.0)
-                        line_starts.append(t0)
-                        line_ends.append(t1)
-                        cum_t = t1
+                    # 优先使用逐句 TTS 的真实句级时间轴（字幕与语音精确同步）
+                    timing = self._load_timing_sidecar(voice_wav_path)
+                    if timing:
+                        raw_lines = [str(t["text"]).strip() for t in timing]
+                        line_starts = [float(t.get("start", 0)) for t in timing]
+                        line_ends = [float(t.get("end", 0)) for t in timing]
+                        # 本步骤内音频被 atempo 加速对齐视频时 → 时间轴按同比例缩放
+                        if need_audio_speed and audio_dur > 0:
+                            f_scale = video_dur / audio_dur
+                            line_starts = [s * f_scale for s in line_starts]
+                            line_ends = [e * f_scale for e in line_ends]
+                        if display_dur > 0:
+                            line_ends = [min(e, display_dur) for e in line_ends]
+                    else:
+                        # 回退：无时间轴时按字数比例估算（旧行为）
+                        raw_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+                        if not raw_lines:
+                            raw_lines = [text.strip()]
+                        char_counts = [max(1, len(line)) for line in raw_lines]
+                        total_chars = sum(char_counts)
+                        cum_t = 0.0
+                        line_starts, line_ends = [], []
+                        for c in char_counts:
+                            t0 = cum_t
+                            t1 = cum_t + (display_dur * c / total_chars if display_dur > 0 else 5.0)
+                            line_starts.append(t0)
+                            line_ends.append(t1)
+                            cum_t = t1
 
                     # Build drawtext filters
                     drawtexts = []
@@ -2811,6 +2920,17 @@ class VideoMontagePage(BasePage):
 
         # Parameters row
         row_params = QHBoxLayout()
+        row_params.addWidget(QLabel("排列逻辑:"))
+        self.logic_combo = QComboBox()
+        self.logic_combo.addItem("随机洗牌", "random")
+        self.logic_combo.addItem("🎯 按文案智能匹配", "script")
+        self.logic_combo.setToolTip(
+            "随机洗牌：镜头随机排列组合。\n"
+            "按文案智能匹配：粘贴口播文案（每行一句），LLM 为每行挑选画面最贴合的镜头并按行序排列。")
+        self.logic_combo.currentIndexChanged.connect(self._on_logic_combo_changed)
+        row_params.addWidget(self.logic_combo)
+
+        row_params.addSpacing(15)
         row_params.addWidget(QLabel("输出画幅:"))
         self.layout_combo = QComboBox()
         self.layout_combo.addItem("与原视频一致", "source")
@@ -2880,6 +3000,16 @@ class VideoMontagePage(BasePage):
 
         row_params.addStretch()
         card_layout.addLayout(row_params)
+
+        # 智能匹配模式的口播文案输入框（默认隐藏）
+        self.match_script_edit = QTextEdit()
+        self.match_script_edit.setPlaceholderText(
+            "粘贴口播文案，每行一句。\n"
+            "智能匹配将为每一行文案从勾选的镜头中挑选画面最贴合的一个，并按行序排列成片。\n"
+            "示例：\n这款鼠标采用轻量化设计\n8000DPI 电竞级传感器\n续航长达 70 小时")
+        self.match_script_edit.setFixedHeight(96)
+        self.match_script_edit.setVisible(False)
+        card_layout.addWidget(self.match_script_edit)
 
         self.btn_assemble_video = QPushButton("🎬 开始镜头组合排列")
         self.btn_assemble_video.setObjectName("action_button")
@@ -5297,8 +5427,6 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "无可排列镜头", "请先在待排列镜头视频列表中勾选要用于排列的镜头片段。")
             return
 
-        recombine_mode = "random"
-        
         dir_path = self.concat_src_dir_input.text().strip()
         if not dir_path or not os.path.exists(dir_path):
             dir_path = self.folder_path_input.text().strip()
@@ -5309,7 +5437,52 @@ class VideoMontagePage(BasePage):
 
         out_montage_dir = self._get_out_montage_dir(dir_path)
         os.makedirs(out_montage_dir, exist_ok=True)
+        self._pending_out_montage_dir = out_montage_dir
 
+        logic = self.logic_combo.currentData() if hasattr(self, "logic_combo") else "random"
+
+        # ── 🎯 按文案智能匹配：先用 LLM 为每行文案匹配最贴合的镜头，再按行序拼接 ──
+        if logic == "script":
+            script_text = self.match_script_edit.toPlainText().strip() if hasattr(self, "match_script_edit") else ""
+            if not script_text:
+                QMessageBox.warning(self.parent_widget, "文案为空",
+                                    "智能匹配模式需要口播文案。\n请在文案框中粘贴口播文案（每行一句）。")
+                return
+            llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
+            llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
+            llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
+            if not llm_api_url or not llm_api_key:
+                QMessageBox.warning(self.parent_widget, "未配置大模型",
+                                    "智能匹配需要大模型 API。\n请先在「环境配置」中配置 LLM API 地址与密钥。")
+                return
+
+            # 无描述的镜头无法参与语义匹配，提示但不阻断（LLM 会按文件名兜底）
+            no_desc = sum(1 for c in self.split_clips_list
+                          if not self.split_descriptions.get(os.path.abspath(c), "").strip()
+                          and not self.split_descriptions.get(c, "").strip())
+            if no_desc == len(self.split_clips_list):
+                QMessageBox.warning(self.parent_widget, "镜头无画面描述",
+                                    "勾选的镜头都没有画面描述，无法做语义匹配。\n"
+                                    "请先在「镜头分割」步骤生成画面描述文案。")
+                return
+
+            self.btn_assemble_video.setEnabled(False)
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+            self.stage_label.setText("🎯 正在用大模型为每句文案匹配最贴合的镜头...")
+
+            self.script_match_worker = ScriptMatchLLMWorker(
+                api_url=llm_api_url, api_key=llm_api_key, model=llm_model,
+                rewritten_text=script_text,
+                candidate_clips=list(self.split_clips_list),
+                split_descriptions=self.split_descriptions,
+            )
+            self.script_match_worker.finished.connect(self._on_script_match_finished)
+            self.script_match_worker.error.connect(self._on_script_match_error)
+            self.script_match_worker.start()
+            return
+
+        # ── 随机洗牌（原有逻辑）──
         target_clip_count = int(self.clip_count_combo.currentData())
         if len(self.split_clips_list) < target_clip_count:
             QMessageBox.warning(
@@ -5320,23 +5493,59 @@ class VideoMontagePage(BasePage):
             )
             return
 
+        batch_count = int(self.batch_count_spin.value())
+        randomness_val = self.randomness_combo.currentData() if hasattr(self, "randomness_combo") else "medium"
+        self._launch_concat_worker(
+            selected_clips=self.split_clips_list,
+            out_montage_dir=out_montage_dir,
+            recombine_mode="random",
+            target_clip_count=target_clip_count,
+            batch_count=batch_count,
+            randomness=randomness_val,
+            selected_descriptions_list=None,
+        )
+
+    def _on_script_match_finished(self, matched_paths, matched_descs):
+        """LLM 匹配完成：按文案行序拼接（不洗牌、每批相同故只生成 1 个）。"""
+        self.stage_label.setText(f"🎯 匹配完成：{len(matched_paths)} 句文案已配齐镜头，开始拼接...")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self._launch_concat_worker(
+            selected_clips=matched_paths,
+            out_montage_dir=getattr(self, "_pending_out_montage_dir", ""),
+            recombine_mode="script",
+            target_clip_count=len(matched_paths),
+            batch_count=1,
+            randomness="low",
+            selected_descriptions_list=matched_descs,
+        )
+
+    def _on_script_match_error(self, err):
+        self.btn_assemble_video.setEnabled(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("❌ 文案镜头匹配失败")
+        QMessageBox.critical(self.parent_widget, "智能匹配失败",
+                             f"大模型匹配文案与镜头时出错：\n{err}\n\n可切换回「随机洗牌」模式继续。")
+
+    def _launch_concat_worker(self, selected_clips, out_montage_dir, recombine_mode,
+                              target_clip_count, batch_count, randomness,
+                              selected_descriptions_list=None):
         self.btn_assemble_video.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
-        batch_count = int(self.batch_count_spin.value())
-
-        randomness_val = self.randomness_combo.currentData() if hasattr(self, "randomness_combo") else "medium"
         self.concat_worker = VideoConcatWorker(
-            selected_clips=self.split_clips_list,
+            selected_clips=selected_clips,
             output_dir=out_montage_dir,
             layout_mode=self.layout_combo.currentData(),
             recombine_mode=recombine_mode,
             target_clip_count=target_clip_count,
             batch_count=batch_count,
             split_descriptions=self.split_descriptions,
-            randomness=randomness_val
+            randomness=randomness,
+            selected_descriptions_list=selected_descriptions_list,
         )
         self.concat_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
@@ -5345,22 +5554,29 @@ class VideoMontagePage(BasePage):
         self.concat_worker.start()
 
     def _on_logic_combo_changed(self):
-        # Default behavior when no selection is present (random mode)
-        self.lbl_clip_count.setVisible(True)
-        self.clip_count_combo.setVisible(True)
-        self.lbl_batch_count.setVisible(True)
-        self.batch_count_spin.setVisible(True)
-        
+        logic = self.logic_combo.currentData() if hasattr(self, "logic_combo") else "random"
+        is_script = (logic == "script")
+
+        # 智能匹配模式：镜头数量由文案行数决定；每批结果相同故固定生成 1 个
+        self.lbl_clip_count.setVisible(not is_script)
+        self.clip_count_combo.setVisible(not is_script)
+        self.lbl_batch_count.setVisible(not is_script)
+        self.batch_count_spin.setVisible(not is_script)
+
         if hasattr(self, "lbl_randomness") and hasattr(self, "randomness_combo"):
-            self.lbl_randomness.setVisible(True)
-            self.randomness_combo.setVisible(True)
-            
-        self.clip_count_combo.setEnabled(True)
-        self.batch_count_spin.setEnabled(True)
-        self.batch_count_spin.setValue(3)
-        if hasattr(self, "randomness_combo"):
-            self.randomness_combo.setEnabled(True)
-            self.randomness_combo.setCurrentIndex(0) # 中 (保留同场景)
+            self.lbl_randomness.setVisible(not is_script)
+            self.randomness_combo.setVisible(not is_script)
+
+        if hasattr(self, "match_script_edit"):
+            self.match_script_edit.setVisible(is_script)
+
+        if not is_script:
+            self.clip_count_combo.setEnabled(True)
+            self.batch_count_spin.setEnabled(True)
+            self.batch_count_spin.setValue(3)
+            if hasattr(self, "randomness_combo"):
+                self.randomness_combo.setEnabled(True)
+                self.randomness_combo.setCurrentIndex(0) # 中 (保留同场景)
 
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)

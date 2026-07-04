@@ -879,4 +879,11 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #ollama_models_lbl { color: #6b7280; font-size: 11px; }
 #ollama_runners_warn { color: #f87171; font-size: 12px; }
 #ollama_progress_lbl { color: #fbbf24; font-size: 11px; }
+
+#model_groupbox[section="llm"]::title     { color: #3b82f6; }
+#model_groupbox[section="vox"]::title     { color: #a855f7; }
+#model_groupbox[section="whisper"]::title { color: #10b981; }
+#model_groupbox[section="ocr"]::title     { color: #f59e0b; }
+
+#comfyui_local_status { color: #666; font-size: 12px; }
 """

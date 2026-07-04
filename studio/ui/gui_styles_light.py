@@ -608,4 +608,11 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #ollama_models_lbl { color: #6b7280; font-size: 11px; }
 #ollama_runners_warn { color: #dc2626; font-size: 12px; }
 #ollama_progress_lbl { color: #d97706; font-size: 11px; }
+
+#model_groupbox[section="llm"]::title     { color: #2563eb; }
+#model_groupbox[section="vox"]::title     { color: #7c3aed; }
+#model_groupbox[section="whisper"]::title { color: #059669; }
+#model_groupbox[section="ocr"]::title     { color: #d97706; }
+
+#comfyui_local_status { color: #86868b; font-size: 12px; }
 """

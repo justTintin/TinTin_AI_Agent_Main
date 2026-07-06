@@ -2910,9 +2910,11 @@ class VideoMontagePage(BasePage):
         
         header = self.split_result_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        self.split_result_table.setColumnWidth(1, 180)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setStretchLastSection(False)
         
         card_layout.addWidget(self.split_result_table)
 
@@ -2992,11 +2994,14 @@ class VideoMontagePage(BasePage):
         self.concat_clips_list_widget.cellChanged.connect(self._on_concat_table_cell_changed)
         
         header = self.concat_clips_list_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # 分割文件名
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # 时间戳
-        header.setSectionResizeMode(2, QHeaderView.Stretch)          # 描述文案
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # 文件目录
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # 操作
+        header.setSectionResizeMode(0, QHeaderView.Interactive)       # 分割文件名
+        self.concat_clips_list_widget.setColumnWidth(0, 160)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # 时间戳
+        header.setSectionResizeMode(2, QHeaderView.Stretch)           # 描述文案
+        header.setSectionResizeMode(3, QHeaderView.Interactive)       # 文件目录
+        self.concat_clips_list_widget.setColumnWidth(3, 120)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)             # 操作
+        self.concat_clips_list_widget.setColumnWidth(4, 30)
         
         card_layout.addWidget(self.concat_clips_list_widget)
 
@@ -4164,6 +4169,7 @@ class VideoMontagePage(BasePage):
                     file_item = QTableWidgetItem(f)
                     file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable) # Read-only
                     file_item.setData(Qt.UserRole, norm_path) # Save full path in UserRole
+                    file_item.setToolTip(norm_path)
                     self.split_result_table.setItem(idx, 1, file_item)
                     
                     # Col 2: Timestamp
@@ -7001,6 +7007,7 @@ class VideoMontagePage(BasePage):
                 file_item.setFlags(file_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 file_item.setCheckState(Qt.Checked)
                 file_item.setData(Qt.UserRole, norm_path) # Store full path
+                file_item.setToolTip(norm_path)
                 self.concat_clips_list_widget.setItem(idx, 0, file_item)
                 
                 # Col 1: 时间戳 (ReadOnly)
@@ -7017,6 +7024,7 @@ class VideoMontagePage(BasePage):
                 # Col 3: 文件目录 (ReadOnly)
                 dir_item = QTableWidgetItem(file_dir)
                 dir_item.setFlags(dir_item.flags() & ~Qt.ItemIsEditable) # Read-only
+                dir_item.setToolTip(norm_path)
                 self.concat_clips_list_widget.setItem(idx, 3, dir_item)
                 
                 # Col 4: 操作 (Play button)

@@ -3153,6 +3153,8 @@ class VideoMontagePage(BasePage):
         self.assembled_clips_list_widget.setTextElideMode(Qt.ElideRight)
         self.assembled_clips_list_widget.itemDoubleClicked.connect(self._preview_video_item)
         self.assembled_clips_list_widget.itemClicked.connect(self._on_assembled_item_clicked)
+        self.assembled_clips_list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.assembled_clips_list_widget.customContextMenuRequested.connect(self._show_assembled_context_menu)
         left_vbox.addWidget(self.assembled_clips_list_widget)
 
         left_vbox.addWidget(QLabel("📋 视频组成镜头详情 (拖动把手调序，右键删除/恢复镜头):"))
@@ -7201,48 +7203,36 @@ class VideoMontagePage(BasePage):
                 "output_path": path,
                 "out_dir": os.path.dirname(path) if path else "",
             }
-        text = f"预合成 {index + 1}"
-        if path:
-            text = f"预合成 {index + 1}   ({path})"
-        item = QListWidgetItem()
-        item.setText(text)
-        item.setData(Qt.UserRole, index)
-        self.assembled_clips_list_widget.addItem(item)
-
-        row = QWidget()
-        row.setMinimumHeight(28)
-        h = QHBoxLayout(row)
-        h.setContentsMargins(4, 0, 4, 0)
-        h.setSpacing(6)
         clip_count = len(plan.get("clips") or [])
         out_path = (plan.get("output_path") or path or "").strip()
-        status_txt = "已合成" if (plan.get("confirmed") and out_path) else "待确认"
-        status_color = "#2ecc71" if status_txt == "已合成" else "#f1c40f"
-
+        confirmed = plan.get("confirmed") and bool(out_path)
+        status_txt = "✅已合成" if confirmed else "⏳待确认"
         file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
-        lbl = QLabel(f"[{index+1}] {file_text}")
-        lbl.setToolTip(out_path or f"预合成 {index+1}")
-        lbl.setStyleSheet("color:#e5e7eb; font-size:12px;")
-        lbl.setTextElideMode(Qt.ElideRight)
-        lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        h.addWidget(lbl, 1)
+        plan_id = plan.get("_plan_id")
+        if plan_id is None:
+            plan_id = index
+            plan["_plan_id"] = index
+        text = f"[{index+1}] {file_text}  {status_txt}"
+        item = QListWidgetItem(text)
+        item.setData(Qt.UserRole, index)
+        item.setData(Qt.UserRole + 1, int(confirmed))
+        self.assembled_clips_list_widget.addItem(item)
 
-        st = QLabel(status_txt)
-        st.setStyleSheet(f"color:{status_color}; font-size:12px; font-weight:bold;")
-        st.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        h.addWidget(st, 0)
-
-        btn = QPushButton("✍")
-        btn.setToolTip("根据该组合视频的画面镜头描述 + 共用产品背景，用大模型生成口播文案"
-                       "（保存为同名 .txt，下一步配音自动载入）")
-        btn.setFixedWidth(28)
-        btn.setFixedHeight(20)
-        btn.setStyleSheet("border: none; color: #9ca3af; font-size: 12px; padding: 0;")
-        btn.clicked.connect(lambda checked=False, idx=index: self._gen_copy_for_plan(idx))
-        h.addWidget(btn, 0)
-
-        item.setSizeHint(row.sizeHint())
-        self.assembled_clips_list_widget.setItemWidget(item, row)
+    def _show_assembled_context_menu(self, pos):
+        item = self.assembled_clips_list_widget.itemAt(pos)
+        if not item:
+            return
+        idx = item.data(Qt.UserRole)
+        if idx is None:
+            return
+        menu = QMenu()
+        act_confirm = QAction("✅ 确认合成视频", menu)
+        act_confirm.triggered.connect(lambda: self._confirm_precompose(idx))
+        menu.addAction(act_confirm)
+        act_copy = QAction("✍ 生成口播文案", menu)
+        act_copy.triggered.connect(lambda: self._gen_copy_for_plan(idx))
+        menu.addAction(act_copy)
+        menu.exec_(self.assembled_clips_list_widget.viewport().mapToGlobal(pos))
 
     def _assembled_has_copy(self, path):
         """该组合视频是否已有同名 .txt 文案。"""
@@ -7253,25 +7243,7 @@ class VideoMontagePage(BasePage):
             return False
 
     def _refresh_assembled_copy_buttons(self):
-        """根据 .txt 是否存在，刷新各行按钮样式。"""
-        w = self.assembled_clips_list_widget
-        for i in range(w.count()):
-            item = w.item(i)
-            row = w.itemWidget(item)
-            if not row:
-                continue
-            idx = item.data(Qt.UserRole)
-            if idx is None or idx < 0 or idx >= len(self.precompose_plans):
-                continue
-            plan = self.precompose_plans[idx]
-            out_path = (plan.get("output_path") or "").strip()
-            has_copy = bool(out_path and self._assembled_has_copy(out_path))
-            buttons = row.findChildren(QPushButton)
-            if buttons:
-                copy_btn = buttons[-1]
-                copy_btn.setStyleSheet(
-                    "border: none; color: #2ecc71; font-size: 12px; padding: 0;"
-                    if has_copy else "border: none; color: #9ca3af; font-size: 12px; padding: 0;")
+        pass
 
     def _collect_assembled_paths(self):
         """按列表顺序返回已确认合成的视频路径。"""

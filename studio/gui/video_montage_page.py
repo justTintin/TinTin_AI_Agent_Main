@@ -4088,26 +4088,26 @@ class VideoMontagePage(BasePage):
         _pvp = getattr(self, "processing_video_path", "")
         log.info(f"[DIAG _check_split_clips_exist] folder_path_input='{dir_path}' currentItem='{_cur_text}' processing_video_path='{_pvp}'")
         self.split_clips_list = []
-        
+
         # Block signals on table during update to avoid triggering cellChanged slot
         self.split_result_table.blockSignals(True)
         self.split_result_table.setRowCount(0)
-        
-            splits_dir = ""
-            if dir_path and os.path.exists(dir_path):
-                selected_item = self.video_list.currentItem()
-                video_path = selected_item.text() if selected_item else ""
-                if not video_path and hasattr(self, "processing_video_path") and self.processing_video_path:
-                    video_path = self.processing_video_path
-                log.info(f"[DIAG _check_split_clips_exist] resolved video_path='{video_path}' (source={'currentItem' if selected_item else 'processing_video_path'})")
-                if video_path:
+
+        splits_dir = ""
+        if dir_path and os.path.exists(dir_path):
+            selected_item = self.video_list.currentItem()
+            video_path = selected_item.text() if selected_item else ""
+            if not video_path and hasattr(self, "processing_video_path") and self.processing_video_path:
+                video_path = self.processing_video_path
+            log.info(f"[DIAG _check_split_clips_exist] resolved video_path='{video_path}' (source={'currentItem' if selected_item else 'processing_video_path'})")
+            if video_path:
                 video_basename = os.path.splitext(os.path.basename(video_path))[0]
                 video_dir = os.path.dirname(video_path)
                 video_workspace_dir = os.path.join(video_dir, video_basename)
                 splits_dir = os.path.join(video_workspace_dir, "splits")
             else:
                 splits_dir = os.path.join(dir_path, "splits")
-            
+
             # Read files in splits
             files = []
             if os.path.exists(splits_dir):

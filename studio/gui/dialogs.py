@@ -183,7 +183,7 @@ class StartupSplash(QWidget):
         self.card_layout.setContentsMargins(30, 35, 30, 35)
         self.card_layout.setSpacing(16)
         
-        title_lbl = QLabel("🤖 <b>思维向量 - 自动化 AI 视频助手</b>")
+        title_lbl = QLabel("🤖 <b>丁大怪-电商智能体矩阵</b>")
         title_lbl.setStyleSheet("font-size: 18px; color: #ffffff;")
         title_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(title_lbl)

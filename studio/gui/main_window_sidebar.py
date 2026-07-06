@@ -60,7 +60,7 @@ class SidebarMixin:
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("background: transparent;")
+        scroll_content.setStyleSheet("QWidget { background: transparent; }")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(8, 12, 8, 12)
         scroll_layout.setSpacing(12)

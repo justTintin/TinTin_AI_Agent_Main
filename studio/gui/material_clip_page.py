@@ -605,7 +605,7 @@ class MaterialClipPage(BasePage):
 
         # ── Stacked Content ──
         self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setStyleSheet("background: transparent;")
+        self.stacked_widget.setStyleSheet("QStackedWidget { background: transparent; }")
         self.ingest_panel = self._build_ingest_panel()
         self.analyze_panel = self._build_analyze_panel()
         self.stacked_widget.addWidget(self.ingest_panel)

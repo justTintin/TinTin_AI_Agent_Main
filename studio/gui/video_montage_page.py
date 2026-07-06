@@ -2808,13 +2808,15 @@ class VideoMontagePage(BasePage):
         card_layout.addLayout(row_dir)
 
         # Raw videos list
-        card_layout.addWidget(QLabel("已选择的原始视频素材 (双击可播放预览，每条可删除):"))
+        card_layout.addWidget(QLabel("已选择的原始视频素材 (双击可播放预览，右键可删除):"))
         self.video_list = QListWidget()
         self.video_list.setFixedHeight(120)
         self.video_list.setTextElideMode(Qt.ElideRight)
         self.video_list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.video_list.itemClicked.connect(self._check_split_clips_exist)
         self.video_list.itemDoubleClicked.connect(self._preview_video_item)
+        self.video_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.video_list.customContextMenuRequested.connect(self._show_video_context_menu)
         card_layout.addWidget(self.video_list)
 
 
@@ -3794,30 +3796,17 @@ class VideoMontagePage(BasePage):
     def _decorate_video_item_widget(self, item):
         path = item.text().strip()
         if not path:
-            log.info("[DIAG _decorate_video_item_widget] empty path, skip")
             return
-        log.info(f"[DIAG _decorate_video_item_widget] decorating item path='{path}'")
-        row = QWidget()
-        row.setMinimumHeight(28)
-        h = QHBoxLayout(row)
-        h.setContentsMargins(4, 0, 4, 0)
-        h.setSpacing(6)
 
-        lbl = QLabel(os.path.basename(path))
-        lbl.setToolTip(path)
-        lbl.setTextElideMode(Qt.ElideRight)
-        h.addWidget(lbl, 1)
-
-        btn_del = QPushButton("✕")
-        btn_del.setToolTip("从素材列表移除")
-        btn_del.setFixedWidth(24)
-        btn_del.setFixedHeight(20)
-        btn_del.setStyleSheet("border: none; color: #e74c3c; font-size: 12px; padding: 0;")
-        btn_del.clicked.connect(lambda _=False, it=item: self._remove_source_video_item(it))
-        h.addWidget(btn_del)
-
-        item.setSizeHint(QSize(self.video_list.width() if self.video_list.width() > 0 else 200, 28))
-        self.video_list.setItemWidget(item, row)
+    def _show_video_context_menu(self, pos):
+        item = self.video_list.itemAt(pos)
+        if not item:
+            return
+        menu = QMenu()
+        act = QAction("🗑 从素材列表移除", menu)
+        act.triggered.connect(lambda: self._remove_source_video_item(item))
+        menu.addAction(act)
+        menu.exec_(self.video_list.viewport().mapToGlobal(pos))
 
     def _remove_source_video_item(self, item):
         row = self.video_list.row(item)
@@ -5325,9 +5314,9 @@ class VideoMontagePage(BasePage):
         if not llm_api_url or not llm_api_key:
             self.stage_label.setText("未配置大模型API，已跳过画面描述生成。")
             video_path = getattr(self, "processing_video_path", "")
-            if not video_path:
-                selected_item = self.video_list.currentItem()
-                video_path = selected_item.text() if selected_item else ""
+        if not video_path:
+            selected_item = self.video_list.currentItem()
+            video_path = selected_item.text() if selected_item else ""
             if video_path:
                 base_dir = os.path.dirname(video_path)
                 video_basename = os.path.splitext(os.path.basename(video_path))[0]

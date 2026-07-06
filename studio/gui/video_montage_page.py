@@ -32,8 +32,17 @@ from utils.logger_utils import log
 from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT
 
 def get_voxcpm_python():
-    from utils.platform_utils import find_venv_python
-    return find_venv_python(VOXCPM2_DIR)
+    """返回可用于启动 VoxCPM API 服务器的 Python 路径。
+
+    优先用嵌入式 Python（torch/numpy 完好），
+    并注入 voxcpm2 venv 的 site-packages 以提供 flask 等依赖。
+    """
+    import sys as _sys
+    embedded = _sys.executable
+    voxcpm_sp = os.path.join(VOXCPM2_DIR, "venv", "Lib", "site-packages")
+    if os.path.isdir(voxcpm_sp):
+        os.environ.setdefault("VOXCPM_EXTRA_PATH", voxcpm_sp)
+    return embedded
 
 
 def find_ffmpeg():
@@ -7247,7 +7256,46 @@ class VideoMontagePage(BasePage):
         act_copy = QAction("✍ 生成口播文案", menu)
         act_copy.triggered.connect(lambda: self._gen_copy_for_plan(idx))
         menu.addAction(act_copy)
+        plan = self.precompose_plans[idx] if 0 <= idx < len(self.precompose_plans) else None
+        if plan:
+            out_path = (plan.get("output_path") or "").strip()
+            has_copy = bool(out_path and self._assembled_has_copy(out_path))
+            if has_copy:
+                act_view = QAction("📄 查看文案", menu)
+                act_view.triggered.connect(lambda: self._view_assembled_copy(idx))
+                menu.addAction(act_view)
         menu.exec_(self.assembled_clips_list_widget.viewport().mapToGlobal(pos))
+
+    def _view_assembled_copy(self, idx):
+        if idx < 0 or idx >= len(self.precompose_plans):
+            return
+        out_path = (self.precompose_plans[idx].get("output_path") or "").strip()
+        if not out_path:
+            return
+        txt = os.path.splitext(out_path)[0] + ".txt"
+        if not os.path.exists(txt):
+            return
+        try:
+            with open(txt, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            return
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QHBoxLayout
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle(f"口播文案 - 预合成 {idx+1}")
+        dlg.resize(600, 400)
+        lay = QVBoxLayout(dlg)
+        te = QPlainTextEdit()
+        te.setPlainText(content)
+        te.setReadOnly(True)
+        lay.addWidget(te)
+        btn_row = QHBoxLayout()
+        btn_close = QPushButton("关闭")
+        btn_close.clicked.connect(dlg.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        lay.addLayout(btn_row)
+        dlg.exec_()
 
     def _assembled_has_copy(self, path):
         """该组合视频是否已有同名 .txt 文案。"""
@@ -7275,6 +7323,16 @@ class VideoMontagePage(BasePage):
             copy_mark = " 📄" if has_copy else ""
             file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
             item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
+            if has_copy:
+                txt = os.path.splitext(out_path)[0] + ".txt"
+                try:
+                    with open(txt, "r", encoding="utf-8") as f:
+                        snippet = f.read(200).strip()
+                    item.setToolTip(snippet + ("..." if len(snippet) == 200 else ""))
+                except Exception:
+                    item.setToolTip("")
+            else:
+                item.setToolTip("")
 
     def _collect_assembled_paths(self):
         """按列表顺序返回已确认合成的视频路径。"""

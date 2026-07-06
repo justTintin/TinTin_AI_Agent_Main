@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
+
+# 将 voxcpm2 venv 的 site-packages 加入路径（由 get_voxcpm_python 设置）
+_extra_sp = os.environ.pop("VOXCPM_EXTRA_PATH", "")
+if _extra_sp and os.path.isdir(_extra_sp):
+    sys.path.insert(0, _extra_sp)
+
 import argparse
 import base64
 import tempfile

@@ -3816,7 +3816,7 @@ class VideoMontagePage(BasePage):
         btn_del.clicked.connect(lambda _=False, it=item: self._remove_source_video_item(it))
         h.addWidget(btn_del)
 
-        item.setSizeHint(row.sizeHint())
+        item.setSizeHint(QSize(self.video_list.width() if self.video_list.width() > 0 else 200, 28))
         self.video_list.setItemWidget(item, row)
 
     def _remove_source_video_item(self, item):

@@ -131,7 +131,7 @@ class EnvConfigPage(BasePage):
         scroll_area.setMinimumHeight(300)
 
         scroll_widget = QWidget()
-        scroll_widget.setStyleSheet("background: transparent;")
+        scroll_widget.setStyleSheet("QWidget { background: transparent; }")
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(16)

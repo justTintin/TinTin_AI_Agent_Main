@@ -298,7 +298,15 @@ def _has_hidden_or_system_attr(path: str) -> bool:
 
 def _should_skip_path(path: str) -> bool:
     name = os.path.basename(path.rstrip("/\\"))
-    return _is_hidden_name(name) or _has_hidden_or_system_attr(path)
+    if _is_hidden_name(name) or _has_hidden_or_system_attr(path):
+        return True
+    lower = name.lower()
+    if lower == "splits":
+        return True
+    norm = path.replace("\\", "/").rstrip("/")
+    if "/splits/" in norm + "/":
+        return True
+    return False
 
 _SCRIPT_BRAND_PATTERNS = [
     ("罗技", ["logitech", "logi", "罗技", "gpw", "g pro wireless", "g pro x superlight", "gpx"]),

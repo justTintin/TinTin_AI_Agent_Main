@@ -95,16 +95,16 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; background: transparent; } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         # Tab 1: 声音样本
-        p1 = QWidget(); p1.setStyleSheet("background: transparent;")
+        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
         from gui.voice_samples_page import VoiceSamplesPage
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
         tabs.addTab(p1, "🎭 声音样本")
 
         # Tab 2: 素材资源
-        p2 = QWidget(); p2.setStyleSheet("background: transparent;")
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
         l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30); l2.setSpacing(16)
         # Materials dir
         g1 = QGroupBox("📂 素材存储目录"); g1.setStyleSheet("QGroupBox { font-size:13px; font-weight:bold; border:1px solid #2e2e32; border-radius:8px; margin-top:12px; } QGroupBox::title { subcontrol-origin:margin; padding:0 8px; color:#a855f7; }")
@@ -144,7 +144,7 @@ class PageSetupMixin:
 
         # 素材管理容器
         self.res_material_container = QWidget()
-        self.res_material_container.setStyleSheet("background: transparent;")
+        self.res_material_container.setStyleSheet("QWidget { background: transparent; }")
         self.res_material_container.setVisible(False)
         l2.addWidget(self.res_material_container, 1)
         l2.addStretch()
@@ -470,9 +470,9 @@ class PageSetupMixin:
         heading = QLabel("⚙️ 模型配置"); heading.setObjectName("heading")
         layout.addWidget(heading, 0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; background: transparent; } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
-        def _page(): w = QWidget(); w.setStyleSheet("background: transparent;"); return w
+        def _page(): w = QWidget(); w.setStyleSheet("QWidget { background: transparent; }"); return w
         def _lr(p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch()
         def _row(w): r = QHBoxLayout(); w(r); return r
         # ───── Tab 1: LLM ─────
@@ -582,7 +582,7 @@ class PageSetupMixin:
         layout = QVBoxLayout(self.page_llm_settings)
         layout.setContentsMargins(20, 20, 20, 20)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; background: transparent; } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         def _inp(lbl, attr, ph, parent_layout, echo=None):
             r = QHBoxLayout(); r.addWidget(QLabel(lbl))
@@ -807,7 +807,7 @@ class PageSetupMixin:
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(self.accounts_grid_container)
-            scroll.setStyleSheet("background: transparent; border: none;")
+            scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
             layout.addWidget(scroll, 1)
 
     def setup_account_detail_page(self):
@@ -866,10 +866,10 @@ class PageSetupMixin:
         layout = QVBoxLayout(self.page_logs)
         layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; background: transparent; } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         # Tab 1: 日志
-        p1 = QWidget(); p1.setStyleSheet("background: transparent;")
+        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
         l1 = QVBoxLayout(p1); l1.setContentsMargins(16,16,16,16)
         h1 = QHBoxLayout(); l1.addLayout(h1)
         b = QPushButton("🔄 刷新"); b.setObjectName("primary_button"); b.setFixedWidth(90); b.clicked.connect(self.refresh_logs); h1.addWidget(b); h1.addStretch()
@@ -878,7 +878,7 @@ class PageSetupMixin:
         tabs.addTab(p1, "📊 日志")
 
         # Tab 2: 系统信息
-        p2 = QWidget(); p2.setStyleSheet("background: transparent;")
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
         l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30); l2.setSpacing(12)
         l2.addWidget(QLabel("系统硬件信息")); l2.addWidget(self._info_row("操作系统:", "os_ver"))
         l2.addWidget(self._info_row("处理器:", "cpu_info"))
@@ -892,7 +892,7 @@ class PageSetupMixin:
         tabs.addTab(p2, "🖥️ 系统信息")
 
         # Tab 3: 版本
-        p3 = QWidget(); p3.setStyleSheet("background: transparent;")
+        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
         l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30); l3.setSpacing(8)
         import sys as _s, platform as _p
         l3.addWidget(QLabel(f"应用版本: v2.0.0 RC"))
@@ -968,19 +968,19 @@ class PageSetupMixin:
         layout = QVBoxLayout(self.page_backup)
         layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; background: transparent; } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
-        p1 = QWidget(); p1.setStyleSheet("background: transparent;")
+        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
         from gui.env_config_page import EnvConfigPage
         self.env_config_tool = EnvConfigPage(p1, self); self.env_config_tool.setup()
         tabs.addTab(p1, "🖥️ 运行环境")
 
-        p2 = QWidget(); p2.setStyleSheet("background: transparent;")
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
         from gui.terminal_page import TerminalPage
         self.terminal_tool = TerminalPage(p2, self); self.terminal_tool.setup()
         tabs.addTab(p2, "💻 终端")
 
-        p3 = QWidget(); p3.setStyleSheet("background: transparent;")
+        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
         from gui.backup_page import BackupPage
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
         tabs.addTab(p3, "💾 备份管理")

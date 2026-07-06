@@ -7140,7 +7140,11 @@ class VideoMontagePage(BasePage):
                 random.shuffle(deck)
             seq = []
             total_dur = 0.0
+            _safety = 0
             while len(seq) < target_clip_count:
+                _safety += 1
+                if _safety > target_clip_count * 4:
+                    break
                 if cursor >= len(deck):
                     cursor = 0
                     if randomness != "low":
@@ -7166,6 +7170,7 @@ class VideoMontagePage(BasePage):
                 while len(seq) < target_clip_count:
                     seq.append(random.choice(unique))
             plans.append({"clips": seq, "deleted_flags": [False] * len(seq), "mode": "random"})
+        log.info(f"[DIAG _build_precompose_plans] target={target_clip_count} batch={batch_count} total_clips={len(unique)} plans={len(plans)} plan_sizes={[len(p['clips']) for p in plans]}")
         return plans
 
     def _load_precompose_plans(self, plan_specs, out_montage_dir):

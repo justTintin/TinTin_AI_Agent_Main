@@ -7221,11 +7221,13 @@ class VideoMontagePage(BasePage):
         confirmed = plan.get("confirmed") and bool(out_path)
         status_txt = "✅已合成" if confirmed else "⏳待确认"
         file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
+        has_copy = bool(out_path and self._assembled_has_copy(out_path))
+        copy_mark = " 📄" if has_copy else ""
         plan_id = plan.get("_plan_id")
         if plan_id is None:
             plan_id = index
             plan["_plan_id"] = index
-        text = f"[{index+1}] {file_text}  {status_txt}"
+        text = f"[{index+1}] {file_text}  {status_txt}{copy_mark}"
         item = QListWidgetItem(text)
         item.setData(Qt.UserRole, index)
         item.setData(Qt.UserRole + 1, int(confirmed))
@@ -7256,7 +7258,23 @@ class VideoMontagePage(BasePage):
             return False
 
     def _refresh_assembled_copy_buttons(self):
-        pass
+        w = self.assembled_clips_list_widget
+        for i in range(w.count()):
+            item = w.item(i)
+            if not item:
+                continue
+            idx = item.data(Qt.UserRole)
+            if idx is None or idx < 0 or idx >= len(self.precompose_plans):
+                continue
+            plan = self.precompose_plans[idx]
+            out_path = (plan.get("output_path") or "").strip()
+            clip_count = len(plan.get("clips") or [])
+            confirmed = plan.get("confirmed") and bool(out_path)
+            has_copy = bool(out_path and self._assembled_has_copy(out_path))
+            status_txt = "✅已合成" if confirmed else "⏳待确认"
+            copy_mark = " 📄" if has_copy else ""
+            file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
+            item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
 
     def _collect_assembled_paths(self):
         """按列表顺序返回已确认合成的视频路径。"""

@@ -125,7 +125,7 @@ class _SimilarSearchWorker(BaseWorker):
 
     def do_work(self):
         from utils.material_clip_indexer import search_by_text
-        rows = search_by_text(
+        rows, _total = search_by_text(
             self.query,
             top_k=max(self.top_k * 3, self.top_k),   # 多取一些用于按文件去重
             filter_brand=self.filter_brand,
@@ -171,7 +171,7 @@ class _AutoBindShotsWorker(BaseWorker):
             if not q:
                 continue
             try:
-                rows = search_by_text(
+                rows, _total = search_by_text(
                     q, top_k=5,
                     filter_brand=self.filter_brand,
                     filter_category=self.filter_category,

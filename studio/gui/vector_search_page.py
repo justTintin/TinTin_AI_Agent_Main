@@ -24,11 +24,11 @@ from utils.base_worker import BaseWorker
 
 class _VectorSearchWorker(BaseWorker):
     """Chinese-CLIP 文字向量检索。"""
-    finished = Signal(list)
+    finished = Signal(list, int)
 
     def __init__(self, query: str, top_k: int, path_prefix: str,
                  brand: str, category: str, hash_prefix: str = "",
-                 color: str = ""):
+                 color: str = "", offset: int = 0):
         super().__init__()
         self.query       = query
         self.top_k       = top_k
@@ -37,26 +37,29 @@ class _VectorSearchWorker(BaseWorker):
         self.category    = category or None
         self.hash_prefix = hash_prefix
         self.color       = color or None
+        self.offset      = offset
 
     def do_work(self):
         from utils.material_clip_indexer import search_by_text
-        results = search_by_text(
+        results, total = search_by_text(
             self.query, top_k=self.top_k,
             filter_brand=self.brand,
             filter_category=self.category,
             filter_hash=self.hash_prefix,
             filter_path_prefix=self.path_prefix,
             filter_color=self.color,
+            offset=self.offset,
         )
-        self.finished.emit(results)
+        self.finished.emit(results, total)
 
 
 class _TagSearchWorker(BaseWorker):
     """按品牌/型号/类别/状态标签查询数据库。"""
-    finished = Signal(list)
+    finished = Signal(list, int)
 
     def __init__(self, brand: str, model: str, category: str,
-                 ai_status: str, limit: int, hash_prefix: str = ""):
+                 ai_status: str, limit: int, hash_prefix: str = "",
+                 offset: int = 0):
         super().__init__()
         self.brand       = brand or None
         self.model       = model or None
@@ -64,46 +67,51 @@ class _TagSearchWorker(BaseWorker):
         self.ai_status   = ai_status or None
         self.limit       = limit
         self.hash_prefix = hash_prefix
+        self.offset      = offset
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
         with MaterialClipIndexer() as idx:
-            rows = idx.search_by_tags(
+            rows, total = idx.search_by_tags(
                 brand=self.brand, model=self.model,
                 category=self.category, ai_status=self.ai_status,
                 limit=self.limit, hash_prefix=self.hash_prefix,
+                offset=self.offset,
             )
-        self.finished.emit(rows)
+        self.finished.emit(rows, total)
 
 
 class _DirQueryWorker(BaseWorker):
     """按路径前缀从 DB 列出素材。"""
-    finished = Signal(list)
+    finished = Signal(list, int)
 
-    def __init__(self, path_prefix: str, limit: int = 100, hash_prefix: str = ""):
+    def __init__(self, path_prefix: str, limit: int = 100,
+                 hash_prefix: str = "", offset: int = 0):
         super().__init__()
         self.path_prefix = path_prefix
         self.limit       = limit
         self.hash_prefix = hash_prefix
+        self.offset      = offset
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
         with MaterialClipIndexer() as idx:
-            rows = idx.list_materials(
+            rows, total = idx.list_materials(
                 path_prefix=self.path_prefix,
                 limit=self.limit,
-                hash_prefix=self.hash_prefix
+                hash_prefix=self.hash_prefix,
+                offset=self.offset,
             )
-        self.finished.emit(rows)
+        self.finished.emit(rows, total)
 
 
 class _KeywordSearchWorker(BaseWorker):
     """关键词模糊搜索：对文件名/描述/品牌/型号做 LIKE 匹配。"""
-    finished = Signal(list)
+    finished = Signal(list, int)
 
     def __init__(self, keyword: str, limit: int = 100,
                  file_type: str = "", brand: str = "", model: str = "",
-                 category: str = "", ai_status: str = ""):
+                 category: str = "", ai_status: str = "", offset: int = 0):
         super().__init__()
         self.keyword = keyword.strip()
         self.limit = limit
@@ -112,19 +120,20 @@ class _KeywordSearchWorker(BaseWorker):
         self.model = model.strip() or None
         self.category = category.strip() or None
         self.ai_status = ai_status or None
+        self.offset = offset
 
     def do_work(self):
         if not self.keyword:
-            self.finished.emit([])
+            self.finished.emit([], 0)
             return
         from utils.material_clip_indexer import MaterialClipIndexer
         with MaterialClipIndexer() as idx:
-            rows = idx.search_by_keyword(
+            rows, total = idx.search_by_keyword(
                 self.keyword, self.limit,
                 file_type=self.file_type, brand=self.brand,
                 model=self.model, category=self.category,
-                ai_status=self.ai_status)
-        self.finished.emit(rows)
+                ai_status=self.ai_status, offset=self.offset)
+        self.finished.emit(rows, total)
 
 
 # ── 主页面 ────────────────────────────────────────────────────────────────────
@@ -140,6 +149,8 @@ _TABLE_COLS_IDX = {n: i for i, n in enumerate(_TABLE_COLS)}
 
 
 class VectorSearchPage(BasePage):
+    _PAGE_SIZE = 50
+
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
         root.setContentsMargins(20, 20, 20, 20)
@@ -164,6 +175,7 @@ class VectorSearchPage(BasePage):
         root.addWidget(self._tabs, 1)
 
         self._load_tag_options()
+        self._page_state = {"text": 0, "tag": 0, "kw": 0, "dir": 0}
 
     def _on_tab_changed(self, index):
         if index in (0, 1):  # Tab 1 & 2: 文字语义检索 + 标签检索
@@ -223,20 +235,25 @@ class VectorSearchPage(BasePage):
         self.txt_hash.setPlaceholderText("Hash 过滤")
         self.txt_hash.setFixedWidth(100)
         flt.addWidget(self.txt_hash)
-        flt.addWidget(QLabel("返回："))
+        flt.addWidget(QLabel("每页："))
         self.txt_topk = QSpinBox()
-        self.txt_topk.setRange(1, 200)
-        self.txt_topk.setValue(100)
+        self.txt_topk.setRange(10, 200)
+        self.txt_topk.setValue(self._PAGE_SIZE)
         self.txt_topk.setFixedWidth(56)
         flt.addWidget(self.txt_topk)
         lay.addLayout(flt)
 
         self.txt_table, self.txt_stat = self._make_result_table()
         lay.addWidget(self.txt_table, 1)
-        lay.addWidget(self.txt_stat)
 
         bot = QHBoxLayout()
         bot.addWidget(self.txt_stat, 1)
+        self.txt_prev, self.txt_next, self.txt_page_lbl = self._make_pager()
+        self.txt_prev.clicked.connect(lambda: self._do_text_search(page_delta=-1))
+        self.txt_next.clicked.connect(lambda: self._do_text_search(page_delta=1))
+        bot.addWidget(self.txt_prev)
+        bot.addWidget(self.txt_page_lbl)
+        bot.addWidget(self.txt_next)
         btn_copy = QPushButton("📋 复制路径")
         btn_copy.setObjectName("secondary_button")
         btn_copy.clicked.connect(lambda: self._copy_path(self.txt_table))
@@ -290,10 +307,10 @@ class VectorSearchPage(BasePage):
         self.tag_hash = QLineEdit()
         self.tag_hash.setPlaceholderText("Hash 过滤")
         row3.addWidget(self.tag_hash, 1)
-        row3.addWidget(QLabel("限制："))
+        row3.addWidget(QLabel("每页："))
         self.tag_limit = QSpinBox()
-        self.tag_limit.setRange(10, 2000)
-        self.tag_limit.setValue(100)
+        self.tag_limit.setRange(10, 200)
+        self.tag_limit.setValue(self._PAGE_SIZE)
         self.tag_limit.setFixedWidth(65)
         row3.addWidget(self.tag_limit)
         self.tag_btn = QPushButton("查询")
@@ -307,6 +324,12 @@ class VectorSearchPage(BasePage):
 
         bot = QHBoxLayout()
         bot.addWidget(self.tag_stat, 1)
+        self.tag_prev, self.tag_next, self.tag_page_lbl = self._make_pager()
+        self.tag_prev.clicked.connect(lambda: self._do_tag_search(page_delta=-1))
+        self.tag_next.clicked.connect(lambda: self._do_tag_search(page_delta=1))
+        bot.addWidget(self.tag_prev)
+        bot.addWidget(self.tag_page_lbl)
+        bot.addWidget(self.tag_next)
         btn_copy = QPushButton("📋 复制路径")
         btn_copy.setObjectName("secondary_button")
         btn_copy.clicked.connect(lambda: self._copy_path(self.tag_table))
@@ -364,9 +387,15 @@ class VectorSearchPage(BasePage):
 
         self.kw_table, self.kw_stat = self._make_result_table()
         lay.addWidget(self.kw_table, 1)
-        lay.addWidget(self.kw_stat)
 
         bot = QHBoxLayout()
+        bot.addWidget(self.kw_stat, 1)
+        self.kw_prev, self.kw_next, self.kw_page_lbl = self._make_pager()
+        self.kw_prev.clicked.connect(lambda: self._do_kw_search(page_delta=-1))
+        self.kw_next.clicked.connect(lambda: self._do_kw_search(page_delta=1))
+        bot.addWidget(self.kw_prev)
+        bot.addWidget(self.kw_page_lbl)
+        bot.addWidget(self.kw_next)
         btn_copy = QPushButton("📋 复制路径"); btn_copy.setObjectName("secondary_button")
         btn_copy.clicked.connect(lambda: self._copy_path(self.kw_table)); bot.addWidget(btn_copy)
         btn_open = QPushButton("🗂 打开目录"); btn_open.setObjectName("secondary_button")
@@ -374,28 +403,43 @@ class VectorSearchPage(BasePage):
         lay.addLayout(bot)
         return panel
 
-    def _do_kw_search(self):
+    def _do_kw_search(self, page_delta: int = 0):
         kw = self.kw_input.text().strip()
         if not kw: return
+        if page_delta == 0:
+            self._page_state["kw"] = 0
+        else:
+            self._page_state["kw"] = max(0, self._page_state["kw"] + page_delta)
+        offset = self._page_state["kw"] * self._PAGE_SIZE
         self.kw_btn.setEnabled(False)
         self.kw_table.setRowCount(0)
         self.kw_stat.setText("搜索中…")
+        self.kw_prev.setEnabled(False)
+        self.kw_next.setEnabled(False)
         ft = "" if self.kw_type.currentIndex() == 0 else self.kw_type.currentText()
         ai = "" if self.kw_aistat.currentIndex() == 0 else self.kw_aistat.currentText()
         w = self.track_worker(_KeywordSearchWorker(
-            kw, 200, file_type=ft,
+            kw, self._PAGE_SIZE, file_type=ft,
             brand=self.kw_brand.text().strip(),
             model=self.kw_model.text().strip(),
             category=self.kw_category.text().strip(),
-            ai_status=ai))
-        w.finished.connect(lambda rows: self._on_kw_done(rows))
+            ai_status=ai, offset=offset))
+        w.finished.connect(lambda rows, total: self._on_kw_done(rows, total))
         w.error.connect(lambda m: self._on_search_err(m, self.kw_btn, self.kw_stat))
         w.start()
 
-    def _on_kw_done(self, rows):
+    def _on_kw_done(self, rows: list, total: int):
         self.kw_btn.setEnabled(True)
         self._fill_table(self.kw_table, rows, has_score=False)
-        self.kw_stat.setText(f"共 {len(rows)} 条结果，双击文件名播放，双击其他单元格打开目录")
+        page = self._page_state["kw"]
+        ps = self._PAGE_SIZE
+        total_pages = (total + ps - 1) // ps if total > 0 else 0
+        start = page * ps + 1 if total > 0 else 0
+        end = min(start + len(rows) - 1, total)
+        self.kw_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
+        self.kw_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
+        self.kw_prev.setEnabled(page > 0)
+        self.kw_next.setEnabled((page + 1) * ps < total)
 
     # ── Tab 4：目录查询 ───────────────────────────────────────────────────────
 
@@ -431,10 +475,10 @@ class VectorSearchPage(BasePage):
         self.dir_hash = QLineEdit()
         self.dir_hash.setPlaceholderText("输入 hash 前缀筛选")
         dir_filter_row.addWidget(self.dir_hash, 1)
-        dir_filter_row.addWidget(QLabel("限制："))
+        dir_filter_row.addWidget(QLabel("每页："))
         self.dir_limit = QSpinBox()
-        self.dir_limit.setRange(10, 2000)
-        self.dir_limit.setValue(100)
+        self.dir_limit.setRange(10, 200)
+        self.dir_limit.setValue(self._PAGE_SIZE)
         self.dir_limit.setFixedWidth(65)
         dir_filter_row.addWidget(self.dir_limit)
         lay.addLayout(dir_filter_row)
@@ -444,6 +488,12 @@ class VectorSearchPage(BasePage):
 
         bot = QHBoxLayout()
         bot.addWidget(self.dir_stat, 1)
+        self.dir_prev, self.dir_next, self.dir_page_lbl = self._make_pager()
+        self.dir_prev.clicked.connect(lambda: self._do_dir_query(page_delta=-1))
+        self.dir_next.clicked.connect(lambda: self._do_dir_query(page_delta=1))
+        bot.addWidget(self.dir_prev)
+        bot.addWidget(self.dir_page_lbl)
+        bot.addWidget(self.dir_next)
         btn_copy = QPushButton("📋 复制路径")
         btn_copy.setObjectName("secondary_button")
         btn_copy.clicked.connect(lambda: self._copy_path(self.dir_table))
@@ -457,6 +507,18 @@ class VectorSearchPage(BasePage):
         return panel
 
     # ── 通用：结果表格 ────────────────────────────────────────────────────────
+
+    def _make_pager(self):
+        from PySide6.QtWidgets import QPushButton, QLabel
+        prev = QPushButton("◀ 上一页")
+        prev.setObjectName("secondary_button")
+        prev.setEnabled(False)
+        nxt = QPushButton("下一页 ▶")
+        nxt.setObjectName("secondary_button")
+        nxt.setEnabled(False)
+        lbl = QLabel("0/0 页")
+        lbl.setObjectName("muted_text")
+        return prev, nxt, lbl
 
     def _make_result_table(self):
         table = QTableWidget()
@@ -521,13 +583,21 @@ class VectorSearchPage(BasePage):
 
     # ── 搜索动作 ─────────────────────────────────────────────────────────────
 
-    def _do_text_search(self):
+    def _do_text_search(self, page_delta: int = 0):
         query = self.txt_query.text().strip()
         if not query:
             return
+        page_size = self.txt_topk.value()
+        if page_delta == 0:
+            self._page_state["text"] = 0
+        else:
+            self._page_state["text"] = max(0, self._page_state["text"] + page_delta)
+        offset = self._page_state["text"] * page_size
         self.txt_btn.setEnabled(False)
         self.txt_table.setRowCount(0)
         self.txt_stat.setText("检索中…")
+        self.txt_prev.setEnabled(False)
+        self.txt_next.setEnabled(False)
         brand = self.txt_brand.currentText().strip()
         if brand == "全部":
             brand = ""
@@ -535,25 +605,41 @@ class VectorSearchPage(BasePage):
         if category == "全部":
             category = ""
         w = self.track_worker(_VectorSearchWorker(
-            query, self.txt_topk.value(),
+            query, page_size,
             self.txt_path.text().strip(),
             brand, category,
             hash_prefix=self.txt_hash.text().strip(),
             color=self.txt_color.text().strip(),
+            offset=offset,
         ))
-        w.finished.connect(lambda rows: self._on_text_done(rows))
+        w.finished.connect(lambda rows, total: self._on_text_done(rows, total, page_size))
         w.error.connect(lambda m: self._on_search_err(m, self.txt_btn, self.txt_stat))
         w.start()
 
-    def _on_text_done(self, rows: list):
+    def _on_text_done(self, rows: list, total: int, page_size: int):
         self.txt_btn.setEnabled(True)
         self._fill_table(self.txt_table, rows, has_score=True)
-        self.txt_stat.setText(f"共 {len(rows)} 条结果，双击文件名播放，双击其他单元格打开目录")
+        page = self._page_state["text"]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+        start = page * page_size + 1 if total > 0 else 0
+        end = min(start + len(rows) - 1, total)
+        self.txt_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
+        self.txt_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
+        self.txt_prev.setEnabled(page > 0)
+        self.txt_next.setEnabled((page + 1) * page_size < total)
 
-    def _do_tag_search(self):
+    def _do_tag_search(self, page_delta: int = 0):
+        page_size = self.tag_limit.value()
+        if page_delta == 0:
+            self._page_state["tag"] = 0
+        else:
+            self._page_state["tag"] = max(0, self._page_state["tag"] + page_delta)
+        offset = self._page_state["tag"] * page_size
         self.tag_btn.setEnabled(False)
         self.tag_table.setRowCount(0)
         self.tag_stat.setText("查询中…")
+        self.tag_prev.setEnabled(False)
+        self.tag_next.setEnabled(False)
 
         brand = self.tag_brand.currentText()
         if brand == "全部":
@@ -570,39 +656,63 @@ class VectorSearchPage(BasePage):
             model,
             category,
             self.tag_status.currentData(),
-            self.tag_limit.value(),
+            page_size,
             hash_prefix=self.tag_hash.text().strip(),
+            offset=offset,
         ))
-        w.finished.connect(lambda rows: self._on_tag_done(rows))
+        w.finished.connect(lambda rows, total: self._on_tag_done(rows, total, page_size))
         w.error.connect(lambda m: self._on_search_err(m, self.tag_btn, self.tag_stat))
         w.start()
 
-    def _on_tag_done(self, rows: list):
+    def _on_tag_done(self, rows: list, total: int, page_size: int):
         self.tag_btn.setEnabled(True)
         self._fill_table(self.tag_table, rows, has_score=False)
-        self.tag_stat.setText(f"共 {len(rows)} 条结果，双击文件名播放，双击其他单元格打开目录")
+        page = self._page_state["tag"]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+        start = page * page_size + 1 if total > 0 else 0
+        end = min(start + len(rows) - 1, total)
+        self.tag_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
+        self.tag_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
+        self.tag_prev.setEnabled(page > 0)
+        self.tag_next.setEnabled((page + 1) * page_size < total)
 
-    def _do_dir_query(self):
+    def _do_dir_query(self, page_delta: int = 0):
         path = self.dir_path.text().strip()
         if not path:
             self.show_warning("请输入要查询的目录路径。", "未填目录")
             return
+        page_size = self.dir_limit.value()
+        if page_delta == 0:
+            self._page_state["dir"] = 0
+        else:
+            self._page_state["dir"] = max(0, self._page_state["dir"] + page_delta)
+        offset = self._page_state["dir"] * page_size
         self.dir_btn.setEnabled(False)
         self.dir_table.setRowCount(0)
         self.dir_stat.setText("查询中…")
+        self.dir_prev.setEnabled(False)
+        self.dir_next.setEnabled(False)
         w = self.track_worker(_DirQueryWorker(
             path,
-            limit=self.dir_limit.value(),
+            limit=page_size,
             hash_prefix=self.dir_hash.text().strip(),
+            offset=offset,
         ))
-        w.finished.connect(lambda rows: self._on_dir_done(rows))
+        w.finished.connect(lambda rows, total: self._on_dir_done(rows, total, page_size))
         w.error.connect(lambda m: self._on_search_err(m, self.dir_btn, self.dir_stat))
         w.start()
 
-    def _on_dir_done(self, rows: list):
+    def _on_dir_done(self, rows: list, total: int, page_size: int):
         self.dir_btn.setEnabled(True)
         self._fill_table(self.dir_table, rows, has_score=False)
-        self.dir_stat.setText(f"共 {len(rows)} 条记录，双击文件名播放，双击其他单元格打开目录")
+        page = self._page_state["dir"]
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+        start = page * page_size + 1 if total > 0 else 0
+        end = min(start + len(rows) - 1, total)
+        self.dir_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
+        self.dir_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
+        self.dir_prev.setEnabled(page > 0)
+        self.dir_next.setEnabled((page + 1) * page_size < total)
 
     def _browse_dir(self):
         d = QFileDialog.getExistingDirectory(self.parent_widget, "选择要查询的目录")

@@ -2,6 +2,13 @@
 import sys
 import os
 
+# 强制 stdout/stderr 使用 UTF-8 编码，避免 Windows cp1252 无法输出中文
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # 将 voxcpm2 venv 的 site-packages 加入路径（由 get_voxcpm_python 设置）
 _extra_sp = os.environ.pop("VOXCPM_EXTRA_PATH", "")
 if _extra_sp and os.path.isdir(_extra_sp):
@@ -218,7 +225,7 @@ if __name__ == "__main__":
             # 可能相对路径基于工作区根目录而非 studio/
             _abs = os.path.abspath(os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "..", _checkpoint_path))
+                _checkpoint_path))
         if os.path.isdir(_abs):
             _checkpoint_path = _abs
 

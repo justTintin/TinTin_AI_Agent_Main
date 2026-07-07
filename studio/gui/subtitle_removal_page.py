@@ -759,6 +759,9 @@ class SubtitleRemovalPage(BasePage):
         # Resolve paths to VSR local modules
         vsr_dir = VSR_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
+        # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
+        if not os.path.exists(vsr_python) and IS_WIN:
+            vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
 
         # On Linux, the bundled Python is Windows-only; fall back to project venv

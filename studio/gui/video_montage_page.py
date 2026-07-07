@@ -34,15 +34,11 @@ from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT
 def get_voxcpm_python():
     """返回可用于启动 VoxCPM API 服务器的 Python 路径。
 
-    优先用嵌入式 Python（torch/numpy 完好），
-    并注入 voxcpm2 venv 的 site-packages 以提供 flask 等依赖。
+    使用 voxcpm2 venv 自带的 Python（3.12），以保证 numpy/torch 等
+    编译扩展与解释器版本匹配；嵌入式 Python（3.11）无法加载 cp312 的 C 扩展。
     """
-    import sys as _sys
-    embedded = _sys.executable
-    voxcpm_sp = os.path.join(VOXCPM2_DIR, "venv", "Lib", "site-packages")
-    if os.path.isdir(voxcpm_sp):
-        os.environ.setdefault("VOXCPM_EXTRA_PATH", voxcpm_sp)
-    return embedded
+    from utils.platform_utils import find_venv_python
+    return find_venv_python(VOXCPM2_DIR)
 
 
 def find_ffmpeg():
@@ -3150,16 +3146,6 @@ class VideoMontagePage(BasePage):
         assembled_header = QHBoxLayout()
         assembled_header.setContentsMargins(0, 0, 0, 0)
         assembled_header.addWidget(QLabel("预合成视频列表 (双击播放预览，单击选中查看镜头):"), 1)
-        self.btn_batch_scene_copy = QPushButton("✍ 一键根据画面生成全部文案")
-        self.btn_batch_scene_copy.setObjectName("secondary_button")
-        self.btn_batch_scene_copy.setFixedHeight(26)
-        self.btn_batch_scene_copy.setStyleSheet("padding:2px 12px; font-size:12px;")
-        self.btn_batch_scene_copy.setToolTip(
-            "为列表中所有组合视频，按各自的画面镜头描述自动生成口播文案"
-            "（共用同一份产品背景，保存为同名 .txt，下一步配音自动载入）")
-        self.btn_batch_scene_copy.clicked.connect(self._batch_gen_copy_by_scene)
-        self.btn_batch_scene_copy.setEnabled(False)
-        assembled_header.addWidget(self.btn_batch_scene_copy, 0)
         left_vbox.addLayout(assembled_header)
 
         self.assembled_clips_list_widget = QListWidget()
@@ -3259,7 +3245,16 @@ class VideoMontagePage(BasePage):
         self.btn_confirm_all.setFixedHeight(35)
         self.btn_confirm_all.setEnabled(False)
         self.btn_confirm_all.clicked.connect(self._confirm_all_precompose)
-        confirm_row.addWidget(self.btn_confirm_all, 1)
+        confirm_row.addWidget(self.btn_confirm_all)
+        self.btn_batch_scene_copy = QPushButton("合成视频生成文案")
+        self.btn_batch_scene_copy.setObjectName("secondary_button")
+        self.btn_batch_scene_copy.setFixedHeight(35)
+        self.btn_batch_scene_copy.setToolTip(
+            "为列表中所有组合视频，按各自的画面镜头描述自动生成口播文案"
+            "（共用同一份产品背景，保存为同名 .txt，下一步配音自动载入）")
+        self.btn_batch_scene_copy.clicked.connect(self._batch_gen_copy_by_scene)
+        self.btn_batch_scene_copy.setEnabled(False)
+        confirm_row.addWidget(self.btn_batch_scene_copy, 0)
         layout.addLayout(confirm_row)
 
         # Navigation row
@@ -7373,6 +7368,14 @@ class VideoMontagePage(BasePage):
             return
         has_unconfirmed = any(not p.get("confirmed") for p in self.precompose_plans)
         self.btn_confirm_all.setEnabled(has_unconfirmed)
+        # 确认合成视频全部完成后，将绿色背景转移到「合成视频生成文案」按钮
+        if hasattr(self, "btn_batch_scene_copy"):
+            if not has_unconfirmed and self.btn_batch_scene_copy.isEnabled():
+                self.btn_batch_scene_copy.setObjectName("action_button")
+            else:
+                self.btn_batch_scene_copy.setObjectName("secondary_button")
+            self.btn_batch_scene_copy.style().unpolish(self.btn_batch_scene_copy)
+            self.btn_batch_scene_copy.style().polish(self.btn_batch_scene_copy)
 
     def _confirm_all_precompose(self):
         if self.concat_worker and self.concat_worker.isRunning():

@@ -16,7 +16,7 @@ NAS 瑙嗛/鍥剧墖 鈫 ffmpeg 鎶藉抚 鈫 Chinese-CLIP 512 缁村悜閲 鈫 
   idx.index_directory(r"\\192.168.111.17\绱犳潗\榧犳爣閿鐩")
 
   # 妫绱
-  results = search_by_text("罗技无线鼠标 白色", top_k=10)
+  results, total = search_by_text("罗技无线鼠标 白色", top_k=10)
 
 鍛戒护琛:
   python -m utils.material_clip_indexer index "Z:\\绱犳潗\\榧犳爣閿鐩" --nas-root "Z:\\绱犳潗"
@@ -1185,8 +1185,10 @@ class _MaterialDB:
 
     def search_by_tags(self, brand: str = None, model: str = None,
                        category: str = None, ai_status: str = None,
-                       limit: int = 10000, hash_prefix: str = "") -> list:
-        """鎸夊搧鐗/鍨嬪彿/绫诲埆鏍囩炬ā绯婃煡璇㈢礌鏉愶紝浠讳綍瀛楁电暀绌哄垯涓嶇瓫閫夎ュ瓧娈点"""
+                       limit: int = 10000, hash_prefix: str = "",
+                       offset: int = 0) -> tuple:
+        """按品牌/型号/类别标签模糊查询素材，任何字段留空则不筛选该字段。
+        返回 (rows, total)，total 为符合条件的总记录数（不受 limit/offset 影响）。"""
         self._connect()
         conds: list = []
         params: list = []
@@ -1206,8 +1208,9 @@ class _MaterialDB:
             conds.append("file_hash ILIKE %s")
             params.append(hash_prefix.strip() + "%")
         where = ("WHERE " + " AND ".join(conds)) if conds else ""
-        params.append(limit)
         with self._conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
+            total = cur.fetchone()[0]
             cur.execute(f"""
                 SELECT id, path, filename, media_type, duration_s,
                        brand, product, model, category,
@@ -1216,12 +1219,66 @@ class _MaterialDB:
                 FROM materials
                 {where}
                 ORDER BY id DESC
-                LIMIT %s
-            """, params)
+                LIMIT %s OFFSET %s
+            """, params + [limit, offset])
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, row)) for row in cur.fetchall()]
         self._conn.commit()
-        return rows
+        return rows, total
+
+    def search_by_keyword(self, keyword: str, limit: int = 100,
+                          file_type: str = "", brand: str = "",
+                          model: str = "", category: str = "",
+                          ai_status: str = "", offset: int = 0) -> tuple:
+        """关键词模糊搜索：对文件名/画面描述/品牌/型号/路径做 ILIKE 匹配。
+        返回 (rows, total)。"""
+        self._connect()
+        conds: list = []
+        params: list = []
+        kw_like = f"%{keyword}%"
+        conds.append("""(
+            filename ILIKE %s OR
+            scene_desc_primary ILIKE %s OR
+            scene_desc_secondary ILIKE %s OR
+            brand ILIKE %s OR
+            model ILIKE %s OR
+            product ILIKE %s OR
+            category ILIKE %s OR
+            path ILIKE %s)""")
+        params.extend([kw_like] * 8)
+        if file_type:
+            conds.append("media_type = %s")
+            params.append(file_type)
+        if brand:
+            conds.append("brand ILIKE %s")
+            params.append(f"%{brand}%")
+        if model:
+            conds.append("(model ILIKE %s OR product ILIKE %s)")
+            params.extend([f"%{model}%", f"%{model}%"])
+        if category:
+            conds.append("(category ILIKE %s OR product ILIKE %s)")
+            params.extend([f"%{category}%", f"%{category}%"])
+        if ai_status:
+            conds.append("COALESCE(ai_status,'pending') = %s")
+            params.append(ai_status)
+        where = "WHERE " + " AND ".join(conds)
+        with self._conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
+            total = cur.fetchone()[0]
+            cur.execute(f"""
+                SELECT id, path, filename, media_type, duration_s,
+                       brand, product, model, category,
+                       COALESCE(ai_status,'pending') AS ai_status,
+                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary
+                FROM materials
+                {where}
+                ORDER BY id DESC
+                LIMIT %s OFFSET %s
+            """, params + [limit, offset])
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        self._conn.commit()
+        return rows, total
 
     def upsert_material(self, file_hash: str, path: str, media_type: str, filename: str,
                         duration_s: Optional[float], width: int, height: int,
@@ -1274,7 +1331,8 @@ class _MaterialDB:
                        offset: int = 0, ai_status: Optional[str] = None,
                        hash_prefix: str = "", media_type: Optional[str] = None,
                        brand: str = "", scene_desc: str = "",
-                       conf_filter: str = "", product: str = "") -> list:
+                       conf_filter: str = "", product: str = "") -> tuple:
+        """返回 (rows, total)，total 为符合条件的总记录数。"""
         self._connect()
         conds = []
         params = []
@@ -1322,10 +1380,11 @@ class _MaterialDB:
             conds.append("ai_confidence >= 0.4 AND ai_confidence < 0.7")
         elif conf_filter == "low":
             conds.append("(ai_confidence < 0.4 OR ai_confidence IS NULL)")
-        
+
         where = ("WHERE " + " AND ".join(conds)) if conds else ""
-        params += [limit, offset]
         with self._conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
+            total = cur.fetchone()[0]
             cur.execute(f"""
                 SELECT id, path, filename, media_type, duration_s,
                        brand, product, model, category,
@@ -1336,11 +1395,11 @@ class _MaterialDB:
                 {where}
                 ORDER BY id DESC
                 LIMIT %s OFFSET %s
-            """, params)
+            """, params + [limit, offset])
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, row)) for row in cur.fetchall()]
         self._conn.commit()
-        return rows
+        return rows, total
 
     def get_stats(self) -> dict:
         """返回 {total, pending, analyzed, failed}"""
@@ -2413,7 +2472,7 @@ class MaterialClipIndexer:
                        offset: int = 0, ai_status: Optional[str] = None,
                        hash_prefix: str = "", media_type: Optional[str] = None,
                        brand: str = "", scene_desc: str = "",
-                       conf_filter: str = "", product: str = "") -> list:
+                       conf_filter: str = "", product: str = "") -> tuple:
         return self._db.list_materials(
             path_prefix, limit, offset, ai_status, hash_prefix, media_type,
             brand=brand, scene_desc=scene_desc, conf_filter=conf_filter, product=product
@@ -2421,8 +2480,15 @@ class MaterialClipIndexer:
 
     def search_by_tags(self, brand: str = None, model: str = None,
                        category: str = None, ai_status: str = None,
-                       limit: int = 10000, hash_prefix: str = "") -> list:
-        return self._db.search_by_tags(brand, model, category, ai_status, limit, hash_prefix)
+                       limit: int = 10000, hash_prefix: str = "",
+                       offset: int = 0) -> tuple:
+        return self._db.search_by_tags(brand, model, category, ai_status, limit, hash_prefix, offset)
+
+    def search_by_keyword(self, keyword: str, limit: int = 100,
+                          file_type: str = "", brand: str = "",
+                          model: str = "", category: str = "",
+                          ai_status: str = "", offset: int = 0) -> tuple:
+        return self._db.search_by_keyword(keyword, limit, file_type, brand, model, category, ai_status, offset)
 
     def delete_material_by_id(self, material_id: int) -> None:
         self._db.delete_material_by_id(material_id)
@@ -2502,7 +2568,8 @@ def search_by_text(
     filter_color: Optional[str] = None,
     cfg: Optional[dict] = None,
     comprehensive: bool = True,
-) -> list[dict]:
+    offset: int = 0,
+) -> tuple:
     """
     用文字描述向量检索，返回最相似的 top_k 帧记录（含来源文件路径）。
     可附加 brand / category / file_hash / color 筛选。
@@ -2604,13 +2671,20 @@ def search_by_text(
             JOIN materials m ON m.id = f.material_id
             WHERE {where}
             ORDER BY score DESC
-            LIMIT %s
+            LIMIT %s OFFSET %s
         """
-        params = [query_vec] + params + [query_vec, top_k]
+        params = [query_vec] + params + [top_k, offset]
         with db._conn.cursor() as cur:
+            count_sql = f"""
+                SELECT COUNT(*) FROM frames f
+                JOIN materials m ON m.id = f.material_id
+                WHERE {where}
+            """
+            cur.execute(count_sql, [query_vec] + params[1:-2] if text_score_parts else params[:-2])
+            total = cur.fetchone()[0]
             cur.execute(sql, params)
             rows = cur.fetchall()
-        return [
+        result = [
             {
                 "material_id": r[0], "path": r[1], "filename": r[2],
                 "ts_s": r[3], "brand": r[4], "product": r[5],
@@ -2621,6 +2695,7 @@ def search_by_text(
             }
             for r in rows
         ]
+        return result, total
     finally:
         db.close()
 
@@ -2709,7 +2784,7 @@ if __name__ == "__main__":
         print(f"\n成功:{ok}  跳过:{skip}  失败:{fail}")
 
     elif args.cmd == "search":
-        results = search_by_text(args.query, top_k=args.top_k, filter_brand=args.brand)
+        results, _total = search_by_text(args.query, top_k=args.top_k, filter_brand=args.brand)
         for r in results:
             ts = f"@{r['ts_s']:.1f}s" if r["ts_s"] else ""
             print(f"[{r['score']:.3f}] {r['filename']}{ts}  {r['brand']} {r['model']}")

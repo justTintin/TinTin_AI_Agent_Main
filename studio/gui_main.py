@@ -1460,8 +1460,9 @@ if __name__ == "__main__":
     if _os.environ.get("XDG_SESSION_TYPE") == "wayland":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-    # ── License 许可证验证 ──
-    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1" or sys.platform == "win32"
+    # ── License 许可证验证 ──（暂时关闭，恢复时改回下方注释行）
+    _LICENSE_CHECK_DISABLED = True
+    # _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1" or sys.platform == "win32"
     if not _LICENSE_CHECK_DISABLED:
         try:
             from utils.license import verify_license, LicenseError, LicenseInfo

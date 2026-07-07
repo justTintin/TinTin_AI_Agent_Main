@@ -399,7 +399,7 @@ class _QueryMaterialsWorker(BaseWorker):
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
         with MaterialClipIndexer() as idx:
-            rows = idx.list_materials(
+            rows, total = idx.list_materials(
                 path_prefix=self.path_prefix,
                 ai_status=self.ai_status_filter,
                 limit=self.limit,

@@ -1,5 +1,13 @@
 import os
 import sys
+
+# 强制 stdout/stderr 使用 UTF-8 编码，避免 Windows cp1252 无法输出中文
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 import argparse
 import time
 import cv2

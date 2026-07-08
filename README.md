@@ -2,7 +2,7 @@
 
 > 面向电商内容创作的全栈 AI 桌面工作站
 >
-> 视频下载 · 智能混剪 · 声音克隆 · 素材检索 · AI 图像生成
+> 智能混剪 · 直播切片 · 声音克隆 · 素材检索 · AI 图像生成
 
 **跨平台**：Windows 10+ / Linux (Pop!_OS, Ubuntu 24.04+)  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
 
@@ -206,6 +206,8 @@ make install          # 创建 venv + 安装依赖 + Playwright Chromium
 
 ## 配置
 
+> 完整字段说明见 **[docs/SETUP.md](docs/SETUP.md)** 第 5 节。含凭据的配置文件不入库，仓库内提供 `.example` 模板，部署时复制为正式文件并填入真实值。
+
 ### AI 配置 (`studio/config/ai_config.json`)
 
 ```json
@@ -214,9 +216,22 @@ make install          # 创建 venv + 安装依赖 + Playwright Chromium
   "llm_api_key": "sk-xxx",
   "llm_api_url": "https://api.deepseek.com",
   "llm_model": "deepseek-v4-flash",
+  "llm_vision_api_url": "http://127.0.0.1:11434",
+  "llm_vision_model": "qwen2.5vl:7b-16k",
+  "ollama_num_parallel": 4,
+  "vision_concurrency": 4,
   "comfyui_addr": "http://127.0.0.1:8188",
-  "runninghub_key": "",
-  "runninghub_url": "https://www.runninghub.cn"
+  "runninghub_api_key": "",
+  "runninghub_base_url": "https://www.runninghub.cn",
+  "voice_clone_addr": "http://127.0.0.1:7860",
+  "vox_api_url": "http://127.0.0.1:7861/v1/tts",
+  "vox_mode": "api",
+  "vox_timesteps": 20,
+  "vox_cfg": 2.0,
+  "rustfs_endpoint": "http://192.168.111.17:9000",
+  "rustfs_access_key": "xxx",
+  "rustfs_secret_key": "xxx",
+  "rustfs_bucket": "photos"
 }
 ```
 
@@ -228,10 +243,13 @@ appid = cli_xxx
 appsecret = xxx
 apptoken = xxx
 tableid = tblxxx
+topicfield = 文案标题
+scriptfield = 脚本
+foldertoken =
 
 [VoxCPM]
-Port = 7861
-ModelPath = apps/voxcpm2/models/openbmb__VoxCPM2
+modelpath = apps/voxcpm2/models/openbmb__VoxCPM2
+port = 7861
 ```
 
 ### 激活与授权

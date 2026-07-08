@@ -2787,8 +2787,8 @@ class VideoMontagePage(BasePage):
     def setup(self):
         # Main layout
         layout = QVBoxLayout(self.parent_widget)
-        layout.setContentsMargins(30, 16, 30, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(30, 20, 30, 20)
+        layout.setSpacing(12)
 
         # Title
         heading = QLabel("🎬 智能混剪与批量视频制作")
@@ -2803,22 +2803,23 @@ class VideoMontagePage(BasePage):
                 background-color: rgba(255, 255, 255, 0.02);
                 border: 1px solid rgba(255, 255, 255, 0.05);
                 border-radius: 8px;
-                padding: 2px 16px;
             }
         """)
         step_layout = QHBoxLayout(self.step_bar)
-        step_layout.setContentsMargins(0, 0, 0, 0)
+        step_layout.setContentsMargins(12, 6, 12, 6)
         step_layout.setSpacing(8)
         
         self.step_labels = []
         steps_text = ["1. 镜头智能分割", "2. 镜头重组", "3. 口播配音", "4. 特效包装"]
         for i, text in enumerate(steps_text):
             lbl = QLabel(text)
+            lbl.setObjectName("step_label")
             lbl.setAlignment(Qt.AlignCenter)
-            lbl.setFont(self._get_step_font(True if i == 0 else False))
+            if i == 0:
+                lbl.setProperty("active", True)
             step_layout.addWidget(lbl)
             self.step_labels.append(lbl)
-            
+
             if i < len(steps_text) - 1:
                 arrow = QLabel("➔")
                 arrow.setStyleSheet("color: rgba(255,255,255,0.2); font-weight: bold;")
@@ -2867,23 +2868,14 @@ class VideoMontagePage(BasePage):
         self.update_step_indicator(0)
         self._populate_ref_audio_samples()
 
-    def _get_step_font(self, active=False):
-        from PySide6.QtGui import QFont
-        font = QFont("Microsoft YaHei", 9)
-        font.setBold(active)
-        return font
-
     def update_step_indicator(self, index):
         for i, lbl in enumerate(self.step_labels):
             if i == index:
-                lbl.setFont(self._get_step_font(True))
-                lbl.setStyleSheet("color: #3498db; font-weight: bold; background-color: rgba(52, 152, 219, 0.1); border-radius: 4px; padding: 2px 10px;")
-            elif i < index:
-                lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #2ecc71; background-color: rgba(46, 204, 113, 0.08); border-radius: 4px; padding: 2px 10px;")
+                lbl.setProperty("active", True)
             else:
-                lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #7f8c8d; padding: 2px 10px;")
+                lbl.setProperty("active", False)
+            lbl.style().unpolish(lbl)
+            lbl.style().polish(lbl)
 
     def _go_to_step(self, index):
         # Stop background music playback if leaving Step 4 (index 3)

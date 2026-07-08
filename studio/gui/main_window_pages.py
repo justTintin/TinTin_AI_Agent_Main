@@ -611,6 +611,9 @@ class PageSetupMixin:
         try: self.refresh_comfyui_local_status()
         except Exception: pass
         self.btn_open_comfyui_editor = QPushButton("🎨 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)
+        r1 = QHBoxLayout(); r1.addStretch()
+        b_save_comfy = QPushButton("💾 保存 ComfyUI 配置"); b_save_comfy.setObjectName("primary_button"); b_save_comfy.clicked.connect(self.save_ai_config); r1.addWidget(b_save_comfy)
+        l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
 
         # ── Tab 2: RunningHub ──
@@ -619,6 +622,9 @@ class PageSetupMixin:
         _inp("Base URL:", "rh_base_url_input", "https://www.runninghub.cn", l2)
         self.rh_api_key_input.setText(self.ai_config.get("runninghub_api_key",""))
         self.rh_base_url_input.setText(self.ai_config.get("runninghub_base_url","https://www.runninghub.cn"))
+        r2 = QHBoxLayout(); r2.addStretch()
+        b_save_rh = QPushButton("💾 保存 RunningHub 配置"); b_save_rh.setObjectName("primary_button"); b_save_rh.clicked.connect(self.save_ai_config); r2.addWidget(b_save_rh)
+        l2.addLayout(r2)
         l2.addStretch(); tabs.addTab(p2, "🔗 RunningHub")
 
         # ── Tab 3: 飞书 ──
@@ -696,10 +702,6 @@ class PageSetupMixin:
         except Exception: pass
         try: self.load_matdb_platform_cfg()
         except Exception: pass
-        # Save button for ComfyUI + RunningHub
-        r = QHBoxLayout(); r.addStretch()
-        sb = QPushButton("💾 保存 ComfyUI/RunningHub"); sb.setObjectName("secondary_button"); sb.clicked.connect(self.save_ai_config); r.addWidget(sb)
-        r.setContentsMargins(0,8,0,0); layout.addLayout(r)
 
     def setup_digital_human_page(self):
             layout = QVBoxLayout(self.page_digital_human)

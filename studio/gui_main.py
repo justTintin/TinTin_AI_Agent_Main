@@ -148,7 +148,7 @@ try:
                                  QAbstractItemView, QButtonGroup, QGroupBox, QListView,
                                  QSpinBox)
     from PySide6.QtGui import QIcon, QFont, QPixmap
-    from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
+    from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent, QSharedMemory
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     print("Please install PySide6 using: pip install PySide6 shiboken6")
@@ -1479,6 +1479,15 @@ if __name__ == "__main__":
     log.info("Application starting...")
     try:
         app = QApplication(sys.argv)
+
+        # ── 单例保护：只允许运行一个实例 ──
+        _singleton_key = "dingdaguai.ecommerce.agent.matrix.single_instance"
+        _shmem = QSharedMemory(_singleton_key)
+        if not _shmem.create(1) and _shmem.error() == QSharedMemory.AlreadyExists:
+            from PySide6.QtWidgets import QMessageBox as _QMB
+            _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
+            sys.exit(0)
+
         app.setAttribute(Qt.AA_DontUseNativeDialogs, True)  # 主题对话框
         app.setStyle("Fusion")
         from utils.theme_manager import apply_theme

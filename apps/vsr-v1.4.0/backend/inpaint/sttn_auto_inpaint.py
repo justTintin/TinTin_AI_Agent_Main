@@ -328,7 +328,9 @@ class STTNAutoInpaint:
                     torch.cuda.empty_cache()
         except Exception as e:
             print(f"Error during video processing: {str(e)}")
-            # 不抛出异常，允许程序继续执行
+            import traceback
+            traceback.print_exc()
+            raise  # 重新抛出异常，让调用方知道处理失败
         finally:
             if reader:
                 prefetcher.release()

@@ -372,24 +372,35 @@ class SubtitleRemover:
         else:
             # 精准模式下，获取场景分割的帧号，进一步切割
             self.log_model()
-            if config.inpaintMode.value == InpaintMode.PROPAINTER:
-                self.propainter_mode(tbar)
-            elif config.inpaintMode.value == InpaintMode.STTN_AUTO:
-                self.sttn_auto_mode(tbar)
-            elif config.inpaintMode.value == InpaintMode.STTN_DET:
-                self.video_inpaint(tbar, self.sttn_det_inpaint)
-            elif config.inpaintMode.value == InpaintMode.LAMA:
-                self.video_inpaint(tbar, self.lama_inpaint)
-            elif config.inpaintMode.value == InpaintMode.OPENCV:
-                self.video_inpaint(tbar, OpenCVInpaint())
-            else:
-                raise Exception(f'inpaint mode: {config.inpaintMode.value} not implemented')
+            try:
+                if config.inpaintMode.value == InpaintMode.PROPAINTER:
+                    self.propainter_mode(tbar)
+                elif config.inpaintMode.value == InpaintMode.STTN_AUTO:
+                    self.sttn_auto_mode(tbar)
+                elif config.inpaintMode.value == InpaintMode.STTN_DET:
+                    self.video_inpaint(tbar, self.sttn_det_inpaint)
+                elif config.inpaintMode.value == InpaintMode.LAMA:
+                    self.video_inpaint(tbar, self.lama_inpaint)
+                elif config.inpaintMode.value == InpaintMode.OPENCV:
+                    self.video_inpaint(tbar, OpenCVInpaint())
+                else:
+                    raise Exception(f'inpaint mode: {config.inpaintMode.value} not implemented')
+            except Exception as e:
+                import traceback as _tb
+                _tb.print_exc()
+                self.append_output(f"[错误] 视频处理失败: {e}")
+                self.video_cap.release()
+                self.video_writer.release()
+                return  # 不设置 isFinished=True，让调用方知道失败
 
         self.video_cap.release()
         self.video_writer.release()
         if not self.is_picture:
             # 将原音频合并到新生成的视频文件中
             self.merge_audio_to_video()
+        # 检查音频是否合并成功（视频本身可能已成功）
+        if not self.is_picture and not self.is_successful_merged:
+            self.append_output(f"[警告] 音频合并失败，已保存无声视频到 {self.video_out_path}")
         self.append_output(tr['Main']['FinishedProcessing'].format(self.video_out_path))
         self.append_output(tr['Main']['ProcessingTime'].format(round(time.time() - start_time)))
         self.isFinished = True

@@ -5405,6 +5405,9 @@ class VideoMontagePage(BasePage):
             try:
                 self._rename_all_splits_with_metadata(out_dir, scenes)
                 self._batch_ok += 1
+                # Track last successful batch split for vision analysis
+                self._last_batch_splits_dir = out_dir
+                self._last_batch_scenes = scenes
             except Exception as e:
                 self._batch_fail += 1
                 self._batch_fail_msgs.append(f"{os.path.basename(out_dir)}: 重命名失败 {e}")
@@ -5439,6 +5442,15 @@ class VideoMontagePage(BasePage):
             detail += "\n\n「未检测到切点」的视频画面切换不明显，可调低分割阈值后重试。"
         if self._batch_fail_msgs:
             detail += "\n\n失败明细：\n" + "\n".join(self._batch_fail_msgs[:8])
+
+        # Trigger vision analysis on the last batch-split video's splits
+        if self._batch_ok > 0 and hasattr(self, "_last_batch_splits_dir"):
+            self._trigger_vision_on_dir(
+                self._last_batch_splits_dir,
+                self._last_batch_scenes if hasattr(self, "_last_batch_scenes") else [],
+                "批量分割"
+            )
+
         QMessageBox.information(self.parent_widget, "批量分割完成", detail)
 
     # --- Step 1 batch "pick best N seconds" highlights ---
@@ -5584,6 +5596,15 @@ class VideoMontagePage(BasePage):
         detail = msg
         if self._hl_fail_msgs:
             detail += "\n\n失败明细：\n" + "\n".join(self._hl_fail_msgs[:8])
+
+        # Trigger vision analysis on highlight clips
+        if self._hl_ok > 0 and os.path.exists(self._hl_shared_splits):
+            # Build scenes from split files
+            files = sorted([f for f in os.listdir(self._hl_shared_splits)
+                           if f.lower().endswith((".mp4", ".m4v"))])
+            scenes = self._get_split_scenes_times(self._hl_shared_splits, files) if files else []
+            self._trigger_vision_on_dir(self._hl_shared_splits, scenes, "批量挑精华")
+
         QMessageBox.information(self.parent_widget, "批量挑精华完成", detail)
 
     def _start_auto_transcription(self):
@@ -5682,6 +5703,90 @@ class VideoMontagePage(BasePage):
     def _on_auto_transcribe_error(self, err):
         log.warning(f"自动转写字幕失败: {err}")
         self._generate_scene_descriptions(self.temp_scenes)
+
+    def _trigger_vision_on_dir(self, splits_dir, scenes, source_label="镜头分割"):
+        """对指定 splits 目录中的所有片段运行视觉AI画面分析。
+
+        供批量分割、批量挑精华等批量路径复用。
+        """
+        vision_api_url = self.main_window.ai_config.get("llm_vision_api_url", "")
+        vision_model = self.main_window.ai_config.get("llm_vision_model", "")
+
+        if not vision_api_url or not vision_model:
+            log.info(f"[{source_label}] 未配置本地视觉模型，跳过画面描述生成")
+            return
+
+        if not os.path.exists(splits_dir):
+            return
+
+        files = sorted([f for f in os.listdir(splits_dir)
+                       if f.lower().endswith((".mp4", ".m4v"))])
+        if not files:
+            return
+
+        split_video_paths = [os.path.join(splits_dir, f) for f in files]
+
+        # Try to find SRT for the parent video
+        raw_srt = ""
+        srt_segments = []
+        parent_dir = os.path.dirname(splits_dir)
+        if parent_dir:
+            for f_name in os.listdir(parent_dir):
+                if f_name.endswith(".srt"):
+                    srt_path = os.path.join(parent_dir, f_name)
+                    try:
+                        with open(srt_path, "r", encoding="utf-8") as sf:
+                            raw_srt = sf.read().strip()
+                        if raw_srt:
+                            srt_segments = parse_srt(raw_srt)
+                        break
+                    except Exception:
+                        pass
+
+        status_msg = f"🤖 正在使用本地视觉AI分析{source_label}画面内容..."
+        if srt_segments:
+            status_msg += "（结合字幕）"
+        self.stage_label.setText(status_msg)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        # Save scenes for the finished handler
+        self._trigger_scenes = scenes
+        self._trigger_splits_dir = splits_dir
+
+        self.vision_desc_worker = LocalVisionDescWorker(
+            vision_api_url=vision_api_url,
+            vision_model=vision_model,
+            split_video_paths=split_video_paths,
+            scenes=scenes if scenes else [],
+            srt_text=raw_srt,
+            srt_segments=srt_segments,
+        )
+        self.vision_desc_worker.finished.connect(self._on_trigger_vision_finished)
+        self.vision_desc_worker.error.connect(self._on_desc_error)
+        self.vision_desc_worker.start()
+
+    def _on_trigger_vision_finished(self, desc_json):
+        """批量路径视觉分析完成回调。"""
+        import json as _json
+        try:
+            desc_dict_raw = _json.loads(desc_json)
+            desc_dict = {int(k): v for k, v in desc_dict_raw.items()}
+        except Exception as e:
+            log.warning(f"_on_trigger_vision_finished - JSON解析失败: {e}")
+            desc_dict = {}
+
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.stage_label.setText("✅ 画面文案描述生成完毕！（本地视觉AI）")
+
+        splits_dir = getattr(self, "_trigger_splits_dir", "")
+        scenes = getattr(self, "_trigger_scenes", [])
+        if splits_dir and os.path.exists(splits_dir) and scenes:
+            self._rename_all_splits_with_metadata(splits_dir, scenes, desc_dict)
+            self._save_split_srt()
+
+        self._check_split_clips_exist()
 
     def _generate_scene_descriptions(self, scenes):
         llm_api_url = self.main_window.ai_config.get("llm_api_url", "")

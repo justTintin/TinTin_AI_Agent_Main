@@ -6142,16 +6142,27 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")
             return
 
-        # 声音克隆前停止 Ollama 释放显存，避免 VoxCPM 显存不足
+        # 检查空闲显存是否足够运行 VoxCPM（约需 6GB），不足则停止 Ollama 释放
         try:
-            from utils.ollama_manager import OllamaManager
-            mgr = OllamaManager.get()
-            if mgr.is_running():
-                self.stage_label.setText("正在停止 Ollama 释放显存...")
-                mgr.stop()
-                self.stage_label.setText("Ollama 已停止，开始声音克隆...")
+            import subprocess as _sp
+            r = _sp.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, timeout=5,
+                        creationflags=0x08000000 if sys.platform == "win32" else 0)
+            free_mb = int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 99999
+            if free_mb < 6144:
+                self.stage_label.setText(f"空闲显存 {free_mb}MB 不足，正在停止 Ollama 释放显存...")
+                from utils.ollama_manager import OllamaManager
+                mgr = OllamaManager.get()
+                if mgr.is_running():
+                    mgr.stop()
+                    time.sleep(3)
+                    self.stage_label.setText("Ollama 已停止，开始声音克隆...")
+                else:
+                    self.stage_label.setText("Ollama 未运行，显存可能被其他程序占用...")
+            else:
+                self.stage_label.setText(f"空闲显存 {free_mb}MB 充足，开始声音克隆...")
         except Exception as e:
-            log.warning(f"停止 Ollama 失败（不影响声音克隆）: {e}")
+            log.warning(f"显存检查失败（不影响声音克隆）: {e}")
 
         # Build tasks from the table
         tasks = []

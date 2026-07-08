@@ -57,13 +57,30 @@ def _get_gpu_info():
         return None
 
 
+def _get_nvidia_smi_free_mb():
+    """用 nvidia-smi 查询真实空闲显存（包含 PyTorch 缓存预留）。"""
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=0x08000000)
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            return int(r.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
 def _release_gpu_cache():
     """安全地释放未使用的 GPU 显存缓存，降低驱动内存碎片压力。"""
     try:
         import torch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
             gc.collect()
+            torch.cuda.empty_cache()
     except Exception:
         pass
 
@@ -78,6 +95,10 @@ def health():
         info["gpu_used_mb"] = used_mb
         info["gpu_total_mb"] = total_mb
         info["gpu_free_mb"] = total_mb - used_mb
+    # nvidia-smi 的真实空闲显存（包含 PyTorch 缓存预留的部分）
+    smi_free = _get_nvidia_smi_free_mb()
+    if smi_free is not None:
+        info["nvidia_free_mb"] = smi_free
     return jsonify(info)
 
 

@@ -271,7 +271,7 @@ class SidebarMixin:
         scroll.setWidget(scroll_content)
         self.sidebar_layout.addWidget(scroll)
         
-        footer = QLabel("v2.0.0 RC")
+        footer = QLabel("v2.1.1")
         footer.setObjectName("sidebar_footer")
         self.sidebar_layout.addWidget(footer)
         self.main_layout.addWidget(self.sidebar)

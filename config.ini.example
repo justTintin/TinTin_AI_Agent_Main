@@ -1,0 +1,12 @@
+[Feishu]
+appid = cli_xxx
+appsecret = xxx
+apptoken = xxx
+tableid = tblxxx
+topicfield = 文案标题
+scriptfield = 脚本
+foldertoken =
+
+[VoxCPM]
+modelpath = apps/voxcpm2/models/openbmb__VoxCPM2
+port = 7861

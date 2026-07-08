@@ -2787,8 +2787,8 @@ class VideoMontagePage(BasePage):
     def setup(self):
         # Main layout
         layout = QVBoxLayout(self.parent_widget)
-        layout.setContentsMargins(30, 24, 30, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(30, 16, 30, 16)
+        layout.setSpacing(10)
 
         # Title
         heading = QLabel("🎬 智能混剪与批量视频制作")
@@ -2803,13 +2803,15 @@ class VideoMontagePage(BasePage):
                 background-color: rgba(255, 255, 255, 0.02);
                 border: 1px solid rgba(255, 255, 255, 0.05);
                 border-radius: 8px;
-                padding: 10px 16px;
+                padding: 2px 16px;
             }
         """)
         step_layout = QHBoxLayout(self.step_bar)
+        step_layout.setContentsMargins(0, 0, 0, 0)
+        step_layout.setSpacing(8)
         
         self.step_labels = []
-        steps_text = ["1. 镜头智能分割", "2. 镜头重组", "3. 克隆口播配音", "4. 特效包装"]
+        steps_text = ["1. 镜头智能分割", "2. 镜头重组", "3. 口播配音", "4. 特效包装"]
         for i, text in enumerate(steps_text):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
@@ -2867,7 +2869,7 @@ class VideoMontagePage(BasePage):
 
     def _get_step_font(self, active=False):
         from PySide6.QtGui import QFont
-        font = QFont("Microsoft YaHei", 10)
+        font = QFont("Microsoft YaHei", 9)
         font.setBold(active)
         return font
 
@@ -2875,13 +2877,13 @@ class VideoMontagePage(BasePage):
         for i, lbl in enumerate(self.step_labels):
             if i == index:
                 lbl.setFont(self._get_step_font(True))
-                lbl.setStyleSheet("color: #3498db; font-weight: bold; background-color: rgba(52, 152, 219, 0.1); border-radius: 4px; padding: 6px 12px;")
+                lbl.setStyleSheet("color: #3498db; font-weight: bold; background-color: rgba(52, 152, 219, 0.1); border-radius: 4px; padding: 2px 10px;")
             elif i < index:
                 lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #2ecc71; background-color: rgba(46, 204, 113, 0.08); border-radius: 4px; padding: 6px 12px;")
+                lbl.setStyleSheet("color: #2ecc71; background-color: rgba(46, 204, 113, 0.08); border-radius: 4px; padding: 2px 10px;")
             else:
                 lbl.setFont(self._get_step_font(False))
-                lbl.setStyleSheet("color: #7f8c8d; padding: 6px 12px;")
+                lbl.setStyleSheet("color: #7f8c8d; padding: 2px 10px;")
 
     def _go_to_step(self, index):
         # Stop background music playback if leaving Step 4 (index 3)
@@ -8042,7 +8044,7 @@ class VideoMontagePage(BasePage):
             QMessageBox.information(
                 self.parent_widget, "文案已生成",
                 f"已根据画面为 {os.path.basename(pth)} 生成口播文案并保存：\n{ctxt}\n\n"
-                f"——\n{content}\n——\n\n进入下一步「克隆口播配音」会自动载入。")
+                f"——\n{content}\n——\n\n进入下一步「口播配音」会自动载入。")
 
         def on_err(msg):
             self.stage_label.setText("❌ 文案生成失败")
@@ -8204,7 +8206,7 @@ class VideoMontagePage(BasePage):
                 QMessageBox.information(
                     self.parent_widget, "全部完成",
                     f"已根据画面为全部 {ok_count} 个组合视频生成口播文案并保存。\n"
-                    f"进入下一步「克隆口播配音」会自动载入。")
+                    f"进入下一步「口播配音」会自动载入。")
             return
 
         path = self._batch_copy_queue.pop(0)

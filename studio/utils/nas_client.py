@@ -58,24 +58,43 @@ class NASClient:
     def is_connected(self) -> bool:
         return self._conn is not None
 
-    def connect(self):
+    def connect(self, timeout: float = 5.0):
+        """连接 NAS，超时秒数内未连上则放弃（避免连不上时阻塞几十秒）。
+
+        smbprotocol 的 Connection.connect()/Session.connect() 默认无超时，
+        目标主机不可达时会阻塞 30-60 秒（SMB 重试）。这里用线程 + join(timeout)
+        包装，保证调用方不会被长时间卡住。
+        """
         if self.is_connected():
             return
+        import threading
         # 首次连接时才加载 smbprotocol
         (Connection, Session, _TreeConnect, _Open, _Imp, _FA, _SA, _CD, _CO,
          _FPAM, _FIC) = self._ensure_smb()
-        self._conn = Connection(None, server_name=self._server, port=445)
-        self._conn.connect()
-
-        if self._username:
-            self._session = Session(
-                self._conn, username=self._username, password=self._password
-            )
-        else:
-            self._session = Session(
-                self._conn, username="guest", password="", require_encryption=False
-            )
-        self._session.connect()
+        err: list = []
+        def _do():
+            try:
+                conn = Connection(None, server_name=self._server, port=445)
+                conn.connect()
+                if self._username:
+                    sess = Session(conn, username=self._username, password=self._password)
+                else:
+                    sess = Session(conn, username="guest", password="", require_encryption=False)
+                sess.connect()
+                self._conn = conn
+                self._session = sess
+            except Exception as e:
+                err.append(e)
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
+        t.join(timeout)
+        if t.is_alive():
+            # 超时：连接仍在后台跑，放弃这次连接
+            raise TimeoutError(f"NAS 连接超时（{timeout}s），请检查 NAS 地址 {self._server} 是否可达")
+        if err:
+            raise err[0]
+        if not self.is_connected():
+            raise ConnectionError(f"NAS 连接失败：{self._server}")
 
     def _ensure_smb(self):
         """延迟加载并缓存 smbprotocol 符号，所有用到 SMB 的方法开头调用。"""

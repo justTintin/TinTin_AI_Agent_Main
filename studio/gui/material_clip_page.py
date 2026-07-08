@@ -687,7 +687,6 @@ class MaterialClipPage(BasePage):
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(14, 14, 14, 14)
         left_lay.setSpacing(8)
-        left_lay.addWidget(QLabel("📥 入库"))
         self._build_dir_tree_widget(left_lay, "ingest_tree")
 
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)
@@ -726,7 +725,6 @@ class MaterialClipPage(BasePage):
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(14, 14, 14, 14)
         left_lay.setSpacing(8)
-        left_lay.addWidget(QLabel("📂 数据库"))
         self._build_dir_tree_widget(left_lay, "analyze_tree")
         
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)

@@ -1110,16 +1110,34 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
 
 class LocalVisionDescWorker(BaseWorker):
-    """使用本地 Ollama 视觉模型（qwen2.5vl）分析每个分割镜头的画面内容，生成画面描述文案。"""
+    """使用本地 Ollama 视觉模型（qwen2.5vl）分析每个分割镜头的画面内容，生成画面描述文案。
+
+    有字幕时：结合字幕文案 + 画面截图，生成带营销感的描述。
+    无字幕时：纯画面视觉分析。
+    """
 
     finished = Signal(str)  # JSON string: {"1": "desc1", "2": "desc2", ...}
 
-    def __init__(self, vision_api_url, vision_model, split_video_paths, scenes):
+    def __init__(self, vision_api_url, vision_model, split_video_paths, scenes,
+                 srt_text="", srt_segments=None):
         super().__init__()
         self.vision_api_url = vision_api_url.rstrip("/")
         self.vision_model = vision_model
         self.split_video_paths = split_video_paths
         self.scenes = scenes
+        self.srt_text = srt_text
+        self.srt_segments = srt_segments or []  # list of (start_sec, end_sec, text)
+
+    def _find_subtitle_for_shot(self, shot_start, shot_end):
+        """找到与该镜头时间重叠的字幕文本。"""
+        matched_texts = []
+        for seg_start, seg_end, text in self.srt_segments:
+            # 有重叠即匹配
+            if seg_start < shot_end and seg_end > shot_start:
+                text = text.strip()
+                if text:
+                    matched_texts.append(text)
+        return " ".join(matched_texts) if matched_texts else ""
 
     def _extract_mid_frame(self, video_path):
         """从视频中间位置抽取一帧，返回 base64 jpg。"""
@@ -1156,10 +1174,17 @@ class LocalVisionDescWorker(BaseWorker):
             import json as _json
             desc_dict = {}
             total = len(self.split_video_paths)
+            has_subtitles = bool(self.srt_segments)
 
-            system_prompt = (
+            system_prompt_vision_only = (
                 "你是一个视频画面描述专家。请仔细观察这张视频截图，用一句简短的中文（10-25字）"
                 "描述画面中的核心视觉内容，包括：主体对象、动作/姿态、场景/环境。"
+                "只输出描述文字，不要编号、不要引号、不要任何额外解释。"
+            )
+            system_prompt_with_srt = (
+                "你是一个短视频营销文案专家。请结合下方提供的【口播字幕文案】和这张【视频截图】，"
+                "生成一句简短有营销感的中文画面描述（10-25字）。"
+                "描述应提炼画面中的视觉卖点，并与字幕内容呼应。"
                 "只输出描述文字，不要编号、不要引号、不要任何额外解释。"
             )
 
@@ -1170,11 +1195,24 @@ class LocalVisionDescWorker(BaseWorker):
                         desc_dict[idx] = f"镜头片段 {idx}"
                         continue
 
+                    # Check for subtitle text aligned to this shot
+                    shot_start, shot_end = (0.0, 0.0)
+                    if idx - 1 < len(self.scenes):
+                        shot_start, shot_end = self.scenes[idx - 1]
+                    sub_text = self._find_subtitle_for_shot(shot_start, shot_end)
+
+                    if sub_text:
+                        system_prompt = system_prompt_with_srt
+                        user_text = f"【口播字幕文案】{sub_text}\n\n请结合截图生成画面描述。"
+                    else:
+                        system_prompt = system_prompt_vision_only
+                        user_text = "请描述这张截图的画面内容。"
+
                     payload = {
                         "model": self.vision_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": "请描述这张截图的画面内容。",
+                            {"role": "user", "content": user_text,
                              "images": [frame_b64]},
                         ],
                         "stream": False,
@@ -1188,7 +1226,6 @@ class LocalVisionDescWorker(BaseWorker):
                     if resp.status_code == 200:
                         data = resp.json()
                         content = data.get("message", {}).get("content", "").strip()
-                        # Clean up: remove quotes, take first line
                         content = content.strip("'\"\"'").split("\n")[0].strip()
                         if content:
                             desc_dict[idx] = content[:30]
@@ -1201,7 +1238,8 @@ class LocalVisionDescWorker(BaseWorker):
                     log.warning(f"Vision analysis failed for clip {idx}: {e}")
                     desc_dict[idx] = f"镜头片段 {idx}"
 
-            log.info(f"LocalVisionDescWorker - 完成 {len(desc_dict)}/{total} 个镜头画面分析")
+            log.info(f"LocalVisionDescWorker - 完成 {len(desc_dict)}/{total} 个镜头画面分析"
+                     + ("（结合字幕）" if has_subtitles else "（纯画面）"))
             self.finished.emit(_json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))
         except Exception as e:
             log.exception("LocalVisionDescWorker 运行发生异常")
@@ -5702,9 +5740,20 @@ class VideoMontagePage(BasePage):
             )
             return
 
+        # Parse SRT into time-aligned segments for vision + subtitle combination
+        srt_segments = []
+        if raw_srt:
+            try:
+                srt_segments = parse_srt(raw_srt)
+            except Exception as e:
+                log.warning(f"解析SRT时间轴失败: {e}")
+
         # Prefer local vision model for visual content analysis
         if has_vision:
-            self.stage_label.setText("🤖 正在使用本地视觉AI逐镜头分析画面内容...")
+            status_msg = "🤖 正在使用本地视觉AI逐镜头分析画面内容..."
+            if srt_segments:
+                status_msg += "（结合字幕）"
+            self.stage_label.setText(status_msg)
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)
 
@@ -5713,6 +5762,8 @@ class VideoMontagePage(BasePage):
                 vision_model=vision_model,
                 split_video_paths=split_video_paths,
                 scenes=scenes,
+                srt_text=raw_srt,
+                srt_segments=srt_segments,
             )
             self.vision_desc_worker.finished.connect(self._on_vision_desc_finished)
             self.vision_desc_worker.error.connect(self._on_desc_error)

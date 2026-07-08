@@ -1607,11 +1607,12 @@ class VideoConcatWorker(BaseWorker):
     def run(self):
         try:
             ffmpeg_path = find_ffmpeg()
-            if not ffmpeg_path:
+            if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
 
-            ffprobe_path = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe.exe" if sys.platform == "win32" else "ffprobe")
-            if not os.path.exists(ffprobe_path):
+            from utils.platform_utils import find_ffprobe
+            ffprobe_path = find_ffprobe()
+            if not os.path.isfile(ffprobe_path):
                 ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
 
             if not self.selected_clips:

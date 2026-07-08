@@ -1109,6 +1109,105 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
             self.error.emit(str(e))
 
 
+class LocalVisionDescWorker(BaseWorker):
+    """使用本地 Ollama 视觉模型（qwen2.5vl）分析每个分割镜头的画面内容，生成画面描述文案。"""
+
+    finished = Signal(str)  # JSON string: {"1": "desc1", "2": "desc2", ...}
+
+    def __init__(self, vision_api_url, vision_model, split_video_paths, scenes):
+        super().__init__()
+        self.vision_api_url = vision_api_url.rstrip("/")
+        self.vision_model = vision_model
+        self.split_video_paths = split_video_paths
+        self.scenes = scenes
+
+    def _extract_mid_frame(self, video_path):
+        """从视频中间位置抽取一帧，返回 base64 jpg。"""
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+            return None
+        mid = total_frames // 2
+        cap.set(cv2.CAP_PROP_POS_FRAMES, mid)
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            return None
+        # Resize to max 512px for token efficiency
+        h, w = frame.shape[:2]
+        max_size = 512
+        if h > max_size or w > max_size:
+            if h > w:
+                new_h, new_w = max_size, int(w * max_size / h)
+            else:
+                new_h, new_w = int(h * max_size / w), max_size
+            frame = cv2.resize(frame, (new_w, new_h))
+        ret_jpg, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        if not ret_jpg:
+            return None
+        return base64.b64encode(buffer).decode("utf-8")
+
+    def run(self):
+        try:
+            import json as _json
+            desc_dict = {}
+            total = len(self.split_video_paths)
+
+            system_prompt = (
+                "你是一个视频画面描述专家。请仔细观察这张视频截图，用一句简短的中文（10-25字）"
+                "描述画面中的核心视觉内容，包括：主体对象、动作/姿态、场景/环境。"
+                "只输出描述文字，不要编号、不要引号、不要任何额外解释。"
+            )
+
+            for idx, clip_path in enumerate(self.split_video_paths, 1):
+                try:
+                    frame_b64 = self._extract_mid_frame(clip_path)
+                    if not frame_b64:
+                        desc_dict[idx] = f"镜头片段 {idx}"
+                        continue
+
+                    payload = {
+                        "model": self.vision_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": "请描述这张截图的画面内容。",
+                             "images": [frame_b64]},
+                        ],
+                        "stream": False,
+                        "options": {"num_ctx": 4096},
+                    }
+                    resp = requests.post(
+                        f"{self.vision_api_url}/api/chat",
+                        json=payload,
+                        timeout=60,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        content = data.get("message", {}).get("content", "").strip()
+                        # Clean up: remove quotes, take first line
+                        content = content.strip("'\"\"'").split("\n")[0].strip()
+                        if content:
+                            desc_dict[idx] = content[:30]
+                        else:
+                            desc_dict[idx] = f"镜头片段 {idx}"
+                    else:
+                        log.warning(f"Vision API error for clip {idx}: HTTP {resp.status_code}")
+                        desc_dict[idx] = f"镜头片段 {idx}"
+                except Exception as e:
+                    log.warning(f"Vision analysis failed for clip {idx}: {e}")
+                    desc_dict[idx] = f"镜头片段 {idx}"
+
+            log.info(f"LocalVisionDescWorker - 完成 {len(desc_dict)}/{total} 个镜头画面分析")
+            self.finished.emit(_json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))
+        except Exception as e:
+            log.exception("LocalVisionDescWorker 运行发生异常")
+            self.error.emit(str(e))
+
+
 class AITextRewriteWorker(BaseWorker):
     finished = Signal(str)  # Emits the rewritten text
 
@@ -5550,7 +5649,9 @@ class VideoMontagePage(BasePage):
         llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
         llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
         llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
-        
+        vision_api_url = self.main_window.ai_config.get("llm_vision_api_url", "")
+        vision_model = self.main_window.ai_config.get("llm_vision_model", "")
+
         # Read raw srt from .srt file in workspace or parent directory
         raw_srt = ""
         video_path = getattr(self, "processing_video_path", "")
@@ -5573,29 +5674,8 @@ class VideoMontagePage(BasePage):
 
         if not raw_srt and hasattr(self, "raw_srt_display"):
             raw_srt = self.raw_srt_display.toPlainText().strip()
-        
-        if not llm_api_url or not llm_api_key:
-            self.stage_label.setText("未配置大模型API，已跳过画面描述生成。")
-            video_path = getattr(self, "processing_video_path", "")
-        if not video_path:
-            selected_item = self.video_list.currentItem()
-            video_path = selected_item.text() if selected_item else ""
-            if video_path:
-                base_dir = os.path.dirname(video_path)
-                video_basename = os.path.splitext(os.path.basename(video_path))[0]
-            splits_dir = os.path.join(base_dir, video_basename, "splits")
-            log.info(f"[DIAG _on_desc_finished] splits_dir='{splits_dir}' exists={os.path.exists(splits_dir)} has_temp_scenes={hasattr(self,'temp_scenes')}")
-            if os.path.exists(splits_dir) and hasattr(self, "temp_scenes"):
-                    self._rename_all_splits_with_metadata(splits_dir, self.temp_scenes)
-                    self._save_split_srt()
-            self._check_split_clips_exist()
-            QMessageBox.information(
-                self.parent_widget,
-                "分割完成",
-                f"镜头分割导出成功！共 {self.temp_count} 个镜头，已跳过画面描述生成。"
-            )
-            return
 
+        # Resolve split video paths
         video_path = getattr(self, "processing_video_path", "")
         if not video_path:
             selected_item = self.video_list.currentItem()
@@ -5609,10 +5689,41 @@ class VideoMontagePage(BasePage):
                 files = sorted([f for f in os.listdir(splits_dir) if f.lower().endswith((".mp4", ".m4v"))])
                 split_video_paths = [os.path.join(splits_dir, f) for f in files]
 
+        has_vision = bool(vision_api_url and vision_model and split_video_paths)
+        has_llm = bool(llm_api_url and llm_api_key)
+
+        if not has_vision and not has_llm:
+            self.stage_label.setText("未配置大模型API，已跳过画面描述生成。")
+            self._check_split_clips_exist()
+            QMessageBox.information(
+                self.parent_widget,
+                "分割完成",
+                f"镜头分割导出成功！共 {self.temp_count} 个镜头，已跳过画面描述生成。"
+            )
+            return
+
+        # Prefer local vision model for visual content analysis
+        if has_vision:
+            self.stage_label.setText("🤖 正在使用本地视觉AI逐镜头分析画面内容...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+
+            self.vision_desc_worker = LocalVisionDescWorker(
+                vision_api_url=vision_api_url,
+                vision_model=vision_model,
+                split_video_paths=split_video_paths,
+                scenes=scenes,
+            )
+            self.vision_desc_worker.finished.connect(self._on_vision_desc_finished)
+            self.vision_desc_worker.error.connect(self._on_desc_error)
+            self.vision_desc_worker.start()
+            return
+
+        # Fallback: text-based LLM analysis (existing flow)
         self.stage_label.setText("🤖 正在使用大模型批量生成镜头画面描述文案...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        
+
         self.desc_worker = BatchGenerateDescriptionsWorker(
             api_url=llm_api_url,
             api_key=llm_api_key,
@@ -5624,6 +5735,41 @@ class VideoMontagePage(BasePage):
         self.desc_worker.finished.connect(self._on_desc_finished)
         self.desc_worker.error.connect(self._on_desc_error)
         self.desc_worker.start()
+
+    def _on_vision_desc_finished(self, desc_json):
+        """处理本地视觉AI分析完成的结果。"""
+        import json as _json
+        try:
+            desc_dict_raw = _json.loads(desc_json)
+            desc_dict = {int(k): v for k, v in desc_dict_raw.items()}
+        except Exception as e:
+            log.warning(f"_on_vision_desc_finished - JSON解析失败: {e}")
+            desc_dict = {}
+        log.info(f"_on_vision_desc_finished - 视觉分析完成，共 {len(desc_dict)} 条描述")
+
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.stage_label.setText("✅ 画面文案描述生成完毕！（本地视觉AI）")
+
+        video_path = getattr(self, "processing_video_path", "")
+        if not video_path:
+            selected_item = self.video_list.currentItem()
+            video_path = selected_item.text() if selected_item else ""
+        if video_path:
+            base_dir = os.path.dirname(video_path)
+            video_basename = os.path.splitext(os.path.basename(video_path))[0]
+            splits_dir = os.path.join(base_dir, video_basename, "splits")
+            if os.path.exists(splits_dir) and hasattr(self, "temp_scenes"):
+                self._rename_all_splits_with_metadata(splits_dir, self.temp_scenes, desc_dict)
+                self._save_split_srt()
+
+        self._check_split_clips_exist()
+
+        QMessageBox.information(
+            self.parent_widget,
+            "分割及视觉描述生成完毕",
+            f"镜头分割和画面描述文案生成已顺利完成！\n共生成 {self.temp_count} 个描述性片段。"
+        )
 
     def _on_desc_finished(self, desc_json):
         import json as _json
@@ -7313,9 +7459,10 @@ class VideoMontagePage(BasePage):
                 time_item.setTextAlignment(Qt.AlignCenter)
                 self.concat_clips_list_widget.setItem(idx, 1, time_item)
                 
-                # Col 2: 描述文案 (Editable)
+                # Col 2: 描述文案 (Editable, with ellipsis + tooltip + double-click popup)
                 desc_item = QTableWidgetItem(desc)
                 desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                desc_item.setToolTip(desc if desc else "（双击可编辑/查看完整文案）")
                 self.concat_clips_list_widget.setItem(idx, 2, desc_item)
                 
                 # Col 3: 文件目录 (ReadOnly)
@@ -8352,6 +8499,63 @@ class VideoMontagePage(BasePage):
 
     def _preview_concat_table_item(self, item):
         row = item.row()
+        col = item.column()
+        
+        # Col 2 (描述文案): double-click shows popup with full description
+        if col == 2:
+            desc_item = self.concat_clips_list_widget.item(row, 2)
+            full_desc = desc_item.text().strip() if desc_item else ""
+            file_item = self.concat_clips_list_widget.item(row, 0)
+            filename = file_item.text() if file_item else "未知"
+            
+            dlg = QDialog(self.parent_widget)
+            dlg.setWindowTitle(f"镜头描述 — {filename}")
+            dlg.setMinimumWidth(500)
+            dlg.setMinimumHeight(250)
+            layout = QVBoxLayout(dlg)
+            
+            desc_edit = QTextEdit()
+            desc_edit.setPlainText(full_desc)
+            desc_edit.setStyleSheet("""
+                QTextEdit {
+                    background-color: #1c1c1e;
+                    color: #ecf0f1;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-size: 14px;
+                    line-height: 1.6;
+                }
+            """)
+            layout.addWidget(desc_edit)
+            
+            btn_row = QHBoxLayout()
+            btn_save = QPushButton("💾 保存修改")
+            btn_save.setObjectName("primary_button")
+            btn_close = QPushButton("关闭")
+            btn_close.setObjectName("secondary_button")
+            
+            def do_save():
+                new_text = desc_edit.toPlainText().strip()
+                if desc_item:
+                    desc_item.setText(new_text)
+                    # Trigger save to split_descriptions
+                    path = file_item.data(Qt.UserRole) if file_item else ""
+                    if path:
+                        self.split_descriptions[os.path.abspath(path)] = new_text
+                    self._save_split_srt()
+                dlg.accept()
+            
+            btn_save.clicked.connect(do_save)
+            btn_close.clicked.connect(dlg.reject)
+            btn_row.addWidget(btn_save)
+            btn_row.addWidget(btn_close)
+            layout.addLayout(btn_row)
+            
+            dlg.exec()
+            return
+        
+        # Default: play video on double-click
         file_item = self.concat_clips_list_widget.item(row, 0)
         if file_item:
             path = file_item.data(Qt.UserRole)

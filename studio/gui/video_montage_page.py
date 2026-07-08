@@ -3827,8 +3827,38 @@ class VideoMontagePage(BasePage):
         self.video_list.takeItem(row)
         if getattr(self, "processing_video_path", "") == path:
             self.processing_video_path = ""
+        # 终止正在运行的分割/挑精华 worker，避免后台残留导致后续操作被静默拦截
+        self._kill_running_workers()
         self._refresh_source_root_hint()
         self._check_split_clips_exist()
+
+    def _kill_running_workers(self):
+        """终止所有可能正在后台运行的 worker（镜头分割 / 批量分割 / 挑精华）。"""
+        for attr in ("worker", "batch_worker", "highlight_worker"):
+            w = getattr(self, attr, None)
+            if w and w.isRunning():
+                try:
+                    if sys.platform == "win32":
+                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
+                                       capture_output=True, timeout=5)
+                    else:
+                        w.terminate()
+                except Exception:
+                    try:
+                        w.terminate()
+                    except Exception:
+                        pass
+                try:
+                    w.wait(3000)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        # 恢复按钮状态
+        for btn_attr in ("btn_split", "btn_split_all", "btn_pick_highlights", "btn_transcribe_raw"):
+            btn = getattr(self, btn_attr, None)
+            if btn:
+                btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
 
     def _refresh_source_root_hint(self):
         paths = []
@@ -4941,7 +4971,10 @@ class VideoMontagePage(BasePage):
     # --- Step 1 batch splits (split + rename only, no transcribe/description) ---
     def _start_split_all(self):
         if (self.worker and self.worker.isRunning()) or \
-           (getattr(self, "batch_worker", None) and self.batch_worker.isRunning()):
+           (getattr(self, "batch_worker", None) and self.batch_worker.isRunning()) or \
+           (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
+            QMessageBox.warning(self.parent_widget, "任务进行中",
+                                "上一个任务仍在运行中，请等待完成或先停止。")
             return
 
         paths = []
@@ -5060,6 +5093,8 @@ class VideoMontagePage(BasePage):
         if (self.worker and self.worker.isRunning()) or \
            (getattr(self, "batch_worker", None) and self.batch_worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
+            QMessageBox.warning(self.parent_widget, "任务进行中",
+                                "上一个任务仍在运行中，请等待完成或先停止。")
             return
 
         paths = []

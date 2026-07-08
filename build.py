@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cross-platform build script for 丁大怪-电商智能体矩阵.
+Cross-platform build script for 电商智能体矩阵.
 
 Usage:
     python build.py win      Build Windows executable (PyInstaller)
@@ -22,7 +22,7 @@ STUDIO_DIR = os.path.join(PROJECT_ROOT, "studio")
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
 ENTRY = os.path.join(STUDIO_DIR, "gui_main.py")
-NAME = "AI电商智能体"
+NAME = "电商智能体矩阵"
 ICON = os.path.join(STUDIO_DIR, "assets", "app_icon.png")
 
 

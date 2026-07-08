@@ -1610,6 +1610,10 @@ class VideoConcatWorker(BaseWorker):
             if not ffmpeg_path:
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
 
+            ffprobe_path = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+            if not os.path.exists(ffprobe_path):
+                ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+
             if not self.selected_clips:
                 raise RuntimeError("未选择任何镜头素材。")
 
@@ -1639,16 +1643,37 @@ class VideoConcatWorker(BaseWorker):
             # Step 1: Transcode all selected candidate clips once to temporary folder
             normalized_list = []
             norm_to_desc = {}
+            skipped_clips = []
             for i, clip in enumerate(self.selected_clips):
+                # 先用 ffprobe 快速检测文件是否完整（moov atom 存在），跳过损坏文件
+                clip_abspath = os.path.abspath(clip)
+                if not os.path.isfile(clip_abspath) or os.path.getsize(clip_abspath) < 1024:
+                    self.stage.emit(f"⚠ 跳过损坏/过小文件: {os.path.basename(clip)}")
+                    skipped_clips.append(clip)
+                    continue
+                probe_cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+                             "-of", "csv=p=0", clip_abspath]
+                try:
+                    probe_r = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15,
+                                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                    if probe_r.returncode != 0 or not probe_r.stdout.strip():
+                        self.stage.emit(f"⚠ 跳过无法读取的文件: {os.path.basename(clip)}")
+                        skipped_clips.append(clip)
+                        continue
+                except Exception:
+                    self.stage.emit(f"⚠ 跳过探测失败的文件: {os.path.basename(clip)}")
+                    skipped_clips.append(clip)
+                    continue
+
                 self.stage.emit(f"规格标准化转码并标记 ({i+1}/{len(self.selected_clips)}): {os.path.basename(clip)}")
                 norm_out = os.path.join(temp_dir, f"norm_{i:04d}.mp4")
-                
+
                 # No sequence overlay watermark
                 vf_scale_pad = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30"
                 vf_filter = vf_scale_pad
-                
+
                 cmd = [
-                    ffmpeg_path, "-y", "-i", clip,
+                    ffmpeg_path, "-y", "-i", clip_abspath,
                     "-vf", vf_filter,
                     "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
                     "-c:a", "aac", "-ar", "44100", "-ac", "2",
@@ -1656,8 +1681,11 @@ class VideoConcatWorker(BaseWorker):
                 ]
                 r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
                 if r.returncode != 0:
-                    raise RuntimeError(f"标准化转码镜头失败：\n{r.stderr}")
-                
+                    log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
+                    self.stage.emit(f"⚠ 转码失败，跳过: {os.path.basename(clip)}")
+                    skipped_clips.append(clip)
+                    continue
+
                 normalized_list.append(norm_out)
                 if self.selected_descriptions_list is not None and i < len(self.selected_descriptions_list):
                     norm_to_desc[norm_out] = self.selected_descriptions_list[i]
@@ -1665,6 +1693,11 @@ class VideoConcatWorker(BaseWorker):
                     norm_to_desc[norm_out] = self.split_descriptions.get(os.path.abspath(clip), "")
                 prog = 10 + int((i + 1) / len(self.selected_clips) * 70)
                 self.progress.emit(prog)
+
+            if not normalized_list:
+                raise RuntimeError("所有镜头文件均损坏或转码失败，无法合成视频。请重新进行镜头分割。")
+            if skipped_clips:
+                self.stage.emit(f"⚠ 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(normalized_list)} 个镜头")
 
             # Step 2: Batch generate fast concatenations
             generated_paths = []

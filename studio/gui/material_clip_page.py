@@ -637,9 +637,16 @@ class MaterialClipPage(BasePage):
     # ── 共享：目录树组件 ──
 
     def _build_dir_tree_widget(self, parent_layout, tree_attr="dir_tree"):
-        """构建 NAS 根目录 + 资源目录树。"""
+        """构建目录来源选择 + 资源目录树。"""
         nas_row = QHBoxLayout()
-        nas_row.addWidget(QLabel("NAS 根目录："))
+        # 目录来源下拉（仅首个树创建一次，两树共享）
+        if not hasattr(self, "cmb_dir_source"):
+            nas_row.addWidget(QLabel("目录来源:"))
+            self.cmb_dir_source = QComboBox()
+            self.cmb_dir_source.addItems(["本机目录", "NAS 目录"])
+            self.cmb_dir_source.setCurrentIndex(0)  # 默认本机
+            self.cmb_dir_source.currentIndexChanged.connect(self._reload_dir_config)
+            nas_row.addWidget(self.cmb_dir_source)
         nas_lbl = QLabel("（未配置）")
         nas_lbl.setObjectName("nas_root_label")
         nas_row.addWidget(nas_lbl, 1)
@@ -647,7 +654,7 @@ class MaterialClipPage(BasePage):
         btn_reload_cfg = QPushButton("↺")
         btn_reload_cfg.setFixedWidth(36)
         btn_reload_cfg.setStyleSheet("padding: 2px; min-width: 28px;")
-        btn_reload_cfg.setToolTip("重新读取「环境配置」中的目录设置")
+        btn_reload_cfg.setToolTip("重新读取「资源配置」中的目录设置")
         btn_reload_cfg.setObjectName("secondary_button")
         btn_reload_cfg.clicked.connect(self._reload_dir_config)
         nas_row.addWidget(btn_reload_cfg)
@@ -941,7 +948,10 @@ class MaterialClipPage(BasePage):
         """将相对路径或 UNC 路径转为完整本地路径。"""
         if self._nas_client and self._nas_client.is_connected():
             return path  # SMB 直接访问
-        # 本地目录模式：用 local_dir 拼接
+        # 本机目录模式：local_directories 中的路径已是绝对路径
+        if os.path.isabs(path):
+            return path
+        # 旧的本地目录模式：用 local_dir 拼接
         if self._local_dir and not self._nas_root:
             return os.path.join(self._local_dir, path.lstrip("/\\"))
         from utils.material_clip_indexer import to_local_path
@@ -988,47 +998,58 @@ class MaterialClipPage(BasePage):
             pass
         return False
 
-    def _reload_dir_config(self):
+    def _reload_dir_config(self, *_args):
+        """重新读取目录配置，按「目录来源」下拉加载本机或 NAS 目录树。
+
+        *_args 用于兼容 QComboBox.currentIndexChanged 信号传入的 index 参数。
+        """
         import json as _json
-        cfg_path = os.path.join(
-            CONFIG_DIR, "material_index_config.json"
-        )
-        self._nas_root = ""
-        self._local_dir = ""
-        dirs = []
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         cfg = {}
         try:
             if os.path.isfile(cfg_path):
                 with open(cfg_path, encoding="utf-8") as f:
                     cfg = _json.load(f)
-                self._nas_root = cfg.get("nas_root", "")
-                self._local_dir = cfg.get("local_dir", "")
-                dirs = cfg.get("index_directories", [])
         except Exception:
             pass
 
-        storage_type = cfg.get("storage_type", "nas")
-        if storage_type == "local" and self._local_dir:
-            # 本机目录模式
-            nas_text = self._local_dir
-            self._nas_client = None
-        elif self._nas_root.startswith("//") or self._nas_root.startswith("\\\\"):
-            nas_text = self._nas_root if self._nas_root else "（未配置，请前往「设置」配置）"
-            try:
-                self._nas_client = NASClient.from_config(cfg)
-                self._nas_client.connect()
-                log.info(f"NAS 客户端已连接: {self._nas_root}")
-            except Exception as e:
-                log.warning(f"NAS 客户端连接失败: {e}")
-                self._nas_client = None
+        # 目录来源：下拉值（0=本机目录，1=NAS目录），默认本机
+        # 兼容旧配置：无下拉时按 default_storage / storage_type 回退
+        if hasattr(self, "cmb_dir_source"):
+            use_nas = self.cmb_dir_source.currentIndex() == 1
         else:
-            nas_text = self._nas_root if self._nas_root else "（未配置，请前往「设置」配置）"
-            self._nas_client = None
+            use_nas = cfg.get("default_storage", cfg.get("storage_type", "local")) == "nas"
 
+        dirs = []
+        self._nas_root = ""
+        self._local_dir = ""
+        self._nas_client = None
+
+        if use_nas:
+            # ── NAS 目录模式 ──
+            self._nas_root = cfg.get("nas_root", "")
+            dirs = cfg.get("index_directories", [])
+            root_text = self._nas_root if self._nas_root else "（未配置，请前往「资源配置」配置）"
+            if self._nas_root.startswith("//") or self._nas_root.startswith("\\\\"):
+                try:
+                    self._nas_client = NASClient.from_config(cfg)
+                    self._nas_client.connect()
+                    log.info(f"NAS 客户端已连接: {self._nas_root}")
+                except Exception as e:
+                    log.warning(f"NAS 客户端连接失败: {e}")
+                    self._nas_client = None
+        else:
+            # ── 本机目录模式 ──
+            # local_directories 是纯路径字符串列表
+            local_dirs = cfg.get("local_directories", [])
+            dirs = local_dirs
+            root_text = "本机磁盘" if local_dirs else "（未配置，请前往「资源配置」配置）"
+
+        # 更新顶部根目录标签
         for attr in ["lbl_nas_root_ingest_tree", "lbl_nas_root_analyze_tree"]:
             lbl = getattr(self, attr, None)
             if lbl is not None:
-                lbl.setText(nas_text)
+                lbl.setText(root_text)
 
         old_selected = getattr(self, "_last_selected_dir", "")
 

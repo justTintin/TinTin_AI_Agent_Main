@@ -73,18 +73,26 @@ class FolderWatcherService:
             return
             
         cfg = self.indexer.cfg
-        index_dirs = cfg.get("index_directories", [])
-        if not index_dirs:
+        # 收集所有要监听的本地路径：NAS 目录（index_directories）+ 本机目录（local_directories）
+        watch_paths = []
+        for d in cfg.get("index_directories", []):
+            local_path = d["local_path"] if isinstance(d, dict) else str(d)
+            if local_path:
+                watch_paths.append(local_path)
+        for d in cfg.get("local_directories", []):
+            local_path = str(d)
+            if local_path:
+                watch_paths.append(local_path)
+        if not watch_paths:
             log.warning("No directories configured for FolderWatcher.")
             return
 
         self.running = True
         self.observer = Observer()
         handler = FolderWatchHandler(self.indexer, self.event_queue)
-        
+
         watch_count = 0
-        for d in index_dirs:
-            local_path = d["local_path"]
+        for local_path in watch_paths:
             if os.path.isdir(local_path):
                 try:
                     self.observer.schedule(handler, local_path, recursive=True)

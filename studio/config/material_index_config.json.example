@@ -39,5 +39,10 @@
     }
   ],
   "nas_user": "your_nas_user",
-  "nas_password": "your_nas_password"
+  "nas_password": "your_nas_password",
+  "local_directories": [
+    "D:\\素材",
+    "E:\\电商视频"
+  ],
+  "default_storage": "local"
 }

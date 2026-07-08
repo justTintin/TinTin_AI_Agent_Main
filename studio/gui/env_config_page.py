@@ -366,61 +366,7 @@ class EnvConfigPage(BasePage):
 
         scroll_layout.addWidget(group_matdb)
 
-        # Group 9: NAS 素材入库目录
-        group_nasdirs = QGroupBox("📁 NAS 素材入库目录（向量库）")
-        group_nasdirs.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #8b5cf6; }
-        """)
-        layout_nasdirs = QVBoxLayout(group_nasdirs)
-        layout_nasdirs.setContentsMargins(16, 20, 16, 16)
-        layout_nasdirs.setSpacing(10)
-
-        nasdirs_desc = QLabel(
-            "配置 NAS 根目录和要入库的资源目录列表。\n"
-            "「向量素材库」页面将从此处读取，无需每次手动填写路径。"
-        )
-        nasdirs_desc.setObjectName("muted_text")
-        nasdirs_desc.setWordWrap(True)
-        layout_nasdirs.addWidget(nasdirs_desc)
-
-        row_nas_root = QHBoxLayout()
-        row_nas_root.addWidget(QLabel("NAS 根目录："))
-        self.edit_nas_root = QLineEdit()
-        self.edit_nas_root.setPlaceholderText(r"例：\\192.168.111.17  （用于路径标签解析）")
-        row_nas_root.addWidget(self.edit_nas_root, 1)
-        btn_browse_nas_root = QPushButton("浏览…")
-        btn_browse_nas_root.setObjectName("secondary_button")
-        btn_browse_nas_root.clicked.connect(self._browse_nas_root)
-        row_nas_root.addWidget(btn_browse_nas_root)
-        layout_nasdirs.addLayout(row_nas_root)
-
-        layout_nasdirs.addWidget(QLabel("入库资源目录列表："))
-        self.list_index_dirs = QListWidget()
-        self.list_index_dirs.setMaximumHeight(140)
-        self.list_index_dirs.setAlternatingRowColors(True)
-        layout_nasdirs.addWidget(self.list_index_dirs)
-
-        row_dir_btns = QHBoxLayout()
-        btn_add_dir = QPushButton("＋ 添加目录")
-        btn_add_dir.setObjectName("secondary_button")
-        btn_add_dir.clicked.connect(self._add_index_dir)
-        row_dir_btns.addWidget(btn_add_dir)
-        btn_remove_dir = QPushButton("－ 删除选中")
-        btn_remove_dir.setObjectName("secondary_button")
-        btn_remove_dir.clicked.connect(self._remove_index_dir)
-        row_dir_btns.addWidget(btn_remove_dir)
-        row_dir_btns.addStretch()
-        self.lbl_nasdirs_status = QLabel("")
-        self.lbl_nasdirs_status.setObjectName("muted_text")
-        row_dir_btns.addWidget(self.lbl_nasdirs_status)
-        btn_save_nasdirs = QPushButton("💾 保存目录配置")
-        btn_save_nasdirs.setObjectName("secondary_button")
-        btn_save_nasdirs.clicked.connect(self._save_nasdirs_config)
-        row_dir_btns.addWidget(btn_save_nasdirs)
-        layout_nasdirs.addLayout(row_dir_btns)
-
-        scroll_layout.addWidget(group_nasdirs)
+        # 注：素材目录配置（NAS/本机）已移至「📦 资源配置」页，此处不再重复。
 
         scroll_area.setWidget(scroll_widget)
         card_layout.addWidget(scroll_area)
@@ -861,25 +807,6 @@ class EnvConfigPage(BasePage):
                 self.edit_matdb_name.setText(cfg.get("db_name", "material_index"))
                 self.edit_matdb_user.setText(cfg.get("db_user", "postgres"))
                 self.edit_matdb_pass.setText(cfg.get("db_password", ""))
-                # NAS 入库目录配置
-                self.edit_nas_root.setText(cfg.get("nas_root", ""))
-                self.list_index_dirs.clear()
-                from utils.material_clip_indexer import to_relative_path
-                nas_root = cfg.get("nas_root", "")
-                for d in cfg.get("index_directories", []):
-                    if isinstance(d, dict):
-                        local_path = d.get("local_path", "")
-                        nas_folder = d.get("nas_folder", "")
-                    else:
-                        local_path = str(d)
-                        nas_folder = to_relative_path(local_path, nas_root)
-                        if not nas_folder or nas_folder == local_path:
-                            nas_folder = os.path.basename(local_path.rstrip("/\\")) or local_path
-                    
-                    item_text = f"{local_path} ➔ {nas_folder}"
-                    list_item = QListWidgetItem(item_text)
-                    list_item.setData(Qt.UserRole, {"local_path": local_path, "nas_folder": nas_folder})
-                    self.list_index_dirs.addItem(list_item)
                 self.edit_clip_model_dir.setText(cfg.get("clip_model_dir") or "")
         except Exception as e:
             log.error(f"加载素材向量库数据库配置失败: {e}")
@@ -1179,85 +1106,6 @@ class EnvConfigPage(BasePage):
         threading.Thread(target=_do_download, daemon=True).start()
 
     # ── 旺店通 ERP 配置 ──
-
-	    # ── NAS 入库目录配置 ──
-
-    def _browse_nas_root(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择 NAS 根目录")
-        if d:
-            self.edit_nas_root.setText(d)
-
-    def _add_index_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择要入库的资源目录")
-        if not d:
-            return
-        
-        nas_root = self.edit_nas_root.text().strip()
-        from utils.material_clip_indexer import to_relative_path
-        default_folder = to_relative_path(d, nas_root)
-        if not default_folder or default_folder == d:
-            default_folder = os.path.basename(d.rstrip("/\\")) or d
-            
-        folder_name, ok = QInputDialog.getText(
-            self.parent_widget,
-            "确认 NAS 文件夹名称",
-            f"请输入该目录在 NAS 中对应的文件夹名称：\n本地路径：{d}",
-            QLineEdit.Normal,
-            default_folder
-        )
-        if not ok or not folder_name.strip():
-            return
-            
-        nas_folder = folder_name.strip()
-        
-        existing_paths = []
-        for i in range(self.list_index_dirs.count()):
-            item = self.list_index_dirs.item(i)
-            data = item.data(Qt.UserRole)
-            if isinstance(data, dict):
-                existing_paths.append(data.get("local_path", ""))
-            else:
-                existing_paths.append(item.text().split(" ➔ ")[0])
-                
-        if d not in existing_paths:
-            item_text = f"{d} ➔ {nas_folder}"
-            list_item = QListWidgetItem(item_text)
-            list_item.setData(Qt.UserRole, {"local_path": d, "nas_folder": nas_folder})
-            self.list_index_dirs.addItem(list_item)
-
-    def _remove_index_dir(self):
-        for item in self.list_index_dirs.selectedItems():
-            self.list_index_dirs.takeItem(self.list_index_dirs.row(item))
-
-    def _save_nasdirs_config(self):
-        import json as _json
-        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        try:
-            cfg = {}
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-            cfg["nas_root"] = self.edit_nas_root.text().strip()
-            
-            index_directories = []
-            for i in range(self.list_index_dirs.count()):
-                item = self.list_index_dirs.item(i)
-                data = item.data(Qt.UserRole)
-                if isinstance(data, dict):
-                    index_directories.append(data)
-                else:
-                    parts = item.text().split(" ➔ ")
-                    local_path = parts[0]
-                    nas_folder = parts[1] if len(parts) > 1 else ""
-                    index_directories.append({"local_path": local_path, "nas_folder": nas_folder})
-                    
-            cfg["index_directories"] = index_directories
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            self.lbl_nasdirs_status.setText("✅ 已保存")
-        except Exception as e:
-            self.lbl_nasdirs_status.setText(f"❌ {e}")
-            log.error(f"保存 NAS 入库目录配置失败: {e}")
 
     def _test_matdb_connection(self):
         self._save_matdb_config()

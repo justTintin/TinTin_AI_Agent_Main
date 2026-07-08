@@ -8,14 +8,30 @@ NAS SMB 客户端 — 通过 SMB 协议直接访问 NAS 文件系统。
         print(e["name"], e["is_dir"])
 """
 
-from smbprotocol.connection import Connection
-from smbprotocol.session import Session
-from smbprotocol.tree import TreeConnect
-from smbprotocol.open import (
-    Open, ImpersonationLevel, FileAttributes, ShareAccess,
-    CreateDisposition, CreateOptions, FilePipePrinterAccessMask,
-)
-from smbprotocol.file_info import FileInformationClass
+# smbprotocol 为可选重依赖（NAS 访问），缺失时不应阻断主程序启动。
+# 这里不顶层 import，改在 _load_smb() 首次需要时延迟加载。
+# 见 studio/gui/material_clip_page.py —— import 本模块不再触发 import smbprotocol。
+
+
+def _load_smb():
+    """延迟导入 smbprotocol 全部符号。缺失时抛 ModuleNotFoundError（含中文提示）。"""
+    try:
+        from smbprotocol.connection import Connection
+        from smbprotocol.session import Session
+        from smbprotocol.tree import TreeConnect
+        from smbprotocol.open import (
+            Open, ImpersonationLevel, FileAttributes, ShareAccess,
+            CreateDisposition, CreateOptions, FilePipePrinterAccessMask,
+        )
+        from smbprotocol.file_info import FileInformationClass
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "缺少 NAS 访问依赖 smbprotocol，NAS 相关功能不可用。"
+            "安装：pip install smbprotocol"
+        ) from e
+    return (Connection, Session, TreeConnect, Open, ImpersonationLevel,
+            FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+            FilePipePrinterAccessMask, FileInformationClass)
 
 
 class NASClient:
@@ -23,8 +39,10 @@ class NASClient:
         self._server = server.lstrip("\\/")
         self._username = username
         self._password = password
-        self._conn: Connection | None = None
-        self._session: Session | None = None
+        self._conn = None   # smbprotocol.Connection | None（延迟导入）
+        self._session = None  # smbprotocol.Session | None
+        # 延迟加载的符号缓存
+        self._smb = None
 
     @classmethod
     def from_config(cls, cfg: dict) -> "NASClient":
@@ -43,6 +61,9 @@ class NASClient:
     def connect(self):
         if self.is_connected():
             return
+        # 首次连接时才加载 smbprotocol
+        (Connection, Session, _TreeConnect, _Open, _Imp, _FA, _SA, _CD, _CO,
+         _FPAM, _FIC) = self._ensure_smb()
         self._conn = Connection(None, server_name=self._server, port=445)
         self._conn.connect()
 
@@ -55,6 +76,12 @@ class NASClient:
                 self._conn, username="guest", password="", require_encryption=False
             )
         self._session.connect()
+
+    def _ensure_smb(self):
+        """延迟加载并缓存 smbprotocol 符号，所有用到 SMB 的方法开头调用。"""
+        if self._smb is None:
+            self._smb = _load_smb()
+        return self._smb
 
     def disconnect(self):
         try:
@@ -98,6 +125,9 @@ class NASClient:
 
     def scandir(self, path: str) -> list[dict]:
         self.connect()
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, _ShareAccess, _CreateDisposition, _CreateOptions,
+         FilePipePrinterAccessMask, FileInformationClass) = self._ensure_smb()
         share, subdir = self._parse_path(path)
 
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
@@ -146,6 +176,9 @@ class NASClient:
 
     def isdir(self, path: str) -> bool:
         self.connect()
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -172,6 +205,9 @@ class NASClient:
     def open_file(self, path: str):
         """以只读方式打开 NAS 文件，返回类文件对象。"""
         self.connect()
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -227,6 +263,9 @@ class NASClient:
 
     def stat(self, path: str) -> dict | None:
         self.connect()
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -257,6 +296,9 @@ class NASClient:
     def download_file(self, share: str, remote_path: str, local_path: str):
         """通过 SMB 下载文件到本地。"""
         self.connect()
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
         try:

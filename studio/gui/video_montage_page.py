@@ -2410,11 +2410,15 @@ class VideoDubbingWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(dict)  # Outputs a dict mapping: original_video_path -> dubbed_video_path
 
-    def __init__(self, tasks, add_subtitles=True, length_modes=None):
+    def __init__(self, tasks, add_subtitles=True, length_modes=None,
+                 fancy_text=False, fancy_style="gold", fancy_words=None):
         super().__init__()
         self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)
         self.add_subtitles = add_subtitles
         self.length_modes = length_modes or {}  # video_path -> "video" or "audio"
+        self.fancy_text = fancy_text
+        self.fancy_style = fancy_style
+        self.fancy_words = fancy_words or []  # list of strings to overlay
 
     @staticmethod
     def _load_timing_sidecar(voice_wav_path):
@@ -2518,6 +2522,51 @@ class VideoDubbingWorker(BaseWorker):
                         drawtexts.append(dt)
                     video_filters.append(f"[{video_label}]{','.join(drawtexts)}[v]")
                     video_label = "v"
+
+                # 花字叠加（关键信息加重提醒，大号彩色描边特效文字）
+                if self.fancy_text and self.fancy_words and display_dur > 0:
+                    font_path = "C\\:/Windows/Fonts/msyhbd.ttc"
+                    if not os.path.exists("C:/Windows/Fonts/msyhbd.ttc"):
+                        font_path = "C\\:/Windows/Fonts/msyh.ttc"
+                    if not os.path.exists("C:/Windows/Fonts/msyh.ttc"):
+                        font_path = "msyh"
+
+                    # 花字样式预设：fontcolor + borderw + bordercolor + shadow
+                    fancy_styles = {
+                        "gold":          "fontcolor=0xF0C040:borderw=4:bordercolor=0x6B3000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                        "red":           "fontcolor=0xFF4040:borderw=4:bordercolor=0x800000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                        "blue":          "fontcolor=0x40A0FF:borderw=4:bordercolor=0x003080:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                        "purple":        "fontcolor=0xC060FF:borderw=4:bordercolor=0x300060:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                        "neon_green":    "fontcolor=0x40FF80:borderw=3:bordercolor=0x004020:shadowx=3:shadowy=3:shadowcolor=0x00FF80@0.5",
+                        "white_outline": "fontcolor=white:borderw=5:bordercolor=black:shadowx=2:shadowy=2:shadowcolor=0x000000@0.6",
+                        "yellow_red":    "fontcolor=0xFFFF00:borderw=5:bordercolor=0xCC0000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                    }
+                    style_str = fancy_styles.get(self.fancy_style, fancy_styles["gold"])
+
+                    fancy_drawtexts = []
+                    # 每个花字在整个视频时长内均匀分布轮换显示
+                    n_words = len(self.fancy_words)
+                    if n_words > 0:
+                        seg_dur = display_dur / n_words
+                        for wi, word in enumerate(self.fancy_words):
+                            word = word.strip()
+                            if not word:
+                                continue
+                            ft_start = wi * seg_dur
+                            ft_end = min((wi + 1) * seg_dur, display_dur)
+                            escaped = word.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')
+                            # 花字：大号字体，居中偏上，带描边和阴影
+                            dt = (
+                                f"drawtext=fontfile='{font_path}':"
+                                f"text='{escaped}':"
+                                f"fontsize=h*0.08:{style_str}:"
+                                f"x=(w-text_w)/2:y=h*0.3:"
+                                f"enable='between(t,{ft_start:.3f},{ft_end:.3f})'"
+                            )
+                            fancy_drawtexts.append(dt)
+                    if fancy_drawtexts:
+                        video_filters.append(f"[{video_label}]{','.join(fancy_drawtexts)}[vf]")
+                        video_label = "vf"
 
                 if need_audio_speed:
                     # Speed up audio to match video duration using atempo chain
@@ -3646,6 +3695,34 @@ class VideoMontagePage(BasePage):
         self.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")
         row_subtitle_opt.addWidget(self.chk_add_subtitles)
         card_layout.addLayout(row_subtitle_opt)
+
+        # 花字选项（关键信息加重提醒，非字幕）
+        row_fancy_text = QHBoxLayout()
+        self.chk_fancy_text = QCheckBox("添加花字 (关键信息加重提醒)")
+        self.chk_fancy_text.setChecked(False)
+        self.chk_fancy_text.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.chk_fancy_text.setToolTip("在视频画面中央叠加花字特效文字，用于突出关键卖点/价格/型号等信息")
+        row_fancy_text.addWidget(self.chk_fancy_text)
+
+        row_fancy_text.addWidget(QLabel("样式:"))
+        self.fancy_style_combo = QComboBox()
+        self.fancy_style_combo.addItem("渐变金", "gold")
+        self.fancy_style_combo.addItem("渐变红", "red")
+        self.fancy_style_combo.addItem("渐变蓝", "blue")
+        self.fancy_style_combo.addItem("渐变紫", "purple")
+        self.fancy_style_combo.addItem("霓虹绿", "neon_green")
+        self.fancy_style_combo.addItem("白字黑描边", "white_outline")
+        self.fancy_style_combo.addItem("黄字红描边", "yellow_red")
+        self.fancy_style_combo.setCurrentIndex(0)
+        self.fancy_style_combo.setFixedWidth(110)
+        row_fancy_text.addWidget(self.fancy_style_combo)
+
+        row_fancy_text.addWidget(QLabel("花字内容:"))
+        self.fancy_text_input = QLineEdit()
+        self.fancy_text_input.setPlaceholderText("输入要叠加的花字内容，多行用逗号分隔（按镜头顺序轮换）")
+        self.fancy_text_input.setToolTip("多个花字用逗号分隔，会按镜头顺序轮换显示。如：超轻量化,8000DPI,续航70小时")
+        row_fancy_text.addWidget(self.fancy_text_input, 1)
+        card_layout.addLayout(row_fancy_text)
 
         # 7. Action buttons row
         row_actions = QHBoxLayout()
@@ -6411,6 +6488,14 @@ class VideoMontagePage(BasePage):
         # Build tasks: (video_path, voice_wav_path, output_video_path, text)
         tasks = []
         add_subs = self.chk_add_subtitles.isChecked()
+        # 花字设置
+        fancy_enabled = self.chk_fancy_text.isChecked() if hasattr(self, "chk_fancy_text") else False
+        fancy_style = self.fancy_style_combo.currentData() if hasattr(self, "fancy_style_combo") else "gold"
+        fancy_words = []
+        if fancy_enabled and hasattr(self, "fancy_text_input"):
+            raw = self.fancy_text_input.text().strip()
+            if raw:
+                fancy_words = [w.strip() for w in raw.replace("，", ",").split(",") if w.strip()]
         for vid, wav in self.generated_voice_paths.items():
             if os.path.exists(vid) and os.path.exists(wav):
                 out_vid_name = f"dubbed_{os.path.basename(vid)}"
@@ -6439,7 +6524,9 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         
-        self.dub_worker = VideoDubbingWorker(tasks, add_subtitles=add_subs, length_modes=self.voice_length_mode)
+        self.dub_worker = VideoDubbingWorker(
+            tasks, add_subtitles=add_subs, length_modes=self.voice_length_mode,
+            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words)
         self.dub_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.dub_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
         self.dub_worker.finished.connect(self._on_dubbing_finished)

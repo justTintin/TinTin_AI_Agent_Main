@@ -17,11 +17,13 @@ make run         # 启动 GUI
 
 | 文件 | 用途 |
 |------|------|
-| `studio/requirements.txt` | 核心依赖 (Flask / 爬虫 / 数据库) |
-| `studio/requirements_gui.txt` | GUI 依赖 (PySide6 / faster-whisper) |
-| `studio/requirements_dev.txt` | 开发工具 (PyInstaller / Playwright) |
+| `studio/requirements_gui.txt` | GUI 主程序依赖（PySide6 / Pillow / numpy / opencv / av / cryptography / watchdog 等，含可选功能注释） |
+| `studio/requirements.txt` | 后端依赖（Flask / 爬虫 / 数据库） |
+| `studio/requirements_dev.txt` | 开发工具（PyInstaller / Playwright） |
 
 `make install` 安装全部三项，`make install-dev` 额外加 pyinstaller。
+
+> 重型依赖（torch / paddleocr / onnxruntime 等）随各子应用 venv 自带，不在 requirements 中声明。
 
 ## 项目结构
 
@@ -52,38 +54,49 @@ studio/
 
 ## 添加新功能页面
 
-### 1. 创建页面
+### 1. 创建页面类
 
 ```python
 # studio/gui/xxx_page.py
-from PySide6.QtWidgets import QWidget
 from gui.base_page import BasePage
 
 class XxxPage(BasePage):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.page_id = "xxx"
+    def __init__(self, parent_widget, main_window):
+        super().__init__(parent_widget, main_window)
 
-    def build_ui(self):
-        # 在这里构建 UI
-        pass
+    def setup(self):
+        # 在这里构建 UI（往 self.parent_widget 上加 layout/控件）
+        from PySide6.QtWidgets import QVBoxLayout, QLabel
+        root = QVBoxLayout(self.parent_widget)
+        root.addWidget(QLabel("XXX"))
 ```
 
 ### 2. 注册页面
 
-编辑 `studio/gui/main_window_pages.py`：
+页面在 `studio/gui_main.py` 的 `setup_pages()` 中注册，模式为
+`QWidget 容器 → setup 方法 → 加入 content_stack`：
 
 ```python
-from gui.xxx_page import XxxPage
-
-# 在 init_pages() 中：
-self.xxx_page = XxxPage()
-self.pages["xxx"] = self.xxx_page
+# studio/gui_main.py
+self.page_xxx = QWidget()
+self.setup_xxx_page()              # 在 MainWindow 里定义，或委托给页面类
+self.content_stack.addWidget(self.page_xxx)
 ```
 
-### 3. 添加侧边栏
+复杂页面通常在 `studio/gui/main_window_pages.py` 里写 `setup_xxx_page()` 方法，
+内部实例化页面类并调用 `.setup()`：
 
-编辑 `studio/gui/main_window_sidebar.py`，在对应分类下添加入口。
+```python
+def setup_xxx_page(self):
+    from gui.xxx_page import XxxPage
+    self.xxx_tool = XxxPage(self.page_xxx, self)
+    self.xxx_tool.setup()
+```
+
+### 3. 添加侧边栏入口
+
+侧边栏导航项在 `studio/gui_main.py` 中构建（按钮 → 切换 `content_stack` 索引）。
+新增按钮后连接到对应的 `page_xxx`。
 
 ## 跨平台注意事项
 

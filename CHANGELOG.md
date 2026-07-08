@@ -1,5 +1,32 @@
 # 版本日志
 
+## v2.1.1 (2026-07-08)
+
+### 安全修复
+- 移除敏感文件的 git 跟踪（本地保留）：
+  - `studio/douyin_cookies.txt`（含真实抖音登录 Cookie）
+  - `studio/config/trial_whitelist.json`（License 机器码白名单）
+  - `studio/config/theme.json`（用户主题偏好，运行时写入）
+- `.gitignore` 新增 `*cookies*.txt` / `douyin_cookies.txt` 规则
+
+### 依赖修复
+- `requirements_gui.txt` 补全 9 个代码在用但未声明的依赖：
+  - 图像/视频核心：`Pillow` `numpy` `opencv-python` `av`
+  - 授权/系统：`cryptography` `darkdetect` `watchdog`
+  - 文档：`openpyxl`
+  - 另列出 10 个可选功能依赖（webview/psycopg2/rembg 等）以注释归档
+- `subtitle_removal_page.py` / `video_ocr_page.py`：`import av` 从模块顶层移到函数体内（每文件 4 处）
+  - 此前缺 `av` 会导致整个 `main_window_pages` 导入失败 → GUI 无法启动
+  - 现在缺 `av` 仅影响「字幕擦除 / 视频 OCR」两个功能，不再阻断主程序
+
+### 功能优化
+- 激活对话框机器码支持复制：QLabel 增加 `TextSelectableByMouse`，并新增「📋 复制」按钮一键复制到剪贴板
+
+### 死代码清理
+- 删除 `ai_skills/`（447 MB，无代码依赖、未入库）
+- 删除 `legacy_crawler/`（旧版爬虫系统，已归档，功能被 `studio/core/` 取代）
+- 删除 `studio/gui/hotspot_page.py`（热点追踪页早已移除，此文件无人 import 且含语法错误）
+
 ## v2.1.0 (2026-06-30)
 
 ### 系统配置重构

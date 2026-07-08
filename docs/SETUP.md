@@ -220,10 +220,11 @@ vsr-v1.4.0 和 vsr-v1.1.1 使用 QPT 打包的嵌入式 Python，`python.exe` �
 
 ### 9.5 License 认证
 
-当前已临时关闭（`gui_main.py:1464`，`_LICENSE_CHECK_DISABLED = True`）。恢复时改为：
-```python
-_LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1" or sys.platform == "win32"
-```
+默认**开启**：未激活设备启动会弹出激活对话框，需输入开发人员签发的激活码（JSON）。
+- 激活对话框显示 16 位机器码，支持鼠标选中复制或点「📋 复制」按钮
+- 开发跳过：设环境变量 `TINTIN_NO_LICENSE=1`（`gui_main.py:1465`，`_LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1"`）
+- 签发工具：`tools/license_tool.py`
+- 白名单 `studio/config/trial_whitelist.json` 中的机器码可免激活直接试用（该文件已从 git 移除，仅本地保留）
 
 ### 9.6 HuggingFace 镜像
 

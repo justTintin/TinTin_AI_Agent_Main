@@ -291,7 +291,7 @@ vsr-v1.4.0 和 vsr-v1.1.1 使用 QPT 打包的嵌入式 Python，`python.exe` �
 | ComfyUI | `127.0.0.1:8188` | 图像生成 | 否 |
 | RunningHub | `runninghub.cn` | 云端图像生成 | 否 |
 | RustFS/S3 | `192.168.111.17:9000` | 素材存储 | 否 |
-| 抖音 | `douyin.com` | 视频下载/发布 | 否 |
+| 抖音 | `douyin.com` | 直播切片录制 / 素材嗅探 | 否 |
 | 旺店通 | `api.wangdian.cn` | ERP | 否 |
 
 ---

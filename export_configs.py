@@ -21,7 +21,6 @@ def export_configurations():
         "studio_data/video_predictions.json": "studio/data/video_predictions.json",
         "studio_accounts/accounts.json": "studio/accounts/accounts.json",
         "douyin_cookies.txt": "studio/douyin_cookies.txt",
-        "legacy_crawler_config/config.ini": "legacy_crawler/config.ini"
     }
     
     bundle_dir = "ubuntu_migration_bundle"

@@ -3177,7 +3177,6 @@ class VideoMontagePage(BasePage):
         self.btn_split = QPushButton("✂️ 开始智能镜头分割")
         self.btn_split.setObjectName("action_button")
         self.btn_split.setFixedHeight(35)
-        self.btn_split.clicked.connect(self._start_split)
         self.btn_split.setVisible(False)
 
         self.btn_split_all = QPushButton("📚 批量分割镜头")

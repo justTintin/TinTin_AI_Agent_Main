@@ -407,12 +407,25 @@ class ActivationDialog(QDialog):
         desc.setStyleSheet("font-size: 13px; color: #9e9ea6;")
         layout.addWidget(desc)
 
-        # 机器码显示
+        # 机器码显示（可选中复制 + 一键复制按钮）
         mid_row = QHBoxLayout()
         mid_row.addWidget(QLabel("机器码:"))
-        mid_lbl = QLabel(machine_id)
-        mid_lbl.setStyleSheet("color: #818cf8; font-family: monospace; font-size: 12px;")
-        mid_row.addWidget(mid_lbl, 1)
+        self.mid_lbl = QLabel(machine_id)
+        self.mid_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.mid_lbl.setCursor(Qt.IBeamCursor)
+        self.mid_lbl.setStyleSheet(
+            "color: #818cf8; font-family: monospace; font-size: 12px; "
+            "background-color: #f5f5f7; border: 1px solid #d1d1d6; "
+            "border-radius: 6px; padding: 6px 10px;"
+        )
+        self.mid_lbl.setToolTip("可拖动选中后 Ctrl+C 复制，或点右侧按钮")
+        mid_row.addWidget(self.mid_lbl, 1)
+        btn_copy_mid = QPushButton("📋 复制")
+        btn_copy_mid.setObjectName("secondary_button")
+        btn_copy_mid.setCursor(Qt.PointingHandCursor)
+        btn_copy_mid.setToolTip("复制机器码到剪贴板")
+        btn_copy_mid.clicked.connect(lambda: self._copy_to_clipboard(machine_id, btn_copy_mid))
+        mid_row.addWidget(btn_copy_mid)
         layout.addLayout(mid_row)
 
         # 激活码输入
@@ -451,6 +464,14 @@ class ActivationDialog(QDialog):
         layout.addLayout(btn_row)
 
         self._activated = False
+
+    def _copy_to_clipboard(self, text: str, btn: QPushButton):
+        """复制文本到剪贴板，并在按钮上短暂提示「已复制」。"""
+        QApplication.clipboard().setText(text)
+        orig = btn.text()
+        btn.setText("✅ 已复制")
+        btn.setEnabled(False)
+        QTimer.singleShot(1200, lambda: (btn.setText(orig), btn.setEnabled(True)))
 
     def _do_activate(self):
         from utils.license import verify_activation_code, save_activation_cache

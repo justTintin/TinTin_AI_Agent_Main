@@ -48,6 +48,13 @@ credentials*
 *cookies*.txt
 douyin_cookies.txt
 
+# Config files with credentials (templates *.example are tracked)
+config.ini
+studio/config.ini
+studio/config/ai_config.json
+studio/config/material_index_config.json
+studio/config/erp_config.json
+
 # Node
 node_modules/
 *.exe

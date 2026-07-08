@@ -3,8 +3,8 @@
   "db_host": "192.168.111.17",
   "db_port": 15432,
   "db_name": "material_index",
-  "db_user": "Justin",
-  "db_password": "sfs.66778899",
+  "db_user": "your_user",
+  "db_password": "your_password",
   "_comment_tags": [
     "目录层级标签（相对 nas_root，0 = 第一级子目录，-1 = 不取该字段）",
     "例: \\\\NAS\\素材\\鼠标\\罗技\\G502\\video.mp4",
@@ -38,6 +38,6 @@
       "nas_folder": "鼠标键盘"
     }
   ],
-  "nas_user": "WXJB-0001",
-  "nas_password": "WXJB-0001"
+  "nas_user": "your_nas_user",
+  "nas_password": "your_nas_password"
 }

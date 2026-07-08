@@ -85,56 +85,105 @@ make run       # 启动 GUI
 
 ## 5. 配置文件
 
+> ⚠️ **含凭据的配置文件不入库**：下列 JSON/ini 含 API Key、数据库密码等敏感信息，已从 git 移除（本地保留）。仓库内提供对应的 `.example` 模板（值用 `xxx` 占位），新部署时复制为正式文件并填入真实值。
+
 ### 5.1 `config.ini`（工程根目录）
 
+飞书集成与 VoxCPM 声音克隆配置：
+
 ```ini
+[Feishu]
+appid = cli_xxx               ; 飞书应用 App ID
+appsecret = xxx               ; 飞书应用 App Secret
+apptoken = xxx                ; 飞书表格 App Token
+tableid = tblxxx              ; 选题表格 Table ID
+topicfield = 文案标题          ; 选题标题列字段名
+scriptfield = 脚本             ; 脚本内容列字段名
+foldertoken =                 ; 文件夹 Token（可空）
+
 [VoxCPM]
 modelpath = apps/voxcpm2/models/openbmb__VoxCPM2
 port = 7861
 ```
 
-> **注意**：代码加载的是**工程根目录**的 `config.ini`，不是 `studio/config.ini`。
+> **注意**：代码加载的是**工程根目录**的 `config.ini`，不是 `studio/config.ini`（后者为冗余备份）。模板见 `config.ini.example`。
 
 ### 5.2 `studio/config/ai_config.json`
 
-大模型、图像生成、声音克隆等 AI 服务配置：
+大模型、图像生成、声音克隆、对象存储等 AI 服务配置：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `llm_api_url` | DeepSeek API 地址 | `https://api.deepseek.com` |
-| `llm_api_key` | API 密钥 | `sk-xxx` |
-| `llm_model` | 模型名 | `deepseek-v4-flash` |
+| `llm_provider` | LLM 提供商 | `deepseek` |
+| `llm_api_url` | LLM API 地址 | `https://api.deepseek.com` |
+| `llm_api_key` | LLM API 密钥 | `sk-xxx` |
+| `llm_model` | 文本模型名 | `deepseek-v4-flash` |
 | `llm_vision_api_url` | 视觉模型(Ollama)地址 | `http://127.0.0.1:11434` |
 | `llm_vision_model` | 视觉模型名 | `qwen2.5vl:7b-16k` |
+| `ollama_num_parallel` | Ollama 并发数（按显存自动调） | `4` |
+| `vision_concurrency` | 视觉分析并发数 | `4` |
 | `comfyui_addr` | ComfyUI 地址 | `http://127.0.0.1:8188` |
-| `vox_api_url` | VoxCPM API 地址 | `http://127.0.0.1:7861/v1/tts` |
 | `runninghub_api_key` | RunningHub API Key | |
-| `rustfs_endpoint` | S3 对象存储地址 | `http://192.168.111.17:9000` |
+| `runninghub_base_url` | RunningHub 基址 | `https://www.runninghub.cn` |
+| `voice_clone_addr` | 声音克隆服务地址 | `http://127.0.0.1:7860` |
+| `vox_api_url` | VoxCPM TTS API 地址 | `http://127.0.0.1:7861/v1/tts` |
+| `vox_mode` | VoxCPM 模式 | `api` |
+| `vox_timesteps` | VoxCPM 时间步数 | `20` |
+| `vox_cfg` | VoxCPM CFG 强度 | `2.0` |
+| `rustfs_endpoint` | RustFS/S3 对象存储地址 | `http://192.168.111.17:9000` |
+| `rustfs_access_key` | S3 Access Key | `xxx` |
+| `rustfs_secret_key` | S3 Secret Key | `xxx` |
+| `rustfs_bucket` | S3 Bucket 名 | `photos` |
+
+> 模板见 `studio/config/ai_config.json.example`。
 
 ### 5.3 `studio/config/material_index_config.json`
 
-向量检索数据库与 CLIP 模型配置：
+向量检索数据库、CLIP 模型、NAS 素材索引配置：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `db_host` | PostgreSQL 地址 | `192.168.111.17` |
-| `db_port` | 端口 | `15432` |
+| `db_host` / `db_port` | PostgreSQL 地址 / 端口 | `192.168.111.17` / `15432` |
 | `db_name` | 数据库名 | `material_index` |
-| `db_user` / `db_password` | 账号密码 | |
-| `clip_model_dir` | CLIP 模型路径 | 需改为实际路径 |
+| `db_user` / `db_password` | 数据库账号 / 密码 | `xxx` |
+| `clip_model` | CLIP 模型规格 | `ViT-B-16`（可选 `ViT-L-14` / `ViT-H-14`） |
+| `clip_model_dir` | CLIP 模型目录 | 需改为实际路径 |
+| `device` | 推理设备 | `auto`（自动选 cuda/cpu） |
+| `batch_size` | CLIP 编码批大小（按显存自动调） | `16` |
+| `fps` | 抽帧采样率 | `1` |
+| `tag_depth_product` | 产品标签目录层级（0=第一级） | `0` |
+| `tag_depth_brand` | 品牌标签目录层级 | `1` |
+| `tag_depth_model` | 型号标签目录层级 | `2` |
+| `tag_depth_category` | 类别标签层级（-1=不取） | `-1` |
+| `save_thumbs` | 是否生成缩略图 | `false` |
+| `thumb_dir` | 缩略图目录（`save_thumbs=true` 时生效） | |
 | `nas_root` | NAS 素材根路径 | `\\192.168.111.17` |
-| `batch_size` | CLIP 编码批大小 | 16（按显存自动调） |
+| `nas_user` / `nas_password` | NAS 账号 / 密码 | `xxx` |
+| `index_directories` | 索引目录映射（local_path ↔ nas_folder） | 列表 |
+| `ffmpeg_path` | ffmpeg 路径（null=自动查找） | `null` |
 
-> **注意**：`clip_model_dir` 默认硬编码为 `D:/Project/TinTin_AI_Agent_Main/...`，换到其他盘需修改此路径。
+> **注意**：`clip_model_dir` 默认硬编码为 `D:/Project/TinTin_AI_Agent_Main/...`，换到其他盘需修改此路径。模板见 `studio/config/material_index_config.json.example`。
 
 ### 5.4 `studio/config/erp_config.json`
-旺店通 ERP API 配置（可选）。
+
+旺店通 ERP OpenAPI2 配置（可选，仅知识库库存查询用到）：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `base_url` | API 基址 | `https://api.wangdian.cn/openapi2/` |
+| `appkey` | 应用 AppKey | `wdt112233-jd`（沙箱示例） |
+| `appsecret` | 应用 Secret | `xxx` |
+| `sid` | 商家 SID | `wdt112233` |
+
+> 默认填旺店通官方沙箱账号，正式使用请替换为生产凭据。模板见 `studio/config/erp_config.json.example`。
 
 ### 5.5 `studio/config/theme.json`
+
 ```json
 {"theme": "dark"}
 ```
-可选值：`dark` / `light` / `system`。
+
+可选值：`dark` / `light` / `system`。该文件由程序在用户切换主题时自动生成（`utils/theme_manager.py`），**不入库**。首次运行时默认 `dark`。
 
 ---
 

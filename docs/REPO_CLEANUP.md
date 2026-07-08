@@ -32,20 +32,15 @@
 
 ## 三、已处理的决定
 
-- **`ai_skills/`（817 M）**：按要求**视为源码，保留入库**（未加入忽略）。
-- **旧爬虫系统**：已整体归入 [`legacy_crawler/`](../legacy_crawler/README.md)。
-  - 搬迁文件：`core/{crawlers,login,douyin_advanced_crawler,refresh_douyin_cookies,a_lxml_create_html}.py`、
-    `timing_crawl.py`、`run_server.py`、`check_mongo.py`、`repro_test.py`、根 `config.ini`、`project_analysis.md`、`templates/`。
-  - 共享底层模块 `douyin_a_bogus / douyin_video / browser_fetcher / douyin_parser` 因 GUI 仍依赖，**原件留在 `studio/core/`**，legacy 内为副本。
-  - 已修正 `timing_crawl.py` / `run_server.py` 的 import 路径；全部文件 `py_compile` 通过。
+- **`ai_skills/`（原 817 M / 实际未入库）**：经核查无任何代码依赖、未提交入库，**已整体删除**（含 439M 打包产物），并移除 `.gitignore` 中失效的 `ai_skills/*/dist/` 规则。
+- **旧爬虫系统 `legacy_crawler/`**：README 自述「已归档，不属于 studio GUI 运行所需，可整体删除」，且功能已被 `studio/core/` 取代。经核查无运行时调用，**已整体删除**。
+  - 连带清理 `export_configs.py` 中复制 `legacy_crawler/config.ini` 的死代码行。
 
 ## 四、仍待人工确认
 
 | 项 | 处理建议 |
 |----|---------|
 | `app_icon.png.bak` / `app_icon.ico.bak` | 直接删除（已被 `*.bak` 忽略，但磁盘上仍在） |
-| `legacy_crawler/config.ini` | 含代理 / MySQL 配置，当前被 `.gitignore` 的 `config.ini` 规则忽略；若想随归档入库需放开规则 |
-| `legacy_crawler/`（整体） | 确认不再使用后可整体删除，或拆为独立仓库 |
 
 ## 四、启用前提
 

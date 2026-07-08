@@ -117,52 +117,45 @@ class PageSetupMixin:
         b2 = QPushButton("↩ 恢复默认"); b2.setObjectName("secondary_button"); b2.clicked.connect(self._res_reset_mat_dir); r.addWidget(b2)
         lg1.addLayout(r); l2.addWidget(g1)
 
-        # 素材存储目录
-        g2 = QGroupBox("📁 素材存储目录")
-        g2.setStyleSheet(g1.styleSheet().replace("#a855f7","#8b5cf6"))
-        lg2 = QVBoxLayout(g2); lg2.setContentsMargins(16,20,16,16); lg2.setSpacing(10)
-        lg2.addWidget(QLabel("素材库文件来源，入库时从此处扫描。"))
-        # NAS/本机选择
-        sel_row = QHBoxLayout()
-        sel_row.addWidget(QLabel("存储类型:"))
-        self.res_storage_type = QComboBox()
-        self.res_storage_type.addItems(["NAS 目录", "本机目录"])
-        self.res_storage_type.setCurrentIndex(0)
-        self.res_storage_type.currentIndexChanged.connect(self._res_on_storage_type_changed)
-        sel_row.addWidget(self.res_storage_type)
-        sel_row.addStretch()
-        lg2.addLayout(sel_row)
-        # NAS 根目录 (选择NAS时显示)
-        self.res_nas_group = QWidget()
-        nas_lay = QVBoxLayout(self.res_nas_group); nas_lay.setContentsMargins(0,0,0,0); nas_lay.setSpacing(6)
-        nas_lay.addWidget(QLabel("NAS 网络地址:"))
+        # ── NAS 共享目录卡片 ──
+        g_nas = QGroupBox("🖥️ NAS 共享目录")
+        g_nas.setStyleSheet(g1.styleSheet().replace("#a855f7","#8b5cf6"))
+        lg_nas = QVBoxLayout(g_nas); lg_nas.setContentsMargins(16,20,16,16); lg_nas.setSpacing(10)
+        lg_nas.addWidget(QLabel("通过网络（SMB）访问 NAS 上的共享文件夹。"))
+        # NAS 网络地址
+        nas_addr_row = QHBoxLayout()
+        nas_addr_row.addWidget(QLabel("NAS 地址:"))
         self.res_nas_root = QLineEdit()
-        self.res_nas_root.setPlaceholderText(r"例: \\192.168.xxx.xxx  (留空不启用)")
-        nas_lay.addWidget(self.res_nas_root)
-        lg2.addWidget(self.res_nas_group)
-        # 本机目录选择器 (选择本机时显示)
-        self.res_local_group = QWidget()
-        local_lay = QVBoxLayout(self.res_local_group); local_lay.setContentsMargins(0,0,0,0); local_lay.setSpacing(6)
-        local_lay.addWidget(QLabel("本机素材目录:"))
-        local_row = QHBoxLayout()
-        self.res_local_dir = QLineEdit()
-        self.res_local_dir.setPlaceholderText("例: D:\\素材")
-        local_row.addWidget(self.res_local_dir, 1)
-        btn_local = QPushButton("📁 浏览"); btn_local.setObjectName("secondary_button")
-        btn_local.clicked.connect(self._res_choose_local_dir)
-        local_row.addWidget(btn_local)
-        local_lay.addLayout(local_row)
-        self.res_local_group.setVisible(False)
-        lg2.addWidget(self.res_local_group)
-        # 入库资源目录列表
-        lg2.addWidget(QLabel("入库资源目录列表:"))
-        r2 = QHBoxLayout()
-        self.res_index_dirs = QListWidget(); self.res_index_dirs.setMaximumHeight(120); self.res_index_dirs.setAlternatingRowColors(True); lg2.addWidget(self.res_index_dirs)
-        btn_add = QPushButton("＋ 添加"); btn_add.setObjectName("secondary_button"); btn_add.clicked.connect(self._res_add_index_dir); r2.addWidget(btn_add)
-        btn_del = QPushButton("－ 删除"); btn_del.setObjectName("secondary_button"); btn_del.clicked.connect(self._res_del_index_dir); r2.addWidget(btn_del)
-        r2.addStretch()
-        b_save = QPushButton("💾 保存目录配置"); b_save.setObjectName("primary_button"); b_save.clicked.connect(self._res_save_nas_config); r2.addWidget(b_save)
-        lg2.addLayout(r2); l2.addWidget(g2)
+        self.res_nas_root.setPlaceholderText(r"格式: \\192.168.xxx.xxx")
+        nas_addr_row.addWidget(self.res_nas_root, 1)
+        lg_nas.addLayout(nas_addr_row)
+        # NAS 目录列表
+        lg_nas.addWidget(QLabel("NAS 共享目录:"))
+        self.res_index_dirs = QListWidget(); self.res_index_dirs.setMaximumHeight(100); self.res_index_dirs.setAlternatingRowColors(True)
+        lg_nas.addWidget(self.res_index_dirs)
+        nas_btn_row = QHBoxLayout()
+        btn_nas_add = QPushButton("＋ 添加NAS目录"); btn_nas_add.setObjectName("secondary_button"); btn_nas_add.clicked.connect(self._res_add_index_dir); nas_btn_row.addWidget(btn_nas_add)
+        btn_nas_del = QPushButton("－ 删除"); btn_nas_del.setObjectName("secondary_button"); btn_nas_del.clicked.connect(self._res_del_index_dir); nas_btn_row.addWidget(btn_nas_del)
+        nas_btn_row.addStretch()
+        b_nas_save = QPushButton("💾 保存NAS配置"); b_nas_save.setObjectName("primary_button"); b_nas_save.clicked.connect(self._res_save_nas_config); nas_btn_row.addWidget(b_nas_save)
+        lg_nas.addLayout(nas_btn_row)
+        l2.addWidget(g_nas)
+
+        # ── 本机磁盘目录卡片 ──
+        g_local = QGroupBox("💽 本机磁盘目录")
+        g_local.setStyleSheet(g1.styleSheet().replace("#a855f7","#10b981"))
+        lg_local = QVBoxLayout(g_local); lg_local.setContentsMargins(16,20,16,16); lg_local.setSpacing(10)
+        lg_local.addWidget(QLabel("本机磁盘上的素材文件夹，无需网络访问。"))
+        # 本机目录列表
+        self.res_local_dirs = QListWidget(); self.res_local_dirs.setMaximumHeight(100); self.res_local_dirs.setAlternatingRowColors(True)
+        lg_local.addWidget(self.res_local_dirs)
+        local_btn_row = QHBoxLayout()
+        btn_local_add = QPushButton("＋ 添加本机目录"); btn_local_add.setObjectName("secondary_button"); btn_local_add.clicked.connect(self._res_add_local_dir); local_btn_row.addWidget(btn_local_add)
+        btn_local_del = QPushButton("－ 删除"); btn_local_del.setObjectName("secondary_button"); btn_local_del.clicked.connect(self._res_del_local_dir); local_btn_row.addWidget(btn_local_del)
+        local_btn_row.addStretch()
+        b_local_save = QPushButton("💾 保存本机配置"); b_local_save.setObjectName("primary_button"); b_local_save.clicked.connect(self._res_save_local_config); local_btn_row.addWidget(b_local_save)
+        lg_local.addLayout(local_btn_row)
+        l2.addWidget(g_local)
 
         
 
@@ -1067,14 +1060,29 @@ class PageSetupMixin:
         QMessageBox.information(self, "提示", "已恢复默认下载目录。")
 
     def _res_add_index_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "选择入库资源目录", "")
-        if d: self.res_index_dirs.addItem(d)
+        """添加 NAS 共享目录：弹文件夹选择本地映射路径，再确认 NAS 共享文件夹名。"""
+        d = QFileDialog.getExistingDirectory(self, "选择 NAS 映射到本地的目录", "")
+        if not d:
+            return
+        # 默认 nas_folder 取最后一级目录名
+        default_folder = os.path.basename(d.rstrip("\\/")) or d
+        folder, ok = QInputDialog.getText(
+            self, "NAS 共享文件夹名",
+            f"该目录在 NAS 上的共享文件夹名：\n（本地路径：{d}）",
+            text=default_folder
+        )
+        if not ok:
+            return
+        item = QListWidgetItem(f"{d}  ➔  {folder.strip() or default_folder}")
+        item.setData(Qt.UserRole, {"local_path": d, "nas_folder": folder.strip() or default_folder})
+        self.res_index_dirs.addItem(item)
 
     def _res_del_index_dir(self):
         for item in self.res_index_dirs.selectedItems():
             self.res_index_dirs.takeItem(self.res_index_dirs.row(item))
 
     def _res_save_nas_config(self):
+        """保存 NAS 配置：nas_root + index_directories（local_path/nas_folder 映射）。"""
         import json
         from config.paths import CONFIG_DIR
         cfg = os.path.join(CONFIG_DIR, "material_index_config.json")
@@ -1083,15 +1091,49 @@ class PageSetupMixin:
             with open(cfg, "r", encoding="utf-8") as f:
                 try: data = json.load(f)
                 except Exception: data = {}
-        data["storage_type"] = "nas" if self.res_storage_type.currentIndex() == 0 else "local"
         data["nas_root"] = self.res_nas_root.text().strip()
-        data["local_dir"] = self.res_local_dir.text().strip()
-        data["index_directories"] = [{"local_path": self.res_index_dirs.item(i).text(), "nas_folder": self.res_index_dirs.item(i).text()} for i in range(self.res_index_dirs.count())]
-        if "index_dirs" in data: del data["index_dirs"]
+        # 正确存 local_path/nas_folder 映射（修掉旧 bug：nas_folder 误写成 local_path）
+        dirs = []
+        for i in range(self.res_index_dirs.count()):
+            it = self.res_index_dirs.item(i)
+            ud = it.data(Qt.UserRole)
+            if isinstance(ud, dict):
+                dirs.append({"local_path": ud["local_path"], "nas_folder": ud["nas_folder"]})
+            else:
+                # 兼容：纯文本项当成本地路径，nas_folder 取末级名
+                txt = it.text()
+                dirs.append({"local_path": txt, "nas_folder": os.path.basename(txt.rstrip("\\/")) or txt})
+        data["index_directories"] = dirs
         os.makedirs(os.path.dirname(cfg), exist_ok=True)
         with open(cfg, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        QMessageBox.information(self, "提示", "目录配置保存成功。")
+        QMessageBox.information(self, "提示", "NAS 目录配置保存成功。")
+
+    def _res_add_local_dir(self):
+        """添加本机磁盘目录。"""
+        d = QFileDialog.getExistingDirectory(self, "选择本机素材目录", "")
+        if d:
+            self.res_local_dirs.addItem(d)
+
+    def _res_del_local_dir(self):
+        for item in self.res_local_dirs.selectedItems():
+            self.res_local_dirs.takeItem(self.res_local_dirs.row(item))
+
+    def _res_save_local_config(self):
+        """保存本机磁盘目录配置：local_directories（纯路径列表）。"""
+        import json
+        from config.paths import CONFIG_DIR
+        cfg = os.path.join(CONFIG_DIR, "material_index_config.json")
+        data = {}
+        if os.path.isfile(cfg):
+            with open(cfg, "r", encoding="utf-8") as f:
+                try: data = json.load(f)
+                except Exception: data = {}
+        data["local_directories"] = [self.res_local_dirs.item(i).text() for i in range(self.res_local_dirs.count())]
+        os.makedirs(os.path.dirname(cfg), exist_ok=True)
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        QMessageBox.information(self, "提示", "本机目录配置保存成功。")
 
     def _res_load_configs(self):
         import json
@@ -1110,28 +1152,20 @@ class PageSetupMixin:
             try:
                 with open(cfg2, "r", encoding="utf-8") as f:
                     d = json.load(f)
+                # NAS 卡片
                 self.res_nas_root.setText(d.get("nas_root", ""))
-                # 存储类型
-                st = d.get("storage_type", "nas")
-                self.res_storage_type.setCurrentIndex(0 if st == "nas" else 1)
-                self._res_on_storage_type_changed()
-                self.res_local_dir.setText(d.get("local_dir", ""))
                 self.res_index_dirs.clear()
                 for dd in d.get("index_directories", []):
                     if isinstance(dd, dict):
-                        self.res_index_dirs.addItem(dd.get("local_path", str(dd)))
+                        lp, nf = dd.get("local_path", ""), dd.get("nas_folder", "")
+                        item = QListWidgetItem(f"{lp}  ➔  {nf}" if nf else lp)
+                        item.setData(Qt.UserRole, {"local_path": lp, "nas_folder": nf})
+                        self.res_index_dirs.addItem(item)
                     else:
                         self.res_index_dirs.addItem(str(dd))
+                # 本机卡片
+                self.res_local_dirs.clear()
+                for dd in d.get("local_directories", []):
+                    self.res_local_dirs.addItem(str(dd))
             except Exception: pass
-
-    def _res_on_storage_type_changed(self):
-        """根据存储类型切换显示 NAS 地址或本机目录"""
-        is_nas = self.res_storage_type.currentIndex() == 0
-        self.res_nas_group.setVisible(is_nas)
-        self.res_local_group.setVisible(not is_nas)
-
-    def _res_choose_local_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "选择本机素材目录", self.res_local_dir.text())
-        if d:
-            self.res_local_dir.setText(d)
 

@@ -1,3 +1,4 @@
+# ===== GUI 主程序启动必需 =====
 PySide6>=6.5
 requests>=2.31
 loguru
@@ -6,3 +7,30 @@ fake_useragent
 lxml
 pymysql
 faster-whisper
+
+# ===== 图像 / 视频处理（多页面核心依赖）=====
+Pillow>=10.0
+numpy>=1.24
+opencv-python>=4.8      # cv2 —— 视频AI重命名/混剪/视频索引
+av>=12.0                # PyAV —— 字幕擦除/视频OCR（页面内延迟导入，缺失不阻断启动）
+
+# ===== 授权 / 系统 =====
+cryptography>=42.0      # License 签发与校验
+darkdetect>=0.8         # 系统明暗主题检测
+watchdog>=4.0           # 文件夹监听（素材入库）
+
+# ===== 表格 / 文档 =====
+openpyxl>=3.1           # 产品资料 Excel 导入导出
+
+# ===== 可选功能（按需启用）=====
+# webview                # pywebview —— 内嵌浏览器对话框
+# zstandard              # Ollama 模型管理（.zst 解压）
+# soundfile              # VoxCPM 声音克隆服务端
+# psycopg2-binary        # ERP / PostgreSQL 接入
+# pgvector               # 向量检索（搭配 PostgreSQL）
+# smbprotocol            # NAS 网络存储
+# diffusers              # 图像分层（扩散模型）
+# transformers           # 向量/CLIP 模型
+# rembg                  # AI 抠图
+# psd-tools              # 图像分层（PSD 解析）
+# python-pptx            # 图像分层（PPTX 解析）

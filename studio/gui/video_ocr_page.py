@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import traceback
 import time
-import av
 from PIL import Image, ImageDraw
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
@@ -575,6 +574,7 @@ class VideoOcrPage(BasePage):
             return
 
         try:
+            import av
             container = av.open(path)
             video_stream = next(s for s in container.streams if s.type == 'video')
             self.frame_width = video_stream.width
@@ -840,6 +840,7 @@ class VideoOcrPage(BasePage):
             return
             
         try:
+            import av
             container = av.open(path)
             video_stream = next(s for s in container.streams if s.type == 'video')
             
@@ -890,6 +891,7 @@ class VideoOcrPage(BasePage):
         if not path or not os.path.exists(path):
             return
         try:
+            import av
             container = av.open(path)
             total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
@@ -907,6 +909,7 @@ class VideoOcrPage(BasePage):
         if not path or not os.path.exists(path):
             return
         try:
+            import av
             container = av.open(path)
             total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()

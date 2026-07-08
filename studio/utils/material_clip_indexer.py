@@ -569,55 +569,68 @@ def _call_vision_for_product(
         return v
 
     def _query_frame(i, img_path):
-        try:
-            from PIL import Image
-            import io
-            with Image.open(img_path) as img:
-                img.thumbnail((768, 768))
-                if img.mode in ("RGBA", "P"):
-                    img = img.convert("RGB")
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=80)
-                img_bytes = buf.getvalue()
-            b64 = _b64.b64encode(img_bytes).decode()
-            user_text = f"这是视频第 {i+1}/{len(sampled)} 帧，识别产品 brand/category/model 及画面描述："
-            if ocr_text:
-                user_text += f"\n提示：该图片包含以下 OCR 识别到的文字内容（可用于辅助识别产品品牌、型号或做画面内容描述参考）:\n{ocr_text}"
-            payload = {
-                "model": model,
-                "num_ctx": 32768,  # Ollama: override default 4096 context
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": user_text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    ]},
-                ],
-                "temperature": 0.1,
-                "max_tokens": 150,
-            }
-            res = _req.post(url, json=payload, headers=headers, timeout=60)
-            if res.status_code != 200:
-                msg = f"视觉AI帧{i+1} HTTP {res.status_code}: {res.text[:200]}"
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                from PIL import Image
+                import io
+                with Image.open(img_path) as img:
+                    img.thumbnail((768, 768))
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=80)
+                    img_bytes = buf.getvalue()
+                b64 = _b64.b64encode(img_bytes).decode()
+                user_text = f"这是视频第 {i+1}/{len(sampled)} 帧，识别产品 brand/category/model 及画面描述："
+                if ocr_text:
+                    user_text += f"\n提示：该图片包含以下 OCR 识别到的文字内容（可用于辅助识别产品品牌、型号或做画面内容描述参考）:\n{ocr_text}"
+                payload = {
+                    "model": model,
+                    "num_ctx": 32768,  # Ollama: override default 4096 context
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": [
+                            {"type": "text", "text": user_text},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                        ]},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 150,
+                }
+                res = _req.post(url, json=payload, headers=headers, timeout=60)
+                if res.status_code != 200:
+                    msg = f"视觉AI帧{i+1} HTTP {res.status_code}: {res.text[:200]}"
+                    if log_cb:
+                        log_cb(f"     ⚠ {msg}")
+                    if attempt < max_attempts:
+                        if log_cb:
+                            log_cb(f"     ↻ 视觉AI帧{i+1}重试 ({attempt}/{max_attempts - 1})…")
+                        time.sleep(1)
+                    continue
+                raw = res.json()["choices"][0]["message"]["content"].strip()
+                raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+                raw = re.sub(r"\s*```$",           "", raw, flags=re.MULTILINE).strip()
+                m = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
+                if m:
+                    raw = m.group(0)
+                return json.loads(raw)
+            except Exception as e:
+                msg = f"视觉AI帧{i+1}失败: {e}"
                 if log_cb:
                     log_cb(f"     ⚠ {msg}")
-                return None
-            raw = res.json()["choices"][0]["message"]["content"].strip()
-            raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-            raw = re.sub(r"\s*```$",           "", raw, flags=re.MULTILINE).strip()
-            m = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
-            if m:
-                raw = m.group(0)
-            return json.loads(raw)
-        except Exception as e:
-            msg = f"视觉AI帧{i+1}失败: {e}"
-            if log_cb:
-                log_cb(f"     ⚠ {msg}")
-            return None
+                if attempt < max_attempts:
+                    if log_cb:
+                        log_cb(f"     ↻ 视觉AI帧{i+1}重试 ({attempt}/{max_attempts - 1})…")
+                    time.sleep(1)
+        return None
 
     results = [None] * len(sampled)
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = {executor.submit(_query_frame, i, img_path): i for i, img_path in enumerate(sampled)}
+        futures = {}
+        for i, img_path in enumerate(sampled):
+            futures[executor.submit(_query_frame, i, img_path)] = i
+            time.sleep(0.3)  # 帧间延迟，避免Ollama瞬时压力过大
         for future in as_completed(futures):
             i = futures[future]
             try:
@@ -692,6 +705,11 @@ def _call_vision_for_product(
         elif primary_list or secondary_list:
             # 至少识别到稳定画面描述，但未识别品牌/型号/品类
             result["ai_confidence"] = 0.3
+
+    # 所有帧全失败 → 返回空字典，让调用方识别为"视觉AI识别失败"
+    if not result.get("brand") and not result.get("product") and not result.get("model") \
+       and not result.get("scene_desc_primary") and not result.get("scene_desc_secondary"):
+        return {}
 
     return result
 
@@ -2137,6 +2155,7 @@ class MaterialClipIndexer:
             brand = product = model = None
             scene_desc_primary = scene_desc_secondary = None
             ai_confidence = None
+            vision_failed = False
             if img_paths:
                 self._log(f"  ④ 视觉AI识别（{len(img_paths)} 帧）")
                 ai_info = self._call_vision_ai_tags(img_paths, ocr_text=ocr_text)
@@ -2152,6 +2171,7 @@ class MaterialClipIndexer:
                         f"confidence={ai_confidence}"
                     )
                 else:
+                    vision_failed = True
                     self._log(f"     视觉AI未配置或识别失败")
 
             # ── Whisper 台词转写（视频，可选）────────────────────────────────
@@ -2244,7 +2264,10 @@ class MaterialClipIndexer:
                 self._log(f"========================================================\n")
                 return False
 
-            self._log(f"  ✅ AI 分析完成")
+            if vision_failed:
+                self._log(f"  ⚠ AI 分析完成（视觉AI识别失败，基于台词/路径提取信息）")
+            else:
+                self._log(f"  ✅ AI 分析完成")
             self._log(f"========================================================\n")
             return True
 

@@ -1570,7 +1570,7 @@ class VideoConcatWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)  # Emits list of generated files absolute paths
 
-    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None):
+    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade"):
         super().__init__()
         self.selected_clips = selected_clips
         self.output_dir = output_dir
@@ -1581,16 +1581,16 @@ class VideoConcatWorker(BaseWorker):
         self.split_descriptions = split_descriptions or {}
         self.randomness = randomness
         self.selected_descriptions_list = selected_descriptions_list
+        self.transition = transition or "fade"
 
     def _probe_resolution(self, clip):
         """用 ffprobe 读取视频显示分辨率（已考虑旋转），失败返回 None。"""
         import re as _re
         try:
-            ff = find_ffmpeg()
-            if not ff:
-                return None
-            ffprobe = os.path.join(os.path.dirname(ff), "ffprobe.exe")
-            if not os.path.exists(ffprobe):
+            from utils.platform_utils import find_ffprobe
+            ffprobe = find_ffprobe()
+            if not os.path.isfile(ffprobe):
+                ff = find_ffmpeg()
                 ffprobe = ff.replace("ffmpeg", "ffprobe")
             cf = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
@@ -1605,6 +1605,92 @@ class VideoConcatWorker(BaseWorker):
         except Exception as e:
             log.warning(f"探测原视频分辨率失败: {e}")
         return None
+
+    # ffmpeg xfade 转场类型映射
+    _XFADE_MAP = {
+        "fade": "fade",
+        "dissolve": "dissolve",
+        "slideleft": "slideleft",
+        "slideright": "slideright",
+        "slideup": "slideup",
+        "slidedown": "slidedown",
+        "zoomin": "zoomin",
+        "zoomout": "zoomout",
+    }
+
+    def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
+        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。"""
+        if not clips:
+            return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
+
+        # 单个镜头直接复制
+        if len(clips) == 1:
+            cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+
+        xfade_type = self._XFADE_MAP.get(self.transition, "fade")
+        transition_dur = 0.5  # 转场时长 0.5 秒
+
+        # 获取每个片段的时长
+        durations = []
+        for clip in clips:
+            dur = 0.0
+            try:
+                cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+                       "-of", "csv=p=0", clip]
+                pr = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                if pr.returncode == 0 and pr.stdout.strip():
+                    dur = float(pr.stdout.strip())
+            except Exception:
+                pass
+            if dur <= 0:
+                dur = 5.0
+            durations.append(dur)
+
+        # 构建 xfade 滤镜链
+        # xfade 语法: [v0][v1]xfade=transition=fade:duration=0.5:offset=4.5[v01]
+        # offset = 前一个片段结束时间 - 转场时长
+        n = len(clips)
+        filter_parts = []
+        inputs = []
+        for clip in clips:
+            inputs += ["-i", clip]
+
+        # 第一个转场
+        prev_label = "0:v"
+        accumulated = durations[0]
+        for i in range(1, n):
+            offset = max(0, accumulated - transition_dur)
+            out_label = f"v{i:02d}"
+            filter_parts.append(
+                f"[{prev_label}][{i}:v]xfade=transition={xfade_type}:duration={transition_dur}:offset={offset:.3f}[{out_label}]"
+            )
+            prev_label = out_label
+            accumulated = offset + transition_dur + (durations[i] - transition_dur)
+
+        # 音频用 concat 拼接（简单交叉不需要复杂音频转场）
+        audio_filter_parts = []
+        for i in range(n):
+            audio_filter_parts.append(f"[{i}:a]")
+        audio_filter_parts.append(f"concat=n={n}:v=0:a=1[aout]")
+        audio_filter = "".join(audio_filter_parts)
+
+        final_vlabel = prev_label
+        filter_complex = ";".join(filter_parts) + ";" + audio_filter
+
+        cmd = [ffmpeg_path, "-y"] + inputs + [
+            "-filter_complex", filter_complex,
+            "-map", f"[{final_vlabel}]",
+            "-map", "[aout]",
+            "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2",
+            "-movflags", "+faststart",
+            out_file
+        ]
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
 
     def run(self):
         try:
@@ -1753,22 +1839,23 @@ class VideoConcatWorker(BaseWorker):
                     if desc:
                         batch_desc_lines.append(desc)
                 batch_script = "\n".join(batch_desc_lines)
-                
-                concat_txt = os.path.join(temp_dir, f"concat_{batch_idx}.txt")
-                with open(concat_txt, "w", encoding="utf-8") as f:
-                    for n_clip in batch_clips:
-                        safe_path = n_clip.replace("\\", "/")
-                        f.write(f"file '{safe_path}'\n")
 
                 out_file = os.path.join(self.output_dir, f"montage_concat_{random.randint(1000, 9999)}_{batch_idx+1}.mp4")
-                
-                cmd = [
-                    ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
-                    "-c", "copy", out_file
-                ]
-                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+
+                # 使用 xfade 滤镜实现转场动画（非 copy 模式，需要重新编码）
+                r = self._concat_with_transition(ffmpeg_path, ffprobe_path, batch_clips, out_file, temp_dir, batch_idx)
                 if r.returncode != 0:
-                    raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
+                    # 转场拼接失败，回退到无损 concat
+                    log.warning(f"转场拼接失败，回退到普通拼接: {r.stderr[-200:]}")
+                    concat_txt = os.path.join(temp_dir, f"concat_{batch_idx}.txt")
+                    with open(concat_txt, "w", encoding="utf-8") as f:
+                        for n_clip in batch_clips:
+                            safe_path = n_clip.replace("\\", "/")
+                            f.write(f"file '{safe_path}'\n")
+                    cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
+                    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                    if r.returncode != 0:
+                        raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
                 
                 # Save the combined script to a companion .txt file next to the video
                 txt_file = os.path.splitext(out_file)[0] + ".txt"
@@ -2975,7 +3062,7 @@ class VideoMontagePage(BasePage):
         nav_row.addWidget(self.btn_open_splits_dir)
         
         nav_row.addStretch()
-        self.btn_next_to_step_2 = QPushButton("下一步：镜头排列 ➔")
+        self.btn_next_to_step_2 = QPushButton("下一步：镜头重组 ➔")
         self.btn_next_to_step_2.setObjectName("primary_button")
         self.btn_next_to_step_2.setEnabled(True)
         self.btn_next_to_step_2.clicked.connect(lambda: self._go_to_step(1))
@@ -3149,6 +3236,24 @@ class VideoMontagePage(BasePage):
         self.batch_count_hint_lbl = QLabel("推荐: 1")
         self.batch_count_hint_lbl.setObjectName("muted_text")
         row_params2.addWidget(self.batch_count_hint_lbl)
+
+        row_params2.addStretch()
+
+        row_params2.addSpacing(15)
+        row_params2.addWidget(QLabel("转场动画:"))
+        self.transition_combo = QComboBox()
+        self.transition_combo.addItem("模糊", "fade")
+        self.transition_combo.addItem("淡入淡出", "dissolve")
+        self.transition_combo.addItem("左移", "slideleft")
+        self.transition_combo.addItem("右移", "slideright")
+        self.transition_combo.addItem("上移", "slideup")
+        self.transition_combo.addItem("下移", "slidedown")
+        self.transition_combo.addItem("推进", "zoomin")
+        self.transition_combo.addItem("拉远", "zoomout")
+        self.transition_combo.setCurrentIndex(0)
+        self.transition_combo.setFixedWidth(100)
+        self.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
+        row_params2.addWidget(self.transition_combo)
 
         row_params2.addStretch()
 
@@ -3565,7 +3670,7 @@ class VideoMontagePage(BasePage):
 
         # Navigation row
         nav_row = QHBoxLayout()
-        btn_prev = QPushButton("⇠ 上一步：镜头排列")
+        btn_prev = QPushButton("⇠ 上一步：镜头重组")
         btn_prev.setObjectName("secondary_button")
         btn_prev.clicked.connect(lambda: self._go_to_step(1))
         nav_row.addWidget(btn_prev)
@@ -5836,6 +5941,7 @@ class VideoMontagePage(BasePage):
             split_descriptions=self.split_descriptions,
             randomness=randomness,
             selected_descriptions_list=selected_descriptions_list,
+            transition=self.transition_combo.currentData() if hasattr(self, "transition_combo") else "fade",
         )
         self.concat_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v))

@@ -45,6 +45,8 @@ Thumbs.db
 *.key
 *.pem
 credentials*
+*cookies*.txt
+douyin_cookies.txt
 
 # Node
 node_modules/
@@ -64,7 +66,6 @@ studio/bin/
 # Bundled binaries
 apps/pw-browsers/
 apps/asset-browser/bin/
-ai_skills/*/dist/
 
 # Studio logs
 studio/logs/

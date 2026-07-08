@@ -1182,9 +1182,6 @@ class VoiceClonePage(BasePage):
         self.btn_synthesize_voice.setEnabled(True)
         self.progress_bar.setValue(100)
         self.stage_label.setText("✅ 克隆人声音频生成完成！")
-        
-        # 声音克隆完成后停止 VoxCPM 服务释放显存
-        self._stop_voxcpm_after_voice()
 
         for vid, wav in results.items():
             try:
@@ -1236,8 +1233,6 @@ class VoiceClonePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
-        # 失败后也停止 VoxCPM 服务释放显存
-        self._stop_voxcpm_after_voice()
         if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:
             QMessageBox.critical(
                 self.parent_widget,
@@ -1248,20 +1243,23 @@ class VoiceClonePage(BasePage):
             QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
     def _stop_voxcpm_after_voice(self):
-        """声音克隆任务完成后停止 VoxCPM 服务，释放 GPU 显存。"""
+        """离开声音克隆页面时停止 VoxCPM 服务，释放 GPU 显存。"""
         try:
             mw = getattr(self, "main_window", None)
             if mw:
-                # 优先调用 main_window_services 的停止方法
                 if hasattr(mw, "stop_voxcpm_service"):
-                    log.info("声音克隆完成，停止 VoxCPM 服务释放显存")
+                    log.info("离开声音克隆页面，停止 VoxCPM 服务释放显存")
                     mw.stop_voxcpm_service(show_prompt=False)
-                # 也检查 video_montage_page 的 VoxCPM 进程
                 montage = getattr(mw, "subtitle_removal_tool_v14", None)
                 if montage and hasattr(montage, "stop_api_server"):
                     montage.stop_api_server(show_prompt=False)
         except Exception as e:
             log.warning(f"停止 VoxCPM 服务失败: {e}")
+
+    def hideEvent(self, event):
+        """页面隐藏时停止 VoxCPM 服务释放显存。"""
+        self._stop_voxcpm_after_voice()
+        super().hideEvent(event)
 
     def _get_out_voice_dir(self, dir_path):
         dir_path = os.path.abspath(dir_path)

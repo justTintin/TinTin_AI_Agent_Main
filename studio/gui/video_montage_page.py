@@ -2750,6 +2750,10 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "_bgm_player") and self._bgm_player:
             self._stop_bgm_play()
 
+        # 离开声音克隆步骤（step 2）进入下一步时，停止 VoxCPM 服务释放显存
+        if self.stacked_widget.currentIndex() == 2 and index != 2:
+            self._stop_voxcpm_after_voice()
+
         self.stacked_widget.setCurrentIndex(index)
         self.update_step_indicator(index)
         self.stage_label.setText("就绪")
@@ -6230,9 +6234,6 @@ class VideoMontagePage(BasePage):
         self.btn_dub_videos.setEnabled(True)
         self.progress_bar.setValue(100)
         self.stage_label.setText("✅ 克隆人声音频生成完成！")
-        
-        # 声音克隆完成后停止 VoxCPM 服务释放显存
-        self._stop_voxcpm_after_voice()
 
         # Merge results to self.generated_voice_paths
         for vid, wav in results.items():
@@ -6275,8 +6276,6 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
-        # 失败后也停止 VoxCPM 服务释放显存
-        self._stop_voxcpm_after_voice()
         QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
     def _stop_voxcpm_after_voice(self):

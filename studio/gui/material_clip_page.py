@@ -1113,15 +1113,9 @@ class MaterialClipPage(BasePage):
                 child = QTreeWidgetItem(parent_item)
                 child.setText(0, entry["name"])
                 child.setData(0, Qt.UserRole, entry["full_path"] if "full_path" in entry else entry.get("path", ""))
-                try:
-                    has_sub = self._dir_has_subdirs(
-                        entry["full_path"] if "full_path" in entry else entry.get("path", "")
-                    )
-                    if has_sub:
-                        dummy = QTreeWidgetItem(child)
-                        dummy.setText(0, "Loading...")
-                except Exception:
-                    pass
+                # 懒加载：默认加占位项，展开时再检查
+                dummy = QTreeWidgetItem(child)
+                dummy.setText(0, "Loading...")
         except Exception:
             pass
 

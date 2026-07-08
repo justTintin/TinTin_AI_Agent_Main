@@ -4,7 +4,7 @@
 >
 > 视频下载 · 智能混剪 · 声音克隆 · 素材检索 · AI 图像生成
 
-**跨平台**：Windows 10+ / Linux (Pop!_OS, Ubuntu 24.04+)  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.0
+**跨平台**：Windows 10+ / Linux (Pop!_OS, Ubuntu 24.04+)  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
 
 ---
 
@@ -14,7 +14,7 @@
 project-root/
 ├── studio/                    主应用 (Python)
 │   ├── gui_main.py            入口，侧边栏 + QStackedWidget 页面切换
-│   ├── gui/                   页面层 (20+ 功能页面)
+│   ├── gui/                   页面层 (40+ 功能页面)
 │   ├── core/                  抖音解析 / 下载引擎
 │   ├── utils/                 管理器 & 外部服务客户端
 │   ├── config/paths.py        全局路径 & 跨平台二进制定位
@@ -34,6 +34,8 @@ project-root/
 ├── run.sh                     Linux 启动脚本
 └── config.ini                 飞书 & VoxCPM 配置
 ```
+
+> ⚠️ **`apps/` 与敏感文件不入库**：约 59 GB 的模型/工具二进制、Cookie、License 白名单、用户主题偏好等均通过 `.gitignore` 排除。开发者克隆后需自行下载模型或从分发包获取（见 [docs/SETUP.md](docs/SETUP.md)）。
 
 ---
 
@@ -201,6 +203,15 @@ Port = 7861
 ModelPath = apps/voxcpm2/models/openbmb__VoxCPM2
 ```
 
+### 激活与授权
+
+未激活设备启动时弹出激活对话框，需输入开发人员签发的激活码（JSON）。
+
+- **机器码**：对话框显示 16 位机器码，**支持鼠标选中复制或点「📋 复制」按钮**，发给开发人员签发激活码
+- **白名单**：`studio/config/trial_whitelist.json` 中的机器码可免激活直接试用（该文件已从 git 移除，仅本地保留）
+- **开发跳过**：设环境变量 `TINTIN_NO_LICENSE=1` 可跳过激活检查（仅开发用）
+- 签发工具：`tools/license_tool.py`
+
 ### 运行时目录
 
 | 目录 | 说明 |
@@ -221,6 +232,14 @@ make build           # 打包当前平台
 make check           # 全部 .py 语法校验
 make clean           # 清理构建产物
 ```
+
+### 依赖文件
+
+| 文件 | 用途 |
+|------|------|
+| `studio/requirements_gui.txt` | GUI 主程序依赖（PySide6 / 图像视频 / 授权等，含可选功能注释） |
+| `studio/requirements.txt` | 爬虫 / 数据库 / Flask 等后端依赖 |
+| `studio/requirements_dev.txt` | 开发工具（PyInstaller / Playwright） |
 
 详细指南见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
 

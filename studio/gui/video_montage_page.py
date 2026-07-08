@@ -6142,6 +6142,17 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")
             return
 
+        # 声音克隆前停止 Ollama 释放显存，避免 VoxCPM 显存不足
+        try:
+            from utils.ollama_manager import OllamaManager
+            mgr = OllamaManager.get()
+            if mgr.is_running():
+                self.stage_label.setText("正在停止 Ollama 释放显存...")
+                mgr.stop()
+                self.stage_label.setText("Ollama 已停止，开始声音克隆...")
+        except Exception as e:
+            log.warning(f"停止 Ollama 失败（不影响声音克隆）: {e}")
+
         # Build tasks from the table
         tasks = []
         dir_path = self.voice_video_dir_input.text().strip()

@@ -3608,7 +3608,7 @@ class VideoMontagePage(BasePage):
         card = QFrame()
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(12)
+        card_layout.setSpacing(8)  # 收紧行间距，把空间留给视频列表
 
         # 1. Video Directory Row
         row_vid_dir = QHBoxLayout()
@@ -3816,7 +3816,7 @@ class VideoMontagePage(BasePage):
         self.voice_table.verticalHeader().setMinimumSectionSize(90)
         self.voice_table.verticalHeader().setVisible(False)
         self.voice_table.setMinimumHeight(350)
-        card_layout.addWidget(self.voice_table)
+        card_layout.addWidget(self.voice_table, 1)  # stretch=1: 表格吃掉剩余垂直空间
 
         # Subtitle option checkbox
         row_subtitle_opt = QHBoxLayout()

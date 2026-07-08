@@ -1088,13 +1088,10 @@ class MaterialClipPage(BasePage):
             item = QTreeWidgetItem(tree)
             item.setText(0, nas_folder)
             item.setData(0, Qt.UserRole, local_path)
-            try:
-                has_sub = self._dir_has_subdirs(local_path)
-                if has_sub:
-                    dummy = QTreeWidgetItem(item)
-                    dummy.setText(0, "Loading...")
-            except Exception:
-                pass
+            # 懒加载：先假定有子目录加占位项，展开时才真正检查
+            # （避免初始化时同步访问每个目录，连不上 NAS 会卡几十秒）
+            dummy = QTreeWidgetItem(item)
+            dummy.setText(0, "Loading...")
         tree.blockSignals(False)
 
     def _on_tree_item_expanded(self, item):

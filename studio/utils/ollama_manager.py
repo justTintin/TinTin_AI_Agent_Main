@@ -148,8 +148,8 @@ class OllamaManager:
         if IS_WIN:
             for img in ["ollama.exe", "llama-server.exe"]:
                 try:
-                    subprocess.run(["taskkill", "/F", "/IM", img],
-                                   capture_output=True, timeout=5,
+                    subprocess.run(["taskkill", "/F", "/T", "/IM", img],
+                                   capture_output=True, timeout=10,
                                    creationflags=create_no_window_flag())
                 except Exception:
                     pass
@@ -159,6 +159,24 @@ class OllamaManager:
                                capture_output=True, timeout=2)
             except Exception:
                 pass
+
+        # 等待 GPU 显存释放（最多等 10 秒）
+        try:
+            import time as _time
+            for _ in range(10):
+                r = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=create_no_window_flag())
+                if r.returncode == 0 and r.stdout.strip().isdigit():
+                    used_mb = int(r.stdout.strip())
+                    # 显存使用降到 3GB 以下认为已释放（桌面 GUI 约占 1-2GB）
+                    if used_mb < 3072:
+                        break
+                _time.sleep(1)
+        except Exception:
+            pass
+
         log.info("Ollama 进程已停止")
 
     def pull_model(self, model_name: str, progress_cb=None) -> tuple[bool, str]:

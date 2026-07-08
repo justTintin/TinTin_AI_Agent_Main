@@ -7769,7 +7769,8 @@ class VideoMontagePage(BasePage):
         return info
 
     def _gen_copy_for_assembled(self, path):
-        """为某个组合视频，根据其画面镜头描述 + 共用产品背景，用大模型生成口播文案并存同名 .txt。"""
+        """为某个组合视频，根据其画面镜头描述 + 共用产品背景，用大模型生成口播文案并存同名 .txt。
+        如果镜头缺少画面描述，先用视觉 LLM 自动补生成。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         api_url = cfg.get("llm_api_url", "").strip()
         api_key = cfg.get("llm_api_key", "").strip()
@@ -7782,8 +7783,34 @@ class VideoMontagePage(BasePage):
         scenes = self._get_video_scene_descriptions(path)
         if not scenes:
             QMessageBox.warning(self.parent_widget, "无画面信息",
-                                "未找到该视频的镜头画面信息（缺少 _sources.txt 或镜头描述为空），无法按画面生成文案。")
+                                "未找到该视频的镜头画面信息（缺少 _sources.txt），无法按画面生成文案。")
             return
+
+        # 检查是否有镜头缺少描述，如有则先用视觉 LLM 补生成
+        sources_file = os.path.splitext(path)[0] + "_sources.txt"
+        missing_clips = []
+        if os.path.exists(sources_file):
+            with open(sources_file, "r", encoding="utf-8") as sf:
+                src_paths = [line.strip() for line in sf if line.strip()]
+            for i, src_path in enumerate(src_paths):
+                desc = scenes[i] if i < len(scenes) else ""
+                if not desc or not desc.strip():
+                    missing_clips.append(os.path.abspath(src_path))
+
+        if missing_clips:
+            vision_url = cfg.get("llm_vision_api_url", "").strip() or api_url
+            vision_key = cfg.get("llm_api_key", "").strip() or api_key
+            vision_model = cfg.get("llm_vision_model", "").strip() or model
+            self.stage_label.setText(f"正在为 {len(missing_clips)} 个缺失描述的镜头生成画面描述...")
+            self._batch_gen_missing_descriptions(
+                missing_clips, vision_url, vision_key, vision_model,
+                lambda: self._do_gen_copy_for_assembled(path, cfg, api_url, api_key, model))
+        else:
+            self._do_gen_copy_for_assembled(path, cfg, api_url, api_key, model)
+
+    def _do_gen_copy_for_assembled(self, path, cfg, api_url, api_key, model):
+        """实际执行单个视频的口播文案生成（描述已就绪后调用）。"""
+        scenes = self._get_video_scene_descriptions(path)
 
         companion_txt = os.path.splitext(path)[0] + ".txt"
         if self._assembled_has_copy(path):
@@ -7833,7 +7860,8 @@ class VideoMontagePage(BasePage):
         self._scene_copy_worker.start()
 
     def _batch_gen_copy_by_scene(self):
-        """一键为所有已生成的组合视频，按各自画面镜头描述生成口播文案（共用一份产品背景）。"""
+        """一键为所有已生成的组合视频，按各自画面镜头描述生成口播文案（共用一份产品背景）。
+        如果镜头缺少画面描述（如原视频无声音未生成），先用视觉 LLM 自动补生成描述。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         api_url = cfg.get("llm_api_url", "").strip()
         api_key = cfg.get("llm_api_key", "").strip()
@@ -7869,6 +7897,90 @@ class VideoMontagePage(BasePage):
         if info is None:
             return
 
+        # 检查所有目标视频的镜头是否有画面描述，收集缺失描述的镜头
+        missing_desc_clips = set()
+        for path in targets:
+            scenes = self._get_video_scene_descriptions(path)
+            sources_file = os.path.splitext(path)[0] + "_sources.txt"
+            if os.path.exists(sources_file):
+                with open(sources_file, "r", encoding="utf-8") as sf:
+                    src_paths = [line.strip() for line in sf if line.strip()]
+                for i, src_path in enumerate(src_paths):
+                    desc = scenes[i] if i < len(scenes) else ""
+                    if not desc or not desc.strip():
+                        missing_desc_clips.add(os.path.abspath(src_path))
+
+        if missing_desc_clips:
+            # 有镜头缺少画面描述，用视觉 LLM 自动生成
+            vision_url = cfg.get("llm_vision_api_url", "").strip() or api_url
+            vision_key = cfg.get("llm_api_key", "").strip() or api_key
+            vision_model = cfg.get("llm_vision_model", "").strip() or model
+            self._batch_gen_missing_descriptions(
+                list(missing_desc_clips), vision_url, vision_key, vision_model,
+                lambda: self._start_batch_copy(api_url, api_key, model, info, targets))
+        else:
+            self._start_batch_copy(api_url, api_key, model, info, targets)
+
+    def _batch_gen_missing_descriptions(self, clip_paths, api_url, api_key, model, on_done):
+        """用视觉 LLM 为缺少描述的分割镜头批量生成画面描述。"""
+        if not clip_paths:
+            on_done()
+            return
+
+        self.stage_label.setText(f"正在为 {len(clip_paths)} 个缺失描述的镜头生成画面描述...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+
+        # 构建场景列表（时间从文件名解析或用 0）
+        scenes = []
+        split_paths = []
+        for cp in clip_paths:
+            parsed = self._parse_split_filename(os.path.basename(cp))
+            if parsed:
+                start_str, end_str = parsed[1], parsed[2]
+                try:
+                    start_sec = float(start_str.replace(",", "."))
+                    end_sec = float(end_str.replace(",", "."))
+                    scenes.append((start_sec, end_sec))
+                except Exception:
+                    scenes.append((0.0, 5.0))
+            else:
+                scenes.append((0.0, 5.0))
+            split_paths.append(cp)
+
+        self._desc_gen_worker = BatchGenerateDescriptionsWorker(
+            api_url, api_key, model, "", scenes, split_paths)
+
+        def on_desc_ok(json_str):
+            import json as _json
+            try:
+                desc_dict = _json.loads(json_str)
+                for idx_str, desc in desc_dict.items():
+                    idx = int(idx_str) - 1
+                    if 0 <= idx < len(clip_paths):
+                        clip_path = os.path.abspath(clip_paths[idx])
+                        self.split_descriptions[clip_path] = desc
+                        # 同步到缓存
+                        if clip_path in getattr(self, "split_clips_cache", {}):
+                            self.split_clips_cache[clip_path]["desc"] = desc
+                log.info(f"已为 {len(desc_dict)} 个镜头补充画面描述")
+            except Exception as e:
+                log.warning(f"解析镜头描述结果失败: {e}")
+            self.progress_bar.setValue(100)
+            on_done()
+
+        def on_desc_err(msg):
+            log.warning(f"视觉 LLM 生成镜头描述失败: {msg}，将使用空描述继续生成文案")
+            self.progress_bar.setValue(100)
+            on_done()
+
+        self._desc_gen_worker.finished.connect(on_desc_ok)
+        self._desc_gen_worker.error.connect(on_desc_err)
+        self._desc_gen_worker.start()
+
+    def _start_batch_copy(self, api_url, api_key, model, info, targets):
+        """启动批量口播文案生成。"""
         self._batch_llm = (api_url, api_key, model)
         self._batch_product_info = info
         self._batch_copy_queue = list(targets)

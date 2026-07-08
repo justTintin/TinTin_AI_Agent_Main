@@ -48,11 +48,13 @@ def find_ffmpeg():
 
 def get_media_duration(filepath):
     try:
-        from utils.platform_utils import create_no_window_flag, binary_name
+        from utils.platform_utils import find_ffprobe, create_no_window_flag
         creationflags = create_no_window_flag()
-        ffprobe_exe = os.path.join(os.path.dirname(find_ffmpeg()), binary_name("ffprobe"))
-        if not os.path.exists(ffprobe_exe):
+        ffprobe_exe = find_ffprobe()
+        if not os.path.isfile(ffprobe_exe):
             ffprobe_exe = find_ffmpeg().replace("ffmpeg", "ffprobe")
+        if not os.path.isfile(ffprobe_exe):
+            return 0.0
         cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
                "-of", "csv=p=0", filepath]
         r = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags, timeout=10)

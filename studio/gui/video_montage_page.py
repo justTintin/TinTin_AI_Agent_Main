@@ -2809,7 +2809,7 @@ class VideoMontagePage(BasePage):
         step_layout = QHBoxLayout(self.step_bar)
         
         self.step_labels = []
-        steps_text = ["1. 镜头智能分割", "2. 镜头重组", "3. 克隆口播配音", "4. 音视频最终合成"]
+        steps_text = ["1. 镜头智能分割", "2. 镜头重组", "3. 克隆口播配音", "4. 特效包装"]
         for i, text in enumerate(steps_text):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
@@ -3753,7 +3753,7 @@ class VideoMontagePage(BasePage):
         nav_row.addWidget(btn_prev)
         nav_row.addStretch()
 
-        self.btn_next_to_step_4 = QPushButton("下一步：最终合成 ➔")
+        self.btn_next_to_step_4 = QPushButton("下一步：特效包装 ➔")
         self.btn_next_to_step_4.setObjectName("primary_button")
         self.btn_next_to_step_4.setEnabled(True)
         self.btn_next_to_step_4.clicked.connect(lambda: self._go_to_step(3))

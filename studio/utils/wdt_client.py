@@ -2,7 +2,7 @@
 """
 旺店通 ERP OpenAPI2 客户端（纯 Python，仅依赖标准库）。
 
-签名算法移植自 ai_skills/Automated_Listing_Skill/erp/wdt_client.py，
+签名算法依据旺店通 OpenAPI2 规范实现，
 接口文档：https://open.wangdian.cn/open/apidoc
 本模块只实现知识库需要的「库存查询 stock_query」。
 """

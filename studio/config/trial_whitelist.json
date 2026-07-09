@@ -2,6 +2,7 @@
   "_comment": "试用白名单 — 机器码列表中的设备可直接激活，无需 License",
   "_comment2": "machine_id 通过 python studio/utils/license.py machineid 获取",
   "machine_ids": [
-    "4fc34c57c40fa096"
+    "4fc34c57c40fa096",
+    "13a179c03bd74015"
   ]
 }

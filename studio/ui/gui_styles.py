@@ -3,6 +3,11 @@
 扁平化暗色主题 · 丁大怪-电商智能体矩阵 v2.1
 设计语言：Flat Design Modern — 微阴影 · 大圆角 · 低对比边框 · 流畅过渡
 """
+import os
+
+_CHECK_ICON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "assets", "icons", "check.svg")
+_CHECK_ICON_URL = f"file:///{_CHECK_ICON.replace(os.sep, '/')}"
 
 STYLE_SHEET = """
 * {
@@ -382,7 +387,7 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: rgba(99, 102, 241, 0.25);
     border: 2px solid #818cf8;
-    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
+    image: url("__CHECK_ICON_URL__");
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -421,9 +426,8 @@ QTableView::indicator {
 
 QTableView::indicator:checked {
     background-color: rgba(99, 102, 241, 0.25);
-    border: 2px solid #818cf8;
     border: 2px solid #6366f1;
-    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
+    image: url("__CHECK_ICON_URL__");
 }
 
 QHeaderView::section {
@@ -881,4 +885,4 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #model_groupbox[section="ocr"]::title     { color: #f59e0b; }
 
 #comfyui_local_status { color: #666; font-size: 12px; }
-"""
+""".replace("__CHECK_ICON_URL__", _CHECK_ICON_URL)

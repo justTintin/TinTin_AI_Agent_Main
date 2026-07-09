@@ -940,6 +940,9 @@ class MaterialClipPage(BasePage):
         """将相对路径或 UNC 路径转为完整本地路径。"""
         if self._nas_client and self._nas_client.is_connected():
             return path  # SMB 直接访问
+        # 本地目录模式：用 local_dir 拼接
+        if self._local_dir and not self._nas_root:
+            return os.path.join(self._local_dir, path.lstrip("/\\"))
         from utils.material_clip_indexer import to_local_path
         return to_local_path(path, self._nas_root)
 
@@ -991,6 +994,7 @@ class MaterialClipPage(BasePage):
             "config", "material_index_config.json"
         )
         self._nas_root = ""
+        self._local_dir = ""
         dirs = []
         cfg = {}
         try:
@@ -998,18 +1002,18 @@ class MaterialClipPage(BasePage):
                 with open(cfg_path, encoding="utf-8") as f:
                     cfg = _json.load(f)
                 self._nas_root = cfg.get("nas_root", "")
+                self._local_dir = cfg.get("local_dir", "")
                 dirs = cfg.get("index_directories", [])
         except Exception:
             pass
 
-        nas_text = self._nas_root if self._nas_root else "（未配置，请前往「环境配置」设置）"
-        for attr in ["lbl_nas_root_ingest_tree", "lbl_nas_root_analyze_tree"]:
-            lbl = getattr(self, attr, None)
-            if lbl is not None:
-                lbl.setText(nas_text)
-
-        # 检测是否为 SMB 路径，建立 NAS 客户端
-        if self._nas_root.startswith("//") or self._nas_root.startswith("\\\\"):
+        storage_type = cfg.get("storage_type", "nas")
+        if storage_type == "local" and self._local_dir:
+            # 本机目录模式
+            nas_text = self._local_dir
+            self._nas_client = None
+        elif self._nas_root.startswith("//") or self._nas_root.startswith("\\\\"):
+            nas_text = self._nas_root if self._nas_root else "（未配置，请前往「设置」配置）"
             try:
                 self._nas_client = NASClient.from_config(cfg)
                 self._nas_client.connect()
@@ -1018,7 +1022,13 @@ class MaterialClipPage(BasePage):
                 log.warning(f"NAS 客户端连接失败: {e}")
                 self._nas_client = None
         else:
+            nas_text = self._nas_root if self._nas_root else "（未配置，请前往「设置」配置）"
             self._nas_client = None
+
+        for attr in ["lbl_nas_root_ingest_tree", "lbl_nas_root_analyze_tree"]:
+            lbl = getattr(self, attr, None)
+            if lbl is not None:
+                lbl.setText(nas_text)
 
         old_selected = getattr(self, "_last_selected_dir", "")
 
@@ -1210,15 +1220,17 @@ class MaterialClipPage(BasePage):
     def _scan_directory(self, directory: str):
         if not directory:
             return
+        # 先解析为绝对路径
+        resolved = self._resolve_path(directory)
         # NAS SMB 相对路径 → 本地挂载路径
         if self._is_nas_path(directory):
             nas_dir = "/mnt/nas/" + directory
             if not os.path.isdir(nas_dir):
                 self.show_warning(f"目录不可访问：\n{directory}\n\n请确认 NAS 已挂载到 /mnt/nas/", "目录无效")
                 return
-            directory = nas_dir
-        elif not os.path.isdir(directory):
-            self.show_warning(f"目录不可访问：\n{directory}", "目录无效")
+            resolved = nas_dir
+        elif not os.path.isdir(resolved):
+            self.show_warning(f"目录不可访问：\n{directory}\n\n路径解析后: {resolved}", "目录无效")
             return
 
         # 自动拉起日志窗口以让用户看到进度
@@ -1237,7 +1249,7 @@ class MaterialClipPage(BasePage):
         self.lbl_db_pbar_status.setVisible(True)
 
         w = self.track_worker(
-            _IndexMetaWorker(directory, self._nas_root, self.chk_force.isChecked())
+            _IndexMetaWorker(resolved, self._nas_root, self.chk_force.isChecked())
         )
         w.log_line.connect(lambda m: self.log_box.append(m))
         w.progress.connect(self._on_meta_progress)

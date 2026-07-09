@@ -1041,8 +1041,8 @@ class PageSetupMixin:
 
     def _res_save_nas_config(self):
         import json
-        from config.paths import DATA_DIR
-        cfg = os.path.join(DATA_DIR, "material_index_config.json")
+        from config.paths import CONFIG_DIR
+        cfg = os.path.join(CONFIG_DIR, "material_index_config.json")
         data = {}
         if os.path.isfile(cfg):
             with open(cfg, "r", encoding="utf-8") as f:
@@ -1051,7 +1051,8 @@ class PageSetupMixin:
         data["storage_type"] = "nas" if self.res_storage_type.currentIndex() == 0 else "local"
         data["nas_root"] = self.res_nas_root.text().strip()
         data["local_dir"] = self.res_local_dir.text().strip()
-        data["index_dirs"] = [self.res_index_dirs.item(i).text() for i in range(self.res_index_dirs.count())]
+        data["index_directories"] = [{"local_path": self.res_index_dirs.item(i).text(), "nas_folder": self.res_index_dirs.item(i).text()} for i in range(self.res_index_dirs.count())]
+        if "index_dirs" in data: del data["index_dirs"]
         os.makedirs(os.path.dirname(cfg), exist_ok=True)
         with open(cfg, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1059,7 +1060,7 @@ class PageSetupMixin:
 
     def _res_load_configs(self):
         import json
-        from config.paths import DATA_DIR, KNOWLEDGE_MATERIALS_DIR
+        from config.paths import DATA_DIR, CONFIG_DIR, KNOWLEDGE_MATERIALS_DIR
         mat_dir = KNOWLEDGE_MATERIALS_DIR
         cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
         if os.path.isfile(cfg):
@@ -1069,7 +1070,7 @@ class PageSetupMixin:
                 if d.get("materials_dir"): mat_dir = d["materials_dir"]
             except Exception: pass
         self.res_mat_dir.setText(mat_dir)
-        cfg2 = os.path.join(DATA_DIR, "material_index_config.json")
+        cfg2 = os.path.join(CONFIG_DIR, "material_index_config.json")
         if os.path.isfile(cfg2):
             try:
                 with open(cfg2, "r", encoding="utf-8") as f:

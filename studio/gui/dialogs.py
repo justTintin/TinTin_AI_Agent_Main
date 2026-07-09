@@ -282,23 +282,23 @@ class EditAccountDialog(QDialog):
         self.resize(400, 280)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1a1c;
-                color: #ffffff;
+                background-color: #ffffff;
+                color: #1d1d1f;
             }
             QLabel {
-                color: #ffffff;
+                color: #1d1d1f;
                 font-size: 13px;
             }
             QLineEdit {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
+                background-color: #f5f5f7;
+                border: 1px solid #d1d1d6;
                 border-radius: 8px;
                 padding: 6px 10px;
                 font-size: 13px;
-                color: #ffffff;
+                color: #1d1d1f;
             }
             QLineEdit:focus {
-                border: 1px solid #3b82f6;
+                border: 1px solid #6366f1;
             }
         """)
         
@@ -372,11 +372,11 @@ class ActivationDialog(QDialog):
         self.setWindowTitle("激活 - 电商智能体矩阵")
         self.setFixedSize(520, 380)
         self.setStyleSheet("""
-            QDialog { background-color: #1a1a22; color: #c8c8d0; }
-            QLabel { color: #c8c8d0; }
+            QDialog { background-color: #ffffff; color: #1d1d1f; }
+            QLabel { color: #1d1d1f; }
             QLineEdit {
-                background-color: #141418; color: #e4e4e7;
-                border: 1px solid #2e2e32; border-radius: 6px;
+                background-color: #f5f5f7; color: #1d1d1f;
+                border: 1px solid #d1d1d6; border-radius: 6px;
                 padding: 10px 14px; font-size: 13px;
             }
             QPushButton#primary_button {
@@ -386,8 +386,8 @@ class ActivationDialog(QDialog):
             }
             QPushButton#primary_button:hover { background-color: #818cf8; }
             QPushButton#secondary_button {
-                background-color: #2e2e32; color: #c8c8d0;
-                border: 1px solid #3e3e42; border-radius: 6px;
+                background-color: #f0f0f5; color: #1d1d1f;
+                border: 1px solid #d1d1d6; border-radius: 6px;
                 padding: 8px 20px; font-size: 13px;
             }
         """)

@@ -15,33 +15,26 @@ BasePage 收敛了各页重复的构造样板，并提供通用能力：
 子类只需实现 setup()。若子类重写 __init__，请调用 super().__init__(parent_widget, main_window)。
 """
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtCore import QObject
 
 from utils.logger_utils import log
 
 
 def _show_dev_only(parent_widget):
-    """隐藏页面原有子控件，并覆盖一层居中的'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
+    """隐藏页面原有子控件，并在布局中插入居中的'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
-    from PySide6.QtCore import Qt, QEvent
+    from PySide6.QtCore import Qt
     if parent_widget is None:
         return
     # 隐藏原有布局中所有子控件（不销毁，保留原界面以便恢复）
-    old_layout = parent_widget.layout()
-    if old_layout is not None:
-        for i in range(old_layout.count()):
-            item = old_layout.itemAt(i)
-            w = item.widget() if item else None
-            if w is not None:
-                w.setVisible(False)
-    # 覆盖层：铺满 parent_widget，内部居中显示提示卡片
-    overlay = QWidget(parent_widget)
-    overlay.setObjectName("dev_overlay")
-    overlay.setStyleSheet("background-color: #FAFBFC;")
-    ol_layout = QVBoxLayout(overlay)
-    ol_layout.setContentsMargins(0, 0, 0, 0)
-    ol_layout.addStretch()
-    # 提示卡片
+    layout = parent_widget.layout()
+    if layout is None:
+        return
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        w = item.widget() if item else None
+        if w is not None:
+            w.setVisible(False)
+    # 构建提示卡片
     card = QWidget()
     card.setObjectName("dev_card")
     card.setStyleSheet("""
@@ -66,30 +59,8 @@ def _show_dev_only(parent_widget):
     subtitle.setAlignment(Qt.AlignCenter)
     subtitle.setStyleSheet("font-size: 14px; color: #8D6E63; background: transparent; border: none;")
     card_layout.addWidget(subtitle)
-    ol_layout.addWidget(card, 0, Qt.AlignCenter)
-    ol_layout.addStretch()
-    # 跟随父控件大小变化
-    def _resize_overlay(event=None):
-        overlay.setGeometry(parent_widget.rect())
-    overlay._resize_overlay = _resize_overlay
-    _resize_overlay()
-    overlay.show()
-    overlay.raise_()
-    overlay.installEventFilter(_DevOverlayResizer(parent_widget, overlay))
-
-
-class _DevOverlayResizer(QObject):
-    """事件过滤器：父控件尺寸变化时同步调整覆盖层大小"""
-    def __init__(self, parent_widget, overlay):
-        super().__init__()
-        self._overlay = overlay
-        parent_widget.installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-        if event.type() == QEvent.Resize and obj is not None:
-            self._overlay.setGeometry(obj.rect())
-        return False
+    # 插入到原布局：上下各一个 stretch 撑开，卡片居中
+    layout.addWidget(card, 0, Qt.AlignCenter)
 
 
 class BasePage:

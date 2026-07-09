@@ -62,10 +62,22 @@ def save_update_config(cfg: dict):
 
 
 def _compare_versions(local: str, remote: str) -> int:
-    """比较语义化版本号。返回: 1=remote更新, 0=相同, -1=local更新。"""
+    """比较 CalVer 混合版本号（主.次.修订.构建日期）。
+
+    格式：X.Y.Z[.YYYYMMDD]，如 2.1.1.20260709。
+    前3段按语义化比较；第4段(构建日期)作同语义版本的构建先后兜底。
+    段数不同的版本（如旧的3段 2.1.1）缺日期段视为0。
+
+    返回: 1=remote更新, 0=相同, -1=local更新。
+    """
     try:
         def parse(v):
-            return tuple(int(x) for x in v.split(".")[:3])
+            parts = v.split(".")
+            # 前3段：主.次.修订（不足补0）
+            sem = [int(parts[i]) if i < len(parts) else 0 for i in range(3)]
+            # 第4段：构建日期（缺失=0）
+            build = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+            return tuple(sem) + (build,)
         lp, rp = parse(local), parse(remote)
         if rp > lp:
             return 1

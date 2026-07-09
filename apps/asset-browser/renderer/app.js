@@ -146,10 +146,6 @@ async function init() {
 async function loadSettings() {
   currentSettings = await window.api.getSettings();
   downloadPathDisplay.textContent = currentSettings.downloadPath || '未选择';
-  
-  // Apply proxy UI values
-  document.getElementById('checkbox-use-proxy').checked = !!currentSettings.useV2rayProxy;
-  document.getElementById('input-v2ray-path').value = currentSettings.v2rayPath || '';
 }
 
 // Load and render downloads
@@ -607,34 +603,6 @@ function setupEventListeners() {
     if (newPath) {
       currentSettings = await window.api.saveSettings({ downloadPath: newPath });
       downloadPathDisplay.textContent = currentSettings.downloadPath;
-    }
-  });
-
-  // Proxy settings listeners
-  const checkboxUseProxy = document.getElementById('checkbox-use-proxy');
-  const inputV2rayPath = document.getElementById('input-v2ray-path');
-  const btnSaveProxy = document.getElementById('btn-save-proxy');
-  const btnOpenProxy = document.getElementById('btn-open-proxy');
-
-  checkboxUseProxy.addEventListener('change', async () => {
-    const useProxy = checkboxUseProxy.checked;
-    currentSettings = await window.api.saveSettings({ useV2rayProxy: useProxy });
-  });
-
-  btnSaveProxy.addEventListener('click', async () => {
-    const pathVal = inputV2rayPath.value.trim();
-    currentSettings = await window.api.saveSettings({ v2rayPath: pathVal });
-    if (!pathVal) {
-      alert('已重置并保存为使用内置 v2rayN 代理');
-    } else {
-      alert('v2rayN 路径已保存！');
-    }
-  });
-
-  btnOpenProxy.addEventListener('click', async () => {
-    const success = await window.api.openV2rayClient();
-    if (!success) {
-      alert('无法打开 v2rayN，请确认 v2rayN 路径是否正确');
     }
   });
 

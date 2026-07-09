@@ -724,22 +724,23 @@ class ProductLibraryPage(BasePage):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "产品资料"
-        # 表头
+        keys = [f[0] for f in FIELDS]    # 内部字段名
+        labels = [f[1] for f in FIELDS]  # 中文显示名
+        # 表头（中文名）
         header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
-        for col, field in enumerate(FIELDS, 1):
-            cell = ws.cell(row=1, column=col, value=field)
+        for col, label in enumerate(labels, 1):
+            cell = ws.cell(row=1, column=col, value=label)
             cell.fill = header_fill
             cell.font = header_font
         # 填入一行示例数据
-        sample = {f: f"示例{field}" for f in FIELDS[:5]}
-        sample["category"] = "鼠标"
-        sample["brand"] = "罗技"
-        sample["model"] = "G502"
-        for col, field in enumerate(FIELDS, 1):
-            ws.cell(row=2, column=col, value=sample.get(field, ""))
+        for col, key in enumerate(keys, 1):
+            sample_map = {"category": "鼠标", "brand": "罗技", "model": "G502",
+                          "goods_no": "示例GD001", "spec_no": "示例SP001",
+                          "spec_name": "示例规格", "barcode": "6901234567890"}
+            ws.cell(row=2, column=col, value=sample_map.get(key, f"示例{labels[col-1]}"))
         # 设置列宽
-        for col in range(1, len(FIELDS) + 1):
+        for col in range(1, len(keys) + 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 18
         wb.save(path)
         QMessageBox.information(self.parent_widget, "提示",
@@ -748,7 +749,7 @@ class ProductLibraryPage(BasePage):
     def _on_import_excel(self):
         """从 Excel 导入产品数据。"""
         import openpyxl
-        from utils.product_library_manager import ProductLibraryManager
+        from utils.product_library_manager import ProductLibraryManager, FIELDS
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")
@@ -758,6 +759,7 @@ class ProductLibraryPage(BasePage):
             wb = openpyxl.load_workbook(path)
             ws = wb.active
             rows = list(ws.iter_rows(min_row=2, values_only=True))
+            field_keys = [f[0] for f in FIELDS]
             imported = 0
             errors = []
             mgr = ProductLibraryManager()
@@ -765,9 +767,9 @@ class ProductLibraryPage(BasePage):
                 if all(v is None or str(v).strip() == "" for v in row):
                     continue  # 跳过空行
                 item = {}
-                for col, field in enumerate(FIELDS):
+                for col, key in enumerate(field_keys):
                     val = row[col] if col < len(row) else None
-                    item[field] = str(val).strip() if val is not None else ""
+                    item[key] = str(val).strip() if val is not None else ""
                 # 至少要有分类+品牌
                 if not item.get("category") or not item.get("brand"):
                     errors.append(f"第 {i} 行：分类和品牌不能为空")

@@ -419,3 +419,95 @@ class AIConfigMixin:
                 self.dr_status.setText("<font color='#f59e0b'>⚠ 未登录</font>")
         except Exception as e:
             self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+
+    # ── 旺店通 ERP 配置 ──
+
+    def _save_erp_platform_cfg(self):
+        from config.paths import CONFIG_DIR
+        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
+        try:
+            cfg = {
+                "base_url": self.erp_url_input.text().strip(),
+                "appkey": self.erp_appkey_input.text().strip(),
+                "appsecret": self.erp_appsecret_input.text().strip(),
+                "sid": self.erp_sid_input.text().strip(),
+            }
+            os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            self.lbl_erp_status.setText("✅ 配置已保存")
+            self.lbl_erp_status.setStyleSheet("color: #4ade80;")
+        except Exception as e:
+            self.lbl_erp_status.setText(f"❌ 保存失败: {e}")
+            self.lbl_erp_status.setStyleSheet("color: #f87171;")
+
+    def load_erp_platform_cfg(self):
+        from config.paths import CONFIG_DIR
+        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
+        try:
+            if os.path.isfile(cfg_path):
+                with open(cfg_path, encoding="utf-8") as f:
+                    cfg = json.load(f)
+                self.erp_url_input.setText(cfg.get("base_url", ""))
+                self.erp_appkey_input.setText(cfg.get("appkey", ""))
+                self.erp_appsecret_input.setText(cfg.get("appsecret", ""))
+                self.erp_sid_input.setText(cfg.get("sid", ""))
+        except Exception as e:
+            print(f"加载 ERP 配置失败: {e}")
+
+    # ── 数据库配置 ──
+
+    def _save_matdb_platform_cfg(self):
+        from config.paths import CONFIG_DIR
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
+        try:
+            import json as _json
+            cfg = {}
+            if os.path.isfile(cfg_path):
+                with open(cfg_path, encoding="utf-8") as f:
+                    cfg = _json.load(f)
+            cfg["db_host"] = self.matdb_host_input.text().strip()
+            cfg["db_port"] = int(self.matdb_port_input.text().strip() or 0)
+            cfg["db_name"] = self.matdb_name_input.text().strip()
+            cfg["db_user"] = self.matdb_user_input.text().strip()
+            cfg["db_password"] = self.matdb_pass_input.text().strip()
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            self.lbl_db_status.setText("✅ 配置已保存")
+            self.lbl_db_status.setStyleSheet("color: #4ade80;")
+        except Exception as e:
+            self.lbl_db_status.setText(f"❌ 保存失败: {e}")
+            self.lbl_db_status.setStyleSheet("color: #f87171;")
+
+    def load_matdb_platform_cfg(self):
+        from config.paths import CONFIG_DIR
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
+        try:
+            if os.path.isfile(cfg_path):
+                with open(cfg_path, encoding="utf-8") as f:
+                    cfg = json.load(f)
+                self.matdb_host_input.setText(cfg.get("db_host", "192.168.111.17"))
+                self.matdb_port_input.setText(str(cfg.get("db_port", 15432)))
+                self.matdb_name_input.setText(cfg.get("db_name", "material_index"))
+                self.matdb_user_input.setText(cfg.get("db_user", "postgres"))
+                self.matdb_pass_input.setText(cfg.get("db_password", ""))
+        except Exception as e:
+            print(f"加载数据库配置失败: {e}")
+
+    def _test_matdb_platform(self):
+        import psycopg2
+        try:
+            self.lbl_db_status.setText("⏳ 测试中...")
+            self.lbl_db_status.setStyleSheet("color: #facc15;")
+            host = self.matdb_host_input.text().strip()
+            port = int(self.matdb_port_input.text().strip() or 15432)
+            dbname = self.matdb_name_input.text().strip()
+            user = self.matdb_user_input.text().strip()
+            password = self.matdb_pass_input.text().strip()
+            conn = psycopg2.connect(host=host, port=port, dbname=dbname, user=user, password=password, connect_timeout=5)
+            conn.close()
+            self.lbl_db_status.setText("✅ 连接成功")
+            self.lbl_db_status.setStyleSheet("color: #4ade80;")
+        except Exception as e:
+            self.lbl_db_status.setText(f"❌ 连接失败: {e}")
+            self.lbl_db_status.setStyleSheet("color: #f87171;")

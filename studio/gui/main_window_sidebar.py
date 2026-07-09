@@ -69,25 +69,25 @@ class SidebarMixin:
 
 
 
-        # 3. 账户平台 Section
-        account_card = QFrame()
-        account_card.setProperty("section_type", "account")
-        account_layout = QVBoxLayout(account_card)
-        account_layout.setContentsMargins(6, 8, 6, 8)
-        account_layout.setSpacing(2)
-
-        account_header = QLabel("账户平台")
-        account_header.setObjectName("section_header")
-        account_layout.addWidget(account_header)
-
-        account_btn = QPushButton("👥 抖音账户")
-        account_btn.setObjectName("nav_button")
-        account_btn.setProperty("target_index", 8)
-        account_btn.setCursor(Qt.PointingHandCursor)
-        account_btn.clicked.connect(lambda checked=False: self.switch_page(8))
-        account_layout.addWidget(account_btn)
-        self.nav_buttons.append(account_btn)
-        scroll_layout.addWidget(account_card)
+        # 3. 账户平台 Section (暂时隐藏)
+        # account_card = QFrame()
+        # account_card.setProperty("section_type", "account")
+        # account_layout = QVBoxLayout(account_card)
+        # account_layout.setContentsMargins(6, 8, 6, 8)
+        # account_layout.setSpacing(2)
+        #
+        # account_header = QLabel("账户平台")
+        # account_header.setObjectName("section_header")
+        # account_layout.addWidget(account_header)
+        #
+        # account_btn = QPushButton("👥 抖音账户")
+        # account_btn.setObjectName("nav_button")
+        # account_btn.setProperty("target_index", 8)
+        # account_btn.setCursor(Qt.PointingHandCursor)
+        # account_btn.clicked.connect(lambda checked=False: self.switch_page(8))
+        # account_layout.addWidget(account_btn)
+        # self.nav_buttons.append(account_btn)
+        # scroll_layout.addWidget(account_card)
 
         # 4. 方案脚本 Section
         script_card = QFrame()

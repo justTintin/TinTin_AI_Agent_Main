@@ -239,7 +239,6 @@ class PageSetupMixin:
         from gui.mg_animation_page import MGAnimationPage
         self.mg_animation_tool = MGAnimationPage(self.page_mg_animation, self)
         self.mg_animation_tool.setup()
-        self.mg_animation_tool._show_dev_only()
 
     def setup_marketing_detect_page(self):
         from gui.marketing_detect_page import MarketingDetectPage

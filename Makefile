@@ -14,23 +14,21 @@ install: ## 安装运行依赖
 	$(VENV)/bin/pip install playwright
 	$(VENV)/bin/playwright install chromium
 
-install-dev: install ## 安装开发依赖（含 pyinstaller）
-	$(VENV)/bin/pip install pyinstaller
+install-dev: install ## 安装开发依赖
+	@echo "注意：打包/发布功能已迁移到独立发布工程 TinTin_Release_Builder"
 
 run: ## 开发模式运行
 	./run.sh
 
-build-win: ## 打包 Windows .exe
-	$(PYTHON) build.py win
+build-win build-linux build: ## 打包已迁移到发布工程
+	@echo "============================================================"
+	@echo "  打包/发布功能已迁移到独立发布工程："
+	@echo "    D:\\Project\\TinTin_Release_Builder\\release.py"
+	@echo "  请在该工程执行：python release.py"
+	@echo "  或双击 运行.bat"
+	@echo "============================================================"
 
-build-linux: ## 打包 Linux 可执行文件
-	$(PYTHON) build.py linux
-
-build: ## 打包当前平台
-	$(PYTHON) build.py $$([ "$$(uname -s)" = "Linux" ] && echo "linux" || echo "win")
-
-clean: ## 清理构建产物
-	$(PYTHON) build.py clean
+clean: ## 清理缓存
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name '*.pyc' -delete 2>/dev/null || true
 

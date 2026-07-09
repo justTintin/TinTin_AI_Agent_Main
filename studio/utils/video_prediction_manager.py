@@ -13,7 +13,7 @@ from config.paths import VIDEO_PREDICTIONS_FILE
 from utils.logger_utils import log
 
 # 投放平台（与素材浏览器/热点一致）
-PLATFORMS = ["抖音", "小红书", "视频号", "B站", "快手", "YouTube"]
+PLATFORMS = ["抖音", "小红书", "视频号", "B站", "快手"]
 
 # 预测维度（雷达图，6 维）
 DIMENSIONS = ["吸睛力", "画面冲击", "悬念信息", "节奏", "完播预测", "平台适配"]

@@ -2,7 +2,7 @@
 """
 📈 热点追踪页。
 
-看各平台(抖音/知乎/小红书/B站)今日热榜 + 趋势(上榜天数/排名变化)，按 科技/数码/AI 筛选，
+看各平台(抖音/小红书/B站)今日热榜 + 趋势(上榜天数/排名变化)，按 科技/数码/AI 筛选，
 并把热点蒸馏归纳为「选题方向」写入「我的知识库」。
 
 采集在素材浏览器(Electron)里做；本页负责 导入趋势库 / 查看 / 蒸馏。
@@ -20,7 +20,7 @@ from utils.my_knowledge_manager import MyKnowledgeManager
 from utils import asset_browser_client as abrowser
 from utils import knowledge_distiller
 
-PLATFORM_CN = {"douyin": "抖音", "zhihu": "知乎", "xiaohongshu": "小红书", "bilibili": "B站"}
+PLATFORM_CN = {"douyin": "抖音", "xiaohongshu": "小红书", "bilibili": "B站"}
 
 
 class _HotspotDistillWorker(BaseWorker):

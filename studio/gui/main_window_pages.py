@@ -23,7 +23,6 @@ from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.subtitle_removal_page import SubtitleRemovalPage
 from gui.live_clip_page import LiveClipPage
-from gui.base_page import _show_dev_only
 from gui.voice_clone_page import VoiceClonePage
 from gui.voice_samples_page import VoiceSamplesPage
 from gui.video_ocr_page import VideoOcrPage
@@ -85,7 +84,6 @@ class PageSetupMixin:
         from gui.ai_script_page import AIScriptPage
         self.ai_script_tool = AIScriptPage(self.page_ai_script, self)
         self.ai_script_tool.setup()
-        self.ai_script_tool._show_dev_only()
 
     def setup_voice_clone_page(self):
         from gui.voice_clone_page import VoiceClonePage
@@ -236,13 +234,11 @@ class PageSetupMixin:
         from gui.cover_maker_page import CoverMakerPage
         self.cover_maker_tool = CoverMakerPage(self.page_cover_maker, self)
         self.cover_maker_tool.setup()
-        self.cover_maker_tool._show_dev_only()
 
     def setup_compile_video_page(self):
         from gui.compile_video_page import CompileVideoPage
         self.compile_video_tool = CompileVideoPage(self.page_compile_video, self)
         self.compile_video_tool.setup()
-        self.compile_video_tool._show_dev_only()
 
     def setup_hook_score_page(self):
         from gui.hook_score_page import HookScorePage
@@ -758,8 +754,6 @@ class PageSetupMixin:
             self.current_workflow_data = None
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
-
-            _show_dev_only(self.page_digital_human)
 
     def setup_task_list_page(self):
             layout = QVBoxLayout(self.page_task_list)

@@ -105,7 +105,7 @@ class SidebarMixin:
             ("📦 产品资料", 28),
             ("🛒 产品文案创作", 30),
             ("📝 分镜脚本创作", 38),
-            ("✍️ 飞书选题文案", 20),
+            # ("✍️ 飞书选题文案", 20),       # 下版本
         ]
         for text, index in script_menus:
             btn = QPushButton(text)
@@ -164,7 +164,7 @@ class SidebarMixin:
         compose_layout.addWidget(compose_header)
 
         compose_menus = [
-            ("🚀 一键成片", 34),
+            # ("🚀 一键成片", 34),           # 下版本
             ("✂️ 智能混剪", 15),
             ("📡 直播切片", 19),
         ]
@@ -190,7 +190,7 @@ class SidebarMixin:
         graphics_layout.addWidget(graphics_header)
         
         graphics_menus = [
-            ("🖼️ 封面制作", 33),
+            # ("🖼️ 封面制作", 33),          # 下版本
             ("👤 图像抠图", 16),
             # ("🗂️ 智能分层", 17),          # 暂时隐藏
             ("👁️ 图片框选 OCR", 25),
@@ -217,7 +217,7 @@ class SidebarMixin:
         video_layout.addWidget(video_header)
         
         video_menus = [
-            ("🗣️ 数字人", 3),
+            # ("🗣️ 数字人", 3),             # 下版本
             ("💬 视频转文字", 12),
             ("🎙️ 声音克隆", 21),
             ("🎞️ 视频去字幕", 18),

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "dist": "electron-packager . \"丁大怪-电商智能体矩阵素材下载浏览器\" --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=bin"
+    "dist": "electron-packager . \"螺丝钉-电商智能体矩阵素材浏览器\" --platform=win32 --arch=x64 --out=dist --overwrite --extra-resource=bin"
   },
   "devDependencies": {
     "electron": "^30.5.1",

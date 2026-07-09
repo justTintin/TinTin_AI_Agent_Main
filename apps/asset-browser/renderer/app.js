@@ -127,7 +127,7 @@ async function init() {
       webview.src = h.searchUrl;
       addressInput.value = h.searchUrl;
       if (h.topic) {
-        document.title = `选题：${h.topic} — 丁大怪-电商智能体矩阵 素材浏览器`;
+	        document.title = `选题：${h.topic} — 螺丝钉-电商智能体矩阵 素材浏览器`;
       }
       // 将选题专属下载目录设为本次会话的下载路径，并记录到历史目录列表
       if (h.downloadDir) {

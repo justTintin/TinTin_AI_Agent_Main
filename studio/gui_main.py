@@ -1481,20 +1481,27 @@ if __name__ == "__main__":
         app = QApplication(sys.argv)
 
         # ── 单例保护：只允许运行一个实例 ──
-        _singleton_key = "dingdaguai.ecommerce.agent.matrix.single_instance"
-        _shmem = QSharedMemory(_singleton_key)
-        # 先清理上次崩溃/异常退出可能残留的脏锁：
-        # attach 成功说明共享内存存在，detach 后若 create 仍失败，才是真有实例在运行
-        if _shmem.attach():
-            _shmem.detach()
-        # 尝试创建；失败则说明有存活实例持有该共享内存
-        if not _shmem.create(1):
+        _is_already_running = False
+        if sys.platform == "win32":
+            # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
+            import ctypes as _ctypes
+            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "dingdaguai.ecommerce.agent.matrix.single_instance")
+            if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                _is_already_running = True
+        else:
+            # Linux/macOS: QSharedMemory
+            _singleton_key = "dingdaguai.ecommerce.agent.matrix.single_instance"
+            _shmem = QSharedMemory(_singleton_key)
+            if _shmem.attach():
+                _shmem.detach()
+            if not _shmem.create(1):
+                _is_already_running = True
+            import atexit as _atexit
+            _atexit.register(lambda: _shmem.detach() if _shmem.isAttached() else None)
+        if _is_already_running:
             from PySide6.QtWidgets import QMessageBox as _QMB
             _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
             sys.exit(0)
-        # 注册退出钩子：进程结束时主动 detach 共享内存，避免残留导致下次启动误判
-        import atexit as _atexit
-        _atexit.register(lambda: _shmem.detach() if _shmem.isAttached() else None)
 
         app.setAttribute(Qt.AA_DontUseNativeDialogs, True)  # 主题对话框
         app.setStyle("Fusion")

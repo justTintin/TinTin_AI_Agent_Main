@@ -422,63 +422,6 @@ class EnvConfigPage(BasePage):
 
         scroll_layout.addWidget(group_nasdirs)
 
-        # ── ERP 系统配置 ──
-        group_erp = QGroupBox("🏪 旺店通 ERP 配置")
-        group_erp.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #f97316; }
-        """)
-        layout_erp = QVBoxLayout(group_erp)
-        layout_erp.setContentsMargins(16, 20, 16, 16)
-        layout_erp.setSpacing(10)
-        erp_desc = QLabel("配置旺店通 ERP 接口。产品资料从仓库同步时使用。留空则不启用，可在产品资料页导入表格。")
-        erp_desc.setObjectName("muted_text"); erp_desc.setWordWrap(True)
-        layout_erp.addWidget(erp_desc)
-        # API 地址
-        row_erp1 = QHBoxLayout()
-        row_erp1.addWidget(QLabel("API 地址："))
-        self.edit_erp_url = QLineEdit()
-        self.edit_erp_url.setPlaceholderText("https://api.wangdian.cn/openapi2/")
-        row_erp1.addWidget(self.edit_erp_url, 1)
-        layout_erp.addLayout(row_erp1)
-        # AppKey
-        row_erp2 = QHBoxLayout()
-        row_erp2.addWidget(QLabel("AppKey："))
-        self.edit_erp_appkey = QLineEdit()
-        self.edit_erp_appkey.setPlaceholderText("旺店通 appkey")
-        row_erp2.addWidget(self.edit_erp_appkey, 1)
-        layout_erp.addLayout(row_erp2)
-        # AppSecret
-        row_erp3 = QHBoxLayout()
-        row_erp3.addWidget(QLabel("AppSecret："))
-        self.edit_erp_appsecret = QLineEdit()
-        self.edit_erp_appsecret.setPlaceholderText("旺店通 appsecret")
-        self.edit_erp_appsecret.setEchoMode(QLineEdit.Password)
-        row_erp3.addWidget(self.edit_erp_appsecret, 1)
-        layout_erp.addLayout(row_erp3)
-        # SID
-        row_erp4 = QHBoxLayout()
-        row_erp4.addWidget(QLabel("SID："))
-        self.edit_erp_sid = QLineEdit()
-        self.edit_erp_sid.setPlaceholderText("旺店通商家编码")
-        row_erp4.addWidget(self.edit_erp_sid, 1)
-        layout_erp.addLayout(row_erp4)
-        # 按钮
-        row_erp5 = QHBoxLayout()
-        self.lbl_erp_status = QLabel("")
-        self.lbl_erp_status.setObjectName("muted_text")
-        row_erp5.addWidget(self.lbl_erp_status, 1)
-        btn_test_erp = QPushButton("🔌 测试连接")
-        btn_test_erp.setObjectName("secondary_button")
-        btn_test_erp.clicked.connect(self._test_erp_connection)
-        row_erp5.addWidget(btn_test_erp)
-        btn_save_erp = QPushButton("💾 保存 ERP 配置")
-        btn_save_erp.setObjectName("secondary_button")
-        btn_save_erp.clicked.connect(self._save_erp_config)
-        row_erp5.addWidget(btn_save_erp)
-        layout_erp.addLayout(row_erp5)
-        scroll_layout.addWidget(group_erp)
-
         scroll_area.setWidget(scroll_widget)
         card_layout.addWidget(scroll_area)
 
@@ -944,8 +887,6 @@ class EnvConfigPage(BasePage):
                     list_item.setData(Qt.UserRole, {"local_path": local_path, "nas_folder": nas_folder})
                     self.list_index_dirs.addItem(list_item)
                 self.edit_clip_model_dir.setText(cfg.get("clip_model_dir") or "")
-                # ERP 配置
-                self._load_erp_config()
         except Exception as e:
             log.error(f"加载素材向量库数据库配置失败: {e}")
         # 显示当前模型状态
@@ -1249,69 +1190,7 @@ class EnvConfigPage(BasePage):
 
     # ── 旺店通 ERP 配置 ──
 
-    def _load_erp_config(self):
-        import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "erp_config.json")
-        try:
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                self.edit_erp_url.setText(cfg.get("base_url", ""))
-                self.edit_erp_appkey.setText(cfg.get("appkey", ""))
-                self.edit_erp_appsecret.setText(cfg.get("appsecret", ""))
-                self.edit_erp_sid.setText(cfg.get("sid", ""))
-        except Exception as e:
-            log.error(f"加载 ERP 配置失败: {e}")
-
-    def _save_erp_config(self):
-        import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "erp_config.json")
-        try:
-            cfg = {
-                "base_url": self.edit_erp_url.text().strip(),
-                "appkey": self.edit_erp_appkey.text().strip(),
-                "appsecret": self.edit_erp_appsecret.text().strip(),
-                "sid": self.edit_erp_sid.text().strip(),
-            }
-            os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            self.lbl_erp_status.setText("✅ 配置已保存")
-            self.lbl_erp_status.setStyleSheet("color: #4ade80;")
-            QMessageBox.information(self, "提示", "ERP 配置已保存。")
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存失败: {e}")
-
-    def _test_erp_connection(self):
-        from utils.wdt_client import WdtClient
-        try:
-            self.lbl_erp_status.setText("⏳ 测试中...")
-            self.lbl_erp_status.setStyleSheet("color: #facc15;")
-            cfg = {
-                "base_url": self.edit_erp_url.text().strip(),
-                "appkey": self.edit_erp_appkey.text().strip(),
-                "appsecret": self.edit_erp_appsecret.text().strip(),
-                "sid": self.edit_erp_sid.text().strip(),
-            }
-            if not cfg["appkey"]:
-                self.lbl_erp_status.setText("⚠️ 请先填写 AppKey")
-                self.lbl_erp_status.setStyleSheet("color: #f87171;")
-                return
-            client = WdtClient(**cfg)
-            result = client.goods_query(page_no=1, page_size=1)
-            if result is not None:
-                self.lbl_erp_status.setText("✅ ERP 连接成功")
-                self.lbl_erp_status.setStyleSheet("color: #4ade80;")
-            else:
-                self.lbl_erp_status.setText("❌ ERP 连接失败")
-                self.lbl_erp_status.setStyleSheet("color: #f87171;")
-        except Exception as e:
-            self.lbl_erp_status.setText(f"❌ 连接失败: {e}")
-            self.lbl_erp_status.setStyleSheet("color: #f87171;")
-
-    # ── NAS 入库目录配置 ──
+	    # ── NAS 入库目录配置 ──
 
     def _browse_nas_root(self):
         d = QFileDialog.getExistingDirectory(self.parent_widget, "选择 NAS 根目录")

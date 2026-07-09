@@ -32,6 +32,7 @@ PLATFORMS = {
     "bilibili": "B 站",
     "xiaohongshu": "小红书",
     "tiktok": "TikTok",
+    # "youtube": "YouTube",  # 暂时隐藏
 }
 
 

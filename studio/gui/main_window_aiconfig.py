@@ -303,42 +303,71 @@ class AIConfigMixin:
             sender.setEnabled(False)
         self.vision_status_lbl.setText("正在测试...")
         self.vision_status_lbl.setStyleSheet("color: #f39c12;")
-        try:
-            import requests
-            api_url = self.llm_vision_api_url_input.text().strip()
-            api_key = self.llm_api_key_input.text().strip()
-            model = self.llm_vision_model_input.currentText().strip()
-            if not api_url:
-                self.vision_status_lbl.setText("⚠️ 请填写接口地址")
-                self.vision_status_lbl.setStyleSheet("color: #f39c12;")
-                if sender:
-                    sender.setEnabled(True)
-                return
-            url = f"{api_url.rstrip('/')}/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            payload = {"model": model or "qwen2.5vl:7b", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                self.vision_status_lbl.setText(f"✅ 连接成功 ({model})")
-                self.vision_status_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            elif res.status_code == 401:
-                self.vision_status_lbl.setText(f"❌ 认证失败，请检查 API Key")
-                self.vision_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            elif res.status_code == 404:
-                self.vision_status_lbl.setText(f"❌ 接口地址或模型名错误 (404)")
-                self.vision_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            else:
-                msg = res.json().get("error", {}).get("message", res.text[:60])
-                self.vision_status_lbl.setText(f"❌ HTTP {res.status_code}: {msg}")
-                self.vision_status_lbl.setStyleSheet("color: #e74c3c;")
-        except Exception as e:
-            err = str(e)[:80]
-            self.vision_status_lbl.setText(f"❌ 连接失败: {err}")
-            self.vision_status_lbl.setStyleSheet("color: #e74c3c;")
-        if sender:
-            sender.setEnabled(True)
+
+        api_url = self.llm_vision_api_url_input.text().strip()
+        api_key = self.llm_api_key_input.text().strip()
+        model = self.llm_vision_model_input.currentText().strip()
+
+        if not api_url:
+            self.vision_status_lbl.setText("⚠️ 请填写接口地址")
+            self.vision_status_lbl.setStyleSheet("color: #f39c12;")
+            if sender:
+                sender.setEnabled(True)
+            return
+
+        # 本地 Ollama：测试前先预热模型（避免冷加载读超时）。整个测试放到后台线程，
+        # 预热+测试可能耗时数十秒，避免卡死 UI。
+        is_local_ollama = "127.0.0.1:11434" in api_url or "localhost:11434" in api_url
+
+        class _TestWorker(QThread):
+            done = Signal(bool, str, str)  # (ok, status_text, color)
+
+            def __init__(self, url, key, mdl, warmup):
+                super().__init__()
+                self.url, self.key, self.mdl, self.warmup = url, key, mdl, warmup
+
+            def run(self):
+                import requests
+                if self.warmup:
+                    try:
+                        from utils.ollama_manager import OllamaManager
+                        OllamaManager.get().warmup_model(self.mdl)
+                    except Exception as e:
+                        log.warning(f"测试连接前预热失败（继续尝试）: {e}")
+                full_url = f"{self.url.rstrip('/')}/v1/chat/completions"
+                headers = {"Content-Type": "application/json"}
+                if self.key:
+                    headers["Authorization"] = f"Bearer {self.key}"
+                payload = {"model": self.mdl or "qwen2.5vl:7b",
+                           "messages": [{"role": "user", "content": "Hi"}],
+                           "max_tokens": 5}
+                try:
+                    res = requests.post(full_url, json=payload, headers=headers, timeout=120)
+                    if res.status_code == 200:
+                        self.done.emit(True, f"✅ 连接成功 ({self.mdl})", "#2ecc71")
+                    elif res.status_code == 401:
+                        self.done.emit(False, "❌ 认证失败，请检查 API Key", "#e74c3c")
+                    elif res.status_code == 404:
+                        self.done.emit(False, "❌ 接口地址或模型名错误 (404)", "#e74c3c")
+                    else:
+                        msg = res.json().get("error", {}).get("message", res.text[:60])
+                        self.done.emit(False, f"❌ HTTP {res.status_code}: {msg}", "#e74c3c")
+                except Exception as e:
+                    err = str(e)[:80]
+                    if "Read timed out" in err or "ReadTimeout" in err:
+                        self.done.emit(False, "⏳ 模型正在加载进显存，请稍后重试（已触发后台预热）", "#f39c12")
+                    else:
+                        self.done.emit(False, f"❌ 连接失败: {err}", "#e74c3c")
+
+        def _on_done(ok, text, color):
+            self.vision_status_lbl.setText(text)
+            self.vision_status_lbl.setStyleSheet(f"color: {color}; font-weight: bold;")
+            if sender:
+                sender.setEnabled(True)
+
+        self._vision_test_worker = _TestWorker(api_url, api_key, model, is_local_ollama)
+        self._vision_test_worker.done.connect(_on_done)
+        self._vision_test_worker.start()
 
     def on_backend_changed(self, index):
         is_rh = (index == 1)

@@ -23,6 +23,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
+# config 目录由 paths.py 统一管理（支持源码模式与 frozen 打包模式）
+from config.paths import CONFIG_DIR
+
 # ── 公钥（嵌入代码用于验证；私钥由开发者离线保管，不在此工程内）──────────────
 _PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtGAXKhTWuqV6MT9CjrDB
@@ -98,7 +101,7 @@ def verify_license(license_json: str | None = None) -> LicenseInfo:
     """验证 License 文件，校验签名 + 机器码 + 有效期。失败抛 LicenseError。"""
     # 读取 License 文件
     if license_json is None:
-        license_path = Path(__file__).resolve().parent.parent / "config" / _LICENSE_FILE
+        license_path = Path(CONFIG_DIR) / _LICENSE_FILE
         if not license_path.exists():
             raise LicenseError("未找到许可证文件，请将 license.dat 放入 studio/config/ 目录")
 
@@ -169,8 +172,7 @@ _ACTIVATION_CACHE_FILE = ".activation_cache"
 
 
 def _get_whitelist_path() -> str:
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "config", _TRIAL_WHITELIST_FILE)
+    return os.path.join(CONFIG_DIR, _TRIAL_WHITELIST_FILE)
 
 
 def check_trial_whitelist(machine_id: str | None = None) -> bool:
@@ -204,10 +206,7 @@ def verify_activation_code(code_text_raw: str) -> LicenseInfo | None:
 
 def save_activation_cache(info: LicenseInfo):
     """将激活信息缓存到本地文件，下次启动直接读取。"""
-    cache_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config", _ACTIVATION_CACHE_FILE
-    )
+    cache_path = os.path.join(CONFIG_DIR, _ACTIVATION_CACHE_FILE)
     try:
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump({
@@ -222,10 +221,7 @@ def save_activation_cache(info: LicenseInfo):
 
 def load_activation_cache() -> LicenseInfo | None:
     """读取本地的激活缓存。"""
-    cache_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "config", _ACTIVATION_CACHE_FILE
-    )
+    cache_path = os.path.join(CONFIG_DIR, _ACTIVATION_CACHE_FILE)
     try:
         if os.path.isfile(cache_path):
             with open(cache_path, encoding="utf-8") as f:

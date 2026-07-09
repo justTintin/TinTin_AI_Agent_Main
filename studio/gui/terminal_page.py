@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QEvent, QObject
 from PySide6.QtGui import QFont, QColor, QTextCursor, QKeyEvent
 
 from gui.base_page import BasePage
+from config.paths import PROJECT_ROOT
 
 
 # ── Python 路径解析（pythonw.exe → python.exe）────────────────────────────────
@@ -37,8 +38,8 @@ _PYTHON_EXE  = _resolve_python()
 _PYTHON_DIR  = os.path.dirname(_PYTHON_EXE)
 _SCRIPTS_DIR = os.path.join(_PYTHON_DIR, "Scripts")
 
-# studio 根目录（terminal_page.py 在 studio/gui/ 下）
-_STUDIO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# studio 根目录（统一由 paths.py 管理，支持源码与 frozen 模式）
+_STUDIO_DIR = PROJECT_ROOT
 
 
 # ── 快捷按钮定义 ──────────────────────────────────────────────────────────────

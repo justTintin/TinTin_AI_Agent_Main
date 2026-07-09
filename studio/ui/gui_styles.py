@@ -5,8 +5,9 @@
 """
 import os
 
-_CHECK_ICON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "assets", "icons", "check.svg")
+from config.paths import BUNDLE_ICONS_DIR
+
+_CHECK_ICON = os.path.join(BUNDLE_ICONS_DIR, "check.svg")
 _CHECK_ICON_URL = f"file:///{_CHECK_ICON.replace(os.sep, '/')}"
 
 STYLE_SHEET = """

@@ -21,6 +21,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from utils.logger_utils import log
+from config.paths import OUTPUTS_DIR, TMP_DIR
 
 
 HOT_KEYWORDS_CN = [
@@ -1387,9 +1388,8 @@ class ClipListItemWidget(QFrame):
         self.pbar_slice.setVisible(True)
         
         if not self.main_page.output_dir:
-            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             vname = os.path.splitext(os.path.basename(self.main_page.video_path))[0]
-            self.main_page.output_dir = os.path.join(base, "outputs", "live_clips", vname)
+            self.main_page.output_dir = os.path.join(OUTPUTS_DIR, "live_clips", vname)
             os.makedirs(self.main_page.output_dir, exist_ok=True)
             
         clip_data = dict(self.clip_info)
@@ -1866,10 +1866,8 @@ class LiveClipPage(BasePage):
             self.video_info_lbl.setText(f"\U0001F4E6 文件: {gb:.1f} GB  |  流式处理，内存安全")
             
             # Auto-check if audio was already extracted previously
-            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            tmp_dir = os.path.join(base, ".runtime", "tmp")
             vname = os.path.splitext(os.path.basename(path))[0]
-            self.audio_path = os.path.join(tmp_dir, f"{vname}_audio.wav")
+            self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
             if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
                 self.audio_player.set_audio_path(self.audio_path)
             else:
@@ -1884,11 +1882,9 @@ class LiveClipPage(BasePage):
         self.video_path = video_path
         self.btn_export_sub.setEnabled(False)
 
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        tmp_dir = os.path.join(base, ".runtime", "tmp")
-        os.makedirs(tmp_dir, exist_ok=True)
+        os.makedirs(TMP_DIR, exist_ok=True)
         vname = os.path.splitext(os.path.basename(video_path))[0]
-        self.audio_path = os.path.join(tmp_dir, f"{vname}_audio.wav")
+        self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
 
         # Skip audio extraction if audio_path already exists and is valid
         if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
@@ -1926,8 +1922,7 @@ class LiveClipPage(BasePage):
             
         setup_nvidia_dll_path()
 
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        out_dir = os.path.join(base, "outputs", "transcription")
+        out_dir = os.path.join(OUTPUTS_DIR, "transcription")
         os.makedirs(out_dir, exist_ok=True)
         vname = os.path.splitext(os.path.basename(self.video_path))[0]
         out = os.path.join(out_dir, f"{vname}.srt")
@@ -2207,9 +2202,8 @@ class LiveClipPage(BasePage):
             QMessageBox.warning(self.parent_widget, "未选择", "当前没有可切片的片段")
             return
 
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         vname = os.path.splitext(os.path.basename(self.video_path))[0]
-        self.output_dir = os.path.join(base, "outputs", "live_clips", vname)
+        self.output_dir = os.path.join(OUTPUTS_DIR, "live_clips", vname)
         os.makedirs(self.output_dir, exist_ok=True)
 
         self.btn_clip.setEnabled(False)

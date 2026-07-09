@@ -6,7 +6,9 @@ import os
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QApplication
 
-_THEME_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "theme.json")
+from config.paths import CONFIG_DIR
+
+_THEME_CONFIG_FILE = os.path.join(CONFIG_DIR, "theme.json")
 
 THEME_OPTIONS = ["system", "dark", "light"]
 

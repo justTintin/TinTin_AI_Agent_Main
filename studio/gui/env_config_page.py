@@ -15,7 +15,7 @@ import configparser
 from utils.logger_utils import log
 from config.paths import (WORKSPACE_ROOT, APPS_DIR, PYTHON_EMBEDED_DIR, WHISPER_MODELS_DIR,
                            VSR_DIR, VOXCPM2_DIR, KNOWLEDGE_MATERIALS_DIR,
-                           DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE)
+                           DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
 def get_voxcpm_python():
     from utils.platform_utils import find_venv_python
@@ -514,12 +514,8 @@ class EnvConfigPage(BasePage):
         info["whisper_ok"] = False
         try:
             # Add apps to sys.path to check if whisperx can be loaded
-            curr_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(curr_dir)
-            workspace_root = os.path.dirname(project_root)
-            apps_dir = os.path.join(workspace_root, "apps")
-            if apps_dir not in sys.path:
-                sys.path.insert(0, apps_dir)
+            if APPS_DIR not in sys.path:
+                sys.path.insert(0, APPS_DIR)
             import whisperx
             info["whisper_version"] = "已就绪"
             info["whisper_ok"] = True
@@ -543,11 +539,10 @@ class EnvConfigPage(BasePage):
             info["dll_status"] = "未安装 (缺少 nvidia-cublas-cu12 与 nvidia-cudnn-cu12)"
 
         # 5. FFmpeg
-        curr_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(curr_dir)
-        workspace_root = os.path.dirname(project_root)
+        project_root = PROJECT_ROOT
+        workspace_root = WORKSPACE_ROOT
         candidates = [
-            os.path.join(curr_dir, "ffmpeg.exe"),
+            os.path.join(project_root, "gui", "ffmpeg.exe"),
             os.path.join(project_root, "ffmpeg.exe"),
             os.path.join(workspace_root, "ffmpeg.exe"),
             os.path.join(workspace_root, "python_embeded", "ffmpeg.exe"),
@@ -856,8 +851,7 @@ class EnvConfigPage(BasePage):
 
     def _load_matdb_config(self):
         import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         try:
             if os.path.isfile(cfg_path):
                 with open(cfg_path, encoding="utf-8") as f:
@@ -894,8 +888,7 @@ class EnvConfigPage(BasePage):
 
     def _save_matdb_config(self):
         import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         try:
             cfg = {}
             if os.path.isfile(cfg_path):
@@ -954,8 +947,7 @@ class EnvConfigPage(BasePage):
             # ── Step 1: 判断模型格式，确定需要安装哪些包 ─────────────────────
             import json as _json_inner
             cfg_path_inner = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "config", "material_index_config.json",
+                CONFIG_DIR, "material_index_config.json",
             )
             model_dir_cur = ""
             try:
@@ -1079,8 +1071,7 @@ class EnvConfigPage(BasePage):
 
     def _save_clip_model_dir(self):
         import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         try:
             cfg = {}
             if os.path.isfile(cfg_path):
@@ -1155,8 +1146,7 @@ class EnvConfigPage(BasePage):
 
                 # 写入配置
                 cfg_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "config", "material_index_config.json",
+                    CONFIG_DIR, "material_index_config.json",
                 )
                 cfg = {}
                 if os.path.isfile(cfg_path):
@@ -1241,8 +1231,7 @@ class EnvConfigPage(BasePage):
 
     def _save_nasdirs_config(self):
         import json as _json
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         try:
             cfg = {}
             if os.path.isfile(cfg_path):

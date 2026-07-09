@@ -31,6 +31,12 @@ tmp/
 *.cache
 .runtime/
 
+# 发布打包产物（分卷包/清单/日志），默认输出在工程外，此处防御性排除
+*.vol.0?? 
+*.vol.???
+*.manifest.json
+pack_log.txt
+
 # IDE
 .vscode/
 .idea/

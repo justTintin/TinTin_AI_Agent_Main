@@ -3,11 +3,32 @@ import sys
 
 IS_WIN = sys.platform == "win32"
 
-# Project root (studio/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-
-# Workspace root (TinTin_AI_Agent/)
-WORKSPACE_ROOT = os.path.dirname(PROJECT_ROOT)
+# ── 运行模式感知 ────────────────────────────────────────────────────────────
+# 两种运行模式：
+#   · 源码模式（开发）：从 studio/ 目录直接跑 .py，__file__ 指向真实磁盘路径。
+#   · frozen 模式（发布）：PyInstaller 打包成 exe，代码在只读的 _MEIPASS 临时目录，
+#     而可写数据/外部子系统必须在 exe 旁边的部署目录。
+#
+# 三个根目录：
+#   _BUNDLE_DIR   只读资源根（打包进 exe 的 assets/内置bin/图标等）。frozen 时 = _MEIPASS。
+#   PROJECT_ROOT  studio/ 根，可写数据大多派生自此。frozen 时 = 部署根/studio（可写）。
+#   WORKSPACE_ROOT 工程根，apps/python_embeded 派生自此。frozen 时 = 部署根（exe 旁）。
+#
+# 设计权衡：绝大多数派生路径（config/data/logs/accounts/outputs）是【可写数据】，
+# 所以 frozen 时 PROJECT_ROOT 指向可写部署目录，而非只读 _MEIPASS。
+# 只读资源（assets、内置 bin、brand_dictionary）改用 BUNDLE_* 常量显式指向 _BUNDLE_DIR。
+if getattr(sys, "frozen", False):
+    # frozen 模式：exe 所在目录是部署根，所有可写数据/外部子系统都在这里
+    WORKSPACE_ROOT = os.path.dirname(sys.executable)              # = exe 旁（可写）
+    PROJECT_ROOT = os.path.join(WORKSPACE_ROOT, "studio")         # 可写数据根
+    _BUNDLE_DIR = getattr(sys, "_MEIPASS", WORKSPACE_ROOT)        # 只读资源根
+    _BUNDLE_STUDIO_DIR = os.path.join(_BUNDLE_DIR, "studio")      # 打包进去的 studio/ 资源
+else:
+    # 源码模式：保持原有行为
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # studio/
+    WORKSPACE_ROOT = os.path.dirname(PROJECT_ROOT)                               # 工程根
+    _BUNDLE_DIR = PROJECT_ROOT                                                   # 资源也在 studio/
+    _BUNDLE_STUDIO_DIR = PROJECT_ROOT
 
 # Central runtime dir (studio/.runtime/)
 RUNTIME_DIR = os.path.join(PROJECT_ROOT, ".runtime")
@@ -29,7 +50,14 @@ MEDIA_LIBRARY_FILE = os.path.join(DATA_DIR, "media_library.json")
 TAG_LIBRARY_FILE = os.path.join(DATA_DIR, "tag_library.json")
 PYTHON_EMBEDED_DIR = os.path.join(WORKSPACE_ROOT, "python_embeded")
 
-# apps/ paths
+# 只读资源（打包进 exe，frozen 时在 _BUNDLE_STUDIO_DIR；源码模式与 PROJECT_ROOT 相同）
+BUNDLE_ASSETS_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "assets")
+BUNDLE_DATA_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "data")
+BRAND_DICTIONARY_FILE = os.path.join(BUNDLE_DATA_DIR, "brand_dictionary.json")
+BUNDLE_ICONS_DIR = os.path.join(BUNDLE_ASSETS_DIR, "icons")
+VOICE_SAMPLES_BUNDLE_DIR = os.path.join(BUNDLE_ASSETS_DIR, "voice_samples")
+
+# apps/ paths（外部子系统，frozen 时在部署根/apps）
 APPS_DIR = os.path.join(WORKSPACE_ROOT, "apps")
 PW_BROWSERS_DIR = os.path.join(APPS_DIR, "pw-browsers")
 WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
@@ -43,7 +71,8 @@ if not os.path.isfile(PADDLEOCR_PYTHON):
 PADDLEOCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "video_ocr_backend.py")
 IMAGE_FOLDER_OCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "image_folder_ocr_backend.py")
 REMBG_DIR = os.path.join(APPS_DIR, "rembg")
-BUNDLED_PW_BROWSERS_ZIP = os.path.join(PROJECT_ROOT, "assets", "playwright", "pw-browsers-win.zip")
+# 只读资源：assets 下的内置浏览器包（frozen 时在 _BUNDLE_DIR）
+BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")
 CREATOR_CONTENT_MANAGE_URL = "https://creator.douyin.com/creator-micro/content/manage"
 DREAMINA_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "dreamina")
 COVER_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "covers")
@@ -69,8 +98,8 @@ HOTSPOTS_FILE = os.path.join(DATA_DIR, "hotspots.json")
 VIDEO_PREDICTIONS_FILE = os.path.join(DATA_DIR, "video_predictions.json")
 VIDEO_INDEX_FILE = os.path.join(DATA_DIR, "video_index.json")
 
-# Platform-specific binary directories
-BIN_DIR = os.path.join(PROJECT_ROOT, "bin")
+# Platform-specific binary directories（内置 bin 是只读资源，frozen 时在 _BUNDLE_DIR）
+BIN_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "bin")
 PLATFORM_DIR = "win" if IS_WIN else ("linux" if sys.platform == "linux" else "darwin")
 BIN_PLATFORM_DIR = os.path.join(BIN_DIR, PLATFORM_DIR)
 

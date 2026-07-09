@@ -286,7 +286,7 @@ class SidebarMixin:
 
         python_exe  = sys.executable                        # e.g. D:\venv\Scripts\python.exe
         python_dir  = os.path.dirname(python_exe)           # e.g. D:\venv\Scripts
-        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录
+        project_dir = PROJECT_ROOT  # studio 根目录（由 paths.py 管理）
 
         activate    = os.path.join(python_dir, "activate.bat")
         if os.path.isfile(activate):

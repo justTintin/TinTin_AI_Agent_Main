@@ -6,14 +6,12 @@ import os
 import platform
 import json
 import logging
-from config.paths import AI_CONFIG_FILE
+from config.paths import AI_CONFIG_FILE, CONFIG_DIR
 
 log = logging.getLogger(__name__)
 
 # CLIP 配置文件路径
-_CLIP_CFG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "config", "material_index_config.json"
-)
+_CLIP_CFG_FILE = os.path.join(CONFIG_DIR, "material_index_config.json")
 
 def get_system_hardware_info() -> dict:
     """

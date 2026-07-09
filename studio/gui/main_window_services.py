@@ -89,7 +89,7 @@ class ServicesMixin:
                 config.add_section('VoxCPM')
             config.set('VoxCPM', 'ModelPath', self.edit_voxcpm_model_path.text().strip())
             config.set('VoxCPM', 'Port', str(self.spin_voxcpm_port.value()))
-            with open('config.ini', 'w', encoding='utf-8') as f:
+            with open(CONFIG_INI_FILE, 'w', encoding='utf-8') as f:
                 config.write(f)
             # Also save voice clone params to ai_config
             if hasattr(self, 'ai_config'):

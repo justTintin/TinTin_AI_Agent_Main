@@ -20,6 +20,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.platform_utils import open_path
 from utils.logger_utils import log
+from config.paths import CONFIG_DIR
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QFrame, QSplitter, QFileDialog, QTableWidget, QTableWidgetItem,
@@ -101,7 +102,7 @@ class _LoadBrandsWorker(BaseWorker):
     def do_work(self):
         from utils.brand_normalizer import canonical_name
         import json, psycopg2
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         with open(cfg_path) as f:
             cfg = json.load(f)
         conn = psycopg2.connect(
@@ -129,7 +130,7 @@ class _LoadCategoriesWorker(BaseWorker):
 
     def do_work(self):
         import json, psycopg2
-        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "material_index_config.json")
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
         with open(cfg_path) as f:
             cfg = json.load(f)
         conn = psycopg2.connect(
@@ -990,8 +991,7 @@ class MaterialClipPage(BasePage):
     def _reload_dir_config(self):
         import json as _json
         cfg_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "material_index_config.json"
+            CONFIG_DIR, "material_index_config.json"
         )
         self._nas_root = ""
         self._local_dir = ""
@@ -1336,8 +1336,7 @@ class MaterialClipPage(BasePage):
     def _get_index_directories(self):
         import json as _json
         cfg_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "material_index_config.json"
+            CONFIG_DIR, "material_index_config.json"
         )
         dirs = []
         try:

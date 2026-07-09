@@ -72,12 +72,14 @@ if sys.stderr is None:
         pass
 
 # Add project root and workspace root to Python path to ensure local and app modules are found
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# frozen（PyInstaller 打包）模式下依赖已内嵌，跳过源码目录注入
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.paths import (
     PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT
+    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_DIR
 )
 
 os.environ.setdefault("TMP", TMP_DIR)
@@ -363,7 +365,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.load_ai_config()
         
         self._update_splash("正在配置独立浏览器 Profile...", 45)
-        self.playwright_profile_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "playwright_profile")
+        self.playwright_profile_path = os.path.join(PROJECT_ROOT, "playwright_profile")
         os.makedirs(self.playwright_profile_path, exist_ok=True)
 
         if RunningHubManager:
@@ -869,8 +871,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         import threading
         import json
         try:
-            cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "config", "material_index_config.json")
+            cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
             if not os.path.isfile(cfg_path):
                 return
             with open(cfg_path, encoding="utf-8") as f:

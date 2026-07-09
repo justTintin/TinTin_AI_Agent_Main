@@ -10,7 +10,7 @@ from PySide6.QtCore import Signal, QThread, QUrl
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QDesktopServices
 from utils.logger_utils import log
-from config.paths import RUNTIME_DIR, TMP_DIR, OUTPUTS_DIR, WHISPER_MODELS_DIR
+from config.paths import RUNTIME_DIR, TMP_DIR, OUTPUTS_DIR, WHISPER_MODELS_DIR, APPS_DIR, BUNDLE_ASSETS_DIR
 
 WHISPER_MODELS = {
     "small": {"name": "small", "params": "244M", "description": "中等速度，较高准确率"},
@@ -411,12 +411,8 @@ class TranscriptionToolPage(BasePage):
             # Add apps to sys.path to check if whisperx can be loaded
             import sys
             import os
-            curr_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(curr_dir)
-            workspace_root = os.path.dirname(project_root)
-            apps_dir = os.path.join(workspace_root, "apps")
-            if apps_dir not in sys.path:
-                sys.path.insert(0, apps_dir)
+            if APPS_DIR not in sys.path:
+                sys.path.insert(0, APPS_DIR)
             import whisperx  # noqa: F401
             return True
         except Exception:
@@ -440,8 +436,7 @@ class TranscriptionToolPage(BasePage):
 
             def run(self):
                 try:
-                    base_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-                    wheel_dir = os.path.join(base_dir, "assets", "wheels")
+                    wheel_dir = os.path.join(BUNDLE_ASSETS_DIR, "wheels")
                     has_wheels = os.path.isdir(wheel_dir) and any(n.lower().endswith(".whl") for n in os.listdir(wheel_dir))
                     has_nvidia = bool(shutil.which("nvidia-smi"))
 

@@ -15,6 +15,7 @@ BasePage 收敛了各页重复的构造样板，并提供通用能力：
 子类只需实现 setup()。若子类重写 __init__，请调用 super().__init__(parent_widget, main_window)。
 """
 from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QObject
 
 from utils.logger_utils import log
 
@@ -77,13 +78,15 @@ def _show_dev_only(parent_widget):
     overlay.installEventFilter(_DevOverlayResizer(parent_widget, overlay))
 
 
-class _DevOverlayResizer:
+class _DevOverlayResizer(QObject):
     """事件过滤器：父控件尺寸变化时同步调整覆盖层大小"""
     def __init__(self, parent_widget, overlay):
+        super().__init__()
         self._overlay = overlay
         parent_widget.installEventFilter(self)
 
     def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
         if event.type() == QEvent.Resize and obj is not None:
             self._overlay.setGeometry(obj.rect())
         return False

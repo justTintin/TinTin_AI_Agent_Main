@@ -76,6 +76,7 @@ studio/config/license.dat
 studio/config/theme.json
 studio/config/trial_whitelist.json
 studio/config/.activation_cache
+tools/license_private.pem
 
 # pip cache
 apps/*/opt/packages/

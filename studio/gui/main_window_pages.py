@@ -108,27 +108,55 @@ class PageSetupMixin:
         # Tab 2: 素材资源
         p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
         l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30); l2.setSpacing(16)
-        # Materials dir
-        g1 = QGroupBox("📂 素材存储目录"); g1.setStyleSheet("QGroupBox { font-size:13px; font-weight:bold; border:1px solid #2e2e32; border-radius:8px; margin-top:12px; } QGroupBox::title { subcontrol-origin:margin; padding:0 8px; color:#a855f7; }")
+        # 文件下载位置
+        g1 = QGroupBox("📥 文件下载位置")
+        g1.setStyleSheet("QGroupBox { font-size:13px; font-weight:bold; border:1px solid #2e2e32; border-radius:8px; margin-top:12px; } QGroupBox::title { subcontrol-origin:margin; padding:0 8px; color:#a855f7; }")
         lg1 = QVBoxLayout(g1); lg1.setContentsMargins(16,20,16,16); lg1.setSpacing(10)
-        lg1.addWidget(QLabel("素材文件默认存储位置，可映射到外置盘或网络盘。重启生效。"))
+        lg1.addWidget(QLabel("即梦生成等文件下载默认存储位置，可映射到外置盘。重启生效。"))
         r = QHBoxLayout(); r.addWidget(QLabel("当前目录:"))
         self.res_mat_dir = QLineEdit(); self.res_mat_dir.setReadOnly(True); r.addWidget(self.res_mat_dir, 1)
         b1 = QPushButton("📁 选择"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._res_choose_mat_dir); r.addWidget(b1)
         b2 = QPushButton("↩ 恢复默认"); b2.setObjectName("secondary_button"); b2.clicked.connect(self._res_reset_mat_dir); r.addWidget(b2)
         lg1.addLayout(r); l2.addWidget(g1)
 
-        # NAS root +
-        g2 = QGroupBox("📁 NAS 共享目录"); g2.setStyleSheet(g1.styleSheet().replace("#a855f7","#8b5cf6"))
+        # 素材存储目录
+        g2 = QGroupBox("📁 素材存储目录")
+        g2.setStyleSheet(g1.styleSheet().replace("#a855f7","#8b5cf6"))
         lg2 = QVBoxLayout(g2); lg2.setContentsMargins(16,20,16,16); lg2.setSpacing(10)
-        lg2.addWidget(QLabel("配置 NAS 根目录和入库资源目录。素材入库时将从此处扫描。"))
-        r = QHBoxLayout(); r.addWidget(QLabel("NAS 根目录:"))
+        lg2.addWidget(QLabel("素材库文件来源，入库时从此处扫描。"))
+        # NAS/本机选择
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(QLabel("存储类型:"))
+        self.res_storage_type = QComboBox()
+        self.res_storage_type.addItems(["NAS 目录", "本机目录"])
+        self.res_storage_type.setCurrentIndex(0)
+        self.res_storage_type.currentIndexChanged.connect(self._res_on_storage_type_changed)
+        sel_row.addWidget(self.res_storage_type)
+        sel_row.addStretch()
+        lg2.addLayout(sel_row)
+        # NAS 根目录 (选择NAS时显示)
+        self.res_nas_group = QWidget()
+        nas_lay = QVBoxLayout(self.res_nas_group); nas_lay.setContentsMargins(0,0,0,0); nas_lay.setSpacing(6)
+        nas_lay.addWidget(QLabel("NAS 网络地址:"))
         self.res_nas_root = QLineEdit()
-        if sys.platform == "win32":
-            self.res_nas_root.setPlaceholderText(r"例: \\192.168.111.17  (留空不启用)")
-        else:
-            self.res_nas_root.setPlaceholderText("例: //192.168.111.17 或 /mnt/nas  (留空不启用)")
-        r.addWidget(self.res_nas_root, 1); lg2.addLayout(r)
+        self.res_nas_root.setPlaceholderText(r"例: \\192.168.xxx.xxx  (留空不启用)")
+        nas_lay.addWidget(self.res_nas_root)
+        lg2.addWidget(self.res_nas_group)
+        # 本机目录选择器 (选择本机时显示)
+        self.res_local_group = QWidget()
+        local_lay = QVBoxLayout(self.res_local_group); local_lay.setContentsMargins(0,0,0,0); local_lay.setSpacing(6)
+        local_lay.addWidget(QLabel("本机素材目录:"))
+        local_row = QHBoxLayout()
+        self.res_local_dir = QLineEdit()
+        self.res_local_dir.setPlaceholderText("例: D:\\素材")
+        local_row.addWidget(self.res_local_dir, 1)
+        btn_local = QPushButton("📁 浏览"); btn_local.setObjectName("secondary_button")
+        btn_local.clicked.connect(self._res_choose_local_dir)
+        local_row.addWidget(btn_local)
+        local_lay.addLayout(local_row)
+        self.res_local_group.setVisible(False)
+        lg2.addWidget(self.res_local_group)
+        # 入库资源目录列表
         lg2.addWidget(QLabel("入库资源目录列表:"))
         r2 = QHBoxLayout()
         self.res_index_dirs = QListWidget(); self.res_index_dirs.setMaximumHeight(120); self.res_index_dirs.setAlternatingRowColors(True); lg2.addWidget(self.res_index_dirs)
@@ -138,17 +166,6 @@ class PageSetupMixin:
         b_save = QPushButton("💾 保存目录配置"); b_save.setObjectName("primary_button"); b_save.clicked.connect(self._res_save_nas_config); r2.addWidget(b_save)
         lg2.addLayout(r2); l2.addWidget(g2)
 
-        # 素材管理开关
-        self.chk_show_material = QCheckBox("🗄️ 启用素材管理（向量入库/标注/检索）")
-        self.chk_show_material.setStyleSheet("font-size:14px; font-weight:bold; color:#a855f7; margin-top:8px;")
-        self.chk_show_material.toggled.connect(self._res_toggle_material)
-        l2.addWidget(self.chk_show_material)
-
-        # 素材管理容器
-        self.res_material_container = QWidget()
-        self.res_material_container.setStyleSheet("QWidget { background: transparent; }")
-        self.res_material_container.setVisible(False)
-        l2.addWidget(self.res_material_container, 1)
         l2.addStretch()
         tabs.addTab(p2, "🗄️ 素材资源")
 
@@ -995,7 +1012,7 @@ class PageSetupMixin:
 
     # ── 素材资源配置 ──
     def _res_choose_mat_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "选择素材存储目录", self.res_mat_dir.text())
+        d = QFileDialog.getExistingDirectory(self, "选择文件下载位置", self.res_mat_dir.text())
         if d:
             import json
             from config.paths import DATA_DIR
@@ -1003,7 +1020,7 @@ class PageSetupMixin:
             with open(cfg, "w", encoding="utf-8") as f:
                 json.dump({"materials_dir": d}, f, ensure_ascii=False, indent=2)
             self.res_mat_dir.setText(d)
-            QMessageBox.information(self, "提示", f"素材目录已设置为:\n{d}\n重启后生效。")
+            QMessageBox.information(self, "提示", f"下载目录已设置为:\n{d}\n重启后生效。")
 
     def _res_reset_mat_dir(self):
         from config.paths import DATA_DIR, KNOWLEDGE_MATERIALS_DIR
@@ -1012,7 +1029,7 @@ class PageSetupMixin:
             if os.path.exists(cfg): os.remove(cfg)
         except Exception: pass
         self.res_mat_dir.setText(KNOWLEDGE_MATERIALS_DIR)
-        QMessageBox.information(self, "提示", "已恢复默认素材目录。")
+        QMessageBox.information(self, "提示", "已恢复默认下载目录。")
 
     def _res_add_index_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择入库资源目录", "")
@@ -1031,7 +1048,9 @@ class PageSetupMixin:
             with open(cfg, "r", encoding="utf-8") as f:
                 try: data = json.load(f)
                 except Exception: data = {}
+        data["storage_type"] = "nas" if self.res_storage_type.currentIndex() == 0 else "local"
         data["nas_root"] = self.res_nas_root.text().strip()
+        data["local_dir"] = self.res_local_dir.text().strip()
         data["index_dirs"] = [self.res_index_dirs.item(i).text() for i in range(self.res_index_dirs.count())]
         os.makedirs(os.path.dirname(cfg), exist_ok=True)
         with open(cfg, "w", encoding="utf-8") as f:
@@ -1056,6 +1075,11 @@ class PageSetupMixin:
                 with open(cfg2, "r", encoding="utf-8") as f:
                     d = json.load(f)
                 self.res_nas_root.setText(d.get("nas_root", ""))
+                # 存储类型
+                st = d.get("storage_type", "nas")
+                self.res_storage_type.setCurrentIndex(0 if st == "nas" else 1)
+                self._res_on_storage_type_changed()
+                self.res_local_dir.setText(d.get("local_dir", ""))
                 self.res_index_dirs.clear()
                 for dd in d.get("index_directories", []):
                     if isinstance(dd, dict):
@@ -1064,16 +1088,13 @@ class PageSetupMixin:
                         self.res_index_dirs.addItem(str(dd))
             except Exception: pass
 
-    def _res_toggle_material(self, checked):
-        if checked:
-            try:
-                from gui.material_clip_page import MaterialClipPage
-                if not hasattr(self, "material_clip_tool") or not self.material_clip_tool:
-                    self.material_clip_tool = MaterialClipPage(self.res_material_container, self)
-                    self.material_clip_tool.setup()
-                self.res_material_container.setVisible(True)
-            except Exception as e:
-                import traceback; traceback.print_exc()
-                QMessageBox.critical(self, "启动失败", f"素材管理加载失败：{e}")
-        else:
-            self.res_material_container.setVisible(False)
+    def _res_on_storage_type_changed(self):
+        """根据存储类型切换显示 NAS 地址或本机目录"""
+        is_nas = self.res_storage_type.currentIndex() == 0
+        self.res_nas_group.setVisible(is_nas)
+        self.res_local_group.setVisible(not is_nas)
+
+    def _res_choose_local_dir(self):
+        d = QFileDialog.getExistingDirectory(self, "选择本机素材目录", self.res_local_dir.text())
+        if d:
+            self.res_local_dir.setText(d)

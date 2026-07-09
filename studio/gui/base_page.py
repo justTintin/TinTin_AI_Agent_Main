@@ -19,31 +19,33 @@ from PySide6.QtWidgets import QMessageBox
 from utils.logger_utils import log
 
 
+def _hide_widget_tree(widget):
+    """递归隐藏一个 widget 及其所有子孙控件"""
+    if widget is None:
+        return
+    widget.setVisible(False)
+    children = widget.findChildren(QWidget) if hasattr(widget, "findChildren") else []
+    for child in children:
+        child.setVisible(False)
+
+
 def _show_dev_only(parent_widget):
-    """隐藏页面原有子控件，并在布局中插入居中的'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
+    """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     from PySide6.QtCore import Qt
     if parent_widget is None:
         return
-    # 隐藏原有布局中所有子控件（不销毁，保留原界面以便恢复）
     layout = parent_widget.layout()
     if layout is None:
         return
+    # 递归隐藏原有布局中所有子控件及其子孙（不销毁，保留原界面以便恢复）
     for i in range(layout.count()):
         item = layout.itemAt(i)
         w = item.widget() if item else None
         if w is not None:
-            w.setVisible(False)
-    # 构建提示卡片
+            _hide_widget_tree(w)
+    # 构建提示卡片：透明背景融入页面，无色块
     card = QWidget()
-    card.setObjectName("dev_card")
-    card.setStyleSheet("""
-        QWidget#dev_card {
-            background-color: #FFF8E1;
-            border: 1px solid #FFE082;
-            border-radius: 12px;
-        }
-    """)
     card_layout = QVBoxLayout(card)
     card_layout.setContentsMargins(48, 40, 48, 40)
     card_layout.setSpacing(12)
@@ -53,13 +55,13 @@ def _show_dev_only(parent_widget):
     card_layout.addWidget(icon)
     title = QLabel("该功能正在开发中")
     title.setAlignment(Qt.AlignCenter)
-    title.setStyleSheet("font-size: 20px; font-weight: bold; color: #5D4037; background: transparent; border: none;")
+    title.setStyleSheet("font-size: 20px; font-weight: bold; color: #9E9E9E; background: transparent; border: none;")
     card_layout.addWidget(title)
     subtitle = QLabel("敬请期待")
     subtitle.setAlignment(Qt.AlignCenter)
-    subtitle.setStyleSheet("font-size: 14px; color: #8D6E63; background: transparent; border: none;")
+    subtitle.setStyleSheet("font-size: 14px; color: #BDBDBD; background: transparent; border: none;")
     card_layout.addWidget(subtitle)
-    # 插入到原布局：上下各一个 stretch 撑开，卡片居中
+    # 插入到原布局，居中显示
     layout.addWidget(card, 0, Qt.AlignCenter)
 
 

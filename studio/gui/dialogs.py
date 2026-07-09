@@ -171,12 +171,12 @@ class StartupSplash(QWidget):
         self.card = QFrame()
         self.card.setStyleSheet("""
             QFrame {
-                background-color: #222224;
-                border: 1px solid #3a3a3c;
+                background-color: #ffffff;
+                border: 1px solid #e5e5ea;
                 border-radius: 12px;
             }
             QLabel {
-                color: #e5e7eb;
+                color: #3a3a3f;
                 font-family: "Microsoft YaHei", "微软雅黑";
             }
         """)
@@ -185,12 +185,12 @@ class StartupSplash(QWidget):
         self.card_layout.setSpacing(16)
         
         title_lbl = QLabel("🤖 <b>螺丝钉-电商智能体矩阵</b>")
-        title_lbl.setStyleSheet("font-size: 18px; color: #ffffff;")
+        title_lbl.setStyleSheet("font-size: 18px; color: #1a1a1c;")
         title_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(title_lbl)
         
         self.status_lbl = QLabel("正在启动程序，准备系统核心中...")
-        self.status_lbl.setStyleSheet("font-size: 13px; color: #3b82f6;")
+        self.status_lbl.setStyleSheet("font-size: 13px; color: #6366f1;")
         self.status_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(self.status_lbl)
         
@@ -200,13 +200,13 @@ class StartupSplash(QWidget):
         self.progress.setTextVisible(False)
         self.progress.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #2e2e32;
+                border: 1px solid #e5e5ea;
                 border-radius: 4px;
-                background-color: #1c1c1e;
+                background-color: #f0f0f5;
                 height: 6px;
             }
             QProgressBar::chunk {
-                background-color: #3b82f6;
+                background-color: #6366f1;
                 border-radius: 4px;
             }
         """)
@@ -221,12 +221,12 @@ class CloseSplash(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Dialog)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1a1a1c;
-                border: 1px solid #3a3a3c;
+                background-color: #ffffff;
+                border: 1px solid #e5e5ea;
                 border-radius: 12px;
             }
             QLabel {
-                color: #e5e7eb;
+                color: #3a3a3f;
                 font-family: "Microsoft YaHei", "微软雅黑";
             }
         """)
@@ -248,12 +248,12 @@ class CloseSplash(QDialog):
         layout.setSpacing(16)
 
         title = QLabel("🔒 <b>正在安全关闭系统，请稍候...</b>")
-        title.setStyleSheet("font-size: 15px; color: #ffffff;")
+        title.setStyleSheet("font-size: 15px; color: #1a1a1c;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
         self.status_lbl = QLabel("正在释放浏览器内核、清理后台服务与未完成任务...")
-        self.status_lbl.setStyleSheet("font-size: 12px; color: #bdc3c7;")
+        self.status_lbl.setStyleSheet("font-size: 12px; color: #86868b;")
         self.status_lbl.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_lbl)
         
@@ -262,13 +262,13 @@ class CloseSplash(QDialog):
         self.progress.setTextVisible(False)
         self.progress.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #2e2e32;
+                border: 1px solid #e5e5ea;
                 border-radius: 4px;
-                background-color: #1c1c1e;
+                background-color: #f0f0f5;
                 height: 6px;
             }
             QProgressBar::chunk {
-                background-color: #e74c3c;
+                background-color: #ef4444;
                 border-radius: 4px;
             }
         """)

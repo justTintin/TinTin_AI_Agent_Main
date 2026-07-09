@@ -13,7 +13,7 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
     QFrame, QWidget, QTreeWidget, QTreeWidgetItem, QMessageBox, QComboBox,
-    QSplitter, QScrollArea, QFormLayout, QSizePolicy,
+    QSplitter, QScrollArea, QFormLayout, QSizePolicy, QFileDialog,
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
@@ -153,34 +153,27 @@ class ProductLibraryPage(BasePage):
         root.addWidget(subtitle)
 
         # 顶部：仓库同步条
-        sync_bar = QVBoxLayout()
-        sync_row1 = QHBoxLayout()
-        self.btn_sync = QPushButton("🔄 从仓库同步库存")
+        sync_bar = QHBoxLayout()
+        self.btn_sync = QPushButton("🔄 从仓库同步")
         self.btn_sync.setObjectName("primary_button")
         self.btn_sync.clicked.connect(self._on_sync)
-        sync_row1.addWidget(self.btn_sync)
-        self.btn_mine_all = QPushButton("⚡ 一键挖掘")
-        self.btn_mine_all.setObjectName("secondary_button")
-        self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
-        self.btn_mine_all.clicked.connect(self._on_mine_all)
-        sync_row1.addWidget(self.btn_mine_all)
-        self.sync_status = QLabel("")
-        self.sync_status.setObjectName("muted_text")
-        sync_row1.addWidget(self.sync_status, 1)
-        sync_bar.addLayout(sync_row1)
-        sync_row2 = QHBoxLayout()
+        sync_bar.addWidget(self.btn_sync)
         self.btn_import_excel = QPushButton("📥 导入表格")
         self.btn_import_excel.setObjectName("secondary_button")
-        self.btn_import_excel.setToolTip("从 Excel 表格导入产品数据（无 ERP 时使用）")
         self.btn_import_excel.clicked.connect(self._on_import_excel)
-        sync_row2.addWidget(self.btn_import_excel)
+        sync_bar.addWidget(self.btn_import_excel)
         self.btn_export_template = QPushButton("📄 导出模板")
         self.btn_export_template.setObjectName("secondary_button")
-        self.btn_export_template.setToolTip("导出 Excel 导入模板（当前数据格式）")
         self.btn_export_template.clicked.connect(self._on_export_template)
-        sync_row2.addWidget(self.btn_export_template)
-        sync_row2.addStretch()
-        sync_bar.addLayout(sync_row2)
+        sync_bar.addWidget(self.btn_export_template)
+        self.btn_mine_all = QPushButton("⚡ 挖掘")
+        self.btn_mine_all.setObjectName("secondary_button")
+        self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点")
+        self.btn_mine_all.clicked.connect(self._on_mine_all)
+        sync_bar.addWidget(self.btn_mine_all)
+        self.sync_status = QLabel("")
+        self.sync_status.setObjectName("muted_text")
+        sync_bar.addWidget(self.sync_status, 1)
         root.addLayout(sync_bar)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -754,8 +747,8 @@ class ProductLibraryPage(BasePage):
 
     def _on_import_excel(self):
         """从 Excel 导入产品数据。"""
-        from utils.product_library_manager import ProductLibraryManager, FIELDS
         import openpyxl
+        from utils.product_library_manager import ProductLibraryManager
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")

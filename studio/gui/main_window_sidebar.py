@@ -134,7 +134,7 @@ class SidebarMixin:
             # ("🪄 MG 动画", 36),          # 暂时隐藏
             ("🗄️ 素材管理", 42),
             ("🔍 向量检索", 39),
-            ("📋 任务列表", 9),
+            # ("📋 任务列表", 9),           # 暂时隐藏
         ]
         for text, index in media_menus:
             btn = QPushButton(text)

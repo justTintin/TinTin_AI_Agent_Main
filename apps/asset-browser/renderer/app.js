@@ -890,7 +890,7 @@ async function autoScrollToBottom(btn) {
 // 热点追踪：依次打开各平台热榜页采集，再把快照写入清单（'studio 趋势库）
 const HOTSPOT_PAGES = [
   { platform: 'douyin', url: 'https://www.douyin.com/hot' },
-  { platform: 'zhihu', url: 'https://www.zhihu.com/hot' },
+  // { platform: 'zhihu', url: 'https://www.zhihu.com/hot' },        # 暂时隐藏
   { platform: 'xiaohongshu', url: 'https://www.xiaohongshu.com/explore' },
   { platform: 'bilibili', url: 'https://www.bilibili.com/v/popular/rank/all' },
 ];
@@ -1519,8 +1519,12 @@ function renderLoginStatusBadges() {
     { id: 'bilibili', name: 'B' },
     { id: 'xiaohongshu', name: '小红' },
     { id: 'douyin', name: '抖音' },
-    { id: 'youtube', name: 'YouTube' },
-    { id: 'zhihu', name: '知乎' },
+    { id: 'bilibili', name: 'B 站' },
+    { id: 'xiaohongshu', name: '小红书' },
+    { id: 'douyin', name: '抖音' },
+    // { id: 'youtube', name: 'YouTube' },    # 暂时隐藏
+    // { id: 'zhihu', name: '知乎' },          # 暂时隐藏
+    { id: 'tiktok', name: 'TikTok' },
     { id: 'tiktok', name: 'TikTok' }
   ];
   
@@ -1573,7 +1577,7 @@ async function syncKnowledgeBase() {
       renderKnowledgeBaseTable();
     } else {
       kbEmptyState.style.display = 'flex';
-      const pn = { bilibili: 'B站', xiaohongshu: '小红书', douyin: '抖音', youtube: 'YouTube', zhihu: '知乎', tiktok: 'TikTok' };
+      const pn = { bilibili: 'B站', xiaohongshu: '小红书', douyin: '抖音', tiktok: 'TikTok' };
       const loggedIn = Object.keys(activeLoginStatus || {}).filter(k => activeLoginStatus[k]).map(k => pn[k] || k);
       const loginLine = loggedIn.length
         ? `<p style="color:#34d399;font-weight:bold;">✅ 已登录：${loggedIn.join('、')}</p>`

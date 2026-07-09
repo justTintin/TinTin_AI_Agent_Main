@@ -95,7 +95,8 @@ def build_linux():
 
 
 def build_launcher():
-    """Build lightweight launcher exe. Output to project root for double-click launch."""
+    """Build lightweight launcher with built-in first-run extractor.
+    Output to project root. Pack volumes first with: python tools/pack_release.py"""
     print("[build] Building launcher executable...")
     _ensure_pyinstaller()
     launcher = os.path.join(PROJECT_ROOT, "launcher.py")

@@ -3,8 +3,9 @@
 """
 import os as _os
 
-_CHECK_LIGHT_ICON = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                                   "assets", "icons", "check_light.svg")
+from config.paths import BUNDLE_ICONS_DIR
+
+_CHECK_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "check_light.svg")
 _CHECK_LIGHT_URL = f"file:///{_CHECK_LIGHT_ICON.replace(_os.sep, '/')}"
 
 LIGHT_STYLE_SHEET = """

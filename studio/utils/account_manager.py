@@ -3,12 +3,12 @@ import json
 import os
 import time
 from utils.logger_utils import log
+from config.paths import ACCOUNTS_DIR
 
 class AccountManager:
     def __init__(self, base_dir=None):
         if base_dir is None:
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            base_dir = os.path.join(project_root, "accounts")
+            base_dir = ACCOUNTS_DIR
         self.base_dir = base_dir
         self.config_file = os.path.join(self.base_dir, "accounts.json")
         self.sessions_dir = os.path.join(self.base_dir, "sessions")

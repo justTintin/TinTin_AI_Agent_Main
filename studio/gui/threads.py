@@ -5,6 +5,7 @@ import requests
 import uuid
 from PySide6.QtCore import QThread, Signal
 from utils.logger_utils import log
+from config.paths import CONFIG_INI_FILE
 
 try:
     import websocket
@@ -155,7 +156,7 @@ class AIStatusCheckThread(QThread):
                 import configparser
                 import socket
                 config = configparser.ConfigParser()
-                config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.ini")
+                config_path = CONFIG_INI_FILE
                 port = 7861
                 if os.path.exists(config_path):
                     config.read(config_path, encoding='utf-8')

@@ -6,7 +6,9 @@ import json
 import os
 from typing import Optional
 
-_dict_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "brand_dictionary.json")
+from config.paths import BRAND_DICTIONARY_FILE
+
+_dict_path = BRAND_DICTIONARY_FILE
 _alias_to_canonical: dict[str, str] = {}
 _loaded = False
 

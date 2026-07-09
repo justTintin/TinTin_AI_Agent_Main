@@ -29,7 +29,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QMimeData
 from PySide6.QtGui import QDrag, QAction
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT
+from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT, APPS_DIR
 
 def get_voxcpm_python():
     """返回可用于启动 VoxCPM API 服务器的 Python 路径。
@@ -5780,12 +5780,8 @@ class VideoMontagePage(BasePage):
             import sys
             import os
             # Ensure apps path is in sys.path
-            curr_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(curr_dir)
-            workspace_root = os.path.dirname(project_root)
-            apps_dir = os.path.join(workspace_root, "apps")
-            if apps_dir not in sys.path:
-                sys.path.insert(0, apps_dir)
+            if APPS_DIR not in sys.path:
+                sys.path.insert(0, APPS_DIR)
             import whisperx  # noqa: F401
             return True
         except Exception:
@@ -6898,9 +6894,8 @@ class VideoMontagePage(BasePage):
         except Exception:
             pass
 
-        # Script path to voxcpm_api_server.py
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        api_server_script = os.path.abspath(os.path.join(root_dir, "studio", "voxcpm_api_server.py"))
+        # Script path to voxcpm_api_server.py（由 paths.py 统一管理，支持 frozen 模式）
+        api_server_script = os.path.join(PROJECT_ROOT, "voxcpm_api_server.py")
 
         cmd = [
             python_exe,

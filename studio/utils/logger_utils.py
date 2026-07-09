@@ -3,6 +3,8 @@ import sys
 import os
 from loguru import logger
 
+from config.paths import LOG_DIR
+
 def setup_logger():
     """配置日志系统，同时输出到控制台、文件，并保留在内存中供 GUI 读取"""
     # 确保 sys.stdout 和 sys.stderr 在遇到无法编码的字符（如 Emoji）时不会抛出 UnicodeEncodeError 崩溃
@@ -13,10 +15,8 @@ def setup_logger():
             except Exception:
                 pass
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_dir = os.path.join(project_root, ".runtime", "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "app.log")
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_file = os.path.join(LOG_DIR, "app.log")
     
     # 清除默认处理器
     logger.remove()
@@ -40,8 +40,7 @@ log = setup_logger()
 
 def get_last_logs(limit=100):
     """读取最后几行日志文件"""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_file = os.path.join(project_root, ".runtime", "logs", "app.log")
+    log_file = os.path.join(LOG_DIR, "app.log")
     if not os.path.exists(log_file):
         return ""
     try:

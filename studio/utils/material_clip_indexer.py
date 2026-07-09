@@ -41,6 +41,8 @@ from pathlib import Path
 from typing import Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from config.paths import CONFIG_DIR
+
 log = logging.getLogger(__name__)
 
 import sys as _sys
@@ -244,9 +246,7 @@ _DEFAULT_CFG = {
     "thumb_dir": None,          # None 鈫 鐢ㄧ郴缁熶复鏃剁洰褰曚笅鐨勫浐瀹氬瓙鐩褰
 }
 
-_CFG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "config", "material_index_config.json"
-)
+_CFG_FILE = os.path.join(CONFIG_DIR, "material_index_config.json")
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".flv", ".wmv", ".ts", ".mts"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}

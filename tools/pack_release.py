@@ -20,6 +20,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 VOLUME_SIZE = 10 * 1024**3  # 10GB 默认
+# 发布产物默认输出到工程外，避免 21GB+ 的分卷包污染源码工程目录。
+# 可用 --output 覆盖。默认放在工程同级目录下的 TinTin_Releases/。
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT.parent / "TinTin_Releases"
 
 # 需要排除的目录/文件
 EXCLUDE_DIRS = {
@@ -31,6 +34,14 @@ EXCLUDE_FILES = {
 }
 EXCLUDE_PATTERNS = {
     ".pyc", ".pyo", ".pyd", ".exe", ".dll", ".so",
+}
+# 打包产物自身（分卷包 / 清单 / 打包日志）——排除，避免把自己上次打的包又扫进去
+EXCLUDE_RELEASE_ARTIFACTS = {
+    ".vol.001", ".vol.002", ".vol.003", ".vol.004", ".vol.005",
+    ".vol.006", ".vol.007", ".vol.008", ".vol.009", ".vol.010",
+}
+EXCLUDE_RELEASE_NAMES = {
+    "pack_log.txt",
 }
 # 客户业务数据（打包时排除，避免将客户数据发给其他人）
 EXCLUDE_DATA_PATHS = {
@@ -54,6 +65,11 @@ def should_include(path: Path, rel: str) -> bool:
     if name in EXCLUDE_FILES:
         return False
     if any(name.endswith(s) for s in EXCLUDE_PATTERNS):
+        return False
+    # 排除打包产物自身（分卷包后缀 / 清单 / 日志），防止把自己扫进去
+    if any(s in name for s in EXCLUDE_RELEASE_ARTIFACTS):
+        return False
+    if name.endswith(".manifest.json") or name in EXCLUDE_RELEASE_NAMES:
         return False
     # 排除 git 内部文件
     if ".git" in parts:
@@ -131,6 +147,8 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="螺丝钉-电商智能体矩阵 发布分包工具")
     parser.add_argument("--volume-size", default="10G", help="每卷大小, 默认 10G")
+    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_DIR),
+                        help=f"输出目录, 默认工程外: {DEFAULT_OUTPUT_DIR}")
     args = parser.parse_args()
 
     global VOLUME_SIZE
@@ -147,7 +165,10 @@ def main():
     files, total_size = collect_files()
     print(f"  共 {len(files)} 个文件, {total_size/1024**3:.1f} GB ({time.time()-t0:.0f}s)")
 
-    output_prefix = str(PROJECT_ROOT / "螺丝钉-电商智能体矩阵")
+    # 输出到工程外的发布目录，避免产物污染源码工程
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_prefix = str(output_dir / "螺丝钉-电商智能体矩阵")
     print(f"\n打包到 {output_prefix}.vol.xxx ...")
     t0 = time.time()
     pack(files, total_size, output_prefix)

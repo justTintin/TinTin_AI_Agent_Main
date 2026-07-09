@@ -18,6 +18,7 @@ from PySide6.QtGui import QGuiApplication, QColor
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
+from config.paths import CONFIG_DIR
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -745,8 +746,7 @@ class VectorSearchPage(BasePage):
     def _get_nas_root(self) -> str:
         import json as _json
         cfg_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "material_index_config.json"
+            CONFIG_DIR, "material_index_config.json"
         )
         if os.path.isfile(cfg_path):
             try:

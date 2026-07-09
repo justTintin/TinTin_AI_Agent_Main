@@ -84,6 +84,71 @@ def _extract_split_volumes(volumes: list[str], start_idx: int):
         zf.extractall(BASE_DIR)
 
 
+def find_manifest() -> str | None:
+    """查找清单文件 manifest.json。"""
+    import json as _json
+    for name in os.listdir(BASE_DIR):
+        if name.endswith(".manifest.json"):
+            return os.path.join(BASE_DIR, name)
+    return None
+
+
+# 解包后必须校验完整性的关键文件（启动入口 + 核心模块）
+_CRITICAL_FILES = [
+    "studio/gui_main.py",
+    "studio/version.py",
+    "studio/config/paths.py",
+    "studio/utils/license.py",
+]
+
+
+def verify_critical_files() -> tuple[bool, str]:
+    """解包后校验关键文件完整性。返回 (通过, 提示信息)。
+
+    从 manifest.json 读取关键文件的 sha256，与解包后的实际文件比对。
+    manifest 不存在（旧包）则跳过校验（向后兼容）。
+    """
+    import json as _json
+    import hashlib as _hashlib
+
+    manifest_path = find_manifest()
+    if not manifest_path:
+        return True, ""  # 无 manifest（旧包兼容），不校验
+
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = _json.load(f)
+    except Exception as e:
+        return False, f"清单文件读取失败: {e}"
+
+    file_hashes = {item["rel"]: item["sha256"]
+                   for item in manifest.get("files", [])
+                   if "rel" in item and "sha256" in item}
+
+    if not file_hashes:
+        return True, ""  # manifest 无文件清单（旧格式），不校验
+
+    corrupted = []
+    for rel in _CRITICAL_FILES:
+        expected = file_hashes.get(rel)
+        if expected is None:
+            continue  # manifest 没记录此文件，跳过
+        actual_path = os.path.join(BASE_DIR, rel.replace("/", os.sep))
+        if not os.path.isfile(actual_path):
+            corrupted.append(f"{rel}（缺失）")
+            continue
+        h = _hashlib.sha256()
+        with open(actual_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        if h.hexdigest() != expected:
+            corrupted.append(rel)
+
+    if corrupted:
+        return False, "以下文件校验失败：\n  " + "\n  ".join(corrupted)
+    return True, ""
+
+
 def run_extraction():
     """解包流程主入口。"""
     volumes = find_volumes()
@@ -94,7 +159,17 @@ def run_extraction():
         sys.exit(1)
 
     extract_volumes(volumes)
-    print("首次解包完成，正在启动...")
+
+    # 校验关键文件完整性（防止拷贝损坏/被篡改）
+    ok, msg = verify_critical_files()
+    if not ok:
+        print("⚠️  部署文件校验失败，可能拷贝损坏或被篡改。")
+        print(msg)
+        print("请重新拷贝完整分卷包后再试。")
+        _pause()
+        sys.exit(1)
+
+    print("首次解包完成，关键文件校验通过，正在启动...")
 
 
 # ═══════════════════════════════════════════════════════════

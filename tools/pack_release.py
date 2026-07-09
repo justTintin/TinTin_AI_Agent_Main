@@ -19,7 +19,28 @@ import os, sys, zipfile, hashlib, time, json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+STUDIO_DIR = PROJECT_ROOT / "studio"
 VOLUME_SIZE = 10 * 1024**3  # 10GB 默认
+
+
+def _read_version() -> str:
+    """从 studio/version.py 读取版本号（用 exec 避免 import 依赖）。"""
+    ver_file = STUDIO_DIR / "version.py"
+    ns = {}
+    try:
+        exec(compile(ver_file.read_text(encoding="utf-8"), str(ver_file), "exec"), ns)
+        return ns.get("__version__", "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+def _sha256_of(path: Path) -> str:
+    """计算文件的 sha256。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 # 发布产物默认输出到工程外，避免 21GB+ 的分卷包污染源码工程目录。
 # 可用 --output 覆盖。默认放在工程同级目录下的 TinTin_Releases/。
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT.parent / "TinTin_Releases"
@@ -80,8 +101,8 @@ def should_include(path: Path, rel: str) -> bool:
     return True
 
 
-def collect_files() -> list[tuple[Path, str]]:
-    """收集需要打包的文件。返回 [(abs_path, rel_path)]。"""
+def collect_files() -> list[tuple[Path, str, str]]:
+    """收集需要打包的文件。返回 [(abs_path, rel_path, sha256)]。"""
     files = []
     total_size = 0
     for root, dirs, filenames in os.walk(PROJECT_ROOT):
@@ -91,22 +112,24 @@ def collect_files() -> list[tuple[Path, str]]:
             abs_path = Path(root) / fn
             rel_path = abs_path.relative_to(PROJECT_ROOT).as_posix()
             if should_include(abs_path, rel_path):
-                files.append((abs_path, rel_path))
+                sha = _sha256_of(abs_path)
+                files.append((abs_path, rel_path, sha))
                 total_size += abs_path.stat().st_size
     return files, total_size
 
 
 def pack(files: list, total_size: int, output_prefix: str):
-    """打包为分卷 zip 文件。"""
+    """打包为分卷 zip 文件，并生成含版本号+文件hash的清单。"""
     vol_size = VOLUME_SIZE
     vol_index = 1
     current_size = 0
     zip_path = f"{output_prefix}.vol.{vol_index:03d}"
     zf = zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True)
 
-    manifest = []
+    vol_manifest = []    # 每卷的元信息
+    file_manifest = []   # 每文件的 {rel, sha256, size}（供在线更新做文件级增量比对）
 
-    for abs_path, rel_path in files:
+    for abs_path, rel_path, sha256 in files:
         file_size = abs_path.stat().st_size
 
         # 检查是否需要新卷（当前卷超过限制且已有内容）
@@ -114,7 +137,7 @@ def pack(files: list, total_size: int, output_prefix: str):
             zf.close()
             _size = os.path.getsize(zip_path)
             print(f"  {zip_path}  ({_size/1024**3:.1f} GB)")
-            manifest.append({"vol": vol_index, "size": _size, "file": zip_path})
+            vol_manifest.append({"vol": vol_index, "size": _size, "file": zip_path})
             vol_index += 1
             zip_path = f"{output_prefix}.vol.{vol_index:03d}"
             zf = zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True)
@@ -122,24 +145,29 @@ def pack(files: list, total_size: int, output_prefix: str):
 
         zf.write(abs_path, rel_path)
         current_size += file_size
+        file_manifest.append({"rel": rel_path, "sha256": sha256, "size": file_size})
 
     # 关闭最后一个卷
     if zf.fp:
         zf.close()
         _size = os.path.getsize(zip_path)
         print(f"  {zip_path}  ({_size/1024**3:.1f} GB)")
-        manifest.append({"vol": vol_index, "size": _size, "file": zip_path})
+        vol_manifest.append({"vol": vol_index, "size": _size, "file": zip_path})
 
-    # 写入清单文件
+    # 写入清单文件（含版本号 + 卷清单 + 文件hash清单）
+    version = _read_version()
     manifest_path = f"{output_prefix}.manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({
             "app": "螺丝钉-电商智能体矩阵",
+            "version": version,
             "volumes": vol_index,
             "total_size": total_size,
-            "files": manifest,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "volumes_info": vol_manifest,
+            "files": file_manifest,
         }, f, ensure_ascii=False, indent=2)
-    print(f"  清单: {manifest_path}")
+    print(f"  清单: {manifest_path} (版本 {version}, {len(file_manifest)} 个文件)")
     print(f"\n共 {vol_index} 卷, 原始大小: {total_size/1024**3:.1f} GB")
 
 

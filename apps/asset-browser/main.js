@@ -240,7 +240,7 @@ function createWindow() {
     },
     frame: true,
     show: false,
-    title: '丁大怪-电商智能体矩阵 素材下载浏览器'
+    title: '螺丝钉-电商智能体矩阵 素材浏览器'
   });
 
   // Load the frontend main interface

@@ -50,7 +50,7 @@ class HotspotPage(BasePage):
         heading = QLabel("📈 热点追踪")
         heading.setObjectName("heading")
         root.addWidget(heading)
-        sub = QLabel("跟踪 抖音 / 知乎 / 小红书 / B站 每日热榜并记录趋势（上榜天数·排名变化），"
+	        sub = QLabel("跟踪 抖音 / 小红书 / B站 每日热榜并记录趋势（上榜天数·排名变化），"
                      "聚焦 科技 / 数码 / AI，可一键蒸馏为「选题方向」知识。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)

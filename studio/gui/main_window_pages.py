@@ -209,13 +209,11 @@ class PageSetupMixin:
         from gui.dreamina_page import DreaminaPage
         self.dreamina_tool = DreaminaPage(self.page_dreamina, self)
         self.dreamina_tool.setup()
-        self.dreamina_tool._show_dev_only()
 
     def setup_dreamina_assets_page(self):
         from gui.dreamina_assets_page import DreaminaAssetsPage
         self.dreamina_assets_tool = DreaminaAssetsPage(self.page_dreamina_assets, self)
         self.dreamina_assets_tool.setup()
-        self.dreamina_assets_tool._show_dev_only()
 
     def setup_cover_maker_page(self):
         from gui.cover_maker_page import CoverMakerPage

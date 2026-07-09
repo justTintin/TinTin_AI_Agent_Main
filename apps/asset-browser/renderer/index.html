@@ -55,6 +55,7 @@
             <span class="platform-badge dy">抖</span>
             <span>抖音</span>
           </button>
+          <!-- YouTube/知乎 暂时隐藏
           <button class="platform-btn" data-url="https://www.youtube.com" data-platform="youtube">
             <span class="platform-badge yt">Y</span>
             <span>YouTube</span>
@@ -63,6 +64,7 @@
             <span class="platform-badge zh">知</span>
             <span>知乎</span>
           </button>
+          -->
           <button class="platform-btn" data-url="https://jimeng.jianying.com/ai-tool/image/generate" data-platform="jimeng">
             <span class="platform-badge jimeng">即</span>
             <span>即梦AI</span>
@@ -98,7 +100,7 @@
         </button>
 
         <!-- 一键采集各平台今日热榜 -->
-        <button class="action-btn" id="btn-capture-hotspot" title="依次打开 抖音/知乎/小红书/B站 热榜页采集今日热点">
+        <button class="action-btn" id="btn-capture-hotspot" title="依次打开 抖音/小红书/B站 热榜页采集今日热点">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
           <span>抓取今日热点</span>
         </button>
@@ -142,8 +144,8 @@
           <option value="xiaohongshu">小红书</option>
           <option value="bilibili">哔哩哔哩</option>
           <option value="douyin">抖音</option>
-          <option value="youtube">YouTube</option>
-          <option value="zhihu">知乎</option>
+          <!-- <option value="youtube">YouTube</option> 暂时隐藏 -->
+          <!-- <option value="zhihu">知乎</option> 暂时隐藏 -->
         </select>
         
         <select id="kb-type-filter" style="background-color: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 0.8rem; font-family: var(--font-family); cursor: pointer; outline: none;">

@@ -12,16 +12,16 @@ THEME_OPTIONS = ["system", "dark", "light"]
 
 
 def get_saved_theme() -> str:
-    """读取保存的主题设置，默认 'system'。"""
+    """读取保存的主题设置，默认 'light'（炫白）。"""
     try:
         with open(_THEME_CONFIG_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        theme = data.get("theme", "system")
+        theme = data.get("theme", "light")
         if theme in THEME_OPTIONS:
             return theme
     except Exception:
         pass
-    return "system"
+    return "light"
 
 
 def save_theme(theme: str):

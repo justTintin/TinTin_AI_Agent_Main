@@ -19,12 +19,20 @@ from PySide6.QtWidgets import QMessageBox
 from utils.logger_utils import log
 
 
-def _add_dev_banner_to_layout(layout):
-    """在布局顶部插入'开发中'横幅（独立函数，供非BasePage的inline页面使用）"""
-    from PySide6.QtWidgets import QLabel
+def _show_dev_only(parent_widget):
+    """清空页面原有内容，只显示'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     from PySide6.QtCore import Qt
-    if layout is None:
+    if parent_widget is None:
         return
+    # 移除旧布局及其所有子控件
+    old_layout = parent_widget.layout()
+    if old_layout is not None:
+        QWidget().setLayout(old_layout)  # 将旧布局转移给临时对象，Qt 随即回收
+    # 新建只含提示的布局
+    layout = QVBoxLayout(parent_widget)
+    layout.setContentsMargins(40, 40, 40, 40)
+    layout.addStretch()
     banner = QLabel("🚧 该功能正在开发中，敬请期待")
     banner.setObjectName("dev_banner")
     banner.setAlignment(Qt.AlignCenter)
@@ -32,13 +40,14 @@ def _add_dev_banner_to_layout(layout):
         QLabel#dev_banner {
             background-color: #FFF3CD;
             color: #856404;
-            padding: 10px 16px;
-            border-radius: 6px;
-            font-size: 14px;
+            padding: 20px 32px;
+            border-radius: 8px;
+            font-size: 18px;
             font-weight: bold;
         }
     """)
-    layout.insertWidget(0, banner)
+    layout.addWidget(banner, alignment=Qt.AlignCenter)
+    layout.addStretch()
 
 
 class BasePage:
@@ -86,6 +95,6 @@ class BasePage:
         log.error(msg)
 
     # ---------- 开发中提示 ----------
-    def _add_dev_banner(self):
-        """在页面顶部添加'开发中'提示横幅"""
-        _add_dev_banner_to_layout(self.parent_widget.layout())
+    def _show_dev_only(self):
+        """清空页面原有内容，只显示'开发中'提示"""
+        _show_dev_only(self.parent_widget)

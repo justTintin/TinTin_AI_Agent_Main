@@ -24,6 +24,8 @@ DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
 ENTRY = os.path.join(STUDIO_DIR, "gui_main.py")
 NAME = "电商智能体矩阵"
 ICON = os.path.join(STUDIO_DIR, "assets", "app_icon.png")
+# PyInstaller --key 加密密钥：从环境变量 BUILD_KEY 读取，未设置时使用降级默认密钥
+BUILD_KEY = os.environ.get("BUILD_KEY", "d2j9s7k3x5m8q4w6p1r0t2y4u6i8o7a9")
 
 
 def run_dev():
@@ -50,6 +52,7 @@ def build_win():
         "--name", NAME,
         "--onefile",
         "--windowed",
+        "--key", BUILD_KEY,
         "--add-data", f"{os.path.join(STUDIO_DIR, 'assets')}{os.pathsep}studio/assets",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'config')}{os.pathsep}studio/config",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'bin', 'win')}{os.pathsep}studio/bin",
@@ -80,6 +83,7 @@ def build_linux():
         sys.executable, "-m", "PyInstaller",
         "--name", NAME,
         "--onefile",
+        "--key", BUILD_KEY,
         "--add-data", f"{os.path.join(STUDIO_DIR, 'assets')}{os.pathsep}studio/assets",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'config')}{os.pathsep}studio/config",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'bin', 'linux')}{os.pathsep}studio/bin",

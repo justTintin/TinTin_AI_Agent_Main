@@ -74,6 +74,8 @@ studio/ollama_run.log
 studio/config/license_private.pem
 studio/config/license.dat
 studio/config/theme.json
+studio/config/trial_whitelist.json
+studio/config/.activation_cache
 
 # pip cache
 apps/*/opt/packages/

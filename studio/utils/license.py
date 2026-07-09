@@ -224,6 +224,93 @@ def verify_license(license_json: str | None = None) -> LicenseInfo:
     return info
 
 
+# ── 试用白名单 ────────────────────────────────────────────────────────────────
+
+_TRIAL_WHITELIST_FILE = "trial_whitelist.json"
+_ACTIVATION_CACHE_FILE = ".activation_cache"
+
+
+def _get_whitelist_path() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "config", _TRIAL_WHITELIST_FILE)
+
+
+def check_trial_whitelist(machine_id: str | None = None) -> bool:
+    """检查当前机器是否在试用白名单中。"""
+    if machine_id is None:
+        machine_id = get_machine_id()
+    whitelist_path = _get_whitelist_path()
+    try:
+        if os.path.isfile(whitelist_path):
+            with open(whitelist_path, encoding="utf-8") as f:
+                data = json.load(f)
+            allowed = set(data.get("machine_ids", []))
+            return machine_id in allowed
+    except Exception:
+        pass
+    return False
+
+
+def verify_activation_code(code_text_raw: str) -> LicenseInfo | None:
+    """验证用户输入的激活码（粘贴的 License JSON 字符串）。
+    
+    激活码就是通过 `python license.py sign <machine_id> <name> <days>`
+    签发的一段 JSON，与 license.dat 格式一致。
+    返回 LicenseInfo 表示验证通过，None 表示失败。
+    """
+    try:
+        return verify_license(code_text_raw.strip())
+    except LicenseError:
+        return None
+
+
+def save_activation_cache(info: LicenseInfo):
+    """将激活信息缓存到本地文件，下次启动直接读取。"""
+    cache_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config", _ACTIVATION_CACHE_FILE
+    )
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "machine_id": info.machine_id,
+                "licensee": info.licensee,
+                "expires": info.expires,
+                "activated_at": datetime.now().isoformat(),
+            }, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def load_activation_cache() -> LicenseInfo | None:
+    """读取本地的激活缓存。"""
+    cache_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config", _ACTIVATION_CACHE_FILE
+    )
+    try:
+        if os.path.isfile(cache_path):
+            with open(cache_path, encoding="utf-8") as f:
+                data = json.load(f)
+            # 验证缓存中的机器码是否匹配当前设备
+            current = get_machine_id()
+            if data.get("machine_id") != current:
+                return None
+            # 检查有效期
+            expires = datetime.fromisoformat(data["expires"])
+            if expires <= datetime.now():
+                return None
+            return LicenseInfo({
+                "machine_id": data["machine_id"],
+                "licensee": data.get("licensee", ""),
+                "expires": data["expires"],
+                "features": [],
+            })
+    except Exception:
+        pass
+    return None
+
+
 # ── 密钥生成工具（开发者一次性运行）──────────────────────────────────────────
 
 if __name__ == "__main__":

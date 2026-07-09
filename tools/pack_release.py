@@ -32,6 +32,16 @@ EXCLUDE_FILES = {
 EXCLUDE_PATTERNS = {
     ".pyc", ".pyo", ".pyd", ".exe", ".dll", ".so",
 }
+# 客户业务数据（打包时排除，避免将客户数据发给其他人）
+EXCLUDE_DATA_PATHS = {
+    "studio/data/product_library.json",
+    "studio/data/material_index_config.json",
+    "studio/config/trial_whitelist.json",
+    "studio/config/.activation_cache",
+    "studio/config/license.dat",
+    "studio/config/license_private.pem",
+    "tools/license_private.pem",
+}
 
 
 def should_include(path: Path, rel: str) -> bool:
@@ -47,6 +57,9 @@ def should_include(path: Path, rel: str) -> bool:
         return False
     # 排除 git 内部文件
     if ".git" in parts:
+        return False
+    # 排除客户业务数据
+    if rel in EXCLUDE_DATA_PATHS:
         return False
     return True
 

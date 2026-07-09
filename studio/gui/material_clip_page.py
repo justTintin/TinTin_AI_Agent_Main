@@ -32,7 +32,7 @@ from PySide6.QtGui import QColor
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.material_clip_indexer import to_local_path
+from utils.material_clip_indexer import to_local_path, to_relative_path
 from utils.nas_client import NASClient
 
 
@@ -103,7 +103,7 @@ class _LoadBrandsWorker(BaseWorker):
         from utils.brand_normalizer import canonical_name
         import json, psycopg2
         cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        with open(cfg_path) as f:
+        with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
         conn = psycopg2.connect(
             host=cfg["db_host"], port=cfg["db_port"], dbname=cfg["db_name"],
@@ -131,7 +131,7 @@ class _LoadCategoriesWorker(BaseWorker):
     def do_work(self):
         import json, psycopg2
         cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        with open(cfg_path) as f:
+        with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
         conn = psycopg2.connect(
             host=cfg["db_host"], port=cfg["db_port"], dbname=cfg["db_name"],
@@ -376,6 +376,62 @@ class _ImportMaterialTasksWorker(BaseWorker):
             "pending_left": pending_left,
             "file": self.tasks_file,
         })
+
+
+class _ScanSelectedDirWorker(BaseWorker):
+    """子线程扫描指定本地目录下的文件，并比对数据库，筛选出未入库的文件列表。"""
+    finished = Signal(list, str)  # files, sel_dir
+    log_line = Signal(str)
+
+    def __init__(self, sel_dir: str, nas_root: str, index_directories: list):
+        super().__init__()
+        self.sel_dir = sel_dir
+        self.nas_root = nas_root
+        self.index_directories = index_directories or []
+
+    def do_work(self):
+        import os
+        from utils.material_clip_indexer import MaterialClipIndexer, VIDEO_EXTS, IMAGE_EXTS
+        
+        supported_exts = VIDEO_EXTS | IMAGE_EXTS
+        missing_files = []
+        
+        if not self.sel_dir or not os.path.isdir(self.sel_dir):
+            self.finished.emit([], self.sel_dir)
+            return
+
+        try:
+            with MaterialClipIndexer(nas_root=self.nas_root) as idx:
+                idx._db._connect()
+                with idx._db._conn.cursor() as cur:
+                    cur.execute("SELECT path FROM materials")
+                    db_paths = {row[0].replace('\\', '/').strip('/') for row in cur.fetchall() if row[0]}
+        except Exception as e:
+            self.log_line.emit(f"  ✗ 扫描读取数据库路径失败: {e}")
+            db_paths = set()
+
+        for root, _, files in os.walk(self.sel_dir):
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in supported_exts:
+                    fp = os.path.normpath(os.path.join(root, f)).replace('\\', '/')
+                    db_style_rel = to_relative_path(fp, self.nas_root).strip('/')
+                    if db_style_rel not in db_paths:
+                        try:
+                            st = os.stat(fp)
+                            size = st.st_size
+                            mtime = st.st_mtime
+                        except Exception:
+                            size = 0
+                            mtime = 0.0
+                        missing_files.append({
+                            "local_path": fp,
+                            "relative_path": db_style_rel,
+                            "size": size,
+                            "mtime": mtime
+                        })
+
+        self.finished.emit(missing_files, self.sel_dir)
 
 
 class _QueryMaterialsWorker(BaseWorker):
@@ -633,6 +689,9 @@ class MaterialClipPage(BasePage):
                 lbl.setProperty("active", False)
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
+            
+        if index == 1:
+            self._refresh_db_table()
 
     # ── 共享：目录树组件 ──
 
@@ -716,40 +775,7 @@ class MaterialClipPage(BasePage):
     # ── Tab2：智能分析 ──
 
     def _build_analyze_panel(self):
-        panel = QFrame()
-        panel.setObjectName("card")
-        main_lay = QVBoxLayout(panel)
-        main_lay.setContentsMargins(0, 0, 0, 0)
-        main_lay.setSpacing(0)
-
-        splitter = QSplitter(Qt.Horizontal)
-        # 左：目录树
-        left = QFrame()
-        left.setObjectName("card")
-        left_lay = QVBoxLayout(left)
-        left_lay.setContentsMargins(14, 14, 14, 14)
-        left_lay.setSpacing(8)
-        self._build_dir_tree_widget(left_lay, "analyze_tree")
-        
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        sep.setObjectName("separator"); left_lay.addWidget(sep)
-        self.btn_toggle_log = QPushButton("▶ 显示操作日志")
-        self.btn_toggle_log.setObjectName("secondary_button")
-        self.btn_toggle_log.clicked.connect(self._toggle_log_box)
-        left_lay.addWidget(self.btn_toggle_log)
-        self.idx_stat = QLabel("")
-        self.idx_stat.setObjectName("muted_text")
-        left_lay.addWidget(self.idx_stat)
-        splitter.addWidget(left)
-
-        # 右：数据库表格 + 筛选
-        right = self._build_db_panel()
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 25)
-        splitter.setStretchFactor(1, 75)
-        QTimer.singleShot(0, lambda: splitter.setSizes([300, 900]))
-        main_lay.addWidget(splitter, 1)
-        return panel
+        return self._build_db_panel()
 
     # ── 右：数据库浏览面板 ────────────────────────────────────────────────────
 
@@ -898,6 +924,11 @@ class MaterialClipPage(BasePage):
         self.db_stat.setWordWrap(False)
         self.db_stat.setMaximumHeight(24)
         bot_row.addWidget(self.db_stat, 1)
+
+        self.btn_toggle_log = QPushButton("▶ 显示操作日志")
+        self.btn_toggle_log.setObjectName("secondary_button")
+        self.btn_toggle_log.clicked.connect(self._toggle_log_box)
+        bot_row.addWidget(self.btn_toggle_log)
 
         self.btn_reanalyze = QPushButton("🔍 进行AI分析内容")
         self.btn_reanalyze.setObjectName("secondary_button")
@@ -1142,7 +1173,34 @@ class MaterialClipPage(BasePage):
             self._last_selected_dir = str(val) if val is not None else ""
         else:
             self._last_selected_dir = ""
-        self._refresh_db_table()
+            
+        self._current_dir_missing_files = None
+        
+        if self.stacked_widget.currentIndex() == 0:
+            if hasattr(self, "diff_table") and self.diff_table:
+                if self._last_selected_dir:
+                    self.lbl_diff_status.setText("⏳ 正在扫描本地目录文件…")
+                    self.diff_table.setRowCount(0)
+                    self.diff_table.setEnabled(False)
+                    # 启动后台线程异步扫描选中文件夹，不阻塞主线程
+                    w = self.track_worker(_ScanSelectedDirWorker(
+                        self._last_selected_dir, 
+                        self._nas_root,
+                        self._get_index_directories()
+                    ))
+                    w.finished.connect(self._on_dir_scan_done)
+                    w.start()
+                else:
+                    self._refresh_diff_table_data()
+        else:
+            self._refresh_db_table()
+
+    def _on_dir_scan_done(self, files: list, sel_dir: str):
+        if sel_dir != self._last_selected_dir:
+            return  # 忽略旧的、过期的扫描结果
+            
+        self._current_dir_missing_files = files
+        self._refresh_diff_table_data()
 
     def _select_path_in_tree(self, target_path):
         tree = self.analyze_tree
@@ -1365,11 +1423,18 @@ class MaterialClipPage(BasePage):
             CONFIG_DIR, "material_index_config.json"
         )
         dirs = []
+        use_nas = False
+        if hasattr(self, "cmb_dir_source_ingest_tree") and self.cmb_dir_source_ingest_tree is not None:
+            use_nas = self.cmb_dir_source_ingest_tree.currentIndex() == 1
+            
         try:
             if os.path.isfile(cfg_path):
                 with open(cfg_path, encoding="utf-8") as f:
                     cfg = _json.load(f)
-                dirs = cfg.get("index_directories", [])
+                if use_nas:
+                    dirs = cfg.get("index_directories", [])
+                else:
+                    dirs = cfg.get("local_directories", [])
         except Exception:
             pass
         
@@ -1389,6 +1454,7 @@ class MaterialClipPage(BasePage):
         return normalized_dirs
 
     def _reload_stats(self):
+        self._current_dir_missing_files = None
         self.lbl_stats_ingest.setText("素材统计：扫描中…")
         dirs = self._get_index_directories()
         
@@ -1619,18 +1685,48 @@ class MaterialClipPage(BasePage):
     def _refresh_diff_table_data(self):
         self.diff_table.setRowCount(0)
         self.chk_diff_select_all.setChecked(False)
-        all_files = getattr(self, "_missing_files_list", [])
-        sel_dir = self._last_selected_dir
-        if sel_dir:
-            files = [f for f in all_files if f.get("local_path", "").startswith(sel_dir)]
+        
+        # 优先使用当前选中目录的异步扫描结果，否则使用全局差额列表
+        if getattr(self, "_current_dir_missing_files", None) is not None and self._last_selected_dir:
+            files = self._current_dir_missing_files
         else:
-            files = all_files
+            all_files = getattr(self, "_missing_files_list", [])
+            sel_dir = self._last_selected_dir
+            if sel_dir:
+                sel_dir_norm = os.path.normpath(sel_dir).lower()
+                files = [
+                    f for f in all_files 
+                    if os.path.normpath(f.get("local_path", "")).lower().startswith(sel_dir_norm)
+                ]
+            else:
+                files = all_files
+            
+        # Apply type filter
+        type_filter = self.diff_type_filter.currentData() if hasattr(self, 'diff_type_filter') else ""
+        if type_filter:
+            video_exts = {".mp4", ".mov", ".avi", ".mkv"}
+            image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+            audio_exts = {".mp3", ".wav", ".m4a"}
+            
+            filtered = []
+            for f in files:
+                ext = os.path.splitext(f.get("local_path", ""))[1].lower()
+                if type_filter == "video" and ext in video_exts:
+                    filtered.append(f)
+                elif type_filter == "image" and ext in image_exts:
+                    filtered.append(f)
+                elif type_filter == "audio" and ext in audio_exts:
+                    filtered.append(f)
+            files = filtered
+
         if not files:
             self.lbl_diff_status.setText("没有发现未入库的文件（磁盘与数据库已完全同步）")
+            self.diff_table.setRowCount(0)
             return
             
         self.lbl_diff_status.setText(f"发现 {len(files)} 个未入库媒体文件")
         self.diff_table.setRowCount(len(files))
+        self.diff_table.setEnabled(True)
         for idx, f in enumerate(files):
             # 0 = checkbox
             chk = QCheckBox()
@@ -1664,6 +1760,11 @@ class MaterialClipPage(BasePage):
             size_item = QTableWidgetItem(f"{sz_mb:.2f} MB")
             size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
             self.diff_table.setItem(idx, 4, size_item)
+            
+            # 5 = 已入库
+            on_disk_item = QTableWidgetItem("否")
+            on_disk_item.setFlags(on_disk_item.flags() & ~Qt.ItemIsEditable)
+            self.diff_table.setItem(idx, 5, on_disk_item)
 
     def _start_diff_batch_ingest(self):
         checked_paths = []
@@ -1773,16 +1874,17 @@ class MaterialClipPage(BasePage):
     def _refresh_db_table(self):
         if getattr(self, "_is_init", False):
             return
-        path_prefix = self._get_selected_directory()
         is_ingest = self.stacked_widget.currentIndex() == 0
-        if not path_prefix:
-            msg = "请在左侧目录树中选择目录以查看文件。"
-            if is_ingest and hasattr(self, "db_stat_ingest"):
-                self.db_stat_ingest.setText(msg)
-            else:
-                self.db_stat.setText(msg)
-            self.db_table.setRowCount(0)
-            return
+        if is_ingest:
+            path_prefix = self._get_selected_directory()
+            if not path_prefix:
+                msg = "请在左侧目录树中选择目录以查看文件。"
+                if hasattr(self, "db_stat_ingest"):
+                    self.db_stat_ingest.setText(msg)
+                self.db_table.setRowCount(0)
+                return
+        else:
+            path_prefix = ""
 
         if hasattr(self, "_query_worker") and self._query_worker:
             if self._query_worker.isRunning():
@@ -1798,7 +1900,7 @@ class MaterialClipPage(BasePage):
         if hasattr(self, "db_stat_ingest"):
             self.db_stat_ingest.setText("⏳ 查询中…")
         self.db_table.setRowCount(0)
-        if hasattr(self, "diff_table") and self.diff_table:
+        if not is_ingest and hasattr(self, "diff_table") and self.diff_table:
             self.diff_table.setRowCount(0)
             self.diff_table.setEnabled(False)
         status_filter = self.db_status_filter.currentData() or ""
@@ -1887,41 +1989,9 @@ class MaterialClipPage(BasePage):
             # 填充品牌/类别下拉筛选框
             self._populate_filter_dropdowns(rows)
 
-            # 同步填充素材入库面板的 diff 表（仅在素材入库 tab 激活时）
-            if hasattr(self, "diff_table") and self.diff_table and self.stacked_widget.currentIndex() == 0:
-                type_filter = self.diff_type_filter.currentData() if hasattr(self, 'diff_type_filter') else ""
-                filtered_rows = rows
-                if type_filter:
-                    filtered_rows = [r for r in rows if r.get("media_type") == type_filter]
-                self.diff_table.setRowCount(len(filtered_rows))
-                for r, row in enumerate(filtered_rows):
-                    chk = QCheckBox()
-                    chk.setStyleSheet("margin-left: 8px;")
-                    self.diff_table.setCellWidget(r, 0, chk)
-                    fpath = row.get("path", "")
-                    fname = row.get("filename") or os.path.basename(fpath)
-                    mtype = row.get("media_type") or "—"
-                    fsize = row.get("file_size")
-                    if isinstance(fsize, (int, float)) and fsize > 0:
-                        if fsize >= 1048576:
-                            size_text = f"{fsize / 1048576:.1f} MB"
-                        elif fsize >= 1024:
-                            size_text = f"{fsize / 1024:.1f} KB"
-                        else:
-                            size_text = f"{fsize} B"
-                    else:
-                        size_text = "—"
-                    on_disk = "是"  # 数据来自数据库，已入库
-                    # 存 row 数据到文件路径列，供双击播放使用
-                    path_cell = QTableWidgetItem(fpath)
-                    path_cell.setFlags(path_cell.flags() & ~Qt.ItemIsEditable)
-                    path_cell.setData(Qt.UserRole, row)
-                    self.diff_table.setItem(r, 1, path_cell)
-                    for c, val in enumerate([fname, mtype, size_text, on_disk]):
-                        item = QTableWidgetItem(str(val))
-                        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                        self.diff_table.setItem(r, c + 2, item)
-                self.db_stat_ingest.setText(f"共 {len(filtered_rows)} 条")
+            # 同步更新素材入库面板的已入库数量统计
+            if hasattr(self, "db_stat_ingest") and self.db_stat_ingest and self.stacked_widget.currentIndex() == 0:
+                self.db_stat_ingest.setText(f"库内已导入: {len(rows)} 条")
         except Exception as e:
             self.db_stat.setText(f"❌ 渲染表格失败: {e}")
             if hasattr(self, "diff_table") and self.diff_table:
@@ -2061,7 +2131,10 @@ class MaterialClipPage(BasePage):
             self._open_dir_by_path(full_path)
 
     def _refresh_diff_table_from_db(self):
-        self._refresh_db_table()
+        if self.stacked_widget.currentIndex() == 0:
+            self._refresh_diff_table_data()
+        else:
+            self._refresh_db_table()
 
     def _play_file_by_path(self, full_path: str):
         if not os.path.isfile(full_path):

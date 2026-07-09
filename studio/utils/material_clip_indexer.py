@@ -2079,6 +2079,23 @@ class MaterialClipIndexer:
         is_video = ext in VIDEO_EXTS
         is_image = ext in IMAGE_EXTS
 
+        if not os.path.isfile(file_path):
+            self._log(f"📄 [AI 分析] 找不到本地素材文件: {fname}")
+            self._log(f"  ✗ 无法开始 AI 分析：本地没有对应的物理文件！")
+            self._log(f"    预计本地路径: {file_path}")
+            try:
+                self._db.update_material_ai(
+                    material_id,
+                    brand=None, product=None, model=None, category=None,
+                    audio_script=None, ai_status="failed",
+                    ai_confidence=0.0, scene_desc_primary="—",
+                    scene_desc_secondary="—"
+                )
+            except Exception:
+                pass
+            self._log(f"========================================================\n")
+            return False
+
         # 计算并记录文件哈希与基本信息
         file_hash = _compute_hash(file_path) or "unknown"
         file_size = None

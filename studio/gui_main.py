@@ -43,7 +43,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 if sys.platform == "win32":
     try:
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("dingdaguai.ecommerce.agent.matrix.2.0")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
     except Exception:
         pass
 
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         super().__init__()
         self.splash = splash
         self._update_splash("正在初始化窗口参数...", 15)
-        self.setWindowTitle("丁大怪-电商智能体矩阵 v2.0.0 RC")
+        self.setWindowTitle("螺丝钉-电商智能体矩阵 v2.0.0 RC")
         self.resize(1300, 900)
         # Set Window Icon
         icon_path = os.path.join(PROJECT_ROOT, "assets", "app_icon.png")
@@ -1509,12 +1509,12 @@ if __name__ == "__main__":
         if sys.platform == "win32":
             # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
             import ctypes as _ctypes
-            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "dingdaguai.ecommerce.agent.matrix.single_instance")
+            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
             if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
                 _is_already_running = True
         else:
             # Linux/macOS: QSharedMemory
-            _singleton_key = "dingdaguai.ecommerce.agent.matrix.single_instance"
+            _singleton_key = "luosiding.ecommerce.agent.matrix.single_instance"
             _shmem = QSharedMemory(_singleton_key)
             if _shmem.attach():
                 _shmem.detach()

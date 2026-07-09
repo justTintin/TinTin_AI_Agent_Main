@@ -4,7 +4,7 @@ import shutil
 import zipfile
 
 def export_configurations():
-    print("=== Starting 丁大怪-电商智能体矩阵 Configuration Export ===")
+    print("=== Starting 螺丝钉-电商智能体矩阵 Configuration Export ===")
     
     # Define source paths
     src_paths = {

@@ -30,7 +30,7 @@ BUILD_KEY = os.environ.get("BUILD_KEY", "d2j9s7k3x5m8q4w6p1r0t2y4u6i8o7a9")
 
 def run_dev():
     """Run the application directly (dev mode)."""
-    print("[run] Starting 丁大怪-电商智能体矩阵 in dev mode...")
+    print("[run] Starting 螺丝钉-电商智能体矩阵 in dev mode...")
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", os.pathsep.join([
         STUDIO_DIR,
@@ -127,7 +127,7 @@ def _ensure_pyinstaller():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="丁大怪-电商智能体矩阵 Build Tool")
+    parser = argparse.ArgumentParser(description="螺丝钉-电商智能体矩阵 Build Tool")
     parser.add_argument("command", choices=["win", "linux", "run", "clean"],
                         help="Action to perform")
     args = parser.parse_args()

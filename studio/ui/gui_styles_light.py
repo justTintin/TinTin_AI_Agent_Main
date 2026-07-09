@@ -1,6 +1,12 @@
 """
 炫白主题 QSS · 扁平化浅色风格
 """
+import os as _os
+
+_CHECK_LIGHT_ICON = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                   "assets", "icons", "check_light.svg")
+_CHECK_LIGHT_URL = f"file:///{_CHECK_LIGHT_ICON.replace(_os.sep, '/')}"
+
 LIGHT_STYLE_SHEET = """
 * {
     font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
@@ -241,7 +247,7 @@ QCheckBox::indicator:hover { border: 2px solid #6366f1; }
 QCheckBox::indicator:checked {
     background-color: rgba(99, 102, 241, 0.12);
     border: 2px solid #6366f1;
-    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%236366f1' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
+    image: url("__CHECK_LIGHT_URL__");
 }
 
 QTableWidget, QTableView, QListWidget {
@@ -274,7 +280,7 @@ QTableView::indicator {
 QTableView::indicator:checked {
     background-color: rgba(99, 102, 241, 0.12);
     border: 2px solid #6366f1;
-    image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%236366f1' d='M13.78 4.22a.75.75 0 0 1 0 1.06l-7.5 7.5a.75.75 0 0 1-1.06 0L2.22 9.78a.75.75 0 0 1 1.06-1.06L5.5 11.44l6.72-6.72a.75.75 0 0 1 1.06 0z'/%3E%3C/svg%3E");
+    image: url("__CHECK_LIGHT_URL__");
 }
 
 QHeaderView::section {
@@ -620,4 +626,4 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #model_groupbox[section="ocr"]::title     { color: #d97706; }
 
 #comfyui_local_status { color: #86868b; font-size: 12px; }
-"""
+""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL)

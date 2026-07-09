@@ -19,18 +19,8 @@ from PySide6.QtWidgets import QMessageBox
 from utils.logger_utils import log
 
 
-def _hide_widget_tree(widget):
-    """递归隐藏一个 widget 及其所有子孙控件"""
-    if widget is None:
-        return
-    widget.setVisible(False)
-    children = widget.findChildren(QWidget) if hasattr(widget, "findChildren") else []
-    for child in children:
-        child.setVisible(False)
-
-
 def _show_dev_only(parent_widget):
-    """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
+    """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示"""
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     from PySide6.QtCore import Qt
     if parent_widget is None:
@@ -38,16 +28,18 @@ def _show_dev_only(parent_widget):
     layout = parent_widget.layout()
     if layout is None:
         return
-    # 递归隐藏原有布局中所有子控件及其子孙（不销毁，保留原界面以便恢复）
-    for i in range(layout.count()):
-        item = layout.itemAt(i)
-        w = item.widget() if item else None
-        if w is not None:
-            _hide_widget_tree(w)
-    # 构建提示卡片：透明背景融入页面，无色块
+    # 递归隐藏原有所有子控件（不销毁，保留原界面以便恢复）
+    for child in parent_widget.findChildren(QWidget):
+        child.setVisible(False)
+    # 清空原布局 (removeItem 不删除 widget，原控件仍由 page 对象持有)
+    while layout.count():
+        layout.takeAt(0)
+    # 上下 stretch + 卡片居中
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addStretch(1)
     card = QWidget()
     card_layout = QVBoxLayout(card)
-    card_layout.setContentsMargins(48, 40, 48, 40)
+    card_layout.setContentsMargins(0, 0, 0, 0)
     card_layout.setSpacing(12)
     icon = QLabel("🚧")
     icon.setAlignment(Qt.AlignCenter)
@@ -61,8 +53,8 @@ def _show_dev_only(parent_widget):
     subtitle.setAlignment(Qt.AlignCenter)
     subtitle.setStyleSheet("font-size: 14px; color: #BDBDBD; background: transparent; border: none;")
     card_layout.addWidget(subtitle)
-    # 插入到原布局，居中显示
     layout.addWidget(card, 0, Qt.AlignCenter)
+    layout.addStretch(1)
 
 
 class BasePage:

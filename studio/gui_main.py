@@ -1461,36 +1461,34 @@ if __name__ == "__main__":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
 
     # ── 试用白名单 + License 验证 ──
-    # 开发模式：通过 TINTIN_NO_LICENSE=1 环境变量跳过（开发时便捷）
-    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1"
+    # 安全说明：曾经有 TINTIN_NO_LICENSE=1 环境变量可一键绕过全部校验，
+    # 那是个严重后门，已彻底移除——验证逻辑无条件执行，任何环境变量都不再有效。
+    # 开发调试如需免激活，请把机器码加入 studio/config/trial_whitelist.json。
+    from utils.license import (
+        get_machine_id, check_trial_whitelist,
+        verify_license, LicenseError,
+        load_activation_cache,
+    )
     _access_granted = False
-    if not _LICENSE_CHECK_DISABLED:
-        from utils.license import (
-            get_machine_id, check_trial_whitelist,
-            verify_license, LicenseError,
-            load_activation_cache,
-        )
-        _machine_id = get_machine_id()
-        # 1) 试用白名单
-        if check_trial_whitelist(_machine_id):
-            log.info(f"[License] 试用白名单放行: {_machine_id}")
-            _access_granted = True
-        # 2) 已激活缓存（之前输入的有效激活码）
-        if not _access_granted:
-            _cached = load_activation_cache()
-            if _cached is not None:
-                log.info(f"[License] 激活缓存有效: {_cached.licensee}")
-                _access_granted = True
-        # 3) license.dat 文件（正式 License）
-        if not _access_granted:
-            try:
-                _lic = verify_license()
-                log.info(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
-                _access_granted = True
-            except (LicenseError, ImportError):
-                pass
-    else:
+    _machine_id = get_machine_id()
+    # 1) 试用白名单
+    if check_trial_whitelist(_machine_id):
+        log.info(f"[License] 试用白名单放行: {_machine_id}")
         _access_granted = True
+    # 2) 已激活缓存（之前输入的有效激活码）
+    if not _access_granted:
+        _cached = load_activation_cache()
+        if _cached is not None:
+            log.info(f"[License] 激活缓存有效: {_cached.licensee}")
+            _access_granted = True
+    # 3) license.dat 文件（正式 License）
+    if not _access_granted:
+        try:
+            _lic = verify_license()
+            log.info(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
+            _access_granted = True
+        except (LicenseError, ImportError):
+            pass
 
     log.info("Application starting...")
     try:

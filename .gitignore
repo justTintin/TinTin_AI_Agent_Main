@@ -85,6 +85,9 @@ studio/config/theme.json
 studio/config/trial_whitelist.json
 studio/config/.activation_cache
 tools/license_private.pem
+# 独立签发工具（含私钥），严禁放工程内、严禁提交
+TinTin_License_Signer/
+../TinTin_License_Signer/
 
 # pip cache
 apps/*/opt/packages/

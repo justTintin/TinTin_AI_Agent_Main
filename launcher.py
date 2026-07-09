@@ -130,7 +130,6 @@ def launch_app():
 
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", os.path.join(BASE_DIR, "studio"))
-    env["TINTIN_NO_LICENSE"] = "1"
 
     result = subprocess.run([python_exe, entry], env=env, cwd=BASE_DIR)
     if result.returncode != 0:

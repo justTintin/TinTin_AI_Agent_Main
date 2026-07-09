@@ -29,7 +29,6 @@ from utils.my_knowledge_manager import (
 from utils import asset_browser_client as abrowser
 from utils.base_worker import BaseWorker
 from utils import knowledge_distiller
-from utils.dreamina_client import DreaminaClient
 
 from gui.base_page import BasePage
 
@@ -479,15 +478,6 @@ class MyKnowledgePage(BasePage):
 
         bar.addStretch(1)
 
-        # ── 服务状态指示（右侧固定区域，始终可见） ──
-        sep_svc = QFrame(); sep_svc.setFrameShape(QFrame.VLine); sep_svc.setFrameShadow(QFrame.Sunken)
-        bar.addWidget(sep_svc)
-
-        self.stat_dreamina = QLabel("即梦：检测中…")
-        self.stat_dreamina.setObjectName("muted_text")
-        self.stat_dreamina.setToolTip("即梦 CLI 登录状态（用于视觉化参考图生成）")
-        bar.addWidget(self.stat_dreamina)
-
         root.addLayout(bar)
 
         # ── 提炼状态信息栏 ──
@@ -503,7 +493,6 @@ class MyKnowledgePage(BasePage):
 
         self.refresh_stylization_list()
         self._refresh_stats()
-        self._check_service_status()
 
     # ══════════════ 提炼状态信息栏 ══════════════
 
@@ -1287,45 +1276,6 @@ class MyKnowledgePage(BasePage):
         for d, btn in self._style_filter_btns.items():
             btn.setChecked(d == dim)
         self.refresh_stylization_list()
-
-    # ══════════════ 服务状态检测 ══════════════
-
-    def _check_service_status(self):
-        """异步检测即梦服务状态并更新状态栏。"""
-        # 即梦：需检查 CLI 是否安装及是否已登录（放后台）
-        self.stat_dreamina.setText("即梦：检测中…")
-        self.stat_dreamina.setStyleSheet("")
-
-        class _DreaminaCheckWorker(BaseWorker):
-            finished = Signal(bool, str)
-            def do_work(self):
-                c = DreaminaClient()
-                if not c.is_installed():
-                    self.finished.emit(False, "未安装")
-                    return
-                logged, credit = c.is_logged_in()
-                self.finished.emit(logged, credit or "")
-
-        w = _DreaminaCheckWorker()
-
-        def _on_done(logged, info):
-            if logged:
-                self.stat_dreamina.setText(f"即梦：🟢 已登录{' · ' + info if info else ''}")
-                self.stat_dreamina.setStyleSheet("color: #4CAF50;")
-            else:
-                msg = "未安装" if info == "未安装" else "未登录"
-                self.stat_dreamina.setText(f"即梦：🔴 {msg}")
-                self.stat_dreamina.setStyleSheet("color: #f44336;")
-                self.stat_dreamina.setToolTip(
-                    "即梦 CLI 未登录，无法生成视觉化参考图。\n请到「即梦生成」页面完成登录。")
-
-        w.finished.connect(_on_done)
-        w.error.connect(lambda _: (
-            self.stat_dreamina.setText("即梦：🔴 检测失败"),
-            self.stat_dreamina.setStyleSheet("color: #f44336;"),
-        ))
-        self.track_worker(w)
-        w.start()
 
     # ══════════════ 批量转文字 ══════════════
 

@@ -1460,25 +1460,49 @@ if __name__ == "__main__":
     if _os.environ.get("XDG_SESSION_TYPE") == "wayland":
         _os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-    # ── License 许可证验证 ──（暂时关闭，恢复时改回下方注释行）
-    _LICENSE_CHECK_DISABLED = True
-    # _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1" or sys.platform == "win32"
+    # ── 试用白名单 + License 验证 ──
+    # 开发模式：通过 TINTIN_NO_LICENSE=1 环境变量跳过（开发时便捷）
+    _LICENSE_CHECK_DISABLED = _os.environ.get("TINTIN_NO_LICENSE") == "1"
+    _access_granted = False
     if not _LICENSE_CHECK_DISABLED:
-        try:
-            from utils.license import verify_license, LicenseError, LicenseInfo
-            _lic = verify_license()
-            print(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
-        except LicenseError as _e:
-            from PySide6.QtWidgets import QApplication, QMessageBox
-            _app = QApplication([])
-            QMessageBox.critical(None, "许可证错误", str(_e))
-            _app.quit()
-            import sys; sys.exit(1)
-        except ImportError:
-            pass  # cryptography 未安装，跳过验证（开发环境）
+        from utils.license import (
+            get_machine_id, check_trial_whitelist,
+            verify_license, LicenseError,
+            load_activation_cache,
+        )
+        _machine_id = get_machine_id()
+        # 1) 试用白名单
+        if check_trial_whitelist(_machine_id):
+            log.info(f"[License] 试用白名单放行: {_machine_id}")
+            _access_granted = True
+        # 2) 已激活缓存（之前输入的有效激活码）
+        if not _access_granted:
+            _cached = load_activation_cache()
+            if _cached is not None:
+                log.info(f"[License] 激活缓存有效: {_cached.licensee}")
+                _access_granted = True
+        # 3) license.dat 文件（正式 License）
+        if not _access_granted:
+            try:
+                _lic = verify_license()
+                log.info(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
+                _access_granted = True
+            except (LicenseError, ImportError):
+                pass
+    else:
+        _access_granted = True
+
     log.info("Application starting...")
     try:
         app = QApplication(sys.argv)
+
+        # ── 激活对话框（无有效授权时弹出）──
+        if not _access_granted:
+            from gui.dialogs import ActivationDialog
+            _dialog = ActivationDialog(_machine_id)
+            _dialog.exec()
+            if not _dialog.is_activated():
+                sys.exit(0)
 
         # ── 单例保护：只允许运行一个实例 ──
         _is_already_running = False

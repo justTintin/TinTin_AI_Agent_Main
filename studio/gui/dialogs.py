@@ -5,7 +5,8 @@ import json
 import time
 import webbrowser
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QMessageBox, QWidget, QProgressBar, QFrame, QApplication)
+                               QMessageBox, QWidget, QProgressBar, QFrame, QApplication,
+                               QPlainTextEdit)
 from PySide6.QtCore import Qt, QTimer, Signal
 from utils.logger_utils import log
 
@@ -352,7 +353,7 @@ class EditAccountDialog(QDialog):
         self.btn_cancel = QPushButton("取消")
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
-        
+
         layout.addLayout(btn_layout)
 
     def get_data(self):
@@ -361,3 +362,112 @@ class EditAccountDialog(QDialog):
             "douyin_id": self.edit_douyin_id.text().strip(),
             "remark": self.edit_remark.text().strip()
         }
+
+
+class ActivationDialog(QDialog):
+    """激活码输入对话框 —— 用户手动输入激活码（签发的License JSON）"""
+
+    def __init__(self, machine_id: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("激活 - 电商智能体矩阵")
+        self.setFixedSize(520, 380)
+        self.setStyleSheet("""
+            QDialog { background-color: #1a1a22; color: #c8c8d0; }
+            QLabel { color: #c8c8d0; }
+            QLineEdit {
+                background-color: #141418; color: #e4e4e7;
+                border: 1px solid #2e2e32; border-radius: 6px;
+                padding: 10px 14px; font-size: 13px;
+            }
+            QPushButton#primary_button {
+                background-color: #6366f1; color: white;
+                border: none; border-radius: 6px;
+                padding: 10px 28px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton#primary_button:hover { background-color: #818cf8; }
+            QPushButton#secondary_button {
+                background-color: #2e2e32; color: #c8c8d0;
+                border: 1px solid #3e3e42; border-radius: 6px;
+                padding: 8px 20px; font-size: 13px;
+            }
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(16)
+
+        # 标题区域
+        title = QLabel("🔑 软件激活")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #e4e4e7;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        desc = QLabel("该设备尚未激活，请输入开发人员提供的激活码。")
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("font-size: 13px; color: #9e9ea6;")
+        layout.addWidget(desc)
+
+        # 机器码显示
+        mid_row = QHBoxLayout()
+        mid_row.addWidget(QLabel("机器码:"))
+        mid_lbl = QLabel(machine_id)
+        mid_lbl.setStyleSheet("color: #818cf8; font-family: monospace; font-size: 12px;")
+        mid_row.addWidget(mid_lbl, 1)
+        layout.addLayout(mid_row)
+
+        # 激活码输入
+        layout.addWidget(QLabel("激活码:"))
+        self.code_edit = QPlainTextEdit()
+        self.code_edit.setPlaceholderText(
+            "请将开发人员提供的激活码（JSON）粘贴到这里..."
+        )
+        self.code_edit.setMinimumHeight(80)
+        self.code_edit.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #141418; color: #e4e4e7;
+                border: 1px solid #2e2e32; border-radius: 6px;
+                padding: 10px; font-size: 12px; font-family: monospace;
+            }
+        """)
+        layout.addWidget(self.code_edit)
+
+        # 状态提示
+        self.status_label = QLabel("")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.status_label)
+
+        # 按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_activate = QPushButton("✅ 激活")
+        btn_activate.setObjectName("primary_button")
+        btn_activate.clicked.connect(self._do_activate)
+        btn_row.addWidget(btn_activate)
+        btn_exit = QPushButton("退出")
+        btn_exit.setObjectName("secondary_button")
+        btn_exit.clicked.connect(self.reject)
+        btn_row.addWidget(btn_exit)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self._activated = False
+
+    def _do_activate(self):
+        from utils.license import verify_activation_code, save_activation_cache
+        code = self.code_edit.toPlainText().strip()
+        if not code:
+            self.status_label.setText("⚠️ 请输入激活码")
+            self.status_label.setStyleSheet("color: #f87171; font-size: 13px;")
+            return
+        info = verify_activation_code(code)
+        if info is None:
+            self.status_label.setText("❌ 激活码无效，请检查后重试")
+            self.status_label.setStyleSheet("color: #f87171; font-size: 13px;")
+            return
+        # 激活成功
+        save_activation_cache(info)
+        self._activated = True
+        self.accept()
+
+    def is_activated(self) -> bool:
+        return self._activated

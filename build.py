@@ -40,7 +40,7 @@ def build_win():
     """Build Windows executable for commercial distribution (self-contained, large)."""
     print("[build] Building Windows executable for distribution...")
     _ensure_pyinstaller()
-    upx_args = _ensure_upx()
+    _ensure_upx()
     icon_ico = os.path.join(STUDIO_DIR, "assets", "app_icon.ico")
     icon_args = [f"--icon={icon_ico}"] if os.path.isfile(icon_ico) else []
     cmd = [
@@ -50,7 +50,6 @@ def build_win():
         "--windowed",
         "--key", BUILD_KEY,
         "--strip",
-        *upx_args,
         "--add-data", f"{os.path.join(STUDIO_DIR, 'assets')}{os.pathsep}studio/assets",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'config')}{os.pathsep}studio/config",
         "--add-data", f"{os.path.join(STUDIO_DIR, 'bin', 'win')}{os.pathsep}studio/bin",
@@ -74,7 +73,7 @@ def build_linux():
     """Build Linux executable."""
     print("[build] Building Linux executable...")
     _ensure_pyinstaller()
-    upx_args = _ensure_upx()
+    _ensure_upx()
     icon_args = [f"--icon={ICON}"] if os.path.isfile(ICON) else []
     cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -93,9 +92,8 @@ def build_linux():
         "--hidden-import", "voxcpm",
         "--hidden-import", "loguru",
         "--clean",
-        "--noconfirm",
-        *upx_args,
-        *icon_args,
+	    "--noconfirm",
+	    *icon_args,
         ENTRY,
     ]
     subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
@@ -107,6 +105,7 @@ def build_launcher():
     Output to project root. Pack volumes first with: python tools/pack_release.py"""
     print("[build] Building launcher executable...")
     _ensure_pyinstaller()
+    _ensure_upx()
     launcher = os.path.join(PROJECT_ROOT, "launcher.py")
     icon_ico = os.path.join(STUDIO_DIR, "assets", "app_icon.ico")
     icon_args = [f"--icon={icon_ico}"] if os.path.isfile(icon_ico) else []
@@ -117,9 +116,9 @@ def build_launcher():
         "--windowed",
         "--strip",
         "--clean",
-        "--noconfirm",
-        *icon_args,
-        launcher,
+	        "--noconfirm",
+	        *icon_args,
+	        launcher,
     ]
     subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
     src = os.path.join(DIST_DIR, NAME + ".exe")
@@ -145,9 +144,10 @@ def clean():
 
 
 def _ensure_upx():
-    """下载 UPX 压缩工具（用于加固 exe）。"""
+    """确保 UPX 可用（放入 PATH，PyInstaller 会自动识别使用）。"""
     if os.path.isfile(UPX_BIN):
-        return [UPX_BIN]
+        os.environ["PATH"] = UPX_DIR + os.pathsep + os.environ.get("PATH", "")
+        return True
     print("[build] 正在下载 UPX（用于压缩加固 exe）...")
     os.makedirs(UPX_DIR, exist_ok=True)
     if sys.platform == "win32":
@@ -157,32 +157,24 @@ def _ensure_upx():
             urllib.request.urlretrieve(url, zip_path)
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(UPX_DIR)
-            # 找到 upx.exe
             for root, dirs, files in os.walk(UPX_DIR):
                 for fn in files:
                     if fn == "upx.exe":
-                        exe_path = os.path.join(root, fn)
-                        shutil.move(exe_path, UPX_BIN)
+                        shutil.move(os.path.join(root, fn), UPX_BIN)
                         break
             os.remove(zip_path)
-            # 清理解压目录
             for item in os.listdir(UPX_DIR):
                 item_path = os.path.join(UPX_DIR, item)
                 if item != "upx.exe" and os.path.isdir(item_path):
                     shutil.rmtree(item_path)
             if os.path.isfile(UPX_BIN):
-                os.chmod(UPX_BIN, os.stat(UPX_BIN).st_mode | stat.S_IEXEC)
+                os.chmod(UPX_BIN, stat.S_IEXEC | stat.S_IRUSR | stat.S_IXUSR)
+                os.environ["PATH"] = UPX_DIR + os.pathsep + os.environ.get("PATH", "")
                 print(f"[build] UPX 就绪: {UPX_BIN}")
-                return [UPX_BIN]
+                return True
         except Exception as e:
-            print(f"[build] UPX 下载失败: {e}（不影响构建，只是缺少压缩加固）")
-    else:
-        # Linux: 尝试使用系统包管理器安装
-        for c in ["upx", "upx-ucl"]:
-            if shutil.which(c):
-                return [shutil.which(c)]
-        print("[build] UPX 未安装（apt install upx-ucl 或 brew install upx）")
-    return []
+            print(f"[build] UPX 下载失败: {e}（不影响构建）")
+    return False
 
 
 def _ensure_pyinstaller():

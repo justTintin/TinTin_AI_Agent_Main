@@ -19,6 +19,28 @@ from PySide6.QtWidgets import QMessageBox
 from utils.logger_utils import log
 
 
+def _add_dev_banner_to_layout(layout):
+    """在布局顶部插入'开发中'横幅（独立函数，供非BasePage的inline页面使用）"""
+    from PySide6.QtWidgets import QLabel
+    from PySide6.QtCore import Qt
+    if layout is None:
+        return
+    banner = QLabel("🚧 该功能正在开发中，敬请期待")
+    banner.setObjectName("dev_banner")
+    banner.setAlignment(Qt.AlignCenter)
+    banner.setStyleSheet("""
+        QLabel#dev_banner {
+            background-color: #FFF3CD;
+            color: #856404;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+    """)
+    layout.insertWidget(0, banner)
+
+
 class BasePage:
     def __init__(self, parent_widget, main_window):
         self.parent_widget = parent_widget
@@ -62,3 +84,8 @@ class BasePage:
 
     def log_error(self, msg):
         log.error(msg)
+
+    # ---------- 开发中提示 ----------
+    def _add_dev_banner(self):
+        """在页面顶部添加'开发中'提示横幅"""
+        _add_dev_banner_to_layout(self.parent_widget.layout())

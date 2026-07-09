@@ -427,9 +427,41 @@ class ServicesMixin:
             self._ollama_refresh_status()
             if not self.llm_vision_api_url_input.text().strip():
                 self.llm_vision_api_url_input.setText("http://127.0.0.1:11434")
+            # 启动成功后，后台预热（把视觉模型加载进显存），避免测试连接时冷加载读超时
+            self._ollama_warmup()
         else:
             self.ollama_status_lbl.setText(f"● 启动失败: {msg}")
             self._set_ollama_status_state("red")
+
+    def _ollama_warmup(self):
+        """启动成功后后台预热视觉模型；预热期间状态显示「模型加载中」。"""
+        from utils.ollama_manager import OllamaManager
+        mgr = OllamaManager.get()
+
+        model = mgr.get_configured_model()
+        if not model:
+            # 未配置模型，无东西可预热，保持正常状态
+            return
+
+        # 进入预热：状态置为「加载中」
+        self.ollama_status_lbl.setText("● 运行中（模型加载中…）")
+        self._set_ollama_status_state("yellow")
+
+        def _run():
+            try:
+                ok, wmsg = mgr.warmup_model(model)
+                if ok:
+                    log.info(f"视觉模型预热完成: {wmsg}")
+                else:
+                    log.warning(f"视觉模型预热未成功（不影响启动结果）: {wmsg}")
+            except Exception as e:
+                log.warning(f"视觉模型预热异常（不影响启动结果）: {e}")
+            # 无论成败，刷新状态恢复为正常显示（运行中 / 未运行）
+            QTimer.singleShot(0, self._ollama_refresh_status)
+
+        # 持有线程引用避免被 GC
+        self._ollama_warmup_thread = threading.Thread(target=_run, daemon=True)
+        self._ollama_warmup_thread.start()
 
     def _ollama_stop(self):
         from utils.ollama_manager import OllamaManager

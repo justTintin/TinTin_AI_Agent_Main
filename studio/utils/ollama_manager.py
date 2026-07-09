@@ -134,6 +134,52 @@ class OllamaManager:
             time.sleep(0.5)
         return False, f"Ollama 启动超时（60秒），请检查 {OLLAMA_BIN} 是否正常"
 
+    def get_configured_model(self) -> str:
+        """从 ai_config.json 读取当前配置的视觉模型名；读不到返回空串。"""
+        try:
+            from config.paths import AI_CONFIG_FILE
+            import json
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    ai_cfg = json.load(f)
+                return str(ai_cfg.get("llm_vision_model", "") or "").strip()
+        except Exception as e:
+            log.warning(f"读取配置的视觉模型失败: {e}")
+        return ""
+
+    def warmup_model(self, model_name: str = "", timeout: int = 180) -> tuple[bool, str]:
+        """把指定模型预加载进显存（触发冷加载），避免后续推理请求读超时。
+
+        - model_name 为空时自动用 get_configured_model()；仍为空则跳过。
+        - 用 Ollama 原生 /api/generate 接口（predict=1, 不流式）触发模型加载。
+        - 长超时（默认 180s），可被后台线程调用；本方法不抛异常，返回 (ok, msg)。
+        """
+        if not model_name:
+            model_name = self.get_configured_model()
+        if not model_name:
+            return False, "未配置视觉模型，跳过预热"
+
+        if not self.is_running():
+            return False, "Ollama 未运行，跳过预热"
+
+        log.info(f"开始预热视觉模型「{model_name}」(timeout={timeout}s)...")
+        try:
+            res = requests.post(
+                f"{OLLAMA_API}/api/generate",
+                json={"model": model_name, "prompt": "", "stream": False, "predict": 1},
+                timeout=timeout,
+            )
+            if res.status_code == 200:
+                log.info(f"视觉模型「{model_name}」预热完成")
+                return True, "预热完成"
+            else:
+                msg = f"HTTP {res.status_code}"
+                log.warning(f"视觉模型「{model_name}」预热返回非 200: {msg}")
+                return False, msg
+        except Exception as e:
+            log.warning(f"视觉模型「{model_name}」预热失败: {e}")
+            return False, str(e)[:80]
+
     def stop(self):
         with self._lock:
             if self._proc and self._proc.poll() is None:

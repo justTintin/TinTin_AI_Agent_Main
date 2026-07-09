@@ -444,7 +444,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 mgr = OllamaManager.get()
                 if mgr.is_binary_present():
                     log.info("正在初始化并后台启动内置 GPU 优化版 Ollama...")
-                    mgr.start()
+                    ok, _ = mgr.start()
+                    # 启动成功后顺带预热配置的视觉模型，避免首次推理冷加载读超时
+                    if ok:
+                        try:
+                            mgr.warmup_model()
+                        except Exception as we:
+                            log.warning(f"自启动后预热视觉模型失败（不影响启动结果）: {we}")
                 else:
                     log.warning("内置 ollama.exe 不存在，跳过自启动。")
             except Exception as e:

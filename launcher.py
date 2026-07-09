@@ -10,10 +10,25 @@
   2. python build.py launcher        → 生成 螺丝钉-电商智能体矩阵.exe
   3. 把 .exe + .vol.* 一起发给客户
 """
-import os, sys, subprocess, zipfile, glob, re
+import os, sys, subprocess, zipfile, glob, re, traceback
 
 BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
 os.chdir(BASE_DIR)
+
+
+def _pause(msg="按 Enter 退出..."):
+    """等待用户确认。windowed 模式用 MessageBox。"""
+    if getattr(sys, 'frozen', False) and not sys.stdin:
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, msg, "螺丝钉-电商智能体矩阵", 0)
+        except Exception:
+            pass
+    else:
+        try:
+            input(msg)
+        except (EOFError, RuntimeError):
+            pass
 
 
 # ═══════════════════════════════════════════════════════════
@@ -75,7 +90,7 @@ def run_extraction():
     if not volumes:
         print("错误：未找到分卷文件")
         print("请将 螺丝钉-电商智能体矩阵.vol.* 与本程序放在同一目录。")
-        input("按 Enter 退出...")
+        _pause()
         sys.exit(1)
 
     extract_volumes(volumes)
@@ -110,7 +125,7 @@ def launch_app():
     if not os.path.isfile(entry):
         print(f"错误：未找到 {entry}")
         print("请确认分卷已正确解包。")
-        input("按 Enter 退出...")
+        _pause()
         sys.exit(1)
 
     env = os.environ.copy()
@@ -120,7 +135,7 @@ def launch_app():
     result = subprocess.run([python_exe, entry], env=env, cwd=BASE_DIR)
     if result.returncode != 0:
         print(f"程序异常退出，错误码: {result.returncode}")
-        input("按 Enter 退出...")
+        _pause()
 
 
 # ═══════════════════════════════════════════════════════════

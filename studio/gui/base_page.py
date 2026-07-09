@@ -20,23 +20,24 @@ from utils.logger_utils import log
 
 
 def _show_dev_only(parent_widget):
-    """清空页面原有内容，只显示'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
+    """隐藏页面原有子控件，并覆盖一层'开发中'提示（独立函数，供非BasePage的inline页面使用）"""
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     from PySide6.QtCore import Qt
     if parent_widget is None:
         return
-    # 移除旧布局及其所有子控件
+    # 隐藏原有布局中所有子控件（不销毁，保留原界面以便恢复）
     old_layout = parent_widget.layout()
     if old_layout is not None:
-        QWidget().setLayout(old_layout)  # 将旧布局转移给临时对象，Qt 随即回收
-    # 新建只含提示的布局
-    layout = QVBoxLayout(parent_widget)
-    layout.setContentsMargins(40, 40, 40, 40)
-    layout.addStretch()
-    banner = QLabel("🚧 该功能正在开发中，敬请期待")
-    banner.setObjectName("dev_banner")
-    banner.setAlignment(Qt.AlignCenter)
-    banner.setStyleSheet("""
+        for i in range(old_layout.count()):
+            item = old_layout.itemAt(i)
+            w = item.widget() if item else None
+            if w is not None:
+                w.setVisible(False)
+    # 在原有布局之上叠加提示层（作为 parent_widget 的子控件，覆盖在原内容之上）
+    overlay = QLabel("🚧 该功能正在开发中，敬请期待", parent_widget)
+    overlay.setObjectName("dev_banner")
+    overlay.setAlignment(Qt.AlignCenter)
+    overlay.setStyleSheet("""
         QLabel#dev_banner {
             background-color: #FFF3CD;
             color: #856404;
@@ -46,8 +47,16 @@ def _show_dev_only(parent_widget):
             font-weight: bold;
         }
     """)
-    layout.addWidget(banner, alignment=Qt.AlignCenter)
-    layout.addStretch()
+    overlay.setAttribute(Qt.WA_DeleteOnClose)
+    overlay.setScaledContents(False)
+    overlay.setTextFormat(Qt.PlainText)
+    # 让 overlay 铺满整个 parent_widget
+    overlay.setAlignment(Qt.AlignCenter)
+    overlay.setAutoFillBackground(True)
+    overlay.setFixedSize(parent_widget.size())
+    overlay.move(0, 0)
+    overlay.show()
+    overlay.raise_()
 
 
 class BasePage:

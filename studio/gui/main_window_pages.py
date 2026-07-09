@@ -743,6 +743,8 @@ class PageSetupMixin:
             layout.addStretch()
         
             self.current_workflow_data = None
+            # Auto-load default workflow for Digital Human
+            QTimer.singleShot(500, self.auto_load_default_dh_workflow)
 
             _show_dev_only(self.page_digital_human)
 

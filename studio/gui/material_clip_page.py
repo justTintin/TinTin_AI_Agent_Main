@@ -637,16 +637,20 @@ class MaterialClipPage(BasePage):
     # ── 共享：目录树组件 ──
 
     def _build_dir_tree_widget(self, parent_layout, tree_attr="dir_tree"):
-        """构建目录来源选择 + 资源目录树。"""
+        """构建目录来源选择 + 资源目录树。
+
+        每个 Tab 各有一份独立的"目录来源"下拉——素材入库和智能分析是
+        独立功能，目录来源互不影响（入库选 NAS、分析选本机各自独立）。
+        """
         nas_row = QHBoxLayout()
-        # 目录来源下拉（仅首个树创建一次，两树共享）
-        if not hasattr(self, "cmb_dir_source"):
-            nas_row.addWidget(QLabel("目录来源:"))
-            self.cmb_dir_source = QComboBox()
-            self.cmb_dir_source.addItems(["本机目录", "NAS 目录"])
-            self.cmb_dir_source.setCurrentIndex(0)  # 默认本机
-            self.cmb_dir_source.currentIndexChanged.connect(self._reload_dir_config)
-            nas_row.addWidget(self.cmb_dir_source)
+        nas_row.addWidget(QLabel("目录来源:"))
+        cmb = QComboBox()
+        cmb.addItems(["本机目录", "NAS 目录"])
+        cmb.setCurrentIndex(0)  # 默认本机
+        # 各自独立：改本 Tab 的来源只重新加载本 Tab 的目录树
+        cmb.currentIndexChanged.connect(lambda *_: self._reload_dir_config_for(tree_attr))
+        setattr(self, f"cmb_dir_source_{tree_attr}", cmb)
+        nas_row.addWidget(cmb)
         nas_lbl = QLabel("（未配置）")
         nas_lbl.setObjectName("nas_root_label")
         nas_row.addWidget(nas_lbl, 1)
@@ -996,10 +1000,45 @@ class MaterialClipPage(BasePage):
             pass
         return False
 
-    def _reload_dir_config(self, *_args):
-        """重新读取目录配置，按「目录来源」下拉加载本机或 NAS 目录树。
+    def _reload_dir_config_for(self, tree_attr):
+        """某个 Tab 的"目录来源"下拉变化时，只重新加载该 Tab 自己的目录树。
 
-        *_args 用于兼容 QComboBox.currentIndexChanged 信号传入的 index 参数。
+        素材入库与智能分析是独立功能，目录来源互不影响。
+        """
+        cmb = getattr(self, f"cmb_dir_source_{tree_attr}", None)
+        use_nas = cmb.currentIndex() == 1 if cmb is not None else False
+        tree = getattr(self, tree_attr, None)
+        lbl = getattr(self, f"lbl_nas_root_{tree_attr}", None)
+        self._load_dirs_into_tree(use_nas, dirs_target=tree, lbl_target=lbl)
+
+    def _reload_dir_config(self, *_args):
+        """重新读取目录配置，按各 Tab 自己的"目录来源"下拉加载目录树。
+
+        素材入库与智能分析的目录来源独立：各按自己的下拉值加载自己的树。
+        """
+        for tree_attr in ["ingest_tree", "analyze_tree"]:
+            cmb = getattr(self, f"cmb_dir_source_{tree_attr}", None)
+            use_nas = cmb.currentIndex() == 1 if cmb is not None else False
+            tree = getattr(self, tree_attr, None)
+            lbl = getattr(self, f"lbl_nas_root_{tree_attr}", None)
+            self._load_dirs_into_tree(use_nas, dirs_target=tree, lbl_target=lbl)
+
+        # 恢复之前选中的目录（若有）
+        old_selected = getattr(self, "_last_selected_dir", "")
+        if old_selected and hasattr(self, "analyze_tree"):
+            self.analyze_tree.blockSignals(True)
+            self._select_path_in_tree(old_selected)
+            self.analyze_tree.blockSignals(False)
+            self._last_selected_dir = old_selected
+        else:
+            self._last_selected_dir = ""
+        self._refresh_db_table()
+
+    def _load_dirs_into_tree(self, use_nas, dirs_target=None, lbl_target=None):
+        """读取配置，按 use_nas 决定目录列表，填充到指定树 + 更新指定标签。
+
+        单个 Tab 的目录来源变化时只加载该 Tab 的树（独立）；
+        初始化时两个 Tab 各调用一次。
         """
         import json as _json
         cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
@@ -1011,60 +1050,31 @@ class MaterialClipPage(BasePage):
         except Exception:
             pass
 
-        # 目录来源：下拉值（0=本机目录，1=NAS目录），默认本机
-        # 兼容旧配置：无下拉时按 default_storage / storage_type 回退
-        if hasattr(self, "cmb_dir_source"):
-            use_nas = self.cmb_dir_source.currentIndex() == 1
-        else:
-            use_nas = cfg.get("default_storage", cfg.get("storage_type", "local")) == "nas"
-
         dirs = []
-        self._nas_root = ""
-        self._local_dir = ""
-        self._nas_client = None
-
         if use_nas:
             # ── NAS 目录模式 ──
-            self._nas_root = cfg.get("nas_root", "")
+            nas_root = cfg.get("nas_root", "")
             dirs = cfg.get("index_directories", [])
-            root_text = self._nas_root if self._nas_root else "（未配置，请前往「资源配置」配置）"
-            if self._nas_root.startswith("//") or self._nas_root.startswith("\\\\"):
+            root_text = nas_root if nas_root else "（未配置，请前往「资源配置」配置）"
+            if nas_root and (nas_root.startswith("//") or nas_root.startswith("\\\\")):
                 try:
                     self._nas_client = NASClient.from_config(cfg)
                     self._nas_client.connect()
-                    log.info(f"NAS 客户端已连接: {self._nas_root}")
+                    self._nas_root = nas_root
+                    log.info(f"NAS 客户端已连接: {nas_root}")
                 except Exception as e:
                     log.warning(f"NAS 客户端连接失败: {e}")
                     self._nas_client = None
         else:
             # ── 本机目录模式 ──
-            # local_directories 是纯路径字符串列表
             local_dirs = cfg.get("local_directories", [])
             dirs = local_dirs
             root_text = "本机磁盘" if local_dirs else "（未配置，请前往「资源配置」配置）"
 
-        # 更新顶部根目录标签
-        for attr in ["lbl_nas_root_ingest_tree", "lbl_nas_root_analyze_tree"]:
-            lbl = getattr(self, attr, None)
-            if lbl is not None:
-                lbl.setText(root_text)
-
-        old_selected = getattr(self, "_last_selected_dir", "")
-
-        for tree_attr in ["ingest_tree", "analyze_tree"]:
-            tree = getattr(self, tree_attr, None)
-            if tree is not None:
-                self._populate_dir_tree(tree, dirs)
-
-        if old_selected and hasattr(self, "analyze_tree"):
-            self.analyze_tree.blockSignals(True)
-            self._select_path_in_tree(old_selected)
-            self.analyze_tree.blockSignals(False)
-            self._last_selected_dir = old_selected
-            self._refresh_db_table()
-        else:
-            self._last_selected_dir = ""
-            self._refresh_db_table()
+        if lbl_target is not None:
+            lbl_target.setText(root_text)
+        if dirs_target is not None:
+            self._populate_dir_tree(dirs_target, dirs)
 
     def _populate_dir_tree(self, tree, dirs):
         tree.blockSignals(True)

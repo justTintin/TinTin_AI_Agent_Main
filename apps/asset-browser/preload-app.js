@@ -22,7 +22,6 @@ contextBridge.exposeInMainWorld('api', {
   openPath: (dirPath) => ipcRenderer.invoke('open-path', dirPath),
   deleteLocalFiles: (paths) => ipcRenderer.invoke('delete-local-files', paths),
   enqueueMaterialImport: (paths) => ipcRenderer.invoke('enqueue-material-import', paths),
-  openV2rayClient: () => ipcRenderer.invoke('open-v2ray-client'),
 
   // studio 集成：读取选题握手（关键词/搜索页/下载目录）
   getHandoff: () => ipcRenderer.invoke('get-handoff'),

@@ -41,8 +41,6 @@ try {
 function initDatabase() {
   const defaultSettings = {
     downloadPath: KNOWLEDGE_DIR,
-    useV2rayProxy: false,
-    v2rayPath: ""
   };
 
   if (!fs.existsSync(dbPath)) {
@@ -65,8 +63,6 @@ function initDatabase() {
       if (!db.settings) { db.settings = defaultSettings; modified = true; }
       // 始终与 Studio 配置的素材目录同步（knowledge_dir.json 优先）
       if (db.settings.downloadPath !== KNOWLEDGE_DIR) { db.settings.downloadPath = KNOWLEDGE_DIR; modified = true; }
-      if (db.settings.useV2rayProxy === undefined) { db.settings.useV2rayProxy = defaultSettings.useV2rayProxy; modified = true; }
-      if (db.settings.v2rayPath === undefined) { db.settings.v2rayPath = defaultSettings.v2rayPath; modified = true; }
       if (!db.creators) { db.creators = []; modified = true; }
       if (!db.downloads) { db.downloads = []; modified = true; }
       if (!Array.isArray(db.downloadDirs)) {
@@ -619,11 +615,6 @@ ipcMain.handle('open-path', async (event, dirPath) => {
     return true;
   }
   return false;
-});
-
-ipcMain.handle('open-v2ray-client', async () => {
-  const db = getDatabase();
-  return proxyManager.openV2rayN(db.settings.v2rayPath);
 });
 
 function _normalizePathLower(p) {

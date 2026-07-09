@@ -126,9 +126,30 @@ def _ensure_pyinstaller():
         )
 
 
+def build_launcher():
+    """Build a lightweight launcher executable (fast, ~10MB)."""
+    print("[build] Building launcher executable...")
+    _ensure_pyinstaller()
+    launcher = os.path.join(PROJECT_ROOT, "launcher.py")
+    icon_ico = os.path.join(STUDIO_DIR, "assets", "app_icon.ico")
+    icon_args = [f"--icon={icon_ico}"] if os.path.isfile(icon_ico) else []
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--name", NAME,
+        "--onefile",
+        "--windowed",
+        "--clean",
+        "--noconfirm",
+        *icon_args,
+        launcher,
+    ]
+    subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
+    print(f"[build] Done → {os.path.join(DIST_DIR, NAME + '.exe')}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="螺丝钉-电商智能体矩阵 Build Tool")
-    parser.add_argument("command", choices=["win", "linux", "run", "clean"],
+    parser.add_argument("command", choices=["win", "linux", "run", "launcher", "clean"],
                         help="Action to perform")
     args = parser.parse_args()
 
@@ -136,6 +157,8 @@ if __name__ == "__main__":
         build_win()
     elif args.command == "linux":
         build_linux()
+    elif args.command == "launcher":
+        build_launcher()
     elif args.command == "run":
         run_dev()
     elif args.command == "clean":

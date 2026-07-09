@@ -192,7 +192,7 @@ class SidebarMixin:
         graphics_menus = [
             ("🖼️ 封面制作", 33),
             ("👤 图像抠图", 16),
-            ("🗂️ 智能分层", 17),
+            # ("🗂️ 智能分层", 17),          # 暂时隐藏
             ("👁️ 图片框选 OCR", 25),
         ]
         for text, index in graphics_menus:

@@ -76,7 +76,6 @@ class PageSetupMixin:
         from gui.image_layered_page import ImageLayeredPage
         self.image_layered_tool = ImageLayeredPage(self.page_image_layered, self)
         self.image_layered_tool.setup()
-        self.image_layered_tool._show_dev_only()
 
     def setup_live_clip_page(self):
         self.live_clip_tool = LiveClipPage(self.page_live_clip, self)

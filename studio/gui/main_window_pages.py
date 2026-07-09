@@ -164,31 +164,7 @@ class PageSetupMixin:
         b_save = QPushButton("💾 保存目录配置"); b_save.setObjectName("primary_button"); b_save.clicked.connect(self._res_save_nas_config); r2.addWidget(b_save)
         lg2.addLayout(r2); l2.addWidget(g2)
 
-        # ── 旺店通 ERP 配置 ──
-        g_erp = QGroupBox("🏪 旺店通 ERP 配置")
-        g_erp.setStyleSheet(g1.styleSheet().replace("#a855f7","#f97316"))
-        lg_erp = QVBoxLayout(g_erp); lg_erp.setContentsMargins(16,20,16,16); lg_erp.setSpacing(10)
-        lg_erp.addWidget(QLabel("配置旺店通 ERP 接口。产品资料从仓库同步时使用。留空则不启用，可在产品资料页导入表格。"))
-        r_erp = QHBoxLayout(); r_erp.addWidget(QLabel("API 地址:"))
-        self.res_erp_url = QLineEdit(); self.res_erp_url.setPlaceholderText("https://api.wangdian.cn/openapi2/")
-        r_erp.addWidget(self.res_erp_url, 1); lg_erp.addLayout(r_erp)
-        r_erp2 = QHBoxLayout(); r_erp2.addWidget(QLabel("AppKey:"))
-        self.res_erp_appkey = QLineEdit(); self.res_erp_appkey.setPlaceholderText("旺店通 appkey")
-        r_erp2.addWidget(self.res_erp_appkey, 1); lg_erp.addLayout(r_erp2)
-        r_erp3 = QHBoxLayout(); r_erp3.addWidget(QLabel("AppSecret:"))
-        self.res_erp_appsecret = QLineEdit(); self.res_erp_appsecret.setPlaceholderText("旺店通 appsecret")
-        self.res_erp_appsecret.setEchoMode(QLineEdit.Password)
-        r_erp3.addWidget(self.res_erp_appsecret, 1); lg_erp.addLayout(r_erp3)
-        r_erp4 = QHBoxLayout(); r_erp4.addWidget(QLabel("SID:"))
-        self.res_erp_sid = QLineEdit(); self.res_erp_sid.setPlaceholderText("旺店通商家编码")
-        r_erp4.addWidget(self.res_erp_sid, 1); lg_erp.addLayout(r_erp4)
-        r_erp5 = QHBoxLayout()
-        btn_save_erp = QPushButton("💾 保存 ERP 配置"); btn_save_erp.setObjectName("secondary_button")
-        btn_save_erp.clicked.connect(self._res_save_erp_config)
-        r_erp5.addWidget(btn_save_erp)
-        r_erp5.addStretch()
-        lg_erp.addLayout(r_erp5)
-        l2.addWidget(g_erp)
+        
 
         l2.addStretch()
         tabs.addTab(p2, "🗄️ 素材资源")
@@ -683,11 +659,50 @@ class PageSetupMixin:
         r4.addStretch(); l4.addLayout(r4)
         l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
 
+        # ── Tab 5: 旺店通 ERP ──
+        p5 = QWidget(); l5 = QVBoxLayout(p5); l5.setContentsMargins(30,30,30,30)
+        l5.addWidget(QLabel("旺店通 ERP 配置。产品资料从仓库同步时使用，留空则不启用。"))
+        l5.addSpacing(10)
+        _inp("API 地址:", "erp_url_input", "https://api.wangdian.cn/openapi2/", l5)
+        _inp("AppKey:", "erp_appkey_input", "旺店通 appkey", l5)
+        _inp("AppSecret:", "erp_appsecret_input", "旺店通 appsecret", l5, echo=QLineEdit.Password)
+        _inp("SID:", "erp_sid_input", "旺店通商家编码", l5)
+        r5 = QHBoxLayout(); r5.addStretch()
+        b_save_erp = QPushButton("💾 保存配置"); b_save_erp.setObjectName("primary_button")
+        b_save_erp.clicked.connect(self._save_erp_platform_cfg)
+        r5.addWidget(b_save_erp)
+        self.lbl_erp_status = QLabel(""); self.lbl_erp_status.setObjectName("muted_text"); r5.addWidget(self.lbl_erp_status)
+        r5.addStretch(); l5.addLayout(r5)
+        l5.addStretch(); tabs.addTab(p5, "🏪 旺店通")
 
+        # ── Tab 6: 数据库配置 ──
+        p6 = QWidget(); l6 = QVBoxLayout(p6); l6.setContentsMargins(30,30,30,30)
+        l6.addWidget(QLabel("素材向量库 PostgreSQL 数据库地址配置。可配置远程数据库。"))
+        l6.addSpacing(10)
+        _inp("主机地址:", "matdb_host_input", "192.168.111.17", l6)
+        _inp("端口:", "matdb_port_input", "15432", l6)
+        _inp("数据库名:", "matdb_name_input", "material_index", l6)
+        _inp("用户名:", "matdb_user_input", "postgres", l6)
+        _inp("密码:", "matdb_pass_input", "", l6, echo=QLineEdit.Password)
+        r6 = QHBoxLayout(); r6.addStretch()
+        b_test_db = QPushButton("🔌 测试连接"); b_test_db.setObjectName("secondary_button")
+        b_test_db.clicked.connect(self._test_matdb_platform)
+        r6.addWidget(b_test_db)
+        b_save_db = QPushButton("💾 保存配置"); b_save_db.setObjectName("primary_button")
+        b_save_db.clicked.connect(self._save_matdb_platform_cfg)
+        r6.addWidget(b_save_db)
+        self.lbl_db_status = QLabel(""); self.lbl_db_status.setObjectName("muted_text"); r6.addWidget(self.lbl_db_status)
+        r6.addStretch(); l6.addLayout(r6)
+        l6.addStretch(); tabs.addTab(p6, "🗄️ 数据库")
 
         layout.addWidget(tabs, 1)
         # Load feishu config
         self.load_feishu_config()
+        # Load ERP and DB config
+        try: self.load_erp_platform_cfg()
+        except Exception: pass
+        try: self.load_matdb_platform_cfg()
+        except Exception: pass
         # Save button for ComfyUI + RunningHub
         r = QHBoxLayout(); r.addStretch()
         sb = QPushButton("💾 保存 ComfyUI/RunningHub"); sb.setObjectName("secondary_button"); sb.clicked.connect(self.save_ai_config); r.addWidget(sb)
@@ -1108,8 +1123,6 @@ class PageSetupMixin:
                     else:
                         self.res_index_dirs.addItem(str(dd))
             except Exception: pass
-        # 加载 ERP 配置
-        self._res_load_erp_config()
 
     def _res_on_storage_type_changed(self):
         """根据存储类型切换显示 NAS 地址或本机目录"""
@@ -1122,37 +1135,3 @@ class PageSetupMixin:
         if d:
             self.res_local_dir.setText(d)
 
-    # ── 旺店通 ERP 配置 ──
-
-    def _res_save_erp_config(self):
-        import json as _json
-        from config.paths import CONFIG_DIR
-        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
-        try:
-            cfg = {
-                "base_url": self.res_erp_url.text().strip(),
-                "appkey": self.res_erp_appkey.text().strip(),
-                "appsecret": self.res_erp_appsecret.text().strip(),
-                "sid": self.res_erp_sid.text().strip(),
-            }
-            os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            QMessageBox.information(self, "提示", "ERP 配置已保存。")
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存失败: {e}")
-
-    def _res_load_erp_config(self):
-        import json as _json
-        from config.paths import CONFIG_DIR
-        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
-        try:
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                self.res_erp_url.setText(cfg.get("base_url", ""))
-                self.res_erp_appkey.setText(cfg.get("appkey", ""))
-                self.res_erp_appsecret.setText(cfg.get("appsecret", ""))
-                self.res_erp_sid.setText(cfg.get("sid", ""))
-        except Exception as e:
-            log.error(f"加载 ERP 配置失败: {e}")

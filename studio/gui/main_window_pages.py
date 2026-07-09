@@ -23,6 +23,7 @@ from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.subtitle_removal_page import SubtitleRemovalPage
 from gui.live_clip_page import LiveClipPage
+from gui.base_page import _add_dev_banner_to_layout
 from gui.voice_clone_page import VoiceClonePage
 from gui.voice_samples_page import VoiceSamplesPage
 from gui.video_ocr_page import VideoOcrPage
@@ -75,6 +76,7 @@ class PageSetupMixin:
         from gui.image_layered_page import ImageLayeredPage
         self.image_layered_tool = ImageLayeredPage(self.page_image_layered, self)
         self.image_layered_tool.setup()
+        self.image_layered_tool._add_dev_banner()
 
     def setup_live_clip_page(self):
         self.live_clip_tool = LiveClipPage(self.page_live_clip, self)
@@ -84,6 +86,7 @@ class PageSetupMixin:
         from gui.ai_script_page import AIScriptPage
         self.ai_script_tool = AIScriptPage(self.page_ai_script, self)
         self.ai_script_tool.setup()
+        self.ai_script_tool._add_dev_banner()
 
     def setup_voice_clone_page(self):
         from gui.voice_clone_page import VoiceClonePage
@@ -207,21 +210,25 @@ class PageSetupMixin:
         from gui.dreamina_page import DreaminaPage
         self.dreamina_tool = DreaminaPage(self.page_dreamina, self)
         self.dreamina_tool.setup()
+        self.dreamina_tool._add_dev_banner()
 
     def setup_dreamina_assets_page(self):
         from gui.dreamina_assets_page import DreaminaAssetsPage
         self.dreamina_assets_tool = DreaminaAssetsPage(self.page_dreamina_assets, self)
         self.dreamina_assets_tool.setup()
+        self.dreamina_assets_tool._add_dev_banner()
 
     def setup_cover_maker_page(self):
         from gui.cover_maker_page import CoverMakerPage
         self.cover_maker_tool = CoverMakerPage(self.page_cover_maker, self)
         self.cover_maker_tool.setup()
+        self.cover_maker_tool._add_dev_banner()
 
     def setup_compile_video_page(self):
         from gui.compile_video_page import CompileVideoPage
         self.compile_video_tool = CompileVideoPage(self.page_compile_video, self)
         self.compile_video_tool.setup()
+        self.compile_video_tool._add_dev_banner()
 
     def setup_hook_score_page(self):
         from gui.hook_score_page import HookScorePage
@@ -232,6 +239,7 @@ class PageSetupMixin:
         from gui.mg_animation_page import MGAnimationPage
         self.mg_animation_tool = MGAnimationPage(self.page_mg_animation, self)
         self.mg_animation_tool.setup()
+        self.mg_animation_tool._add_dev_banner()
 
     def setup_marketing_detect_page(self):
         from gui.marketing_detect_page import MarketingDetectPage
@@ -303,6 +311,8 @@ class PageSetupMixin:
                 self.vt_workflow_selector.setCurrentIndex(idx)
             else:
                 self.on_vt_workflow_changed(self.vt_workflow_selector.currentIndex())
+
+            _add_dev_banner_to_layout(layout)
 
     def setup_hotspots_page(self):
             layout = QVBoxLayout(self.page_hotspots)
@@ -737,6 +747,8 @@ class PageSetupMixin:
             self.current_workflow_data = None
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
+
+            _add_dev_banner_to_layout(layout)
 
     def setup_task_list_page(self):
             layout = QVBoxLayout(self.page_task_list)

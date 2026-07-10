@@ -1241,23 +1241,7 @@ class VoiceClonePage(BasePage):
         else:
             QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
-    def _stop_voxcpm_after_voice(self):
-        """离开声音克隆页面时停止 VoxCPM 服务，释放 GPU 显存。"""
-        try:
-            mw = getattr(self, "main_window", None)
-            if mw:
-                if hasattr(mw, "stop_voxcpm_service"):
-                    log.info("离开声音克隆页面，停止 VoxCPM 服务释放显存")
-                    mw.stop_voxcpm_service(show_prompt=False)
-                montage = getattr(mw, "subtitle_removal_tool_v14", None)
-                if montage and hasattr(montage, "stop_api_server"):
-                    montage.stop_api_server(show_prompt=False)
-        except Exception as e:
-            log.warning(f"停止 VoxCPM 服务失败: {e}")
-
     def hideEvent(self, event):
-        """页面隐藏时停止 VoxCPM 服务释放显存。"""
-        self._stop_voxcpm_after_voice()
         super().hideEvent(event)
 
     def _get_out_voice_dir(self, dir_path):

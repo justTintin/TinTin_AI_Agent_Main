@@ -383,13 +383,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self._pw_auto_install_attempted = False
         self._pw_ready = False
         self.account_pw_controllers = {}
-        
-        # VoxCPM process control properties
-        self.voxcpm_process = None
-        self.voxcpm_log_file = None
-        self.voxcpm_status_timer = QTimer(self)
-        self.voxcpm_status_timer.timeout.connect(self._check_voxcpm_process_status)
-        
+
         self.refresh_timer = QTimer(self)
         self._avatar_workers = []
         self.active_workers = []
@@ -433,31 +427,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         self.ai_status_collector.status_updated.connect(handle_ai_status)
         self.ai_status_collector.start()
-        
-        # 自启动本地 Ollama 服务的后台线程（仅在 local 模式执行，remote 模式不拉起本地进程）
-        def auto_start_ollama():
-            try:
-                from utils.ollama_manager import OllamaManager, read_ollama_mode
-                if read_ollama_mode() != "local":
-                    log.info("Ollama 来源为远程模式，跳过本地进程自启动。")
-                    return
-                mgr = OllamaManager.get()
-                if mgr.is_binary_present():
-                    log.info("正在初始化并后台启动内置 GPU 优化版 Ollama...")
-                    ok, _ = mgr.start()
-                    # 启动成功后顺带预热配置的视觉模型，避免首次推理冷加载读超时
-                    if ok:
-                        try:
-                            mgr.warmup_model()
-                        except Exception as we:
-                            log.warning(f"自启动后预热视觉模型失败（不影响启动结果）: {we}")
-                else:
-                    log.warning("内置 ollama.exe 不存在，跳过自启动。")
-            except Exception as e:
-                log.error(f"自启动本地 Ollama 失败: {e}")
 
-        threading.Thread(target=auto_start_ollama, daemon=True).start()
-        
         # 启动后台文件夹变化实时监听服务
         self.folder_watcher = None
         def start_watcher():
@@ -519,21 +489,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 静默清理后台服务（不弹 CloseSplash 窗口）
         try:
-            if hasattr(self, "video_montage_tool") and self.video_montage_tool:
-                self.video_montage_tool.stop_api_server(show_prompt=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "voice_clone_tool") and self.voice_clone_tool:
-                self.voice_clone_tool.stop_api_server(show_prompt=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "stop_voxcpm_service"):
-                self.stop_voxcpm_service(show_prompt=False)
-        except Exception:
-            pass
-        try:
             if hasattr(self, "creator_pw_controller") and self.creator_pw_controller:
                 self.creator_pw_controller.stop()
         except Exception:
@@ -577,11 +532,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         try:
             from core.creator_browser_controller import close_all_active_browsers
             close_all_active_browsers()
-        except Exception:
-            pass
-        try:
-            from utils.ollama_manager import OllamaManager
-            OllamaManager.get().stop()
         except Exception:
             pass
 
@@ -898,8 +848,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 7: # System Config
             if hasattr(self, "refresh_llm_page_status"):
                 self.refresh_llm_page_status()
-            if hasattr(self, "voxcpm_status_timer") and not self.voxcpm_status_timer.isActive():
-                self.voxcpm_status_timer.start(3000)
         elif index == 21: # Voice Clone
             if hasattr(self, "voice_clone_tool"):
                 self.voice_clone_tool._populate_ref_audio_samples()
@@ -928,11 +876,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "_res_load_configs"):
                 try: self._res_load_configs()
                 except Exception as e: log.error(f"加载资源配置失败: {e}")
-                
-        # Stop VoxCPM timer if switched away from System Config page
-        if index != 7:
-            if hasattr(self, "voxcpm_status_timer") and self.voxcpm_status_timer.isActive():
-                self.voxcpm_status_timer.stop()
 
 
 
@@ -1083,88 +1026,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.refresh_creator_queue_table()
             if hasattr(self, "cg_status_label"):
                 self.cg_status_label.setText("已移除")
-
-
-
-
-
-
-
-
-
-
-
-
-
-    def start_whisper_repair(self):
-        if hasattr(self, "whisper_repair_worker") and self.whisper_repair_worker and self.whisper_repair_worker.isRunning():
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "开始环境一键配置",
-            "一键配置将会执行以下操作：\n"
-            "1. 自动卸载当前已安装的 CPU 版 PyTorch 依赖包。\n"
-            "2. 安装支持 GPU CUDA 加速的 PyTorch (2.5.1+cu121) 库 (包体积约 2.4 GB)。\n"
-            "3. 安装/升级 WhisperX 运行需要的相关依赖包与 NVIDIA DLL 链接库。\n\n"
-            "是否确认现在开始安装/配置？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-        if reply == QMessageBox.No:
-            return
-
-        self.btn_refresh_whisper.setEnabled(False)
-        self.btn_install_whisper.setEnabled(False)
-        self.whisper_progress_bar.setVisible(True)
-        self.whisper_progress_bar.setRange(0, 0)
-        self.whisper_log_view.clear()
-
-        self.whisper_repair_worker = EnvInstallWorker()
-        self.whisper_repair_worker.log_line.connect(self.on_whisper_log_line)
-        self.whisper_repair_worker.stage.connect(self.on_whisper_stage)
-        self.whisper_repair_worker.finished.connect(self.on_whisper_finished)
-        self.whisper_repair_worker.start()
-
-    def on_whisper_log_line(self, text):
-        self.whisper_log_view.append(text)
-
-    def on_whisper_stage(self, text):
-        self.whisper_stage_label.setText(text)
-
-    def on_whisper_finished(self, success, message):
-        self.btn_refresh_whisper.setEnabled(True)
-        self.btn_install_whisper.setEnabled(True)
-        self.whisper_progress_bar.setVisible(False)
-        self.whisper_stage_label.setText("系统就绪")
-        
-        self.refresh_llm_page_status()
-
-        if success:
-            QMessageBox.information(self, "环境一键配置成功", message)
-        else:
-            QMessageBox.critical(self, "环境配置失败", message)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def select_image(self):
         file, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")

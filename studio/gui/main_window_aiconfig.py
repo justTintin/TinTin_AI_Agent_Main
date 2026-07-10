@@ -50,22 +50,16 @@ class AIConfigMixin:
         self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
         self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
         self.ai_config["llm_model"] = self.llm_model_input.text().strip()
-        # Ollama 来源模式（local 内置进程 / remote 外部已运行）
-        ollama_mode = getattr(self, "ollama_mode_combo", None)
-        self.ai_config["ollama_mode"] = ollama_mode.currentData() if ollama_mode else "local"
         vision_url = self.llm_vision_api_url_input.text().strip()
         vision_model = self.llm_vision_model_input.currentText().strip()
-        # local 模式：vision_url 为空时补本地地址；remote 模式不补（由用户填远程地址）
-        if vision_model and not vision_url and self.ai_config["ollama_mode"] == "local":
-            vision_url = "http://127.0.0.1:11434"
-            self.llm_vision_api_url_input.setText(vision_url)
         self.ai_config["llm_vision_api_url"] = vision_url
         self.ai_config["llm_vision_model"] = vision_model
-        # Whisper 来源模式 + ASR 地址
-        whisper_source = getattr(self, "whisper_source_combo", None)
-        self.ai_config["whisper_source"] = whisper_source.currentData() if whisper_source else "remote"
+        # Whisper ASR 地址（纯远程模式）
         whisper_url = getattr(self, "whisper_api_url_input", None)
         self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
+        # CLIP embedding 服务地址（纯远程模式）
+        clip_url = getattr(self, "clip_api_url_input", None)
+        self.ai_config["clip_api_url"] = clip_url.text().strip() if clip_url else ""
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -97,22 +91,6 @@ class AIConfigMixin:
     def _update_llm_page_ui(self, info):
         if not info:
             return
-        # Update Whisper status labels
-        if info.get("whisper_ok", False):
-            whisper_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('whisper_version', '')})"
-        else:
-            whisper_status = "<font color='#dc2626'><b>❌ 未就绪</b></font> (缺少 whisperx 依赖)"
-        self.llm_whisper_status_val.setText(whisper_status)
-        
-        if info.get("dll_ok", False):
-            dll_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('dll_status', '')})"
-        else:
-            dll_status = f"<font color='#d97706'><b>⚠️ {info.get('dll_status', '')}</b></font>"
-        self.llm_dll_status_val.setText(dll_status)
-        
-        models_status = f"<font color='#2563eb'><b>{', '.join(info.get('found_models', []))}</b></font> (存放目录: {info.get('models_dir', '')})"
-        self.llm_models_status_val.setText(models_status)
-        
         # Update VoxCPM status label
         if info.get("voxcpm_ok", False):
             vox_status = f"<font color='#16a34a'><b>✅ {info.get('voxcpm_status', '')}</b></font>"
@@ -144,9 +122,8 @@ class AIConfigMixin:
             "llm_model": "deepseek-v4-flash",
             "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
-            "ollama_mode": "remote",
-            "whisper_source": "remote",
             "whisper_api_url": "",
+            "clip_api_url": "",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_source": "remote",
             "vox_mode": "api",
@@ -328,27 +305,16 @@ class AIConfigMixin:
                 sender.setEnabled(True)
             return
 
-        # 本地 Ollama：测试前先预热模型（避免冷加载读超时）。整个测试放到后台线程，
-        # 预热+测试可能耗时数十秒，避免卡死 UI。
-        # remote 模式不预热（远程通常已加载或由服务端管理）。
-        from utils.ollama_manager import read_ollama_mode
-        is_local_ollama = read_ollama_mode() == "local"
-
+        # 测试远程连接放到后台线程，避免卡死 UI。
         class _TestWorker(QThread):
             done = Signal(bool, str, str)  # (ok, status_text, color)
 
-            def __init__(self, url, key, mdl, warmup):
+            def __init__(self, url, key, mdl):
                 super().__init__()
-                self.url, self.key, self.mdl, self.warmup = url, key, mdl, warmup
+                self.url, self.key, self.mdl = url, key, mdl
 
             def run(self):
                 import requests
-                if self.warmup:
-                    try:
-                        from utils.ollama_manager import OllamaManager
-                        OllamaManager.get().warmup_model(self.mdl)
-                    except Exception as e:
-                        log.warning(f"测试连接前预热失败（继续尝试）: {e}")
                 full_url = f"{self.url.rstrip('/')}/v1/chat/completions"
                 headers = {"Content-Type": "application/json"}
                 if self.key:
@@ -370,7 +336,7 @@ class AIConfigMixin:
                 except Exception as e:
                     err = str(e)[:80]
                     if "Read timed out" in err or "ReadTimeout" in err:
-                        self.done.emit(False, "⏳ 模型正在加载进显存，请稍后重试（已触发后台预热）", "#f39c12")
+                        self.done.emit(False, "⏳ 模型可能正在加载，请稍后重试", "#f39c12")
                     else:
                         self.done.emit(False, f"❌ 连接失败: {err}", "#e74c3c")
 
@@ -380,7 +346,7 @@ class AIConfigMixin:
             if sender:
                 sender.setEnabled(True)
 
-        self._vision_test_worker = _TestWorker(api_url, api_key, model, is_local_ollama)
+        self._vision_test_worker = _TestWorker(api_url, api_key, model)
         self._vision_test_worker.done.connect(_on_done)
         self._vision_test_worker.start()
 

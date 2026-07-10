@@ -14,14 +14,14 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame,
     QComboBox, QDoubleSpinBox, QFileDialog, QProgressBar, QCheckBox,
 )
-from PySide6.QtCore import Signal, QTimer
+from PySide6.QtCore import Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from utils.media_library_manager import MediaLibraryManager
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
-from utils.voxcpm_client import synthesize_tts, ensure_running, start_server, stop_server, is_running as tts_is_running
+from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from config.paths import FINAL_OUTPUT_DIR
 
@@ -35,10 +35,6 @@ class TTSWorker(BaseWorker):
         self.text = text; self.ref_wav = ref_wav; self.out_path = out_path
 
     def do_work(self):
-        self.phase.emit("检查 TTS 服务…")
-        if not ensure_running(on_phase=self.phase.emit):
-            raise RuntimeError("VoxCPM 服务启动超时（模型加载较慢）。请稍后重试，"
-                               "或到『声音克隆』页查看启动状态/日志。")
         self.phase.emit("正在合成配音…")
         synthesize_tts(self.text, self.ref_wav, self.out_path)
         self.finished.emit(self.out_path)
@@ -101,28 +97,6 @@ class CompileVideoPage(BasePage):
         self.btn_tts.clicked.connect(self._tts_generate)
         tts_row.addWidget(self.btn_tts)
         form.addLayout(tts_row)
-
-        # TTS 本地服务控制：在本页直接启动/停止/检测，无需去「声音克隆」页
-        svc_row = QHBoxLayout()
-        svc_row.addWidget(QLabel("　TTS 服务"))
-        self.lbl_tts_svc = QLabel("检测中…")
-        self.lbl_tts_svc.setStyleSheet("font-weight:bold; color:#a0aec0;")
-        svc_row.addWidget(self.lbl_tts_svc)
-        svc_row.addStretch()
-        self.btn_tts_start = QPushButton("▶️ 启动服务")
-        self.btn_tts_start.setObjectName("secondary_button")
-        self.btn_tts_start.clicked.connect(self._tts_start_service)
-        svc_row.addWidget(self.btn_tts_start)
-        self.btn_tts_stop = QPushButton("⏹️ 停止服务")
-        self.btn_tts_stop.setObjectName("secondary_button")
-        self.btn_tts_stop.clicked.connect(self._tts_stop_service)
-        svc_row.addWidget(self.btn_tts_stop)
-        form.addLayout(svc_row)
-        # 定时检测服务状态（本地探活很快）
-        self._tts_timer = QTimer(self.parent_widget)
-        self._tts_timer.timeout.connect(self._refresh_tts_status)
-        self._tts_timer.start(4000)
-        self._refresh_tts_status()
 
         self.in_intro = self._file_row(form, "开场视频(可选)", self._browse_intro,
                                        placeholder="片头开场视频，如 MG 动态标题；拼在最前面")
@@ -199,36 +173,6 @@ class CompileVideoPage(BasePage):
                     self.combo_voice.addItem(name, path)
         except Exception as e:
             log.error(f"载入音色样本失败: {e}")
-
-    # ---------- TTS 本地服务控制 ----------
-    def _refresh_tts_status(self):
-        try:
-            running = tts_is_running(timeout=1)
-        except Exception:
-            running = False
-        if running:
-            self.lbl_tts_svc.setText("🟢 运行中")
-            self.lbl_tts_svc.setStyleSheet("font-weight:bold; color:#2ecc71;")
-            self.btn_tts_start.setEnabled(False); self.btn_tts_stop.setEnabled(True)
-        else:
-            self.lbl_tts_svc.setText("🔴 未运行")
-            self.lbl_tts_svc.setStyleSheet("font-weight:bold; color:#e74c3c;")
-            self.btn_tts_start.setEnabled(True); self.btn_tts_stop.setEnabled(False)
-
-    def _tts_start_service(self):
-        try:
-            started, msg = start_server()
-        except Exception as e:
-            self.show_error(f"启动 TTS 服务失败：{e}", "TTS 服务"); return
-        self.lbl_tts_svc.setText("🟡 启动中（加载模型，约需十几秒）…")
-        self.lbl_tts_svc.setStyleSheet("font-weight:bold; color:#f1c40f;")
-        self.btn_tts_start.setEnabled(False)
-        self.status.setText(f"TTS 服务：{msg}")
-
-    def _tts_stop_service(self):
-        ok, msg = stop_server()
-        self.status.setText(f"TTS 服务：{msg}")
-        self._refresh_tts_status()
 
     def _tts_generate(self):
         text = self.in_subtitle.toPlainText().strip()

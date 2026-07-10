@@ -155,7 +155,22 @@ def transcribe_audio(video_path: str, models_dir: str,
     """
     用 faster_whisper 对视频音轨转写，返回纯文本台词。
     使用全局字典缓存模型，避免每个视频重复加载模型文件。
+
+    远程模式下走 asr_client 远程服务，不加载本地模型。
     """
+    # 远程模式：走远程 ASR 服务，返回纯文本
+    try:
+        from utils.asr_client import read_whisper_source, read_asr_url, transcribe_remote, segments_to_plain
+        if read_whisper_source() == "remote":
+            asr_url = read_asr_url()
+            if not asr_url:
+                log.warning("远程 ASR 模式但未配置地址，跳过转写")
+                return ""
+            segments = transcribe_remote(video_path, asr_url, language="zh")
+            return segments_to_plain(segments)
+    except Exception as e:
+        log.warning(f"远程 ASR 转写失败，回退本地: {e}")
+
     try:
         import os as _os
         _os.environ["LANG"] = "zh_CN.UTF-8"

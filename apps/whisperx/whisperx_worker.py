@@ -58,127 +58,175 @@ class WhisperXTranscribeWorker(QThread):
 
     def run(self):
         try:
-            # 1. 确保 ffmpeg 可用（复用项目统一的查找逻辑，覆盖 asset-browser/vsr 等内置位置）
-            from utils.platform_utils import find_ffmpeg
-            ffmpeg_path = find_ffmpeg()
-            if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
-                raise RuntimeError(
-                    "未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH。"
-                )
-
-            # 2. 构造 whisperx_runner.py 子进程命令
-            runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisperx_runner.py")
-            cmd = [
-                sys.executable, "-u", runner_path,
-                "--video_path", self.video_path,
-                "--audio_path", self.audio_path,
-                "--output_path", self.output_path,
-                "--model_name", self.model_name,
-                "--download_root", self.download_root,
-                "--device_mode", self.device_mode,
-                "--ffmpeg_path", ffmpeg_path,
-            ]
-            if self.language:
-                cmd.extend(["--language", self.language])
-            if self.task_type:
-                cmd.extend(["--task_type", self.task_type])
-            if self.multi_mode:
-                cmd.append("--multi_mode")
-
-            log.info(f"[WhisperX Worker] 启动子进程: {' '.join(cmd)}")
-
-            # 2.5 启动前检查 GPU 显存是否充足
-            _check_and_warn_vram(min_free_mb=3000)
-
-            # 3. 启动子进程并重定向 stderr 到 stdout 统一解析
-            env = os.environ.copy()
-            # 自动为国内用户配置 Hugging Face 镜像加速，防止网络连接超时
-            env["HF_ENDPOINT"] = "https://hf-mirror.com"
-            env["PYTHONIOENCODING"] = "utf-8"
-            if ffmpeg_path:
-                ffmpeg_dir = os.path.dirname(ffmpeg_path)
-                if ffmpeg_dir not in env.get("PATH", ""):
-                    env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
-
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-
-            finished_srt_path = None
-            error_lines = []
-            is_error = False
-
-            # 4. 实时读取输出流
-            while True:
-                line = self.process.stdout.readline()
-                if not line:
-                    break
-                line_str = line.strip()
-                if not line_str:
-                    continue
-
-                log.info(f"[WhisperX Subprocess] {line_str}")
-
-                # 解析自定义标记
-                if line_str.startswith("[STAGE] "):
-                    stage_msg = line_str[len("[STAGE] "):]
-                    self.stage.emit(stage_msg)
-                elif line_str.startswith("[PROGRESS] "):
-                    try:
-                        prog_val = int(line_str[len("[PROGRESS] "):])
-                        self.progress.emit(prog_val)
-                        if 30 < prog_val < 90:
-                            self.busy.emit(True)
-                        else:
-                            self.busy.emit(False)
-                    except Exception:
-                        pass
-                elif line_str.startswith("[FINISHED] "):
-                    finished_srt_path = line_str[len("[FINISHED] "):]
-                elif line_str.startswith("[ERROR] "):
-                    is_error = True
-                    error_lines.append(line_str[len("[ERROR] "):])
-                else:
-                    if "Traceback" in line_str or "Exception" in line_str or "Error" in line_str:
-                        is_error = True
-                    if is_error:
-                        error_lines.append(line_str)
-
-            self.process.wait()
-
-            if self.process.returncode != 0:
-                err_msg = "\n".join(error_lines) if error_lines else f"子进程执行失败，退出代码: {self.process.returncode}"
-                raise RuntimeError(err_msg)
-
-            if not finished_srt_path:
-                base_out_path = self.output_path.rsplit(".", 1)[0]
-                finished_srt_path = base_out_path + ".srt"
-
-            if not os.path.exists(finished_srt_path):
-                raise FileNotFoundError(f"未找到生成的字幕文件: {finished_srt_path}")
-
-            with open(finished_srt_path, "r", encoding="utf-8") as f:
-                srt_content = f.read()
-
-            self.stage.emit("语音转写字幕完成")
-            self.progress.emit(100)
-            self.busy.emit(False)
-            self.finished.emit(srt_content, finished_srt_path)
-
+            from utils.asr_client import read_whisper_source
+            if read_whisper_source() == "remote":
+                self._run_remote()
+            else:
+                self._run_local()
         except Exception:
             self.busy.emit(False)
             log.exception("WhisperX 转写失败")
             self.error.emit(traceback.format_exc())
         finally:
-            # 无论成功与否，子进程结束后都释放 GPU 缓存
             _release_gpu_cache()
+
+    def _run_remote(self):
+        """远程 ASR 模式：上传音频到远程服务，拿回 segments，本地格式化为 SRT。"""
+        from utils import asr_client
+        asr_url = asr_client.read_asr_url()
+        if not asr_url:
+            raise RuntimeError(
+                "Whisper 来源为远程模式，但未配置 ASR 服务地址。"
+                "请在系统设置 → Whisper 填写远程 API 地址。"
+            )
+
+        self.stage.emit("正在提取音频并上传到远程 ASR 服务...")
+        self.progress.emit(10)
+        self.busy.emit(True)
+
+        language = self.language if self.language and self.language != "auto" else ""
+        segments = asr_client.transcribe_remote(
+            video_path=self.video_path,
+            asr_url=asr_url,
+            language=language,
+            task_type=self.task_type or "transcribe",
+            diarize=bool(self.multi_mode),
+        )
+
+        self.stage.emit("正在生成字幕...")
+        self.progress.emit(85)
+
+        srt_content = asr_client.segments_to_srt(segments)
+
+        # 写 SRT 文件到 output_path（保持与 local 模式一致的输出契约）
+        if self.output_path:
+            srt_path = self.output_path
+            if not srt_path.endswith(".srt"):
+                base = srt_path.rsplit(".", 1)[0] if "." in os.path.basename(srt_path) else srt_path
+                srt_path = base + ".srt"
+            os.makedirs(os.path.dirname(srt_path), exist_ok=True)
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write(srt_content)
+        else:
+            srt_path = ""
+
+        self.stage.emit("语音转写字幕完成")
+        self.progress.emit(100)
+        self.busy.emit(False)
+        self.finished.emit(srt_content, srt_path)
+
+    def _run_local(self):
+        # 1. 确保 ffmpeg 可用（复用项目统一的查找逻辑）
+        from utils.platform_utils import find_ffmpeg
+        ffmpeg_path = find_ffmpeg()
+        if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
+            raise RuntimeError(
+                "未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH。"
+            )
+
+        # 2. 构造 whisperx_runner.py 子进程命令
+        runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisperx_runner.py")
+        cmd = [
+            sys.executable, "-u", runner_path,
+            "--video_path", self.video_path,
+            "--audio_path", self.audio_path,
+            "--output_path", self.output_path,
+            "--model_name", self.model_name,
+            "--download_root", self.download_root,
+            "--device_mode", self.device_mode,
+            "--ffmpeg_path", ffmpeg_path,
+        ]
+        if self.language:
+            cmd.extend(["--language", self.language])
+        if self.task_type:
+            cmd.extend(["--task_type", self.task_type])
+        if self.multi_mode:
+            cmd.append("--multi_mode")
+
+        log.info(f"[WhisperX Worker] 启动子进程: {' '.join(cmd)}")
+
+        # 2.5 启动前检查 GPU 显存是否充足
+        _check_and_warn_vram(min_free_mb=3000)
+
+        # 3. 启动子进程并重定向 stderr 到 stdout 统一解析
+        env = os.environ.copy()
+        env["HF_ENDPOINT"] = "https://hf-mirror.com"
+        env["PYTHONIOENCODING"] = "utf-8"
+        if ffmpeg_path:
+            ffmpeg_dir = os.path.dirname(ffmpeg_path)
+            if ffmpeg_dir not in env.get("PATH", ""):
+                env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
+
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+        finished_srt_path = None
+        error_lines = []
+        is_error = False
+
+        # 4. 实时读取输出流
+        while True:
+            line = self.process.stdout.readline()
+            if not line:
+                break
+            line_str = line.strip()
+            if not line_str:
+                continue
+
+            log.info(f"[WhisperX Subprocess] {line_str}")
+
+            if line_str.startswith("[STAGE] "):
+                stage_msg = line_str[len("[STAGE] "):]
+                self.stage.emit(stage_msg)
+            elif line_str.startswith("[PROGRESS] "):
+                try:
+                    prog_val = int(line_str[len("[PROGRESS] "):])
+                    self.progress.emit(prog_val)
+                    if 30 < prog_val < 90:
+                        self.busy.emit(True)
+                    else:
+                        self.busy.emit(False)
+                except Exception:
+                    pass
+            elif line_str.startswith("[FINISHED] "):
+                finished_srt_path = line_str[len("[FINISHED] "):]
+            elif line_str.startswith("[ERROR] "):
+                is_error = True
+                error_lines.append(line_str[len("[ERROR] "):])
+            else:
+                if "Traceback" in line_str or "Exception" in line_str or "Error" in line_str:
+                    is_error = True
+                if is_error:
+                    error_lines.append(line_str)
+
+        self.process.wait()
+
+        if self.process.returncode != 0:
+            err_msg = "\n".join(error_lines) if error_lines else f"子进程执行失败，退出代码: {self.process.returncode}"
+            raise RuntimeError(err_msg)
+
+        if not finished_srt_path:
+            base_out_path = self.output_path.rsplit(".", 1)[0]
+            finished_srt_path = base_out_path + ".srt"
+
+        if not os.path.exists(finished_srt_path):
+            raise FileNotFoundError(f"未找到生成的字幕文件: {finished_srt_path}")
+
+        with open(finished_srt_path, "r", encoding="utf-8") as f:
+            srt_content = f.read()
+
+        self.stage.emit("语音转写字幕完成")
+        self.progress.emit(100)
+        self.busy.emit(False)
+        self.finished.emit(srt_content, finished_srt_path)
 
     def stop(self):
         if self.process and self.process.poll() is None:

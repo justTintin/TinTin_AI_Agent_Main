@@ -151,6 +151,16 @@ class ServicesMixin:
             if api_idx >= 0:
                 self.vox_mode_combo.setCurrentIndex(api_idx)
 
+    def _on_whisper_source_changed(self, index):
+        """Whisper 来源模式切换：local 显示本地引擎/模型检测控件，remote 隐藏只留 ASR 地址。"""
+        is_local = (self.whisper_source_combo.currentData() == "local")
+        for attr in ("llm_whisper_status_val", "llm_dll_status_val", "llm_models_status_val",
+                     "whisper_stage_label", "whisper_progress_bar",
+                     "btn_refresh_whisper", "btn_install_whisper", "whisper_log_view"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setVisible(is_local)
+
     def toggle_voxcpm_service(self):
         is_active = False
         if self.voxcpm_process and self.voxcpm_process.poll() is None:

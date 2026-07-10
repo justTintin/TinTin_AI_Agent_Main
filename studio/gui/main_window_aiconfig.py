@@ -61,6 +61,11 @@ class AIConfigMixin:
             self.llm_vision_api_url_input.setText(vision_url)
         self.ai_config["llm_vision_api_url"] = vision_url
         self.ai_config["llm_vision_model"] = vision_model
+        # Whisper 来源模式 + ASR 地址
+        whisper_source = getattr(self, "whisper_source_combo", None)
+        self.ai_config["whisper_source"] = whisper_source.currentData() if whisper_source else "remote"
+        whisper_url = getattr(self, "whisper_api_url_input", None)
+        self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -140,6 +145,8 @@ class AIConfigMixin:
             "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
             "ollama_mode": "remote",
+            "whisper_source": "remote",
+            "whisper_api_url": "",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_source": "remote",
             "vox_mode": "api",

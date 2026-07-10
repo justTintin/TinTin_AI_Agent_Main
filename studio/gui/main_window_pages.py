@@ -1060,7 +1060,7 @@ class PageSetupMixin:
                     import subprocess, sys
                     r = subprocess.run(["nvidia-smi","--query-gpu=name,memory.total","--format=csv,noheader,nounits"],
                         capture_output=True, text=True, timeout=5,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0)
+                        creationflags=subprocess.CREATE_NO_WINDOW)
                     w.setText(f"显卡: {r.stdout.strip()}")
                 except Exception:
                     w.setText("显卡: 检测中...")

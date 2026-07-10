@@ -34,12 +34,11 @@ def get_system_hardware_info() -> dict:
         pass
 
     try:
-        if platform.system() == "Windows":
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
-            cpu_name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
-            if cpu_name:
-                info["cpu_name"] = cpu_name
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        cpu_name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+        if cpu_name:
+            info["cpu_name"] = cpu_name
     except Exception:
         pass
 

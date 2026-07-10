@@ -4,60 +4,57 @@ import os
 
 # Configure CUDA/cuDNN DLL paths for Windows embedded Python immediately at startup
 # (Must be done before importing torch or other libraries that rely on CUDA DLLs)
-if sys.platform == "win32":
-    import site
-    packages_dirs = []
-    try:
-        packages_dirs.extend(site.getsitepackages())
-    except Exception:
-        pass
-    try:
-        packages_dirs.append(site.getusersitepackages())
-    except Exception:
-        pass
-    try:
-        base_dir = os.path.dirname(sys.executable)
-        packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
-        packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
-    except Exception:
-        pass
-    for p in packages_dirs:
-        if p and os.path.isdir(p):
-            nvidia_base = os.path.join(p, "nvidia")
-            if os.path.isdir(nvidia_base):
-                for sub in ["cublas", "cudnn"]:
-                    bin_path = os.path.join(nvidia_base, sub, "bin")
-                    if os.path.isdir(bin_path):
-                        if bin_path not in os.environ.get("PATH", ""):
-                            os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
-                        if hasattr(os, "add_dll_directory"):
-                            try:
-                                os.add_dll_directory(bin_path)
-                            except Exception:
-                                pass
+import site
+packages_dirs = []
+try:
+    packages_dirs.extend(site.getsitepackages())
+except Exception:
+    pass
+try:
+    packages_dirs.append(site.getusersitepackages())
+except Exception:
+    pass
+try:
+    base_dir = os.path.dirname(sys.executable)
+    packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
+    packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
+except Exception:
+    pass
+for p in packages_dirs:
+    if p and os.path.isdir(p):
+        nvidia_base = os.path.join(p, "nvidia")
+        if os.path.isdir(nvidia_base):
+            for sub in ["cublas", "cudnn"]:
+                bin_path = os.path.join(nvidia_base, sub, "bin")
+                if os.path.isdir(bin_path):
+                    if bin_path not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
+                    if hasattr(os, "add_dll_directory"):
+                        try:
+                            os.add_dll_directory(bin_path)
+                        except Exception:
+                            pass
 
 # Set domestic Hugging Face mirror to prevent hanging and speed up model downloads
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 # Set explicit AppUserModelID for Windows taskbar icon support
-if sys.platform == "win32":
-    try:
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
-    except Exception:
-        pass
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
+except Exception:
+    pass
 
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
-if sys.platform == "win32":
-    import subprocess
-    class _patched_Popen(subprocess.Popen):
-        def __init__(self, *args, **kwargs):
-            if "creationflags" not in kwargs:
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            else:
-                kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
-            super().__init__(*args, **kwargs)
-    subprocess.Popen = _patched_Popen
+import subprocess
+class _patched_Popen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        if "creationflags" not in kwargs:
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+        super().__init__(*args, **kwargs)
+subprocess.Popen = _patched_Popen
 
 # Prevent crash when sys.stdout or sys.stderr is None (under pythonw.exe)
 if sys.stdout is None:
@@ -1484,22 +1481,11 @@ if __name__ == "__main__":
 
         # ── 单例保护：只允许运行一个实例 ──
         _is_already_running = False
-        if sys.platform == "win32":
-            # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
-            import ctypes as _ctypes
-            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
-            if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                _is_already_running = True
-        else:
-            # Linux/macOS: QSharedMemory
-            _singleton_key = "luosiding.ecommerce.agent.matrix.single_instance"
-            _shmem = QSharedMemory(_singleton_key)
-            if _shmem.attach():
-                _shmem.detach()
-            if not _shmem.create(1):
-                _is_already_running = True
-            import atexit as _atexit
-            _atexit.register(lambda: _shmem.detach() if _shmem.isAttached() else None)
+        # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
+        import ctypes as _ctypes
+        _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
+        if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            _is_already_running = True
         if _is_already_running:
             from PySide6.QtWidgets import QMessageBox as _QMB
             _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")

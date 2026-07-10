@@ -2,8 +2,6 @@
 
 ## 环境搭建
 
-### Linux
-
 ```bash
 # 克隆后首次
 make install-dev
@@ -30,7 +28,7 @@ make run         # 启动 GUI
 ```
 studio/
 ├── gui_main.py              应用程序入口
-├── config/paths.py           全局路径 & 跨平台二进制定位
+├── config/paths.py           全局路径 & 二进制定位
 ├── gui/                      页面层 (View)
 │   ├── base_page.py          页面基类
 │   ├── main_window_*.py      主窗口拆分 (sidebar / pages / services 等)
@@ -103,7 +101,6 @@ def setup_xxx_page(self):
 1. **路径**：使用 `config/paths.py` 中的常量，不要硬编码
 2. **二进制**：通过 `get_bin("xxx")` 获取平台相关路径
 3. **系统判断**：`config/paths.IS_WIN` 或 `sys.platform`
-4. **Qt 平台差异**：Wayland 需要 `QT_WAYLAND_SHELL_INTEGRATION=xdg-shell`
 
 ## 第三方应用集成
 
@@ -129,7 +126,6 @@ logger.info("...")
 
 ```bash
 make build          # 当前平台
-make build-linux    # Linux 可执行文件
 make build-win      # Windows .exe (交叉编译需 Wine)
 make clean          # 清理构建产物
 ```

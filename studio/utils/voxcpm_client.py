@@ -6,7 +6,7 @@ import subprocess
 import configparser
 
 from config.paths import PROJECT_ROOT, WORKSPACE_ROOT, VOXCPM2_DIR
-from utils.platform_utils import IS_WIN, find_venv_python, create_no_window_flag
+from utils.platform_utils import find_venv_python, create_no_window_flag
 
 _proc = None
 
@@ -95,24 +95,15 @@ def stop_server():
     except Exception:
         pass
     _proc = None
-    if IS_WIN:
-        try:
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*voxcpm_api_server.py*' } "
-                 "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
-                creationflags=create_no_window_flag(), timeout=10, capture_output=True)
-            stopped = True
-        except Exception:
-            pass
-    else:
-        try:
-            subprocess.run(
-                ["pkill", "-f", "voxcpm_api_server.py"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-            stopped = True
-        except Exception:
-            pass
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*voxcpm_api_server.py*' } "
+             "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+            creationflags=create_no_window_flag(), timeout=10, capture_output=True)
+        stopped = True
+    except Exception:
+        pass
     return stopped, "已停止" if stopped else "未发现运行中的服务"
 
 

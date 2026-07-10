@@ -4,7 +4,7 @@
 >
 > 智能混剪 · 直播切片 · 声音克隆 · 素材检索 · AI 图像生成
 
-**跨平台**：Windows 10+ / Linux (Pop!_OS, Ubuntu 24.04+)  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
+**Windows 专用**：Windows 10+ 64位  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
 
 ---
 
@@ -17,7 +17,7 @@ project-root/
 │   ├── gui/                   页面层 (40+ 功能页面)
 │   ├── core/                  抖音解析 / 下载引擎
 │   ├── utils/                 管理器 & 外部服务客户端
-│   ├── config/paths.py        全局路径 & 跨平台二进制定位
+│   ├── config/paths.py        全局路径 & 二进制定位
 │   └── ui/gui_styles.py       暗色主题 QSS
 ├── apps/                      第三方工具 & 模型 (~59 GB，不入库)
 │   ├── voxcpm2/               声音克隆 (VoxCPM2)
@@ -29,9 +29,8 @@ project-root/
 │   ├── clip-models/           CLIP 向量模型 (Chinese-CLIP)
 │   └── asset-browser/         Electron 素材浏览器
 ├── docs/                      文档
-├── build.py                   跨平台 PyInstaller 构建
+├── build.py                   PyInstaller 构建
 ├── Makefile                   开发辅助
-├── run.sh                     Linux 启动脚本
 └── config.ini                 飞书 & VoxCPM 配置
 ```
 
@@ -40,13 +39,6 @@ project-root/
 ---
 
 ## 快速开始
-
-### Linux
-
-```bash
-make install          # 创建 venv + 安装依赖 + Playwright Chromium
-./run.sh              # 启动 GUI
-```
 
 ### Windows
 
@@ -200,7 +192,7 @@ make install          # 创建 venv + 安装依赖 + Playwright Chromium
 
 ### 📦 资源配置
 - 声音样本管理
-- 素材目录：支持多目录，NAS 入库，平台自动适配 (Linux: `/mnt/nas/Photos`)
+- 素材目录：支持多目录，NAS 入库，平台自动适配
 
 ---
 

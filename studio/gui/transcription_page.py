@@ -63,9 +63,6 @@ def setup_nvidia_dll_path():
     如果用户通过 pip 安装了 nvidia-cublas-cu12 和 nvidia-cudnn-cu12，
     我们将这些包的 bin 目录动态加入系统 PATH 和 DLL 搜索目录。
     """
-    if sys.platform != "win32":
-        return
-
     import site
     packages_dirs = []
 
@@ -442,13 +439,13 @@ class TranscriptionToolPage(BasePage):
 
                     def run_pip(args):
                         cmd = [sys.executable, "-m", "pip"] + args
-                        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
                         if p.returncode != 0:
                             raise RuntimeError((p.stdout or "") + "\n" + (p.stderr or ""))
 
                     def run_pip_allow_fail(args):
                         cmd = [sys.executable, "-m", "pip"] + args
-                        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW)
 
                     self.stage.emit("正在清理旧版本 torch")
                     self.busy.emit(True)

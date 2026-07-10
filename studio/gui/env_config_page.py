@@ -65,7 +65,7 @@ class EnvInstallWorker(BaseWorker):
             encoding="utf-8",
             errors="ignore",
             bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         while True:
             line = p.stdout.readline()
@@ -548,7 +548,7 @@ class EnvConfigPage(BasePage):
                 [get_voxcpm_python(), "-c", cmd_str],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             info["voxcpm_installed"] = True
         except Exception:
@@ -591,7 +591,7 @@ class EnvConfigPage(BasePage):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 if result.returncode == 0:
                     info["paddleocr_ok"] = True

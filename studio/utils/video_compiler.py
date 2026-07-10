@@ -4,17 +4,13 @@ import subprocess
 import tempfile
 
 from config.paths import PROJECT_ROOT, WORKSPACE_ROOT
-from utils.platform_utils import IS_WIN, find_ffmpeg, find_ffprobe, create_no_window_flag
+from utils.platform_utils import find_ffmpeg, find_ffprobe, create_no_window_flag
 
 RATIO_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def _find(name):
-    # On non-Windows, always strip .exe suffix and prefer system binary
-    from utils.platform_utils import binary_name
-    if not IS_WIN:
-        name = name.replace(".exe", "")
     for c in (os.path.join(WORKSPACE_ROOT, name), os.path.join(PROJECT_ROOT, name), name):
         if os.path.isfile(c):
             return c

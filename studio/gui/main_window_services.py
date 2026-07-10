@@ -235,7 +235,7 @@ class ServicesMixin:
                 stdout=self.voxcpm_log_file,
                 stderr=subprocess.STDOUT,
                 cwd=PROJECT_ROOT,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             log.info(f"[VoxCPM] 子进程 PID: {self.voxcpm_process.pid}")
 
@@ -257,10 +257,7 @@ class ServicesMixin:
             self.voxcpm_process = None
             if proc.poll() is None:
                 try:
-                    if sys.platform == "win32":
-                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-                    else:
-                        proc.terminate()
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
                 except Exception:
                     try:
                         proc.terminate()

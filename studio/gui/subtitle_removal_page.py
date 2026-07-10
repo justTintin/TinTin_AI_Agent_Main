@@ -15,7 +15,7 @@ from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
-from utils.platform_utils import python_binary, IS_WIN
+from utils.platform_utils import python_binary
 
 class SubtitleRemovalWorker(BaseWorker):
     progress_updated = Signal(int)
@@ -63,12 +63,10 @@ class SubtitleRemovalWorker(BaseWorker):
         
         try:
             # Hide the command prompt console window on Windows
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0 # SW_HIDE
-                
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0 # SW_HIDE
+
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -131,19 +129,15 @@ class SubtitleRemovalWorker(BaseWorker):
     def stop(self):
         if self.process:
             try:
-                if sys.platform == "win32":
-                    # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                        capture_output=True
-                    )
-                    try:
-                        self.process.wait(timeout=5)
-                    except Exception:
-                        pass
-                else:
-                    self.process.terminate()
+                # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    capture_output=True
+                )
+                try:
                     self.process.wait(timeout=5)
+                except Exception:
+                    pass
             except Exception:
                 try:
                     self.process.kill()
@@ -760,13 +754,9 @@ class SubtitleRemovalPage(BasePage):
         vsr_dir = VSR_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
-        if not os.path.exists(vsr_python) and IS_WIN:
+        if not os.path.exists(vsr_python):
             vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
-
-        # On Linux, the bundled Python is Windows-only; fall back to project venv
-        if not os.path.exists(vsr_python) and not IS_WIN:
-            vsr_python = sys.executable
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
             QMessageBox.critical(

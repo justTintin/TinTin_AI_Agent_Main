@@ -33,7 +33,7 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Windows 10/11 64位 或 Linux |
+| 操作系统 | Windows 10/11 64位 |
 | GPU | NVIDIA GPU，显存 ≥ 8GB（推荐 24GB） |
 | 磁盘空间 | ≥ 100GB（含模型权重） |
 | 网络 | 需访问外网下载模型、调用 API |
@@ -49,12 +49,7 @@
 将所有文件放在同一目录，双击 exe 即可自动解包部署并启动。
 
 **开发者版本（源码运行）**
-```bash
-# Linux
-make install
-./run.sh
-
-# Windows
+```
 双击 run_gui_integrated.bat
 ```
 
@@ -240,13 +235,13 @@ make install
 ## 五、常见问题
 
 **Q: 启动报错"找不到模块"？**
-A: Linux 执行 `make install`，Windows 确保 `python_embeded/` 完整。
+A: 确保 `python_embeded/` 完整。
 
 **Q: AI 分析失败？**
 A: 确保视觉模型已就绪。
 
 **Q: 即梦无法登录？**
-A: Windows 使用内置 CLI，Linux 使用素材浏览器左侧「即梦AI」标签跳转网页版。
+A: 使用内置 CLI。
 
 **Q: 抠图自动下载很慢？**
 A: 首次运行会自动下载模型，约需 10 分钟。也可从其他已下载的机器复制模型目录。

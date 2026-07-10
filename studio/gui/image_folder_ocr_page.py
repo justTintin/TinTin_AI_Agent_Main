@@ -45,11 +45,9 @@ class ImageFolderOcrWorker(BaseWorker):
         self.log_received.emit(f"[INFO] 定位关键词: {self.key_text}")
         self.log_received.emit(f"[INFO] 执行后端命令: {' '.join(cmd)}")
 
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         try:
             self.process = subprocess.Popen(
@@ -155,11 +153,9 @@ class ImageOcrTestWorker(BaseWorker):
             "--xmax", str(xmax)
         ]
 
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         try:
             p = subprocess.Popen(

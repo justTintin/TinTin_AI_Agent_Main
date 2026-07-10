@@ -35,11 +35,9 @@ HOT_KEYWORDS_CN = [
 
 
 def _startupinfo():
-    si = None
-    if sys.platform == "win32":
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
     return si
 
 

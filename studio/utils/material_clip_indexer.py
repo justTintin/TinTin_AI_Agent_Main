@@ -45,7 +45,6 @@ from config.paths import CONFIG_DIR
 
 log = logging.getLogger(__name__)
 
-import sys as _sys
 
 _DRIVE_UNC_CACHE = {}
 
@@ -54,7 +53,6 @@ def to_relative_path(local_path: str, nas_root: str) -> str:
     """
     Convert a local filesystem path to a relative NAS path.
     Windows: resolves drive letters to UNC paths via mpr.dll.
-    Linux:   strips nas_root prefix from local_path, or returns the full path.
     """
     if not local_path:
         return ""
@@ -62,7 +60,7 @@ def to_relative_path(local_path: str, nas_root: str) -> str:
     local_path = local_path.replace("\\", "/")
     unc_path = local_path
 
-    if _sys.platform == "win32" and len(local_path) >= 2 and local_path[1] == ":":
+    if len(local_path) >= 2 and local_path[1] == ":":
         drive = local_path[:2].upper()
         if drive in _DRIVE_UNC_CACHE:
             unc_path = _DRIVE_UNC_CACHE[drive] + local_path[2:]
@@ -82,9 +80,6 @@ def to_relative_path(local_path: str, nas_root: str) -> str:
     nas_norm = nas_root.replace("\\", "/").rstrip("/")
     if nas_norm and unc_norm.lower().startswith(nas_norm.lower()):
         return unc_path[len(nas_norm):].replace("\\", "/").lstrip("/")
-    # Linux: also strip /mnt/nas prefix
-    if unc_norm.lower().startswith("/mnt/nas/"):
-        return unc_norm[len("/mnt/nas/"):].lstrip("/")
     return unc_path.replace("\\", "/").lstrip("/")
 
 
@@ -92,48 +87,29 @@ def to_local_path(rel_path: str, nas_root: str) -> str:
     """
     Convert a relative NAS path back to a local filesystem path.
     Windows: resolves UNC paths to drive letters via mpr.dll.
-    Linux:   replaces UNC/SMB prefix with local mount point.
     """
     if not rel_path:
         return ""
 
     rel_path = rel_path.replace("\\", "/")
 
-    # Handle Windows drive letters / UNC paths on Linux
-    if _sys.platform != "win32" and (rel_path.startswith("//") or (len(rel_path) >= 2 and rel_path[1] == ":")):
-        # Strip known NAS host prefixes → /mnt/nas
-        for prefix in ["//192.168.111.17", "//192.168.111.17/"]:
-            if rel_path.lower().startswith(prefix.lower()):
-                rel_path = "/mnt/nas/" + rel_path[len(prefix):].lstrip("/")
-                break
-        return os.path.abspath(rel_path)
-
     if (len(rel_path) >= 2 and rel_path[1] == ":"):
         return os.path.normpath(rel_path)
 
     unc_path = os.path.normpath(os.path.join(nas_root, rel_path.lstrip("/\\")))
 
-    # Linux: convert UNC host prefix to /mnt/nas mount path
-    if _sys.platform != "win32":
-        unc_norm = unc_path.replace("\\", "/")
-        for prefix in ["//192.168.111.17/", "//192.168.111.17"]:
-            if unc_norm.startswith(prefix):
-                unc_path = "/mnt/nas/" + unc_norm[len(prefix):].lstrip("/")
-                break
-
-    if _sys.platform == "win32":
-        try:
-            mpr = ctypes.WinDLL("mpr.dll")
-            for drive_letter in [f"{chr(c)}:" for c in range(ord("A"), ord("Z") + 1)]:
-                buffer = ctypes.create_unicode_buffer(512)
-                length = ctypes.c_ulong(512)
-                res = mpr.WNetGetConnectionW(drive_letter, buffer, ctypes.byref(length))
-                if res == 0:
-                    unc_drive = os.path.normpath(buffer.value)
-                    if unc_path.lower().startswith(unc_drive.lower()):
-                        return os.path.normpath(drive_letter + unc_path[len(unc_drive):])
-        except Exception:
-            pass
+    try:
+        mpr = ctypes.WinDLL("mpr.dll")
+        for drive_letter in [f"{chr(c)}:" for c in range(ord("A"), ord("Z") + 1)]:
+            buffer = ctypes.create_unicode_buffer(512)
+            length = ctypes.c_ulong(512)
+            res = mpr.WNetGetConnectionW(drive_letter, buffer, ctypes.byref(length))
+            if res == 0:
+                unc_drive = os.path.normpath(buffer.value)
+                if unc_path.lower().startswith(unc_drive.lower()):
+                    return os.path.normpath(drive_letter + unc_path[len(unc_drive):])
+    except Exception:
+        pass
 
     return unc_path
 
@@ -1526,7 +1502,6 @@ def _sanitize_filename(name: str) -> str:
 
 def _run_image_ocr(img_path: str) -> str:
     try:
-        import sys
         import subprocess
         from config.paths import PADDLEOCR_PYTHON, IMAGE_FOLDER_OCR_SCRIPT
     except ImportError:
@@ -1542,11 +1517,9 @@ def _run_image_ocr(img_path: str) -> str:
     env["PYTHONIOENCODING"] = "utf-8"
     
     try:
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0  # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
             
         res = subprocess.run(
             cmd,

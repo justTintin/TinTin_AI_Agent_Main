@@ -1,7 +1,7 @@
 import os
 import sys
 
-IS_WIN = sys.platform == "win32"
+IS_WIN = True  # 工程仅支持 Windows
 
 # ── 运行模式感知 ────────────────────────────────────────────────────────────
 # 两种运行模式：
@@ -65,7 +65,7 @@ WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
 VSR_DIR = os.path.join(APPS_DIR, "vsr-v1.1.1-windows-nvidia-cuda")
 VSR_V14_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0")
 PADDLEOCR_VENV_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0", "Python")
-PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe" if IS_WIN else "bin/python")
+PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe")
 if not os.path.isfile(PADDLEOCR_PYTHON):
     from utils.platform_utils import find_python
     PADDLEOCR_PYTHON = find_python()
@@ -88,12 +88,7 @@ MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")
 
 # 素材目录平台默认值
-_MATERIALS_DEFAULTS = {
-    "linux": [os.path.join(MATERIALS_DIR, "knowledge"), "/mnt/nas/Photos"],
-    "win32": [os.path.join(MATERIALS_DIR, "knowledge")],
-    "darwin": [os.path.join(MATERIALS_DIR, "knowledge")],
-}
-MATERIALS_PLATFORM_DEFAULTS = _MATERIALS_DEFAULTS.get(sys.platform, _MATERIALS_DEFAULTS["linux"])
+MATERIALS_PLATFORM_DEFAULTS = [os.path.join(MATERIALS_DIR, "knowledge")]
 HOTSPOTS_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "hotspots")
 HOTSPOTS_FILE = os.path.join(DATA_DIR, "hotspots.json")
 VIDEO_PREDICTIONS_FILE = os.path.join(DATA_DIR, "video_predictions.json")
@@ -101,7 +96,7 @@ VIDEO_INDEX_FILE = os.path.join(DATA_DIR, "video_index.json")
 
 # Platform-specific binary directories（内置 bin 是只读资源，frozen 时在 _BUNDLE_DIR）
 BIN_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "bin")
-PLATFORM_DIR = "win" if IS_WIN else ("linux" if sys.platform == "linux" else "darwin")
+PLATFORM_DIR = "win"
 BIN_PLATFORM_DIR = os.path.join(BIN_DIR, PLATFORM_DIR)
 
 # Built-in binaries (resolved at import time via get_bin)
@@ -110,28 +105,22 @@ OLLAMA_BIN = None
 
 
 def get_bin(name):
-    """Return full path to a platform-specific binary in bin/<platform>/<name>.
+    """Return full path to a platform-specific binary in bin/win/<name>.
     On Windows, auto-appends .exe.
     """
     bin_dir = BIN_PLATFORM_DIR
-    if IS_WIN:
-        candidates = [
-            os.path.join(bin_dir, f"{name}.exe"),
-            os.path.join(bin_dir, name),
-        ]
-    else:
-        candidates = [
-            os.path.join(bin_dir, name),
-            os.path.join(bin_dir, f"{name}.exe"),
-        ]
+    candidates = [
+        os.path.join(bin_dir, f"{name}.exe"),
+        os.path.join(bin_dir, name),
+    ]
     for c in candidates:
         if os.path.isfile(c):
             return os.path.abspath(c)
     import shutil
-    found = shutil.which(name if not IS_WIN else f"{name}.exe")
+    found = shutil.which(f"{name}.exe")
     if found:
         return found
-    return os.path.join(bin_dir, f"{name}.exe" if IS_WIN else name)
+    return os.path.join(bin_dir, f"{name}.exe")
 
 
 def init_bin_paths():

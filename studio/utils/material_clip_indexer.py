@@ -83,18 +83,27 @@ def to_relative_path(local_path: str, nas_root: str) -> str:
     return unc_path.replace("\\", "/").lstrip("/")
 
 
-def to_local_path(rel_path: str, nas_root: str) -> str:
+def to_local_path(rel_path: str, nas_root: str = "") -> str:
     """
-    Convert a relative NAS path back to a local filesystem path.
-    Windows: resolves UNC paths to drive letters via mpr.dll.
+    将数据库里的路径解析为本地可访问的完整路径。
+    统一逻辑：盘符路径直接返回，相对路径从配置读 nas_root 拼接。
     """
     if not rel_path:
         return ""
 
     rel_path = rel_path.replace("\\", "/")
 
-    if (len(rel_path) >= 2 and rel_path[1] == ":"):
+    # 盘符路径（如 O:/xxx）直接返回——本机已映射，可直接访问
+    if len(rel_path) >= 2 and rel_path[1] == ":":
         return os.path.normpath(rel_path)
+
+    # 相对路径：从配置读 nas_root（不依赖传入的变量）
+    if not nas_root:
+        try:
+            cfg = _load_config()
+            nas_root = cfg.get("nas_root", "")
+        except Exception:
+            pass
 
     unc_path = os.path.normpath(os.path.join(nas_root, rel_path.lstrip("/\\")))
 

@@ -926,6 +926,36 @@ class _MaterialDB:
             except Exception:
                 pass
 
+    def get_material_by_id(self, material_id: int) -> dict:
+        """按 ID 查询单条素材记录，返回字段字典。"""
+        self._ensure_schema()
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT id, path, file_hash, file_size, mtime, brand, product, model, "
+                "category, ai_status, ai_confidence, audio_script, "
+                "scene_desc_primary, scene_desc_secondary "
+                "FROM materials WHERE id = %s",
+                (material_id,)
+            )
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                return {
+                    "id": row[0], "path": row[1], "file_hash": row[2],
+                    "file_size": row[3], "mtime": row[4], "brand": row[5],
+                    "product": row[6], "model": row[7], "category": row[8],
+                    "ai_status": row[9], "ai_confidence": row[10],
+                    "audio_script": row[11], "scene_desc_primary": row[12],
+                    "scene_desc_secondary": row[13],
+                }
+        except Exception:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+        return {}
+
     def update_material_ai(self, material_id: int, *,
                             brand=None, product=None, model=None, category=None,
                             audio_script=None, ai_status: str = "analyzed",
@@ -1833,6 +1863,25 @@ class MaterialClipIndexer:
         is_video = ext in VIDEO_EXTS
         is_image = ext in IMAGE_EXTS
 
+        # 先从数据库读取已有信息并打印
+        db_info = {}
+        try:
+            db_info = self._db.get_material_by_id(material_id) or {}
+        except Exception:
+            pass
+
+        self._log(f"\n========================================================")
+        self._log(f"📄 [AI 分析] 文件: {fname}")
+        if db_info.get("file_hash"):
+            self._log(f"🔑 哈希值 (Hash): {db_info['file_hash']}  (来自数据库)")
+        if db_info.get("file_size"):
+            self._log(f"📦 文件大小: {db_info['file_size'] / 1048576:.1f} MB  (来自数据库)")
+        if db_info.get("brand") or db_info.get("product") or db_info.get("model"):
+            self._log(f"🏷️ 已有标签: brand={db_info.get('brand')} product={db_info.get('product')} model={db_info.get('model')}")
+        if db_info.get("ai_status"):
+            self._log(f"📊 上次分析状态: {db_info.get('ai_status')}")
+        self._log(f"--------------------------------------------------------")
+
         if not os.path.isfile(file_path):
             self._log(f"📄 [AI 分析] 找不到本地素材文件: {fname}")
             self._log(f"  ✗ 无法开始 AI 分析：本地没有对应的物理文件！")
@@ -1850,16 +1899,19 @@ class MaterialClipIndexer:
             self._log(f"========================================================\n")
             return False
 
-        # 计算并记录文件哈希与基本信息
-        file_hash = _compute_hash(file_path) or "unknown"
-        file_size = None
-        file_mtime = None
-        try:
-            st = os.stat(file_path)
-            file_size = int(st.st_size)
-            file_mtime = float(st.st_mtime)
-        except Exception:
-            pass
+        # 计算并记录文件哈希与基本信息（如果数据库已有则复用）
+        file_hash = db_info.get("file_hash") or _compute_hash(file_path) or "unknown"
+        file_size = db_info.get("file_size")
+        file_mtime = db_info.get("mtime")
+        if file_size is None or file_mtime is None:
+            try:
+                st = os.stat(file_path)
+                if file_size is None:
+                    file_size = int(st.st_size)
+                if file_mtime is None:
+                    file_mtime = float(st.st_mtime)
+            except Exception:
+                pass
 
         try:
             self._db.update_material_file_meta(
@@ -1870,13 +1922,6 @@ class MaterialClipIndexer:
             )
         except Exception as e:
             self._log(f"  ⚠ 文件元信息回填失败（继续分析）: {e}")
-
-        self._log(f"\n========================================================")
-        self._log(f"📄 [AI 分析] 文件: {fname}")
-        self._log(f"🔑 哈希值 (Hash): {file_hash}")
-        if isinstance(file_size, int) and file_size > 0:
-            self._log(f"📦 文件大小: {file_size / 1048576:.1f} MB")
-        self._log(f"--------------------------------------------------------")
 
         # 1. OCR text extraction for images (No automatic renaming during AI analysis)
         ocr_text = ""

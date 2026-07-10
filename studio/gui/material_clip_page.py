@@ -510,11 +510,8 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
-        from utils.logger_utils import log as _log
-        _log.info("[ReAnalyze] do_work() 开始执行")
         ok = fail = 0
         total = len(self.materials)
-        _log.info(f"[ReAnalyze] 共 {total} 个素材")
         if total == 0:
             self.finished.emit(0, 0)
             return
@@ -532,7 +529,6 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
             fname = os.path.basename(mat.get("path", ""))
             self.log_line.emit(f"  ▶ 开始分析: {fname} (id={mat.get('id')}, path={mat.get('path','')})")
             try:
-                self.log_line.emit(f"    连接数据库...")
                 with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=self.log_line.emit) as idx:
                     success = idx.analyze_material(mat["id"], mat["path"])
                 return bool(success), None

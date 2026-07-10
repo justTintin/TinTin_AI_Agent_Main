@@ -403,24 +403,13 @@ class TranscriptionToolPage(BasePage):
         self.worker.start()
 
     def _deps_ok(self):
-        try:
-            import torch  # noqa: F401
-            # Add apps to sys.path to check if whisperx can be loaded
-            import sys
-            import os
-            if APPS_DIR not in sys.path:
-                sys.path.insert(0, APPS_DIR)
-            import whisperx  # noqa: F401
-            return True
-        except Exception:
-            return False
+        # 纯远程 ASR 模式：转写由远程服务完成，不再依赖本地 torch / whisperx。
+        return True
 
     def _refresh_dep_status(self):
         ok = self._deps_ok()
-        self.btn_install_deps.setVisible(not ok)
+        self.btn_install_deps.setVisible(False)  # 远程模式无需本地依赖安装
         self.btn_run.setEnabled(ok)
-        if not ok:
-            self.stage_label.setText("缺少依赖：需要安装 torch + whisperx 等库")
 
     def _install_deps(self):
         if hasattr(self, "_install_worker") and self._install_worker and self._install_worker.isRunning():

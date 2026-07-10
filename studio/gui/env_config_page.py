@@ -13,7 +13,7 @@ from PySide6.QtCore import Signal, QThread, Qt
 from utils.base_worker import BaseWorker
 import configparser
 from utils.logger_utils import log
-from config.paths import (WORKSPACE_ROOT, APPS_DIR, PYTHON_EMBEDED_DIR, WHISPER_MODELS_DIR,
+from config.paths import (WORKSPACE_ROOT, APPS_DIR,
                            VSR_DIR, VOXCPM2_DIR, KNOWLEDGE_MATERIALS_DIR,
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
@@ -33,23 +33,16 @@ class EnvInstallWorker(BaseWorker):
             self.busy.emit(True)
             self.stage.emit("正在卸载 CPU 版 PyTorch 库...")
             self.run_command([sys.executable, "-m", "pip", "uninstall", "-y", "torch", "torchvision", "torchaudio"])
-            
+
             self.stage.emit("正在通过官方源安装 CUDA 12.1 版 PyTorch (包体积较大，下载需要几分钟)...")
             self.run_command([
-                sys.executable, "-m", "pip", "install", "torch==2.5.1+cu121", 
+                sys.executable, "-m", "pip", "install", "torch==2.5.1+cu121",
                 "--index-url", "https://download.pytorch.org/whl/cu121"
             ])
-            
-            self.stage.emit("正在安装 WhisperX 引擎相关依赖及其配套 NVIDIA DLL 链接库...")
-            self.run_command([
-                sys.executable, "-m", "pip", "install", "faster-whisper", "transformers", "pyannote-audio",
-                "nvidia-cublas-cu12", "nvidia-cudnn-cu12",
-                "-i", "https://pypi.tuna.tsinghua.edu.cn/simple"
-            ])
-            
+
             self.stage.emit("依赖安装/修复完成！正在刷新环境状态...")
             self.busy.emit(False)
-            self.finished.emit(True, "系统环境配置一键修复成功！已成功为您安装 CUDA 版 PyTorch 与 GPU 转写相关的所有依赖。")
+            self.finished.emit(True, "系统环境配置一键修复成功！已成功为您安装 CUDA 版 PyTorch。")
         except Exception as e:
             self.busy.emit(False)
             self.stage.emit("❌ 修复失败")
@@ -320,49 +313,8 @@ class EnvConfigPage(BasePage):
         row_matdb3.addWidget(btn_save_matdb)
         layout_matdb.addLayout(row_matdb3)
 
-        # CLIP 模型路径
-        sep_clip = QFrame()
-        sep_clip.setFrameShape(QFrame.HLine)
-        sep_clip.setStyleSheet("color: #2e2e32;")
-        layout_matdb.addWidget(sep_clip)
-
-        lbl_clip_hint = QLabel(
-            "Chinese-CLIP 模型路径（点「一键下载」后自动填入，无需任何手动操作）："
-        )
-        lbl_clip_hint.setObjectName("muted_text")
-        layout_matdb.addWidget(lbl_clip_hint)
-
-        self.edit_clip_model_dir = QLineEdit()
-        self.edit_clip_model_dir.setPlaceholderText("点「⬇ 一键下载模型」后此处自动填写")
-        self.edit_clip_model_dir.setReadOnly(True)
-        layout_matdb.addWidget(self.edit_clip_model_dir)
-
-        # 模型状态行
-        self.lbl_clip_model_status = QLabel("模型状态：未初始化")
-        self.lbl_clip_model_status.setObjectName("muted_text")
-        self.lbl_clip_model_status.setWordWrap(True)
-        layout_matdb.addWidget(self.lbl_clip_model_status)
-
-        row_clip2 = QHBoxLayout()
-        self.lbl_clip_status = QLabel("")
-        self.lbl_clip_status.setObjectName("muted_text")
-        self.lbl_clip_status.setWordWrap(True)
-        row_clip2.addWidget(self.lbl_clip_status, 1)
-        btn_dl_clip = QPushButton("⬇ 一键下载模型（ModelScope）")
-        btn_dl_clip.setObjectName("secondary_button")
-        btn_dl_clip.setToolTip("在后台用 ModelScope 下载 Chinese-CLIP ViT-B-16 模型到工程本地")
-        btn_dl_clip.clicked.connect(self._download_clip_model)
-        row_clip2.addWidget(btn_dl_clip)
-        self.btn_preload_clip = QPushButton("🔥 加载/预热模型")
-        self.btn_preload_clip.setObjectName("primary_button")
-        self.btn_preload_clip.setToolTip("将模型加载到内存，后续检索时无需等待")
-        self.btn_preload_clip.clicked.connect(self._preload_clip_model)
-        row_clip2.addWidget(self.btn_preload_clip)
-        btn_save_clip = QPushButton("💾 保存模型路径")
-        btn_save_clip.setObjectName("secondary_button")
-        btn_save_clip.clicked.connect(self._save_clip_model_dir)
-        row_clip2.addWidget(btn_save_clip)
-        layout_matdb.addLayout(row_clip2)
+        # 注：CLIP 向量检索已切换为纯远程 embedding 服务模式，
+        # 服务地址请在「AI 模型配置」→「🖼️ CLIP」标签页中填写。
 
         scroll_layout.addWidget(group_matdb)
 
@@ -455,36 +407,7 @@ class EnvConfigPage(BasePage):
         except ImportError:
             pass
 
-        # 3. WhisperX
-        info["whisper_version"] = "未安装"
-        info["whisper_ok"] = False
-        try:
-            # Add apps to sys.path to check if whisperx can be loaded
-            if APPS_DIR not in sys.path:
-                sys.path.insert(0, APPS_DIR)
-            import whisperx
-            info["whisper_version"] = "已就绪"
-            info["whisper_ok"] = True
-        except ImportError:
-            pass
-
-        # 4. DLLs
-        info["dll_ok"] = False
-        info["dll_status"] = "未安装"
-        site_packages = os.path.join(PYTHON_EMBEDED_DIR, "Lib", "site-packages")
-        nvidia_dir = os.path.join(site_packages, "nvidia")
-        if os.path.isdir(nvidia_dir):
-            cublas_bin = os.path.join(nvidia_dir, "cublas", "bin")
-            cudnn_bin = os.path.join(nvidia_dir, "cudnn", "bin")
-            if os.path.isdir(cublas_bin) and os.path.isdir(cudnn_bin):
-                info["dll_ok"] = True
-                info["dll_status"] = "已就绪 (已发现 nvidia-cublas 与 nvidia-cudnn DLL 目录)"
-            else:
-                info["dll_status"] = "部分缺失 (缺少 bin 运行目录)"
-        else:
-            info["dll_status"] = "未安装 (缺少 nvidia-cublas-cu12 与 nvidia-cudnn-cu12)"
-
-        # 5. FFmpeg
+        # 3. FFmpeg
         project_root = PROJECT_ROOT
         workspace_root = WORKSPACE_ROOT
         candidates = [
@@ -509,23 +432,7 @@ class EnvConfigPage(BasePage):
             info["ffmpeg_ok"] = False
             info["ffmpeg_path"] = "未在系统环境或软件目录中检测到 ffmpeg.exe"
 
-        # 6. Whisper Models
-        models_dir = WHISPER_MODELS_DIR
-        info["models_dir"] = models_dir
-        found_models = []
-        if os.path.isdir(models_dir):
-            if os.path.isfile(os.path.join(models_dir, "model.bin")) and os.path.isfile(os.path.join(models_dir, "config.json")):
-                found_models.append("已直接在根目录下放置模型文件")
-            for fn in os.listdir(models_dir):
-                sub_path = os.path.join(models_dir, fn)
-                if os.path.isdir(sub_path):
-                    if fn.startswith("models--"):
-                        found_models.append(f"HF缓存格式: {fn.replace('models--Systran--faster-whisper-', '')}")
-                    elif os.path.isfile(os.path.join(sub_path, "model.bin")):
-                        found_models.append(f"标准格式: {fn}")
-        info["found_models"] = found_models if found_models else ["暂无本地模型（首次运行时将自动下载镜像模型）"]
-
-        # 7. VSR Subtitle Remover
+        # 6. VSR Subtitle Remover
         vsr_dir = VSR_DIR
         vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
@@ -766,7 +673,6 @@ class EnvConfigPage(BasePage):
 
     def refresh_status(self):
         self.refresh_status_async()
-        self._refresh_clip_model_status()
 
     # ── RustFS 对象存储配置 ──
 
@@ -814,11 +720,8 @@ class EnvConfigPage(BasePage):
                 self.edit_matdb_name.setText(cfg.get("db_name", "material_index"))
                 self.edit_matdb_user.setText(cfg.get("db_user", "postgres"))
                 self.edit_matdb_pass.setText(cfg.get("db_password", ""))
-                self.edit_clip_model_dir.setText(cfg.get("clip_model_dir") or "")
         except Exception as e:
             log.error(f"加载素材向量库数据库配置失败: {e}")
-        # 显示当前模型状态
-        self._refresh_clip_model_status()
 
     def _save_matdb_config(self):
         import json as _json
@@ -839,278 +742,6 @@ class EnvConfigPage(BasePage):
         except Exception as e:
             self.lbl_matdb_status.setText(f"❌ 保存失败: {e}")
             log.error(f"保存素材向量库数据库配置失败: {e}")
-
-    # ── CLIP 模型配置 ──
-
-    def _refresh_clip_model_status(self):
-        """刷新并显示当前模型加载状态（在 UI 线程调用）。"""
-        try:
-            from utils.material_clip_indexer import get_encoder_status
-            st = get_encoder_status()
-            if st["loaded"]:
-                self.lbl_clip_model_status.setText(f"模型状态：✅ {st['status']}")
-            elif st["error"]:
-                first = st["error"].split("\n")[0]
-                self.lbl_clip_model_status.setText(f"模型状态：❌ {first}")
-            else:
-                self.lbl_clip_model_status.setText("模型状态：⏸ 未加载（点「🔥 加载/预热模型」）")
-        except Exception as e:
-            self.lbl_clip_model_status.setText(f"模型状态：— ({e})")
-
-    def _preload_clip_model(self):
-        """
-        后台线程：
-        1. 检测缺少的依赖包（modelscope / torch / transformers），自动用 pip 安装
-        2. 安装完成后加载 CLIP 模型到内存
-        """
-        self.btn_preload_clip.setEnabled(False)
-        self.btn_preload_clip.setText("⏳ 准备中…")
-        self.lbl_clip_model_status.setText("模型状态：⏳ 正在检查依赖包…")
-        self.lbl_clip_status.setText("")
-
-        def _set(status_text, detail_text=""):
-            self.lbl_clip_model_status.setText(status_text)
-            if detail_text:
-                self.lbl_clip_status.setText(detail_text)
-
-        def _do():
-            import sys
-            import subprocess
-            import importlib
-
-            # ── Step 1: 判断模型格式，确定需要安装哪些包 ─────────────────────
-            import json as _json_inner
-            cfg_path_inner = os.path.join(
-                CONFIG_DIR, "material_index_config.json",
-            )
-            model_dir_cur = ""
-            try:
-                if os.path.isfile(cfg_path_inner):
-                    with open(cfg_path_inner, encoding="utf-8") as f:
-                        model_dir_cur = (_json_inner.load(f).get("clip_model_dir") or "")
-            except Exception:
-                pass
-
-            is_hf_format = (
-                bool(model_dir_cur)
-                and os.path.isdir(model_dir_cur)
-                and os.path.isfile(os.path.join(model_dir_cur, "config.json"))
-            )
-            is_ms_format = (
-                bool(model_dir_cur)
-                and os.path.isdir(model_dir_cur)
-                and os.path.isfile(os.path.join(model_dir_cur, "configuration.json"))
-                and not os.path.isfile(os.path.join(model_dir_cur, "config.json"))
-            )
-
-            need_install = []
-            try:
-                import torch  # noqa: F401
-            except ImportError:
-                need_install.append("torch")
-
-            if is_ms_format:
-                # ModelScope 格式：需要 modelscope 包（优先从本地源安装）
-                try:
-                    import modelscope  # noqa: F401
-                except ImportError:
-                    need_install.append("modelscope")
-            elif is_hf_format:
-                # HF 格式只需 transformers（通常已安装）
-                try:
-                    import transformers  # noqa: F401
-                except ImportError:
-                    need_install.append("transformers")
-            else:
-                # 未知格式 / 未下载：提示先下载
-                _set(
-                    "模型状态：⚠️ 未检测到已下载的模型",
-                    "⚠️ 请先点「⬇ 一键下载模型」下载模型",
-                )
-                self.btn_preload_clip.setEnabled(True)
-                self.btn_preload_clip.setText("🔥 加载/预热模型")
-                return
-
-            if need_install:
-                pkgs = " ".join(need_install)
-                _set(
-                    f"模型状态：⏳ 正在安装 {pkgs}（首次约需 1-5 分钟，请耐心等待）…",
-                    f"⏳ 正在自动安装：{pkgs}…",
-                )
-                try:
-                    # modelscope 优先从 apps/modelscope 本地源安装（无需网络）
-                    ms_local_src = os.path.join(APPS_DIR, "modelscope")
-                    ms_has_local = os.path.isfile(os.path.join(ms_local_src, "setup.py"))
-                    pkgs_to_install = []
-                    for pkg in need_install:
-                        if pkg == "modelscope" and ms_has_local:
-                            pkgs_to_install.append(ms_local_src)
-                        else:
-                            pkgs_to_install.append(pkg)
-                    result = subprocess.run(
-                        [sys.executable, "-m", "pip", "install"] + pkgs_to_install + ["-q",
-                         "--disable-pip-version-check"],
-                        capture_output=True, text=True, timeout=600,
-                    )
-                    if result.returncode != 0:
-                        err_tail = (result.stderr or result.stdout or "")[-300:].strip()
-                        _set(
-                            f"模型状态：❌ 安装 {pkgs} 失败",
-                            f"❌ pip 安装失败：\n{err_tail}",
-                        )
-                        self.btn_preload_clip.setEnabled(True)
-                        self.btn_preload_clip.setText("🔥 加载/预热模型")
-                        return
-                    importlib.invalidate_caches()
-                    _set(f"模型状态：⏳ {pkgs} 安装完成，正在加载模型…", f"✅ {pkgs} 安装完成")
-                except subprocess.TimeoutExpired:
-                    _set("模型状态：❌ 安装超时", "❌ 安装超时，请重试")
-                    self.btn_preload_clip.setEnabled(True)
-                    self.btn_preload_clip.setText("🔥 加载/预热模型")
-                    return
-                except Exception as e:
-                    _set(f"模型状态：❌ 安装失败：{e}")
-                    self.btn_preload_clip.setEnabled(True)
-                    self.btn_preload_clip.setText("🔥 加载/预热模型")
-                    return
-            else:
-                _set("模型状态：⏳ 加载中，请稍候（首次约需 10-60 秒）…")
-
-            # ── Step 2: 加载模型 ───────────────────────────────────────────────
-            # 安装了新包后必须重置编码器，清除上次的 _ms_missing / _load_error 缓存
-            from utils.material_clip_indexer import reset_encoder, preload_encoder, get_encoder_status
-            reset_encoder()
-            preload_encoder()
-            st = get_encoder_status()
-
-            self.btn_preload_clip.setEnabled(True)
-            self.btn_preload_clip.setText("🔥 加载/预热模型")
-            if st["loaded"]:
-                _set(
-                    f"模型状态：✅ {st['status']}",
-                    "✅ 模型已成功加载到内存，可直接使用向量检索功能",
-                )
-            else:
-                err = st.get("error") or "未知原因"
-                first = err.split("\n")[0]
-                _set(f"模型状态：❌ {first}", f"❌ 加载失败：{err}")
-
-        import threading
-        threading.Thread(target=_do, daemon=True).start()
-
-    def _browse_clip_model_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择 Chinese-CLIP 本地模型目录")
-        if d:
-            self.edit_clip_model_dir.setText(d)
-
-    def _save_clip_model_dir(self):
-        import json as _json
-        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        try:
-            cfg = {}
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-            val = self.edit_clip_model_dir.text().strip()
-            cfg["clip_model_dir"] = val if val else None
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            self.lbl_clip_status.setText("✅ 模型路径已保存")
-            # 路径变更后重置全局编码器（下次预热/搜索时会用新路径重建）
-            try:
-                from utils.material_clip_indexer import reset_encoder
-                reset_encoder()
-                self.lbl_clip_model_status.setText("模型状态：路径已更新，请点「🔥 加载/预热模型」")
-            except Exception:
-                pass
-        except Exception as e:
-            self.lbl_clip_status.setText(f"❌ 保存失败: {e}")
-
-    def _download_clip_model(self):
-        """
-        下载 Chinese-CLIP ViT-B-16（ModelScope 格式）。
-        modelscope 包优先从 apps/modelscope 本地源安装，无需联网安装依赖。
-        """
-        self.lbl_clip_status.setText("⏳ 准备下载…")
-        self.lbl_clip_model_status.setText("模型状态：⏳ 准备中…")
-
-        import threading
-        import json as _json
-
-        def _do_download():
-            import sys, subprocess, importlib
-
-            # ── Step 1: 确保 modelscope 已安装，优先从本地源 apps/modelscope ──────────
-            try:
-                import modelscope  # noqa: F401
-            except ImportError:
-                ms_local_src = os.path.join(APPS_DIR, "modelscope")
-                if os.path.isfile(os.path.join(ms_local_src, "setup.py")):
-                    install_src = ms_local_src
-                    self.lbl_clip_status.setText("⏳ 正在从本地源安装 modelscope（无需网络）…")
-                else:
-                    install_src = "modelscope"
-                    self.lbl_clip_status.setText("⏳ 正在安装 modelscope…")
-                r = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", install_src,
-                     "-q", "--disable-pip-version-check"],
-                    capture_output=True, text=True, timeout=600,
-                )
-                if r.returncode != 0:
-                    self.lbl_clip_status.setText(
-                        f"❌ 安装 modelscope 失败：{(r.stderr or r.stdout)[-300:]}"
-                    )
-                    return
-                importlib.invalidate_caches()
-
-            # ── Step 2: 用 ModelScope 下载模型 ────────────────────────────────────────
-            try:
-                from modelscope.hub.snapshot_download import snapshot_download as ms_dl
-
-                clip_cache = os.path.join(APPS_DIR, "clip-models")
-                os.makedirs(clip_cache, exist_ok=True)
-
-                self.lbl_clip_status.setText(
-                    "⏳ 正在通过 ModelScope 下载 Chinese-CLIP（约 400 MB，请稍候）…"
-                )
-                save_dir = ms_dl(
-                    "damo/multi-modal_clip-vit-base-patch16_zh",
-                    cache_dir=clip_cache,
-                )
-
-                # 写入配置
-                cfg_path = os.path.join(
-                    CONFIG_DIR, "material_index_config.json",
-                )
-                cfg = {}
-                if os.path.isfile(cfg_path):
-                    with open(cfg_path, encoding="utf-8") as f:
-                        cfg = _json.load(f)
-                cfg["clip_model_dir"] = save_dir
-                with open(cfg_path, "w", encoding="utf-8") as f:
-                    _json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-                self.edit_clip_model_dir.setText(save_dir)
-                self.lbl_clip_status.setText("✅ 下载完成，路径已自动配置")
-
-                # ── Step 3: 自动加载模型 ─────────────────────────────────────────────
-                self.lbl_clip_model_status.setText("模型状态：⏳ 正在加载模型…")
-                from utils.material_clip_indexer import reset_encoder, preload_encoder, get_encoder_status
-                reset_encoder()
-                preload_encoder()
-                st = get_encoder_status()
-                if st["loaded"]:
-                    self.lbl_clip_model_status.setText(f"模型状态：✅ {st['status']}")
-                    self.lbl_clip_status.setText("✅ 模型下载并加载完成，可直接使用向量检索功能")
-                else:
-                    err_first = (st.get("error") or "").split("\n")[0]
-                    self.lbl_clip_model_status.setText(f"模型状态：❌ {err_first}")
-
-            except Exception as e:
-                self.lbl_clip_status.setText(f"❌ 下载失败: {e}")
-                self.lbl_clip_model_status.setText("模型状态：❌ 下载失败")
-
-        threading.Thread(target=_do_download, daemon=True).start()
 
     # ── 旺店通 ERP 配置 ──
 

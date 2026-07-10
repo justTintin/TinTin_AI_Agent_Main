@@ -381,13 +381,10 @@ class _BatchTranscribeWorker(BaseWorker):
         self._manager = manager
 
     def do_work(self):
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError:
-            raise RuntimeError("faster_whisper 未安装，请在「视频转字幕」页面安装转写依赖。")
-        from config.paths import WHISPER_MODELS_DIR
-        self.progress.emit("正在加载 Whisper 模型…")
-        model = WhisperModel(self._model_name, device="auto", download_root=WHISPER_MODELS_DIR)
+        from utils import asr_client
+        asr_url = asr_client.read_asr_url()
+        if not asr_url:
+            raise RuntimeError("未配置远程 ASR 服务地址，请在系统设置 → Whisper 填写远程 API 地址。")
         count = 0
         for sample in self._samples:
             src = sample.get("source") or {}
@@ -398,9 +395,8 @@ class _BatchTranscribeWorker(BaseWorker):
                 continue
             self.progress.emit(f"转写中：{os.path.basename(media_path)}…")
             try:
-                segments, _ = model.transcribe(media_path, language="zh")
-                text = " ".join(seg.text.strip() for seg in segments)
-                sample["transcript"] = text
+                segments = asr_client.transcribe_remote(media_path, asr_url, language="zh")
+                sample["transcript"] = asr_client.segments_to_plain(segments)
                 count += 1
             except Exception as e:
                 self.progress.emit(f"⚠️ 跳过 {os.path.basename(media_path)}: {e}")

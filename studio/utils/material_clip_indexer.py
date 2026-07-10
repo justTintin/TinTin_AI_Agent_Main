@@ -119,21 +119,17 @@ _GLOBAL_ENCODER: Optional["_ClipEncoder"] = None
 
 
 def get_encoder(cfg: Optional[dict] = None) -> "_ClipEncoder":
-    """鑾峰彇鍏ㄥ眬 CLIP 缂栫爜鍣ㄥ崟渚嬶紙鎳掑姞杞斤紝绾跨▼瀹夊叏锛夈"""
+    """获取全局 CLIP 编码器单例（远程 HTTP 模式，线程安全）。"""
     global _GLOBAL_ENCODER
     with _ENCODER_LOCK:
         if _GLOBAL_ENCODER is None:
-            if cfg is None:
-                cfg = _load_config()
-            _GLOBAL_ENCODER = _ClipEncoder(
-                cfg["clip_model"], cfg.get("clip_model_dir"),
-                cfg.get("device", "auto"), cfg.get("batch_size", 8),
-            )
+            api_url = _read_clip_api_url()
+            _GLOBAL_ENCODER = _ClipEncoder(api_url)
     return _GLOBAL_ENCODER
 
 
 def reset_encoder():
-    """閲嶇疆鍏ㄥ眬缂栫爜鍣锛堟洿鎹㈡ā鍨嬭矾寰勫悗璋冪敤锛夈"""
+    """重置全局编码器（远程模式下为空操作，保留以兼容旧调用方）。"""
     global _GLOBAL_ENCODER
     with _ENCODER_LOCK:
         _GLOBAL_ENCODER = None
@@ -141,44 +137,41 @@ def reset_encoder():
 
 def preload_encoder(cfg: Optional[dict] = None):
     """
-    棰勫姞杞 CLIP 妯″瀷鍒板唴瀛橈紙鍦ㄥ悗鍙扮嚎绋嬭皟鐢锛岄伩鍏嶉樆濉 UI锛夈
-    鍔犺浇鎴愬姛/澶辫触鍧囦笉鎶涘紓甯革紱璋冪敤 get_encoder_status() 鏌ヨ㈢粨鏋溿
+    预热 CLIP 编码器（远程 HTTP 模式下无需本地加载，此函数为空操作，保留以兼容旧调用方）。
     """
-    try:
-        enc = get_encoder(cfg)
-        enc._load()
-    except Exception as e:
-        log.warning(f"CLIP 妯″瀷棰勫姞杞藉け璐: {e}")
+    # 远程模式下，实例化即就绪，无需预加载模型。
+    get_encoder(cfg)
 
 
 def get_encoder_status() -> dict:
     """
-    杩斿洖褰撳墠缂栫爜鍣ㄧ姸鎬佸瓧鍏:
-      loaded  bool      鏄鍚﹀凡鎴愬姛鍔犺浇
-      status  str       浜虹被鍙璇荤姸鎬佹弿杩
-      backend str|None  "transformers" | "modelscope" | None
-      error   str|None  澶辫触鍘熷洜锛堜粎 loaded=False 涓旀浘灏濊瘯杩囨椂鏈夊硷級
+    返回当前编码器状态字典（远程 HTTP 模式）:
+      loaded  bool      是否就绪（远程模式下实例化即视为就绪）
+      status  str       人类可读状态描述
+      backend str|None  固定为 "remote"
+      error   str|None  失败原因（远程地址未配置时给出提示）
     """
     global _GLOBAL_ENCODER
     with _ENCODER_LOCK:
         enc = _GLOBAL_ENCODER
     if enc is None:
-        return {"loaded": False, "status": "鏈鍒濆嬪寲", "backend": None, "error": None}
-    if enc._backend is not None:
+        api_url = _read_clip_api_url()
+        if not api_url:
+            return {
+                "loaded": False,
+                "status": "未配置 CLIP API 地址",
+                "backend": None,
+                "error": "请先在「AI 模型配置」中填写 CLIP API 地址。",
+            }
+        return {"loaded": True, "status": "已就绪 (remote)", "backend": "remote", "error": None}
+    if not enc.clip_api_url:
         return {
-            "loaded":  True,
-            "status":  f"宸插氨缁 ({enc._backend})",
-            "backend": enc._backend,
-            "error":   None,
-        }
-    if enc._load_error:
-        return {
-            "loaded":  False,
-            "status":  "加载失败",
+            "loaded": False,
+            "status": "未配置 CLIP API 地址",
             "backend": None,
-            "error":   enc._load_error,
+            "error": "请先在「AI 模型配置」中填写 CLIP API 地址。",
         }
-    return {"loaded": False, "status": "鏈鍔犺浇", "backend": None, "error": None}
+    return {"loaded": True, "status": "已就绪 (remote)", "backend": "remote", "error": None}
 
 # 鈹鈹 榛樿ら厤缃锛堝彲琚 config/material_index_config.json 瑕嗙洊锛夆攢鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
 _DEFAULT_CFG = {
@@ -342,6 +335,19 @@ def _load_config() -> dict:
         except Exception as e:
             log.warning(f"鍔犺浇閰嶇疆鏂囦欢澶辫触锛屼娇鐢ㄩ粯璁ゅ: {e}")
     return cfg
+
+
+def _read_clip_api_url() -> str:
+    """从 ai_config.json 读取 clip_api_url（远程 CLIP embedding 服务地址）。"""
+    ai_cfg_path = os.path.join(CONFIG_DIR, "ai_config.json")
+    try:
+        if os.path.isfile(ai_cfg_path):
+            with open(ai_cfg_path, encoding="utf-8") as f:
+                ac = json.load(f)
+            return (ac.get("clip_api_url") or "").strip()
+    except Exception as e:
+        log.warning(f"读取 ai_config.json 中 clip_api_url 失败: {e}")
+    return ""
 
 
 def _get_video_meta(file_path: str, ffmpeg_path: Optional[str]) -> tuple[float, int, int]:
@@ -741,327 +747,104 @@ def _extract_from_script(text: str) -> tuple:
 
 
 # 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-# Chinese-CLIP 鎺ㄧ悊锛堟噿鍔犺浇锛屼娇鐢 transformers.ChineseCLIPModel锛
+# CLIP 推理（远程 HTTP embedding 服务模式）
 # 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-
-# 绠绉 鈫 HuggingFace model ID
-_HF_MODEL_MAP = {
-    "ViT-B-16": "OFA-Sys/chinese-clip-vit-base-patch16",
-    "ViT-L-14": "OFA-Sys/chinese-clip-vit-large-patch14",
-    "ViT-H-14": "OFA-Sys/chinese-clip-vit-huge-patch14",
-}
-
-# 绠绉 鈫 ModelScope model ID锛堝浗鍐呭彲鐩存帴涓嬭浇锛
-_MS_MODEL_MAP = {
-    "ViT-B-16": ("damo/multi-modal_clip-vit-base-patch16_zh", "v1.0.1"),
-    "ViT-L-14": ("damo/multi-modal_clip-vit-large-patch14_zh", "v1.0.0"),
-    "ViT-H-14": ("damo/multi-modal_clip-vit-huge-patch14_zh", "v1.0.0"),
-}
-
-# ViT-B-16=512, ViT-L-14=768, ViT-H-14=1024
-_EMBED_DIM_MAP = {
-    "ViT-B-16": 512,
-    "ViT-L-14": 768,
-    "ViT-H-14": 1024,
-}
 
 
 class _ClipEncoder:
     """
-    Chinese-CLIP 鎺ㄧ悊灏佽咃紝鏀鎸佷袱濂楀悗绔锛
-    - transformers锛氭湰鍦 HuggingFace 鏍煎紡鐩褰 / hf-mirror.com 涓嬭浇
-    - modelscope锛氶氳繃 ModelScope pipeline锛堝浗鍐呭彲闈狅紝鑷鍔ㄤ笅杞斤級
+    CLIP 编码封装（远程 HTTP embedding 服务模式）。
+
+    不再本地加载 Chinese-CLIP 模型，而是通过 HTTP 调用远程 embedding 服务：
+      - 文本编码：POST {clip_api_url}/v1/embeddings  body {"input": [...], "model": "clip", "input_type": "text"}
+      - 图片编码：POST {clip_api_url}/v1/embeddings  body {"input": [base64...], "model": "clip", "input_type": "image"}
+    响应为 OpenAI 格式：{"data": [{"embedding": [...]}, ...]}
     """
-    def __init__(self, model_name: str, model_dir: Optional[str], device: str, batch_size: int):
-        self.model_name = model_name
-        self.model_dir = model_dir
-        self.batch_size = batch_size
-        self._torch = None
-        self._device = None
-        self._requested_device = device
-        self._load_error: Optional[str] = None   # fail-fast
-        self._hf_id = _HF_MODEL_MAP.get(model_name, model_name)
-        self._ms_id, self._ms_rev = _MS_MODEL_MAP.get(model_name, ("", ""))
-        self._embed_dim = _EMBED_DIM_MAP.get(model_name, 512)
 
-        # 鍚庣鍖哄垎锛歵ransformers锛圚F 鏍煎紡锛夋垨 modelscope pipeline
-        self._backend: Optional[str] = None   # "transformers" | "modelscope"
-        self._hf_model = None
-        self._hf_processor = None
-        self._ms_pipeline = None
-        self._ms_missing: bool = False  # modelscope 鏈瀹夎呮椂鏍囪
+    def __init__(self, clip_api_url: Optional[str] = None, batch_size: int = 8):
+        self.clip_api_url = (clip_api_url or "").strip()
+        self.batch_size = max(1, int(batch_size))
 
-    # 鈹鈹 鍔犺浇锛堟噿鍔犺浇 + fail-fast锛夆攢鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-
-    def _load(self):
-        if self._backend is not None:
-            return
-        if self._load_error:
-            raise RuntimeError(self._load_error)
-
-        try:
-            import torch
-        except ImportError as e:
-            self._load_error = f"缺少 torch: {e}"
-            raise RuntimeError(self._load_error) from e
-
-        self._torch = torch
-        device = ("cuda" if torch.cuda.is_available() else "cpu") \
-            if self._requested_device == "auto" else self._requested_device
-        self._device = device
-
-        local_is_ms_format = (
-            self.model_dir
-            and os.path.isdir(self.model_dir)
-            and os.path.isfile(os.path.join(self.model_dir, "configuration.json"))
-            and not os.path.isfile(os.path.join(self.model_dir, "config.json"))
-        )
-
-        # 鈶 鏈鍦 HuggingFace 鏍煎紡鐩褰曪紙鏈蹇锛屼笉闇瑕佺綉缁滐級
-        if self.model_dir and os.path.isdir(self.model_dir) and not local_is_ms_format:
-            if self._try_load_hf(self.model_dir, device):
-                return
-
-        # 鈶 ModelScope 鏍煎紡锛堟湰鍦板凡涓嬭浇 鎴 鍦ㄧ嚎涓嬭浇锛夆斺 modelscope 鏄鍞涓鍚庣
-        if local_is_ms_format or self._ms_id:
-            if self._try_load_modelscope(device):
-                return
-            # modelscope 鏈瀹夎 鈫 鐩存帴缁欏嚭娓呮櫚鎻愮ず锛屼笉灏濊瘯鍏朵粬閫斿緞
-            if self._ms_missing:
-                self._load_error = (
-                    "鈿狅笍 妯″瀷涓 ModelScope 鏍煎紡锛岄渶瑕 modelscope 鍖呫俓n\n"
-                    "璇峰湪銆岀幆澧冮厤缃銆嶁啋銆屽悜閲忓簱銆嶇偣銆岎煍 鍔犺浇/棰勭儹妯″瀷銆嶏紝\n"
-                    "绋嬪簭浼氳嚜鍔ㄤ粠鏈鍦板畨瑁 modelscope 骞跺姞杞芥ā鍨嬨"
-                )
-                raise RuntimeError(self._load_error)
-
-        # 鈶 妯″瀷鐩褰曚笉瀛樺湪 / 鏈涓嬭浇
-        if self.model_dir and not os.path.isdir(self.model_dir):
-            self._load_error = (
-                f"模型目录不存在: {self.model_dir}\n\n"
-                "请在「环境配置」→「向量库」点「⬇ 一键下载模型」。"
+    def _ensure_url(self):
+        if not self.clip_api_url:
+            raise RuntimeError(
+                "未配置 CLIP API 地址，请在「AI 模型配置」中填写 clip_api_url。"
             )
-            raise RuntimeError(self._load_error)
 
-        self._load_error = (
-            "⚠️ 无法加载 Chinese-CLIP 模型。\n\n"
-            "璇峰湪銆岀幆澧冮厤缃銆嶁啋銆屽悜閲忓簱銆嶇偣銆屸瑖 涓閿涓嬭浇妯″瀷銆嶄笅杞芥ā鍨嬶紝\n"
-            "鍐嶇偣銆岎煍 鍔犺浇/棰勭儹妯″瀷銆嶅姞杞姐"
-        )
-        raise RuntimeError(self._load_error)
-
-    def model_id_or_path(self, hf_kw: dict) -> str:
-        return self.model_dir if (self.model_dir and not hf_kw) else self._hf_id
-
-    def _try_load_hf(self, model_path: str, device: str, **kw) -> bool:
-        try:
-            from transformers import ChineseCLIPModel, ChineseCLIPProcessor
-            log.info(f"尝试 transformers 加载: {model_path}")
-            m = ChineseCLIPModel.from_pretrained(model_path, **kw).to(device).eval()
-            p = ChineseCLIPProcessor.from_pretrained(model_path, **kw)
-            self._hf_model = m
-            self._hf_processor = p
-            self._backend = "transformers"
-            log.info("Chinese-CLIP (transformers) 加载完成")
-            return True
-        except ValueError as e:
-            # transformers 鏂扮増鏈瀵 torch.load 鐨 CVE-2025-32434 瀹夊叏妫鏌ワ細
-            # 鏈鍦板彲淇℃ā鍨嬫枃浠讹紝缁曡繃璇ラ檺鍒舵墜鍔ㄥ姞杞芥潈閲嶃
-            if "CVE-2025-32434" in str(e) or "torch.load" in str(e):
-                try:
-                    import torch
-                    from transformers import ChineseCLIPModel, ChineseCLIPProcessor
-                    from transformers import AutoConfig
-                    import os as _os
-                    log.info(f"缁曡繃 transformers torch 鐗堟湰妫鏌ワ紝鎵嬪姩鍔犺浇鏈鍦版潈閲: {model_path}")
-                    cfg = AutoConfig.from_pretrained(model_path, local_files_only=True)
-                    m = ChineseCLIPModel(cfg)
-                    # 找到 .bin 文件
-                    bin_files = [f for f in _os.listdir(model_path)
-                                 if f.endswith(".bin") or f.endswith(".pt")]
-                    if not bin_files:
-                        raise FileNotFoundError(f"鏈鎵惧埌 .bin 妯″瀷鏂囦欢: {model_path}")
-                    state_raw = torch.load(
-                        _os.path.join(model_path, bin_files[0]),
-                        map_location="cpu", weights_only=False,
-                    )
-                    # 瑙ｅ寘宓屽
-                    if isinstance(state_raw, dict) and "state_dict" in state_raw:
-                        sd = state_raw["state_dict"]
-                    elif isinstance(state_raw, dict) and "model" in state_raw:
-                        sd = state_raw["model"]
-                    else:
-                        sd = state_raw
-                    # 濡傛灉 key 鍖呭惈 'module.' 鍓嶇紑锛圖DP 璁缁冿級锛屽幓鎺
-                    if all(k.startswith("module.") for k in list(sd.keys())[:5]):
-                        sd = {k[len("module."):]: v for k, v in sd.items()}
-                    missing, unexpected = m.load_state_dict(sd, strict=False)
-                    log.info(f"手动加载: missing={len(missing)} unexpected={len(unexpected)}")
-                    m = m.to(device).eval()
-                    p = ChineseCLIPProcessor.from_pretrained(model_path, local_files_only=True)
-                    self._hf_model = m
-                    self._hf_processor = p
-                    self._backend = "transformers"
-                    log.info("Chinese-CLIP (手动加载权重) 加载完成")
-                    return True
-                except Exception as e2:
-                    log.warning(f"transformers 手动加载权重失败 ({model_path}): {e2}")
-                    return False
-            log.warning(f"transformers 加载失败 ({model_path}): {e}")
-            return False
-        except Exception as e:
-            log.warning(f"transformers 加载失败 ({model_path}): {e}")
-            return False
-
-    def _try_load_modelscope(self, device: str) -> bool:
-        """
-        鐩存帴鍔犺浇 ModelScope 鏍煎紡鐨 Chinese-CLIP 妯″瀷锛
-        涓嶉氳繃 pipeline API锛堥伩鍏嶆媺璧 OFA/fairseq 渚濊禆棰楅棶棰橈級銆
-        """
-        local_dir = self.model_dir
-
-        # 鈹鈹 妫鏌 modelscope 鍖呮槸鍚﹀畨瑁 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-        try:
-            import modelscope  # noqa: F401
-        except ImportError:
-            log.warning("modelscope 鏈瀹夎咃紝璺宠繃 ModelScope 鍚庣銆傝疯繍琛: pip install modelscope")
-            self._ms_missing = True
-            return False
-
-        # 鈹鈹 灏濊瘯鏂瑰紡 1锛氱洿鎺ョ敤 transformers 鍔犺浇 ModelScope 鏈鍦扮洰褰曪紙鍐呭圭浉鍚岋級 鈹鈹鈹鈹鈹鈹鈹鈹鈹
-        if local_dir and os.path.isdir(local_dir):
-            try:
-                from transformers import ChineseCLIPModel, ChineseCLIPProcessor
-                log.info(f"灏濊瘯鐢 transformers 鐩存帴鍔犺浇 ModelScope 鐩褰: {local_dir}")
-                m = ChineseCLIPModel.from_pretrained(local_dir, local_files_only=True)
-                m = m.to(device).eval()
-                p = ChineseCLIPProcessor.from_pretrained(local_dir, local_files_only=True)
-                self._hf_model = m
-                self._hf_processor = p
-                self._backend = "transformers"   # 澶嶇敤 transformers 缂栫爜璺寰
-                log.info("Chinese-CLIP 閫氳繃 transformers 鐩村姞 ModelScope 鐩褰曞畬鎴")
-                return True
-            except Exception as e:
-                log.info(f"transformers 鐩磋 ModelScope 鐩褰曞け璐 ({e})锛屽皾璇 modelscope pipeline鈥")
-
-        # 鈹鈹 灏濊瘯鏂瑰紡 2锛 鐢 modelscope pipeline 锛堥渶瑕佸畬鏁翠緷璧栵級 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-        try:
-            from modelscope.pipelines import pipeline as ms_pipeline
-            from modelscope.utils.constant import Tasks
-        except ImportError as ie:
-            log.warning(f"modelscope.pipelines 导入失败: {ie}")
-            return False
-
-        try:
-            if local_dir and os.path.isdir(local_dir) and os.path.isfile(
-                os.path.join(local_dir, "configuration.json")
-            ):
-                log.info(f"姝ｅ湪浠庢湰鍦扮洰褰曞姞杞 ModelScope 妯″瀷: {local_dir}")
-                model_src = local_dir
-                kw: dict = {}
-            else:
-                log.info(f"姝ｅ湪閫氳繃 ModelScope 涓嬭浇 {self._ms_id} (revision={self._ms_rev})鈥")
-                model_src = self._ms_id
-                kw = {"model_revision": self._ms_rev}
-
-            pl = ms_pipeline(
-                Tasks.multi_modal_embedding,
-                model=model_src,
-                device="gpu" if "cuda" in device else "cpu",
-                **kw,
-            )
-            self._ms_pipeline = pl
-            self._backend = "modelscope"
-            log.info("Chinese-CLIP (ModelScope pipeline) 加载完成")
-            return True
-        except Exception as e:
-            log.warning(f"ModelScope pipeline 加载失败: {e}")
-            return False
-
-    # 鈹鈹 缂栫爜鎺ュ彛 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
+    def _post_embeddings(self, inputs: list[str], input_type: str) -> list[list[float]]:
+        """调用远程 /v1/embeddings，返回归一化后的向量列表。"""
+        import requests
+        self._ensure_url()
+        url = f"{self.clip_api_url.rstrip('/')}/v1/embeddings"
+        payload = {
+            "input": inputs,
+            "model": "clip",
+            "input_type": input_type,
+        }
+        resp = requests.post(url, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        import math
+        embs: list[list[float]] = []
+        for item in data:
+            vec = item.get("embedding") or []
+            n = math.sqrt(sum(x * x for x in vec))
+            embs.append([x / n for x in vec] if n > 0 else list(vec))
+        return embs
 
     def encode_images(self, img_paths: list[str]) -> list[list[float]]:
-        self._load()
-        zero = [0.0] * self._embed_dim
-        all_embs: list[list[float]] = []
-
-        if self._backend == "modelscope":
-            from PIL import Image
-            for p in img_paths:
-                try:
-                    img = Image.open(p).convert("RGB")
-                    out = self._ms_pipeline({"img": img})
-                    emb = out["img_embedding"]  # numpy (1, dim)
-                    import numpy as np
-                    e = emb[0].astype("float32")
-                    n = float(np.linalg.norm(e))
-                    all_embs.append((e / n if n > 0 else e).tolist())
-                except Exception as ex:
-                    log.warning(f"图片编码失败 {p}: {ex}")
-                    all_embs.append(list(zero))
-            return all_embs
-
-        # transformers 鍚庣
-        from PIL import Image
-        torch = self._torch
+        """读取图片 -> base64 -> 远程编码 -> 返回向量列表（与本地实现签名一致）。"""
+        import base64
+        result: list[list[float]] = []
         for i in range(0, len(img_paths), self.batch_size):
             batch = img_paths[i: i + self.batch_size]
-            pil_imgs, valid_idx = [], []
+            b64_list: list[str] = []
+            valid_idx: list[int] = []
             for j, p in enumerate(batch):
                 try:
-                    pil_imgs.append(Image.open(p).convert("RGB"))
+                    with open(p, "rb") as f:
+                        raw = f.read()
+                    b64 = base64.b64encode(raw).decode("ascii")
+                    b64_list.append(b64)
                     valid_idx.append(j)
                 except Exception as ex:
                     log.warning(f"图片读取失败 {p}: {ex}")
-            result = [list(zero) for _ in batch]
-            if pil_imgs:
-                inputs = self._hf_processor(images=pil_imgs, return_tensors="pt")
-                inputs = {k: v.to(self._device) for k, v in inputs.items()}
-                with torch.no_grad():
-                    emb = self._hf_model.get_image_features(**inputs)
-                    if hasattr(emb, "pooler_output"):
-                        emb = emb.pooler_output
-                    emb = emb / emb.norm(p=2, dim=-1, keepdim=True)
-                    emb_np = emb.cpu().float().numpy()
-                for k, vi in enumerate(valid_idx):
-                    result[vi] = emb_np[k].tolist()
-            all_embs.extend(result)
-        return all_embs
+            batch_result: list[list[float]] = [[] for _ in batch]
+            if b64_list:
+                try:
+                    embs = self._post_embeddings(b64_list, input_type="image")
+                    dim = len(embs[0]) if embs else 0
+                    for k, vi in enumerate(valid_idx):
+                        if k < len(embs) and embs[k]:
+                            batch_result[vi] = embs[k]
+                        else:
+                            batch_result[vi] = [0.0] * dim
+                except Exception as ex:
+                    log.warning(f"远程图片编码失败: {ex}")
+                    dim = len(batch_result[0]) if batch_result else 0
+                    for vi in valid_idx:
+                        if not batch_result[vi]:
+                            batch_result[vi] = [0.0] * dim
+            # 补全空向量（维度未知时用 0 长度占位，下游 SQL 插入会跳过）
+            result.extend(batch_result)
+        return result
 
     def encode_text(self, texts: list[str]) -> list[list[float]]:
-        self._load()
+        """远程文本编码 -> 返回向量列表（与本地实现签名一致）。"""
+        try:
+            embs = self._post_embeddings(list(texts), input_type="text")
+            dim = len(embs[0]) if embs else 0
+            result: list[list[float]] = []
+            for k in range(len(texts)):
+                if k < len(embs) and embs[k]:
+                    result.append(embs[k])
+                else:
+                    result.append([0.0] * dim)
+            return result
+        except Exception as ex:
+            log.warning(f"远程文本编码失败: {ex}")
+            return [[] for _ in texts]
 
-        if self._backend == "modelscope":
-            import numpy as np
-            all_embs = []
-            for t in texts:
-                try:
-                    out = self._ms_pipeline({"text": t})
-                    emb = out["text_embedding"][0].astype("float32")
-                    n = float(np.linalg.norm(emb))
-                    all_embs.append((emb / n if n > 0 else emb).tolist())
-                except Exception as ex:
-                    log.warning(f"文本编码失败 '{t}': {ex}")
-                    all_embs.append([0.0] * self._embed_dim)
-            return all_embs
-
-        # transformers 鍚庣
-        torch = self._torch
-        inputs = self._hf_processor(
-            text=texts, return_tensors="pt", padding=True, truncation=True
-        )
-        inputs = {k: v.to(self._device) for k, v in inputs.items()}
-        with torch.no_grad():
-            emb = self._hf_model.get_text_features(**inputs)
-            if hasattr(emb, "pooler_output"):
-                emb = emb.pooler_output
-            emb = emb / emb.norm(p=2, dim=-1, keepdim=True)
-        return emb.cpu().float().numpy().tolist()
-
-
-# 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
-# 鏁版嵁搴撳眰锛堜弗鏍煎瑰簲鐪熷疄 schema锛
-# 鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹鈹
 
 class _MaterialDB:
     def __init__(self, cfg: dict):
@@ -1567,10 +1350,8 @@ class MaterialClipIndexer:
                 pass
         self._db = _MaterialDB(self.cfg)
         self._encoder = _ClipEncoder(
-            model_name=self.cfg["clip_model"],
-            model_dir=self.cfg.get("clip_model_dir"),
-            device=self.cfg["device"],
-            batch_size=self.cfg["batch_size"],
+            clip_api_url=_read_clip_api_url(),
+            batch_size=self.cfg.get("batch_size", 8),
         )
 
     def to_local_path(self, path: str) -> str:
@@ -2720,7 +2501,7 @@ def search_by_image(
     if cfg is None:
         cfg = _load_config()
     import numpy as np
-    encoder = _ClipEncoder(cfg["clip_model"], cfg.get("clip_model_dir"), cfg["device"], 1)
+    encoder = _ClipEncoder(clip_api_url=_read_clip_api_url(), batch_size=1)
     embs = encoder.encode_images([image_path])
     if not embs:
         return []

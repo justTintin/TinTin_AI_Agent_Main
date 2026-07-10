@@ -541,47 +541,24 @@ class PageSetupMixin:
 
         # ───── Tab 2: VoxCPM ─────
         p3 = _page(); l3 = QVBoxLayout(p3); l3.setContentsMargins(16,20,16,16); l3.setSpacing(10)
-        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
-        _rl(lg3, "VoxCPM 来源:", lambda r: (setattr(self,'vox_source_combo',QComboBox()), self.vox_source_combo.setView(QListView()),
-            self.vox_source_combo.addItem("内置（本地）","local"), self.vox_source_combo.addItem("远程（外部已运行）","remote"),
-            self.vox_source_combo.currentIndexChanged.connect(self._on_vox_source_changed), r.addWidget(self.vox_source_combo)))
-        _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://127.0.0.1:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
-        _rl(lg3, "调用方式:", lambda r: (setattr(self,'vox_mode_combo',QComboBox()), self.vox_mode_combo.setView(QListView()),
-            self.vox_mode_combo.addItem("API 接口服务调用","api"), self.vox_mode_combo.addItem("本地命令行直接调用","cli"), r.addWidget(self.vox_mode_combo)))
+        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM（远程）"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
+        _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         lg3.addLayout(_row(lambda r: (r.addWidget(QLabel("推理步数:")), setattr(self,'vox_timesteps_spin',QSpinBox()), self.vox_timesteps_spin.setRange(5,100), self.vox_timesteps_spin.setValue(20), self.vox_timesteps_spin.setFixedWidth(70), r.addWidget(self.vox_timesteps_spin), r.addSpacing(20),
             r.addWidget(QLabel("CFG:")), setattr(self,'vox_cfg_spin',QDoubleSpinBox()), self.vox_cfg_spin.setRange(0.5,10.0), self.vox_cfg_spin.setSingleStep(0.1), self.vox_cfg_spin.setValue(2.0), self.vox_cfg_spin.setFixedWidth(70), r.addWidget(self.vox_cfg_spin), r.addStretch())))
-        _rl(lg3, "模型路径:", lambda r: (setattr(self,'edit_voxcpm_model_path',QLineEdit()), self.edit_voxcpm_model_path.setPlaceholderText("留空使用 HuggingFace 预训练模型"), r.addWidget(self.edit_voxcpm_model_path),
-            setattr(self,'_browse_vox_btn',QPushButton("浏览")), self._browse_vox_btn.setObjectName("secondary_button"), self._browse_vox_btn.clicked.connect(self.browse_voxcpm_model_dir), r.addWidget(self._browse_vox_btn)))
-        _rl(lg3, "端口:", lambda r: (setattr(self,'spin_voxcpm_port',QSpinBox()), self.spin_voxcpm_port.setRange(1024,65535), self.spin_voxcpm_port.setValue(7861), r.addWidget(self.spin_voxcpm_port)))
         rr3 = QHBoxLayout()
-        self.llm_vox_status_val = QLabel("服务状态: 未启动"); self.llm_vox_status_val.setObjectName("muted_text"); rr3.addWidget(self.llm_vox_status_val); rr3.addStretch()
-        self.btn_toggle_voxcpm = QPushButton("▶️ 启动"); self.btn_toggle_voxcpm.setObjectName("primary_button"); self.btn_toggle_voxcpm.clicked.connect(self.toggle_voxcpm_service); rr3.addWidget(self.btn_toggle_voxcpm)
+        self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); rr3.addWidget(self.llm_vox_status_val); rr3.addStretch()
         b3 = QPushButton("💾 保存"); b3.setObjectName("secondary_button"); b3.setFixedWidth(80); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
         lg3.addLayout(rr3)
         l3.addWidget(g3); l3.addStretch(); tabs.addTab(p3, "🗣️ VoxCPM")
 
         # ───── Tab 4: Ollama ─────
         p4 = _page(); l4 = QVBoxLayout(p4); l4.setContentsMargins(16,20,16,16); l4.setSpacing(10)
-        g4 = QGroupBox("🖥️ Ollama 本地视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
-        _rl(lg4, "Ollama 来源:", lambda r: (setattr(self,'ollama_mode_combo',QComboBox()), self.ollama_mode_combo.setView(QListView()),
-            self.ollama_mode_combo.addItem("内置（本地）","local"), self.ollama_mode_combo.addItem("远程（外部已运行）","remote"),
-            self.ollama_mode_combo.currentIndexChanged.connect(self._on_ollama_mode_changed), r.addWidget(self.ollama_mode_combo)))
+        g4 = QGroupBox("🖥️ Ollama 远程视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
-        lg4.addLayout(_row(lambda r: (setattr(self,'btn_ollama_start',QPushButton("▶ 启动")), self.btn_ollama_start.setObjectName("primary_button"), self.btn_ollama_start.setFixedWidth(70), self.btn_ollama_start.clicked.connect(self._ollama_start),
-            setattr(self,'btn_ollama_stop',QPushButton("■ 停止")), self.btn_ollama_stop.setObjectName("secondary_button"), self.btn_ollama_stop.setFixedWidth(70), self.btn_ollama_stop.clicked.connect(self._ollama_stop),
+        lg4.addLayout(_row(lambda r: (
             setattr(self,'btn_ollama_refresh',QPushButton("↺ 刷新")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
-            r.addWidget(self.btn_ollama_start), r.addWidget(self.btn_ollama_stop), r.addWidget(self.btn_ollama_refresh), r.addStretch())))
-        setattr(self,'lbl_runners_warn',QLabel("⚠ 推理运行库缺失")); self.lbl_runners_warn.setObjectName("ollama_runners_warn"); self.lbl_runners_warn.setVisible(False)
-        setattr(self,'btn_fix_runners',QPushButton("🔧 修复")); self.btn_fix_runners.setObjectName("primary_button"); self.btn_fix_runners.setVisible(False); self.btn_fix_runners.clicked.connect(self._ollama_fix_runners)
-        lg4.addLayout(_row(lambda r: (r.addWidget(self.lbl_runners_warn), r.addStretch(), r.addWidget(self.btn_fix_runners))))
-        setattr(self,'runners_bar',QProgressBar()); self.runners_bar.setRange(0,100); self.runners_bar.setVisible(False); lg4.addWidget(self.runners_bar)
-        lg4.addLayout(_row(lambda r: (r.addWidget(QLabel("下载模型:")),
-            setattr(self,'ollama_pull_input',QComboBox()), [self.ollama_pull_input.addItem(md,userData=mid) for mid,md in [("internvl2.5:8b","InternVL2.5 8B"),("qwen2.5vl:7b","Qwen2.5-VL 7B"),("internvl2.5:26b","InternVL2.5 26B"),("qwen2.5vl:3b","Qwen2.5-VL 3B"),("minicpm-v:8b","MiniCPM-V 8B"),("llava:7b","LLaVA 1.5 7B"),("moondream:1.8b","Moondream 1.8B")]],
-            self.ollama_pull_input.setCurrentIndex(0), r.addWidget(self.ollama_pull_input),
-            setattr(self,'btn_ollama_pull',QPushButton("⬇ 下载")), self.btn_ollama_pull.setObjectName("primary_button"), self.btn_ollama_pull.setFixedWidth(70), self.btn_ollama_pull.clicked.connect(self._ollama_pull), r.addWidget(self.btn_ollama_pull), r.addStretch())))
-        setattr(self,'ollama_pull_bar',QProgressBar()); self.ollama_pull_bar.setRange(0,100); self.ollama_pull_bar.setFixedHeight(14); self.ollama_pull_bar.hide(); lg4.addWidget(self.ollama_pull_bar)
-        setattr(self,'ollama_progress_lbl',QLabel("")); self.ollama_progress_lbl.setObjectName("ollama_progress_lbl"); self.ollama_progress_lbl.setWordWrap(True); lg4.addWidget(self.ollama_progress_lbl)
+            r.addWidget(self.btn_ollama_refresh), r.addStretch())))
 
         # ── 视觉模型配置（Ollama 托管的视觉模型，合并到此 Tab）──
         g_vm = QGroupBox("👁️ 当前视觉模型（由 Ollama 提供）"); g_vm.setObjectName("model_groupbox"); g_vm.setProperty("section", "vision"); lg_vm = QVBoxLayout(g_vm); lg_vm.setSpacing(10)
@@ -599,22 +576,13 @@ class PageSetupMixin:
 
         l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
 
-        # ───── Tab 5: Whisper ─────
+        # ───── Tab 5: Whisper（纯远程 ASR 服务）─────
         p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
-        g5 = QGroupBox("🎙️ Whisper 语音转写"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
-        _rl(lg5, "Whisper 来源:", lambda r: (setattr(self,'whisper_source_combo',QComboBox()), self.whisper_source_combo.setView(QListView()),
-            self.whisper_source_combo.addItem("内置（本地模型）","local"), self.whisper_source_combo.addItem("远程（ASR 服务）","remote"),
-            self.whisper_source_combo.currentIndexChanged.connect(self._on_whisper_source_changed), r.addWidget(self.whisper_source_combo)))
+        g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
+        whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
-        _rl(lg5, "引擎:", lambda r: (setattr(self,'llm_whisper_status_val',QLabel("正在检测...")), r.addWidget(self.llm_whisper_status_val)))
-        _rl(lg5, "DLL:", lambda r: (setattr(self,'llm_dll_status_val',QLabel("正在检测...")), r.addWidget(self.llm_dll_status_val)))
-        _rl(lg5, "模型:", lambda r: (setattr(self,'llm_models_status_val',QLabel("正在检测...")), r.addWidget(self.llm_models_status_val)))
-        setattr(self,'whisper_stage_label',QLabel("系统就绪")); self.whisper_stage_label.setObjectName("muted_text"); lg5.addWidget(self.whisper_stage_label)
-        setattr(self,'whisper_progress_bar',QProgressBar()); self.whisper_progress_bar.setVisible(False); self.whisper_progress_bar.setRange(0,100); lg5.addWidget(self.whisper_progress_bar)
-        lg5.addLayout(_row(lambda r: (setattr(self,'btn_refresh_whisper',QPushButton("🔄 刷新")), self.btn_refresh_whisper.setObjectName("secondary_button"), self.btn_refresh_whisper.clicked.connect(self.refresh_llm_page_status),
-            setattr(self,'btn_install_whisper',QPushButton("🚀 一键修复/安装")), self.btn_install_whisper.setObjectName("primary_button"), self.btn_install_whisper.clicked.connect(self.start_whisper_repair),
-            r.addWidget(self.btn_refresh_whisper), r.addWidget(self.btn_install_whisper), r.addStretch())))
-        setattr(self,'whisper_log_view',QTextEdit()); self.whisper_log_view.setObjectName("log_viewer"); self.whisper_log_view.setReadOnly(True); self.whisper_log_view.setFixedHeight(100); self.whisper_log_view.setPlaceholderText("修复日志..."); lg5.addWidget(self.whisper_log_view)
+        lg5.addLayout(_row(lambda r: (setattr(self,'btn_save_whisper',QPushButton("💾 保存")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper), r.addStretch())))
+        self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
         l5.addWidget(g5); l5.addStretch(); tabs.addTab(p5, "🎙️ Whisper")
 
         # ───── Tab 6: PaddleOCR ─────
@@ -630,6 +598,15 @@ class PageSetupMixin:
         setattr(self,'paddle_log_view',QTextEdit()); self.paddle_log_view.setObjectName("log_viewer"); self.paddle_log_view.setReadOnly(True); self.paddle_log_view.setFixedHeight(100); self.paddle_log_view.setPlaceholderText("部署日志..."); lg6.addWidget(self.paddle_log_view)
         l6.addWidget(g6); l6.addStretch(); tabs.addTab(p6, "🔍 PaddleOCR")
 
+        # ───── Tab 7: CLIP（远程 embedding 服务）─────
+        p7 = _page(); l7 = QVBoxLayout(p7); l7.setContentsMargins(16,20,16,16); l7.setSpacing(10)
+        g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
+        clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
+        _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
+        lg7.addLayout(_row(lambda r: (setattr(self,'btn_save_clip',QPushButton("💾 保存")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip), r.addStretch())))
+        self.clip_status_lbl = QLabel(""); self.clip_status_lbl.setObjectName("muted_text"); lg7.addWidget(self.clip_status_lbl)
+        l7.addWidget(g7); l7.addStretch(); tabs.addTab(p7, "🖼️ CLIP")
+
         layout.addWidget(tabs, 1)
         # Load data
         prov = self.ai_config.get("llm_provider","deepseek"); idx = self.llm_provider_combo.findData(prov)
@@ -639,24 +616,11 @@ class PageSetupMixin:
         self.llm_model_input.setText(self.ai_config.get("llm_model","deepseek-v4-flash"))
         self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
-        # Ollama 来源模式初始化（触发 _on_ollama_mode_changed 设置控件可见性）
-        ollama_mode = self.ai_config.get("ollama_mode", "local")
-        midx = self.ollama_mode_combo.findData(ollama_mode)
-        if midx >= 0:
-            self.ollama_mode_combo.setCurrentIndex(midx)
-        else:
-            self.ollama_mode_combo.setCurrentIndex(0)
-        self._on_ollama_mode_changed(self.ollama_mode_combo.currentIndex())
         self.load_voxcpm_config()
-        # Whisper 来源模式初始化
-        whisper_source = self.ai_config.get("whisper_source", "remote")
-        wsidx = self.whisper_source_combo.findData(whisper_source)
-        if wsidx >= 0:
-            self.whisper_source_combo.setCurrentIndex(wsidx)
-        else:
-            self.whisper_source_combo.setCurrentIndex(1)  # 默认 remote
+        # Whisper ASR 地址初始化（纯远程模式）
         self.whisper_api_url_input.setText(self.ai_config.get("whisper_api_url", ""))
-        self._on_whisper_source_changed(self.whisper_source_combo.currentIndex())
+        # CLIP API 地址初始化（纯远程模式）
+        self.clip_api_url_input.setText(self.ai_config.get("clip_api_url", ""))
         self.refresh_llm_page_status()
 
     # ═══════════════════════════════════════════════════════════════

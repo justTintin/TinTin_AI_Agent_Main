@@ -27,18 +27,13 @@ def _read_ai_config() -> dict:
     return {}
 
 
-def read_whisper_source() -> str:
-    """当前 Whisper 来源：'local'(本地模型) 或 'remote'(远程 ASR 服务)。默认 remote。"""
-    return (_read_ai_config().get("whisper_source") or "remote").strip()
-
-
 def read_asr_url() -> str:
     """远程 ASR 服务地址。"""
     return (_read_ai_config().get("whisper_api_url") or "").strip()
 
 
 # ═══════════════════════════════════════════════════════════════
-#  时间戳格式化（从 whisperx_runner.py 提取，保持一致）
+#  时间戳格式化
 # ═══════════════════════════════════════════════════════════════
 
 def format_srt_timestamp(seconds: float) -> str:

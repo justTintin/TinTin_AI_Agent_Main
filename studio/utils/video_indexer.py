@@ -18,10 +18,6 @@ from utils.base_worker import BaseWorker
 from utils.video_index_manager import VideoIndexManager, compute_video_hash
 from utils.logger_utils import log
 from PySide6.QtCore import Signal
-import threading
-
-_whisper_model_lock = threading.Lock()
-_whisper_model_cache = {}
 
 
 # ─── 抽帧（复用 video_ai_rename_page 的 cv2 方案）──────────────────────────
@@ -135,72 +131,26 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
         return []
 
 
-# ─── Whisper 转写（inline faster_whisper，与重命名/知识库页复用同一模型路径）──
-
-def _resolve_whisper_model_path(models_dir: str, model_name: str) -> str:
-    """检查本地是否已有模型文件，返回可用的模型路径或原始名称。"""
-    candidates = [
-        os.path.join(models_dir, f"models--Systran--faster-whisper-{model_name}"),
-        os.path.join(models_dir, model_name),
-        os.path.join(models_dir, f"faster-whisper-{model_name}"),
-    ]
-    for p in candidates:
-        if os.path.isdir(p) and os.path.isfile(os.path.join(p, "model.bin")):
-            return p
-    return model_name
-
+# ─── Whisper 转写（纯远程 ASR 服务）──
 
 def transcribe_audio(video_path: str, models_dir: str,
                      model_name: str = "large-v3") -> str:
     """
-    用 faster_whisper 对视频音轨转写，返回纯文本台词。
-    使用全局字典缓存模型，避免每个视频重复加载模型文件。
+    调用远程 ASR 服务对视频音轨转写，返回纯文本台词。
 
     远程模式下走 asr_client 远程服务，不加载本地模型。
+    models_dir / model_name 参数仅为兼容调用方签名保留，本模式下不再使用。
     """
-    # 远程模式：走远程 ASR 服务，返回纯文本
     try:
-        from utils.asr_client import read_whisper_source, read_asr_url, transcribe_remote, segments_to_plain
-        if read_whisper_source() == "remote":
-            asr_url = read_asr_url()
-            if not asr_url:
-                log.warning("远程 ASR 模式但未配置地址，跳过转写")
-                return ""
-            segments = transcribe_remote(video_path, asr_url, language="zh")
-            return segments_to_plain(segments)
+        from utils.asr_client import read_asr_url, transcribe_remote, segments_to_plain
+        asr_url = read_asr_url()
+        if not asr_url:
+            log.warning("未配置远程 ASR 服务地址，跳过转写")
+            return ""
+        segments = transcribe_remote(video_path, asr_url, language="zh")
+        return segments_to_plain(segments)
     except Exception as e:
-        log.warning(f"远程 ASR 转写失败，回退本地: {e}")
-
-    try:
-        import os as _os
-        _os.environ["LANG"] = "zh_CN.UTF-8"
-        _os.environ["LC_ALL"] = "zh_CN.UTF-8"
-        from faster_whisper import WhisperModel
-
-        device = "cpu"  # 避免与 Ollama 抢显存
-        compute_type = "int8"
-        resolved = _resolve_whisper_model_path(models_dir, model_name)
-        local_files_only = resolved != model_name  # 本地路径找到则禁止下载
-        cache_key = (resolved, device, compute_type)
-
-        with _whisper_model_lock:
-            if cache_key not in _whisper_model_cache:
-                log.info(f"正在加载 Whisper 模型 {model_name} (device={device}, compute_type={compute_type})...")
-                _whisper_model_cache[cache_key] = WhisperModel(
-                    resolved,
-                    device=device,
-                    compute_type=compute_type,
-                    download_root=models_dir,
-                    local_files_only=local_files_only,
-                )
-            model = _whisper_model_cache[cache_key]
-
-            segments, _ = model.transcribe(video_path, language="zh", beam_size=5)
-            text = " ".join(s.text.strip() for s in segments).strip()
-
-        return text
-    except Exception as e:
-        log.warning(f"Whisper 转写失败（跳过）: {e}")
+        log.warning(f"远程 ASR 转写失败（跳过）: {e}")
         return ""
 
 

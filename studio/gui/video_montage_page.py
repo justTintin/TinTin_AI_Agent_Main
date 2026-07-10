@@ -28,16 +28,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QMimeData
 from PySide6.QtGui import QDrag, QAction
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from config.paths import WORKSPACE_ROOT, VOXCPM2_DIR, PROJECT_ROOT, APPS_DIR
-
-def get_voxcpm_python():
-    """返回可用于启动 VoxCPM API 服务器的 Python 路径。
-
-    使用 voxcpm2 venv 自带的 Python（3.12），以保证 numpy/torch 等
-    编译扩展与解释器版本匹配；嵌入式 Python（3.11）无法加载 cp312 的 C 扩展。
-    """
-    from utils.platform_utils import find_venv_python
-    return find_venv_python(VOXCPM2_DIR)
+from config.paths import APPS_DIR
 
 
 def find_ffmpeg():
@@ -2865,12 +2856,6 @@ class VideoMontagePage(BasePage):
         self.voice_video_paths = []
         self.generated_voice_paths = {} # maps video_path -> voice_wav_path
         self.dubbed_video_paths = {}    # maps video_path -> dubbed_video_path
-        
-        # Fish Speech background server process
-        self.api_server_process = None
-        self.api_server_log_file = None
-        self.api_server_log_path = ""
-        self.api_status_timer = None
 
         # BGM Player dedicated setup
         from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -2992,10 +2977,6 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "_bgm_player") and self._bgm_player:
             self._stop_bgm_play()
 
-        # 离开声音克隆步骤（step 2）进入下一步时，停止 VoxCPM 服务释放显存
-        if self.stacked_widget.currentIndex() == 2 and index != 2:
-            self._stop_voxcpm_after_voice()
-
         self.stacked_widget.setCurrentIndex(index)
         self.update_step_indicator(index)
         self.stage_label.setText("就绪")
@@ -3027,44 +3008,14 @@ class VideoMontagePage(BasePage):
         
         self._scan_voice_video_dir()
 
-        # Sync VoxCPM configured port and model path from config.ini
-        import configparser
-        port = 7861
+        # 纯远程模式：从 ai_config 读取已保存的远程 TTS API 地址回填
         try:
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            if config.has_section('VoxCPM'):
-                port = config.getint('VoxCPM', 'Port', fallback=7861)
+            ai_config = getattr(self.main_window, "ai_config", {}) or {}
         except Exception:
-            pass
-
-        self.api_url_input.setText(f"http://127.0.0.1:{port}/v1/tts")
-        self._populate_models()
-
-        # Check if API server is already running externally and monitor it
-        api_url = self.api_url_input.text().strip()
-        try:
-            from urllib.parse import urlparse
-            import socket
-            parsed = urlparse(api_url)
-            host = parsed.hostname or "127.0.0.1"
-            port_to_check = parsed.port or 8000
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.1)
-            s.connect((host, port_to_check))
-            s.close()
-            
-            # Port is listening! Set status and start the timer monitor.
-            self.server_status_lbl.setText("服务状态: 正在运行 (检测到外部进程)")
-            self.server_status_lbl.setStyleSheet("color: #2ecc71;")
-            self.btn_toggle_server.setText("⏹️ 停止本地 API 服务")
-            if not hasattr(self, "api_status_timer") or not self.api_status_timer:
-                from PySide6.QtCore import QTimer
-                self.api_status_timer = QTimer()
-                self.api_status_timer.timeout.connect(self._check_api_server_status)
-            self.api_status_timer.start(3000)
-        except Exception:
-            pass
+            ai_config = {}
+        saved_url = ai_config.get("vox_api_url", "")
+        if saved_url:
+            self.api_url_input.setText(saved_url)
         self._populate_ref_audio_samples()
 
     # ==================== PAGE 0: SMART SPLIT ====================
@@ -3597,14 +3548,10 @@ class VideoMontagePage(BasePage):
         row_vid_dir.addWidget(btn_sel_vid_dir)
         card_layout.addLayout(row_vid_dir)
 
-        # Define advanced elements in background
-        self.voice_mode_combo = QComboBox()
-        self.voice_mode_combo.addItem("API 接口服务调用", "api")
-        self.voice_mode_combo.addItem("本地命令行直接调用 (Local CLI)", "cli")
-        self.voice_mode_combo.currentIndexChanged.connect(self._on_voice_mode_changed)
-
+        # 远程 TTS API 地址输入框（纯远程模式；保存时同步到 ai_config）
         self.api_url_input = QLineEdit()
         self.api_url_input.setText("http://127.0.0.1:8000/v1/tts")
+        self.api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts")
 
         # 2a. Reference Voice Row
         row_voice = QHBoxLayout()
@@ -3657,47 +3604,14 @@ class VideoMontagePage(BasePage):
         row_ref_text.addWidget(self.ref_text_input, 1)
         card_layout.addLayout(row_ref_text)
         
-        # 3. Model selection and Server control group row
+        # 3. TTS API 接口地址与推理参数（纯远程模式）
         row_server = QHBoxLayout()
         row_server.setSpacing(10)
         row_server.setAlignment(Qt.AlignVCenter)
-        
-        row_server.addWidget(QLabel("🤖 模型:"))
-        self.model_combo = QComboBox()
-        self.model_combo.setMinimumWidth(160)
-        row_server.addWidget(self.model_combo)
-        self.model_combo.currentIndexChanged.connect(self._on_model_selected)
-        
-        row_server.addSpacing(10)
-        row_server.addWidget(QLabel("服务控制:"))
-        self.btn_toggle_server = QPushButton("▶️ 启动服务")
-        self.btn_toggle_server.setObjectName("primary_button")
-        self.btn_toggle_server.setStyleSheet("padding: 4px 10px; font-size: 12px; font-weight: bold;")
-        self.btn_toggle_server.clicked.connect(self._toggle_api_server)
-        row_server.addWidget(self.btn_toggle_server)
-        
-        self.server_status_lbl = QLabel("已停止")
-        self.server_status_lbl.setObjectName("muted_text")
-        self.server_status_lbl.setStyleSheet("color: #e74c3c; font-size: 12px; font-weight: bold; margin-left: 5px; margin-right: 5px;")
-        row_server.addWidget(self.server_status_lbl)
-        
-        self.btn_view_server_log = QPushButton("📄")
-        self.btn_view_server_log.setToolTip("查看日志")
-        self.btn_view_server_log.setStyleSheet("padding: 0px; font-size: 12px;")
-        self.btn_view_server_log.setFixedWidth(30)
-        self.btn_view_server_log.setFixedHeight(30)
-        self.btn_view_server_log.clicked.connect(self._view_server_log)
-        row_server.addWidget(self.btn_view_server_log)
-        
-        # Advanced settings button
-        self.btn_advanced_settings = QPushButton("⚙️")
-        self.btn_advanced_settings.setToolTip("高级配置 (调用方式、接口地址)")
-        self.btn_advanced_settings.setStyleSheet("padding: 0px; font-size: 12px;")
-        self.btn_advanced_settings.setFixedWidth(30)
-        self.btn_advanced_settings.setFixedHeight(30)
-        self.btn_advanced_settings.clicked.connect(self._show_advanced_voxcpm_dialog)
-        row_server.addWidget(self.btn_advanced_settings)
-        
+
+        row_server.addWidget(QLabel("🌐 TTS API:"))
+        row_server.addWidget(self.api_url_input, 1)
+
         row_server.addSpacing(12)
         row_server.addWidget(QLabel("推理步数:"))
         from PySide6.QtWidgets import QSpinBox
@@ -3755,8 +3669,6 @@ class VideoMontagePage(BasePage):
 
         row_server.addStretch(1)
         card_layout.addLayout(row_server)
-
-        self.voice_mode_combo.currentIndexChanged.connect(self._on_voice_mode_changed)
 
         # 5. Videos and script mappings table (batch text area removed)
         row_table_title = QHBoxLayout()
@@ -3845,9 +3757,6 @@ class VideoMontagePage(BasePage):
 
         layout.addWidget(card, 1)
 
-        # Scan models directory
-        self._populate_models()
-
         # Navigation row
         nav_row = QHBoxLayout()
         btn_prev = QPushButton("⇠ 上一步：镜头重组")
@@ -3864,72 +3773,6 @@ class VideoMontagePage(BasePage):
         layout.addLayout(nav_row)
 
         self.stacked_widget.addWidget(page)
-
-    def _populate_models(self):
-        self.model_combo.clear()
-        
-        # Load custom model path from config.ini
-        import configparser
-        custom_model_path = ""
-        try:
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            if config.has_section('VoxCPM'):
-                custom_model_path = config.get('VoxCPM', 'ModelPath', fallback="").strip()
-        except Exception:
-            pass
-
-        if not custom_model_path or not os.path.isdir(custom_model_path):
-            default_path = os.path.join(VOXCPM2_DIR, "models", "openbmb__VoxCPM2")
-            if os.path.isdir(default_path):
-                custom_model_path = os.path.abspath(default_path)
-
-        modules_dir = os.path.abspath(os.path.join(WORKSPACE_ROOT, "modules"))
-        found_folders = []
-        
-        # Add configured custom model path first if it exists
-        if custom_model_path and os.path.isdir(custom_model_path):
-            basename = os.path.basename(custom_model_path) or custom_model_path
-            self.model_combo.addItem(f"⚙️ 配置模型: {basename}", custom_model_path)
-
-        # Add default HuggingFace model
-        self.model_combo.addItem("🌐 默认模型: openbmb/VoxCPM2 (HuggingFace)", "openbmb/VoxCPM2")
-
-        if os.path.exists(modules_dir):
-            for d in os.listdir(modules_dir):
-                if os.path.isdir(os.path.join(modules_dir, d)):
-                    full_p = os.path.join(modules_dir, d)
-                    # Avoid duplicate if it matches custom_model_path
-                    if custom_model_path and os.path.abspath(full_p) == os.path.abspath(custom_model_path):
-                        continue
-                    if "voxcpm" in d.lower():
-                        found_folders.append(d)
-                        self.model_combo.addItem(f"📁 {d}", full_p)
-        
-        self.model_combo.addItem("浏览其他模型文件夹...", "custom")
-        
-        # If we added custom_model_path, select it (index 0)
-        if custom_model_path and os.path.isdir(custom_model_path):
-            self.model_combo.setCurrentIndex(0)
-        else:
-            if found_folders:
-                offset = 1 if (custom_model_path and os.path.isdir(custom_model_path)) else 0
-                self.model_combo.setCurrentIndex(offset + 1)
-            else:
-                offset = 1 if (custom_model_path and os.path.isdir(custom_model_path)) else 0
-                self.model_combo.setCurrentIndex(offset)
-
-    def _on_model_selected(self, index):
-        data = self.model_combo.currentData()
-        if data == "custom":
-            dir_path = QFileDialog.getExistingDirectory(self.parent_widget, "选择权重文件夹", "")
-            if dir_path:
-                name = os.path.basename(dir_path) or dir_path
-                self.model_combo.insertItem(0, f"📌 {name}", dir_path)
-                self.model_combo.setCurrentIndex(0)
-            else:
-                if self.model_combo.count() > 1:
-                    self.model_combo.setCurrentIndex(0)
 
     # ==================== PAGE 3: FINAL MIX ====================
     def _setup_page_final(self):
@@ -5092,20 +4935,16 @@ class VideoMontagePage(BasePage):
         # Reset the target progress style
         self._on_row_progress(row_idx, 0)
 
-        model_path = self.model_combo.currentData()
-        if model_path == "custom":
-            model_path = ""
-
         out_wav_path = os.path.abspath(os.path.join(out_montage_dir, "voices", f"voice_{row_idx + 1}.wav"))
         tasks = [(row_idx, text, video_path, out_wav_path)]
-        
+
         self.voice_worker = VoiceCloneWorker(
             tasks=tasks,
             voice_ref_audio=ref_audio,
             voice_ref_text=self.ref_text_input.text().strip(),
-            voice_mode=self.voice_mode_combo.currentData(),
+            voice_mode="api",
             voice_api_url=self.api_url_input.text().strip(),
-            voice_cli_checkpoint=model_path,
+            voice_cli_checkpoint="",
             temp_dir=out_montage_dir,
             inference_timesteps=self.tts_steps_spin.value() if hasattr(self, "tts_steps_spin") else 10,
             cfg_value=self.tts_cfg_spin.value() if hasattr(self, "tts_cfg_spin") else 2.0,
@@ -5745,17 +5584,8 @@ class VideoMontagePage(BasePage):
         )
 
     def _transcription_deps_ok(self):
-        try:
-            import torch  # noqa: F401
-            import sys
-            import os
-            # Ensure apps path is in sys.path
-            if APPS_DIR not in sys.path:
-                sys.path.insert(0, APPS_DIR)
-            import whisperx  # noqa: F401
-            return True
-        except Exception:
-            return False
+        # 纯远程 ASR 模式：转写由远程服务完成，不再依赖本地 torch / whisperx。
+        return True
 
 
     # --- Step 2 Concat execution ---
@@ -5999,41 +5829,6 @@ class VideoMontagePage(BasePage):
 
 
     # --- Step 3 Voice synthesis execution ---
-    def _on_voice_mode_changed(self):
-        mode = self.voice_mode_combo.currentData()
-        is_api = (mode == "api")
-        self.btn_toggle_server.setVisible(is_api)
-        self.server_status_lbl.setVisible(is_api)
-        self.btn_view_server_log.setVisible(is_api)
-
-    def _show_advanced_voxcpm_dialog(self):
-        dialog = QDialog(self.parent_widget)
-        dialog.setWindowTitle("⚙️ VoxCPM 高级配置")
-        dialog.setMinimumSize(450, 180)
-        
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-        
-        # Row 1: Calling mode
-        row_mode = QHBoxLayout()
-        row_mode.addWidget(QLabel("调用方式:"))
-        row_mode.addWidget(self.voice_mode_combo)
-        layout.addLayout(row_mode)
-        
-        # Row 2: API URL
-        row_url = QHBoxLayout()
-        row_url.addWidget(QLabel("VoxCPM API 接口地址:"))
-        row_url.addWidget(self.api_url_input)
-        layout.addLayout(row_url)
-        
-        # Close button
-        btn_close = QPushButton("关闭")
-        btn_close.clicked.connect(dialog.accept)
-        layout.addWidget(btn_close, 0, Qt.AlignRight)
-        
-        dialog.exec()
-
     def _show_ai_rewrite_settings(self):
         dialog = QDialog(self.parent_widget)
         dialog.setWindowTitle("文案生成设置")
@@ -6216,15 +6011,7 @@ class VideoMontagePage(BasePage):
                         creationflags=0x08000000)
             free_mb = int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 99999
             if free_mb < 6144:
-                self.stage_label.setText(f"空闲显存 {free_mb}MB 不足，正在停止 Ollama 释放显存...")
-                from utils.ollama_manager import OllamaManager
-                mgr = OllamaManager.get()
-                if mgr.is_running():
-                    mgr.stop()
-                    time.sleep(3)
-                    self.stage_label.setText("Ollama 已停止，开始声音克隆...")
-                else:
-                    self.stage_label.setText("Ollama 未运行，显存可能被其他程序占用...")
+                self.stage_label.setText(f"空闲显存 {free_mb}MB 不足，声音克隆可能失败...")
             else:
                 self.stage_label.setText(f"空闲显存 {free_mb}MB 充足，开始声音克隆...")
         except Exception as e:
@@ -6266,18 +6053,13 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
-        # Get checkpoint path from model selection dropdown
-        model_path = self.model_combo.currentData()
-        if model_path == "custom":
-            model_path = "" # Reverts to default or empty if not set
-
         self.voice_worker = VoiceCloneWorker(
             tasks=tasks,
             voice_ref_audio=ref_audio,
             voice_ref_text=self.ref_text_input.text().strip(),
-            voice_mode=self.voice_mode_combo.currentData(),
+            voice_mode="api",
             voice_api_url=self.api_url_input.text().strip(),
-            voice_cli_checkpoint=model_path,
+            voice_cli_checkpoint="",
             temp_dir=out_montage_dir,
             inference_timesteps=self.tts_steps_spin.value() if hasattr(self, "tts_steps_spin") else 10,
             cfg_value=self.tts_cfg_spin.value() if hasattr(self, "tts_cfg_spin") else 2.0,
@@ -6339,15 +6121,6 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
         QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
-
-    def _stop_voxcpm_after_voice(self):
-        """声音克隆任务完成后停止 VoxCPM 服务，释放 GPU 显存。"""
-        try:
-            if hasattr(self, "api_server_process") and self.api_server_process:
-                log.info("声音克隆完成，停止 VoxCPM 服务释放显存")
-                self.stop_api_server(show_prompt=False)
-        except Exception as e:
-            log.warning(f"停止 VoxCPM 服务失败: {e}")
 
     def _start_dubbing_videos(self):
         if self.dub_worker and self.dub_worker.isRunning():
@@ -6802,199 +6575,6 @@ class VideoMontagePage(BasePage):
             self.final_preview_player.setSource(QUrl.fromLocalFile(path))
             self.final_preview_player.play()
             self.final_preview_title.setText(f"🎥 {os.path.basename(path)}")
-
-    # ==================== LOCAL API SERVER MANAGEMENT ====================
-    def _toggle_api_server(self):
-        if (hasattr(self, "api_server_process") and self.api_server_process and self.api_server_process.poll() is None) or \
-           (self.btn_toggle_server.text().startswith("⏹️") and (not hasattr(self, "api_server_process") or not self.api_server_process)):
-            self.stop_api_server()
-        else:
-            self.start_api_server()
-
-    def start_api_server(self):
-        # 1. Check if the server is already active at api_url using socket connect
-        api_url = self.api_url_input.text().strip()
-        try:
-            from urllib.parse import urlparse
-            import socket
-            parsed = urlparse(api_url)
-            host = parsed.hostname or "127.0.0.1"
-            port = parsed.port or 8000
-            
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.15)
-            s.connect((host, port))
-            s.close()
-            
-            # Port is already open! Skip startup and monitor it.
-            log.info(f"VoxCPM API server is already running at port {port}. Skipping startup.")
-            self.server_status_lbl.setText("服务状态: 正在运行 (检测到外部进程)")
-            self.server_status_lbl.setStyleSheet("color: #2ecc71;")
-            self.btn_toggle_server.setText("⏹️ 停止本地 API 服务")
-            if not hasattr(self, "api_status_timer") or not self.api_status_timer:
-                from PySide6.QtCore import QTimer
-                self.api_status_timer = QTimer()
-                self.api_status_timer.timeout.connect(self._check_api_server_status)
-            self.api_status_timer.start(3000)
-            return
-        except Exception:
-            pass
-
-        # Always use the VoxCPM virtual environment Python
-        python_exe = get_voxcpm_python()
-        
-        # Get checkpoint path from dropdown selection
-        checkpoint = self.model_combo.currentData()
-        if not checkpoint or checkpoint == "custom":
-            checkpoint = "openbmb/VoxCPM2"
-            
-        api_url = self.api_url_input.text().strip()
-
-        listen_addr = "127.0.0.1:8000"
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(api_url)
-            if parsed.netloc:
-                listen_addr = parsed.netloc
-        except Exception:
-            pass
-
-        # Script path to voxcpm_api_server.py（由 paths.py 统一管理，支持 frozen 模式）
-        api_server_script = os.path.join(PROJECT_ROOT, "voxcpm_api_server.py")
-
-        cmd = [
-            python_exe,
-            api_server_script,
-            "--listen", listen_addr,
-            "--checkpoint-path", checkpoint
-        ]
-
-        try:
-            log_dir = os.path.abspath(os.path.join(PROJECT_ROOT, "logs"))
-            os.makedirs(log_dir, exist_ok=True)
-            self.api_server_log_path = os.path.join(log_dir, "voxcpm_api.log")
-
-            self.api_server_log_file = open(self.api_server_log_path, "a", encoding="utf-8")
-
-            self.api_server_process = subprocess.Popen(
-                cmd,
-                stdout=self.api_server_log_file,
-                stderr=subprocess.STDOUT,
-                cwd=PROJECT_ROOT,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-
-            if not hasattr(self, "api_status_timer") or not self.api_status_timer:
-                from PySide6.QtCore import QTimer
-                self.api_status_timer = QTimer()
-                self.api_status_timer.timeout.connect(self._check_api_server_status)
-            self.api_status_timer.start(3000)
-
-            self.server_status_lbl.setText("服务状态: 启动中...")
-            self.server_status_lbl.setStyleSheet("color: #f39c12;")
-            self.btn_toggle_server.setText("⏹️ 停止本地 API 服务")
-            log.info(f"VoxCPM API server started with command: {' '.join(cmd)} at cwd: {root_dir}")
-        except Exception as e:
-            QMessageBox.critical(self.parent_widget, "启动失败", f"无法启动 VoxCPM API 服务:\n{e}")
-            log.exception("启动 VoxCPM API 服务失败")
-
-    def _check_api_server_status(self):
-        if hasattr(self, "api_server_process") and self.api_server_process:
-            ret = self.api_server_process.poll()
-            if ret is None:
-                self.server_status_lbl.setText(f"服务状态: 正在运行 (PID: {self.api_server_process.pid})")
-                self.server_status_lbl.setStyleSheet("color: #2ecc71;")
-                self.btn_toggle_server.setText("⏹️ 停止本地 API 服务")
-            else:
-                self.server_status_lbl.setText(f"服务状态: 已停止 (返回码: {ret})")
-                self.server_status_lbl.setStyleSheet("color: #e74c3c;")
-                self.btn_toggle_server.setText("▶️ 启动本地 API 服务")
-                if hasattr(self, "api_status_timer") and self.api_status_timer and self.api_status_timer.isActive():
-                    self.api_status_timer.stop()
-
-                if hasattr(self, "api_server_log_file") and self.api_server_log_file:
-                    try:
-                        self.api_server_log_file.close()
-                    except Exception:
-                        pass
-                    self.api_server_log_file = None
-            return
-
-        # Check external service status via socket
-        api_url = self.api_url_input.text().strip()
-        try:
-            from urllib.parse import urlparse
-            import socket
-            parsed = urlparse(api_url)
-            host = parsed.hostname or "127.0.0.1"
-            port = parsed.port or 8000
-            
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.15)
-            s.connect((host, port))
-            s.close()
-            
-            self.server_status_lbl.setText("服务状态: 正在运行 (检测到外部进程)")
-            self.server_status_lbl.setStyleSheet("color: #2ecc71;")
-            self.btn_toggle_server.setText("⏹️ 停止本地 API 服务")
-        except Exception:
-            self.server_status_lbl.setText("服务状态: 已停止")
-            self.server_status_lbl.setStyleSheet("color: #7f8c8d;")
-            self.btn_toggle_server.setText("▶️ 启动本地 API 服务")
-            if hasattr(self, "api_status_timer") and self.api_status_timer and self.api_status_timer.isActive():
-                self.api_status_timer.stop()
-
-    def stop_api_server(self, show_prompt=True):
-        if hasattr(self, "api_server_process") and self.api_server_process:
-            proc = self.api_server_process
-            self.api_server_process = None
-            if proc.poll() is None:
-                try:
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-                except Exception:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-            try:
-                proc.wait(timeout=3)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-
-            if hasattr(self, "api_server_log_file") and self.api_server_log_file:
-                try:
-                    self.api_server_log_file.close()
-                except Exception:
-                    pass
-                self.api_server_log_file = None
-        else:
-            # If we didn't start the server, show a helpful hint and disconnect GUI monitor
-            if show_prompt:
-                QMessageBox.information(
-                    self.parent_widget,
-                    "提示",
-                    "当前检测到的 VoxCPM API 服务是由外部独立启动运行的进程，无法在软件中停止。请在外部控制台或管理器中关闭它。"
-                )
-
-        if hasattr(self, "api_status_timer") and self.api_status_timer and self.api_status_timer.isActive():
-            self.api_status_timer.stop()
-
-        self.server_status_lbl.setText("服务状态: 已停止")
-        self.server_status_lbl.setStyleSheet("color: #7f8c8d;")
-        self.btn_toggle_server.setText("▶️ 启动本地 API 服务")
-        log.info("VoxCPM API server stopped")
-
-    def _view_server_log(self):
-        if hasattr(self, "api_server_log_path") and os.path.exists(self.api_server_log_path):
-            try:
-                os.startfile(self.api_server_log_path)
-            except Exception as e:
-                QMessageBox.warning(self.parent_widget, "无法打开日志", f"无法打开日志文件:\n{e}")
-        else:
-            QMessageBox.information(self.parent_widget, "无日志", "目前没有生成任何本地服务日志。请先启动服务。")
 
     def _open_splits_dir(self):
         selected_item = self.video_list.currentItem()

@@ -1065,7 +1065,8 @@ class _MaterialDB:
                 SELECT id, path, filename, media_type, duration_s,
                        brand, product, model, category,
                        COALESCE(ai_status,'pending') AS ai_status,
-                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary
+                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary,
+                       split_part(path, '/', 1) AS shared_folder
                 FROM materials
                 {where}
                 ORDER BY id DESC
@@ -1119,7 +1120,8 @@ class _MaterialDB:
                 SELECT id, path, filename, media_type, duration_s,
                        brand, product, model, category,
                        COALESCE(ai_status,'pending') AS ai_status,
-                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary
+                       ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary,
+                       split_part(path, '/', 1) AS shared_folder
                 FROM materials
                 {where}
                 ORDER BY id DESC

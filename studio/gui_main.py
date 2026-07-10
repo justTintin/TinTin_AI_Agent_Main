@@ -501,23 +501,17 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
     def closeEvent(self, event):
         # Pop up confirmation dialog
         reply = QMessageBox.question(
-            self, 
-            "退出确认", 
+            self,
+            "退出确认",
             "您确定要退出程序吗？\n确认后，系统将自动安全关闭本软件启动的所有本地运行环境及后端服务。",
-            QMessageBox.Yes | QMessageBox.No, 
+            QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         if reply == QMessageBox.No:
             event.ignore()
             return
 
-        # Create and show close splash loading window
-        close_splash = CloseSplash(self)
-        close_splash.show()
-        QApplication.processEvents()
-        
-        close_splash.status_lbl.setText("正在关闭语音克隆本地 API 服务...")
-        QApplication.processEvents()
+        # 静默清理后台服务（不弹 CloseSplash 窗口）
         try:
             if hasattr(self, "video_montage_tool") and self.video_montage_tool:
                 self.video_montage_tool.stop_api_server(show_prompt=False)
@@ -533,16 +527,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 self.stop_voxcpm_service(show_prompt=False)
         except Exception:
             pass
-            
-        close_splash.status_lbl.setText("正在关闭后台自动发片服务...")
-        QApplication.processEvents()
         try:
             if hasattr(self, "creator_pw_controller") and self.creator_pw_controller:
                 self.creator_pw_controller.stop()
         except Exception:
             pass
-        close_splash.status_lbl.setText("正在关闭登录/账号控制器...")
-        QApplication.processEvents()
         try:
             for _, ctrl in list(getattr(self, "account_pw_controllers", {}).items()):
                 try:
@@ -551,9 +540,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                     pass
         except Exception:
             pass
-            
-        close_splash.status_lbl.setText("正在关闭系统资源监控服务...")
-        QApplication.processEvents()
         try:
             if hasattr(self, "monitor") and self.monitor:
                 self.monitor.running = False
@@ -571,41 +557,28 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 self.folder_watcher.stop()
         except Exception:
             pass
-
-        close_splash.status_lbl.setText("正在断开后台通信连接...")
-        QApplication.processEvents()
         try:
             if hasattr(self, "comfy_ws") and self.comfy_ws:
                 self.comfy_ws.running = False
                 self.comfy_ws.wait()
         except Exception:
             pass
-
-        # 关闭本次启动的本地 ComfyUI 引擎（外部服务不受影响）
         try:
             from utils import comfyui_client as comfy
             comfy.ComfyUILocal.get().stop()
         except Exception:
             pass
-
-        close_splash.status_lbl.setText("正在清理已开启的浏览器分身进程...")
-        QApplication.processEvents()
         try:
             from core.creator_browser_controller import close_all_active_browsers
             close_all_active_browsers()
         except Exception:
             pass
-
-        close_splash.status_lbl.setText("正在关闭内置 AI 推理引擎(Ollama)...")
-        QApplication.processEvents()
         try:
             from utils.ollama_manager import OllamaManager
             OllamaManager.get().stop()
         except Exception:
             pass
 
-        close_splash.close()
-        
         try:
             super().closeEvent(event)
         except Exception:

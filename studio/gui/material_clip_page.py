@@ -780,7 +780,8 @@ class MaterialClipPage(BasePage):
         filter_row.addWidget(QLabel("品牌："))
         self.db_brand_filter = QComboBox()
         self.db_brand_filter.addItem("全部", "")
-        self.db_brand_filter.setFixedWidth(100)
+        self.db_brand_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.db_brand_filter.setMinimumWidth(100)
         self.db_brand_filter.setEditable(True)
         self.db_brand_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.db_brand_filter.currentIndexChanged.connect(self._refresh_db_table)
@@ -789,7 +790,8 @@ class MaterialClipPage(BasePage):
         filter_row.addWidget(QLabel("类别："))
         self.db_category_filter = QComboBox()
         self.db_category_filter.addItem("全部", "")
-        self.db_category_filter.setFixedWidth(80)
+        self.db_category_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.db_category_filter.setMinimumWidth(80)
         self.db_category_filter.setEditable(True)
         self.db_category_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.db_category_filter.currentIndexChanged.connect(self._refresh_db_table)
@@ -798,7 +800,7 @@ class MaterialClipPage(BasePage):
         filter_row.addWidget(QLabel("描述："))
         self.db_desc_filter = QLineEdit()
         self.db_desc_filter.setPlaceholderText("画面描述")
-        self.db_desc_filter.setFixedWidth(90)
+        self.db_desc_filter.setMinimumWidth(90)
         self.db_desc_filter.returnPressed.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_desc_filter)
 
@@ -808,7 +810,8 @@ class MaterialClipPage(BasePage):
         self.db_conf_filter.addItem("高 (>=70%)", "high")
         self.db_conf_filter.addItem("中 (40%~70%)", "medium")
         self.db_conf_filter.addItem("低 (<40%)", "low")
-        self.db_conf_filter.setFixedWidth(115)
+        self.db_conf_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.db_conf_filter.setMinimumWidth(115)
         self.db_conf_filter.currentIndexChanged.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_conf_filter)
 
@@ -817,7 +820,8 @@ class MaterialClipPage(BasePage):
         self.db_type_filter.addItem("全部", "")
         self.db_type_filter.addItem("视频", "video")
         self.db_type_filter.addItem("图片", "image")
-        self.db_type_filter.setFixedWidth(95)
+        self.db_type_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.db_type_filter.setMinimumWidth(95)
         self.db_type_filter.currentIndexChanged.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_type_filter)
 
@@ -827,14 +831,15 @@ class MaterialClipPage(BasePage):
         self.db_status_filter.addItem("待分析", "pending")
         self.db_status_filter.addItem("已分析", "analyzed")
         self.db_status_filter.addItem("失败", "failed")
-        self.db_status_filter.setFixedWidth(120)
+        self.db_status_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.db_status_filter.setMinimumWidth(120)
         self.db_status_filter.currentIndexChanged.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_status_filter)
 
         filter_row.addWidget(QLabel("Hash："))
         self.db_hash_filter = QLineEdit()
         self.db_hash_filter.setPlaceholderText("hash前缀")
-        self.db_hash_filter.setFixedWidth(110)
+        self.db_hash_filter.setMinimumWidth(110)
         self.db_hash_filter.returnPressed.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_hash_filter)
         
@@ -855,7 +860,7 @@ class MaterialClipPage(BasePage):
         )
         hh = self.db_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Fixed)
-        self.db_table.setColumnWidth(0, 30)
+        self.db_table.setColumnWidth(0, 40)
         
         hh.setSectionResizeMode(1, QHeaderView.Interactive)
         self.db_table.setColumnWidth(1, 400)
@@ -1067,6 +1072,7 @@ class MaterialClipPage(BasePage):
                     self._nas_client = None
         else:
             # ── 本机目录模式 ──
+            self._nas_root = ""
             local_dirs = cfg.get("local_directories", [])
             dirs = local_dirs
             root_text = "本机磁盘" if local_dirs else "（未配置，请前往「资源配置」配置）"
@@ -1556,7 +1562,7 @@ class MaterialClipPage(BasePage):
         
         hh = self.diff_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Fixed)
-        self.diff_table.setColumnWidth(0, 35)
+        self.diff_table.setColumnWidth(0, 40)
         hh.setSectionResizeMode(1, QHeaderView.Interactive)
         self.diff_table.setColumnWidth(1, 300)
         hh.setSectionResizeMode(2, QHeaderView.Interactive)

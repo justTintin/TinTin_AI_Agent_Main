@@ -2008,6 +2008,7 @@ class MaterialClipIndexer:
                 self._log(
                     f"  ⚠ CLIP 编码失败（跳过向量，品牌/型号仍保存）: {e}"
                 )
+                frame_records = []  # 清空，避免写入空向量导致 pgvector 报错
 
             # ── 写库 ─────────────────────────────────────────────────────────
             status = "analyzed"

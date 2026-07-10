@@ -72,9 +72,21 @@ ffmpeg
 ffplay
 ffprobe
 
-# Ollama models and CUDA libs
+# Ollama models
 studio/assets/ollama_models/
-studio/bin/
+
+# studio/bin 内的 CUDA/Vulkan 大体积加速库（各几百 MB），不入库
+# ollama/dreamina/ffmpeg 等通用工具及其运行时库入库，保证 clone 即用
+# GPU 库之外的工具文件被全局 *.exe/*.dll/*.so 规则连带忽略，
+# 提交时用 git add -f 强制入库；此处规则仅用于防止 GPU 库被误加
+studio/bin/**/cuda_v*/
+studio/bin/**/vulkan/
+studio/bin/**/cuda*/
+studio/bin/**/cublas*
+studio/bin/**/cudnn*
+studio/bin/**/cudart*
+studio/bin/**/*cuda*
+studio/bin/**/*ggml-cuda*
 
 # Bundled binaries
 apps/pw-browsers/
@@ -119,3 +131,6 @@ resources/test/
 
 # Large data / ERP exports
 *erp_suites_data.json
+
+# ai_skills（独立上架自动化工具，含 Electron 打包产物/浏览器缓存，不入库）
+ai_skills/

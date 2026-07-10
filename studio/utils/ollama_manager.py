@@ -47,7 +47,7 @@ class OllamaManager:
     def is_running(self) -> bool:
         """检测远程 Ollama 服务是否可达。"""
         try:
-            r = requests.get(f"{_read_ollama_api()}/api/tags", timeout=5)
+            r = requests.get(f"{_read_ollama_api()}/ollama/status", timeout=5)
             return r.status_code == 200
         except Exception:
             return False
@@ -55,9 +55,11 @@ class OllamaManager:
     def list_local_models(self) -> list[str]:
         """列出远程 Ollama 已加载的模型。"""
         try:
-            r = requests.get(f"{_read_ollama_api()}/api/tags", timeout=5)
+            r = requests.get(f"{_read_ollama_api()}/ollama/models", timeout=5)
             if r.status_code == 200:
-                return [m["name"] for m in r.json().get("models", [])]
+                data = r.json()
+                models = data.get("models") or data.get("data") or []
+                return [m.get("name", m.get("model", str(m))) for m in models]
         except Exception:
             pass
         return []

@@ -526,12 +526,16 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
         def _analyze_one(mat: dict):
             if self._is_cancelled:
                 return False, None
+            fname = os.path.basename(mat.get("path", ""))
+            self.log_line.emit(f"  ▶ 开始分析: {fname} (id={mat.get('id')}, path={mat.get('path','')})")
             try:
+                self.log_line.emit(f"    连接数据库...")
                 with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=self.log_line.emit) as idx:
                     success = idx.analyze_material(mat["id"], mat["path"])
                 return bool(success), None
             except Exception as e:
                 import traceback
+                self.log_line.emit(f"    ❌ 异常: {e}")
                 return False, traceback.format_exc()
 
         self.log_line.emit(f"  🚀 AI 分析并发数: {max_workers}")

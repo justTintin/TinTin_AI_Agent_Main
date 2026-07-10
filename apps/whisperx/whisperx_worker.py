@@ -58,27 +58,13 @@ class WhisperXTranscribeWorker(QThread):
 
     def run(self):
         try:
-            # 1. 确保 ffmpeg 可用
-            import shutil
-            is_win = sys.platform == "win32"
-            curr_dir = os.path.dirname(os.path.abspath(__file__))
-            workspace_root = os.path.dirname(os.path.dirname(curr_dir))
-            ffmpeg_exe = "ffmpeg.exe" if is_win else "ffmpeg"
-            candidates = [
-                os.path.join(curr_dir, ffmpeg_exe),
-                os.path.join(os.path.dirname(curr_dir), ffmpeg_exe),
-                os.path.join(workspace_root, ffmpeg_exe),
-                os.path.join(workspace_root, "python_embeded", ffmpeg_exe),
-                os.path.join(workspace_root, "python_embeded", "Scripts", ffmpeg_exe),
-            ]
-            ffmpeg_path = shutil.which("ffmpeg")
-            if not ffmpeg_path:
-                for c in candidates:
-                    if os.path.exists(c) and os.path.isfile(c):
-                        ffmpeg_path = os.path.abspath(c)
-                        break
-            if not ffmpeg_path:
-                raise RuntimeError("未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH。")
+            # 1. 确保 ffmpeg 可用（复用项目统一的查找逻辑，覆盖 asset-browser/vsr 等内置位置）
+            from utils.platform_utils import find_ffmpeg
+            ffmpeg_path = find_ffmpeg()
+            if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
+                raise RuntimeError(
+                    "未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH。"
+                )
 
             # 2. 构造 whisperx_runner.py 子进程命令
             runner_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisperx_runner.py")
@@ -90,6 +76,7 @@ class WhisperXTranscribeWorker(QThread):
                 "--model_name", self.model_name,
                 "--download_root", self.download_root,
                 "--device_mode", self.device_mode,
+                "--ffmpeg_path", ffmpeg_path,
             ]
             if self.language:
                 cmd.extend(["--language", self.language])

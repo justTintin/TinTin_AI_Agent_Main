@@ -124,7 +124,8 @@ def main():
     parser.add_argument("--multi_mode", action="store_true", help="Enable speaker diarization")
     parser.add_argument("--download_root", required=True, help="Download root directory for models")
     parser.add_argument("--device_mode", default="auto", help="Device mode (auto/cuda/cpu)")
-    
+    parser.add_argument("--ffmpeg_path", default="", help="ffmpeg 可执行文件路径（由主进程解析后传入）")
+
     args = parser.parse_args()
 
     try:
@@ -134,22 +135,28 @@ def main():
         curr_dir = os.path.dirname(os.path.abspath(__file__))
         workspace_root = os.path.dirname(os.path.dirname(curr_dir))
         ffmpeg_exe = "ffmpeg.exe" if is_win else "ffmpeg"
-        candidates = [
-            os.path.join(curr_dir, ffmpeg_exe),
-            os.path.join(os.path.dirname(curr_dir), ffmpeg_exe),
-            os.path.join(workspace_root, ffmpeg_exe),
-            os.path.join(workspace_root, "python_embeded", ffmpeg_exe),
-            os.path.join(workspace_root, "python_embeded", "Scripts", ffmpeg_exe),
-        ]
-        ffmpeg_path = shutil.which("ffmpeg")
-        if not ffmpeg_path:
-            for c in candidates:
-                if os.path.exists(c) and os.path.isfile(c):
-                    ffmpeg_path = os.path.abspath(c)
-                break
-        if not ffmpeg_path:
+
+        # 优先使用主进程传入的路径；否则回退到本地搜索（覆盖内置 ffmpeg 所在目录）
+        ffmpeg_path = args.ffmpeg_path
+        if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):
+            plat = "win_x64" if is_win else "linux_x64"
+            candidates = [
+                os.path.join(curr_dir, ffmpeg_exe),
+                os.path.join(os.path.dirname(curr_dir), ffmpeg_exe),
+                os.path.join(workspace_root, ffmpeg_exe),
+                os.path.join(workspace_root, "python_embeded", ffmpeg_exe),
+                os.path.join(workspace_root, "python_embeded", "Scripts", ffmpeg_exe),
+                os.path.join(workspace_root, "apps", "asset-browser", "bin", ffmpeg_exe),
+                os.path.join(workspace_root, "apps", "vsr-v1.4.0", "backend", "ffmpeg", plat, ffmpeg_exe),
+                os.path.join(workspace_root, "apps", "vsr-v1.1.1-windows-nvidia-cuda", "resources", "backend", "ffmpeg", plat, ffmpeg_exe),
+            ]
             ffmpeg_path = shutil.which("ffmpeg")
-        if not ffmpeg_path:
+            if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):
+                for c in candidates:
+                    if os.path.isfile(c):
+                        ffmpeg_path = os.path.abspath(c)
+                        break
+        if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):
             raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入系统环境变量 PATH。")
 
         # 将 ffmpeg 所在目录加入到当前进程的 PATH 环境变量中，以保证 whisperx.load_audio 能够成功调用 ffmpeg

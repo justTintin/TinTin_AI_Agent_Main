@@ -516,6 +516,10 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
             self.finished.emit(0, 0)
             return
 
+        self.log_line.emit(f"  📋 队列: {total} 个素材待分析")
+        self.log_line.emit(f"  🌐 服务端: {self._get_server_info()}")
+        QApplication.processEvents()
+
         env_workers = os.environ.get("TINTIN_AI_ANALYZE_WORKERS", "2").strip()
         try:
             max_workers = int(env_workers)
@@ -523,49 +527,59 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
             max_workers = 2
         max_workers = max(1, min(max_workers, 4, total))
 
-        def _analyze_one(mat: dict):
+        self.log_line.emit(f"  🚀 并发数: {max_workers}")
+        QApplication.processEvents()
+
+        done = 0
+        ok_count = 0
+        for i, mat in enumerate(self.materials):
             if self._is_cancelled:
-                return False, None
+                self.log_line.emit("  ⚠️ 用户终止")
+                break
             fname = os.path.basename(mat.get("path", ""))
-            self.log_line.emit(f"  ▶ 开始分析: {fname} (id={mat.get('id')}, path={mat.get('path','')})")
+            self.log_line.emit(f"")
+            self.log_line.emit(f"  [{i+1}/{total}] {fname}")
+            self.log_line.emit(f"    路径: {mat.get('path','')}")
+            QApplication.processEvents()
+
+            # 每步分开，卡在哪能从日志直接看出
             try:
-                with MaterialClipIndexer(nas_root=self.nas_root, progress_cb=self.log_line.emit) as idx:
-                    success = idx.analyze_material(mat["id"], mat["path"])
-                return bool(success), None
+                self.log_line.emit(f"    ⏳ 连接数据库...")
+                QApplication.processEvents()
+
+                idx = MaterialClipIndexer(nas_root=self.nas_root, progress_cb=lambda m: self.log_line.emit(f"    📝 {m}"))
+                QApplication.processEvents()
+
+                success = idx.analyze_material(mat["id"], mat["path"])
+                if success:
+                    ok_count += 1
+                done += 1
+                self.progress.emit(done, total)
             except Exception as e:
                 import traceback
                 self.log_line.emit(f"    ❌ 异常: {e}")
-                return False, traceback.format_exc()
+                fail += 1
 
-        self.log_line.emit(f"  🚀 AI 分析并发数: {max_workers}")
-        done = 0
-        future_map = {}
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for mat in self.materials:
-                future_map[pool.submit(_analyze_one, mat)] = mat
+        self.progress.emit(total, total)
+        self.finished.emit(ok_count, fail)
 
-            for fut in as_completed(future_map):
-                mat = future_map[fut]
-                if self._is_cancelled:
-                    self.log_line.emit("  ⚠️ 用户已终止 AI 分析任务")
-                    for f2 in future_map:
-                        f2.cancel()
-                    break
-                success, err = fut.result()
-                done += 1
-                fname = os.path.basename(mat['path'])
-                if success:
-                    ok += 1
-                    self.log_line.emit(f"  ✓ [{done}/{total}] {fname}: AI 分析完成")
-                else:
-                    fail += 1
-                    err_msg = f": {err}" if err else " (分析失败)"
-                    self.log_line.emit(f"  ✗ [{done}/{total}] {fname}{err_msg}")
-                self.progress.emit(done, total)
-
-        if not self._is_cancelled:
-            self.progress.emit(total, total)
-        self.finished.emit(ok, fail)
+    def _get_server_info(self):
+        """快速获取服务端信息（不阻塞）。"""
+        try:
+            import json, os as _os
+            from config.paths import AI_CONFIG_FILE
+            if _os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+                    cfg = json.load(f)
+                parts = []
+                for k, label in [("llm_vision_api_url", "视觉"), ("whisper_api_url", "语音"), ("clip_api_url", "CLIP")]:
+                    v = cfg.get(k, "").strip()
+                    if v:
+                        parts.append(f"{label}={v.replace('http://','').rstrip('/')}")
+                return " | ".join(parts) if parts else "未配置"
+        except Exception:
+            pass
+        return "未读取到配置"
 
 
 class _OcrRenameWorker(BaseWorker):

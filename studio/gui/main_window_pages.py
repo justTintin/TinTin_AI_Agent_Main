@@ -497,13 +497,43 @@ class PageSetupMixin:
             self.llm_provider_combo.addItem("自定义","custom"), self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
         _inp(lg1, "API 地址:", "llm_api_url_input", "https://api.deepseek.com")
         _inp(lg1, "API Key:", "llm_api_key_input", "sk-xxxxxxxxxxxxxxxx")
+        
+        # Configure API Key EchoMode and show/hide action
+        self.llm_api_key_input.setEchoMode(QLineEdit.Password)
+        self._llm_key_visible = False
+        
+        from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+        from PySide6.QtCore import Qt
+        def make_eye_icon(visible):
+            pix = QPixmap(16, 16)
+            pix.fill(Qt.transparent)
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor(160, 160, 160), 1.5))
+            # Eye outline
+            painter.drawArc(1, 3, 14, 10, 45 * 16, 90 * 16)
+            painter.drawArc(1, 3, 14, 10, 225 * 16, 90 * 16)
+            # Pupil
+            painter.setBrush(QColor(160, 160, 160))
+            painter.drawEllipse(6, 6, 4, 4)
+            if not visible:
+                # Crossed out slash
+                painter.drawLine(3, 3, 13, 13)
+            painter.end()
+            return QIcon(pix)
+            
+        self._llm_key_action = self.llm_api_key_input.addAction(make_eye_icon(False), QLineEdit.TrailingPosition)
+        
+        def toggle_key_visibility():
+            self._llm_key_visible = not self._llm_key_visible
+            self.llm_api_key_input.setEchoMode(QLineEdit.Normal if self._llm_key_visible else QLineEdit.Password)
+            self._llm_key_action.setIcon(make_eye_icon(self._llm_key_visible))
+            
+        self._llm_key_action.triggered.connect(toggle_key_visibility)
+
         _inp(lg1, "文本模型:", "llm_model_input", "deepseek-v4-flash")
-        _inp(lg1, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
-        _rl(lg1, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
-            self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
-            self.llm_vision_model_input.lineEdit().setPlaceholderText("启动 Ollama 后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
         rr1 = QHBoxLayout(); rr1.addStretch()
-        b1 = QPushButton("🔍 测试连接"); b1.setObjectName("secondary_button"); b1.setFixedWidth(110); b1.clicked.connect(self._test_llm_connection); rr1.addWidget(b1)
+        self.btn_test_llm = QPushButton("🔍 测试连接"); self.btn_test_llm.setObjectName("secondary_button"); self.btn_test_llm.setFixedWidth(110); self.btn_test_llm.clicked.connect(self._test_llm_connection); rr1.addWidget(self.btn_test_llm)
         b2 = QPushButton("💾 保存"); b2.setObjectName("primary_button"); b2.setFixedWidth(90); b2.clicked.connect(self.save_llm_config); rr1.addWidget(b2)
         lg1.addLayout(rr1)
         self.llm_status_lbl = QLabel(""); lg1.addWidget(self.llm_status_lbl)
@@ -546,7 +576,22 @@ class PageSetupMixin:
             setattr(self,'btn_ollama_pull',QPushButton("⬇ 下载")), self.btn_ollama_pull.setObjectName("primary_button"), self.btn_ollama_pull.setFixedWidth(70), self.btn_ollama_pull.clicked.connect(self._ollama_pull), r.addWidget(self.btn_ollama_pull), r.addStretch())))
         setattr(self,'ollama_pull_bar',QProgressBar()); self.ollama_pull_bar.setRange(0,100); self.ollama_pull_bar.setFixedHeight(14); self.ollama_pull_bar.hide(); lg4.addWidget(self.ollama_pull_bar)
         setattr(self,'ollama_progress_lbl',QLabel("")); self.ollama_progress_lbl.setObjectName("ollama_progress_lbl"); self.ollama_progress_lbl.setWordWrap(True); lg4.addWidget(self.ollama_progress_lbl)
-        l4.addWidget(g4); l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
+
+        # ── 视觉模型配置（Ollama 托管的视觉模型，合并到此 Tab）──
+        g_vm = QGroupBox("👁️ 当前视觉模型（由 Ollama 提供）"); g_vm.setObjectName("model_groupbox"); g_vm.setProperty("section", "vision"); lg_vm = QVBoxLayout(g_vm); lg_vm.setSpacing(10)
+        _inp(lg_vm, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
+        _rl(lg_vm, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
+            self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
+            self.llm_vision_model_input.lineEdit().setPlaceholderText("启动 Ollama 后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
+        rr_vm = QHBoxLayout(); rr_vm.addStretch()
+        b_vm_test = QPushButton("🔍 测试连接"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
+        b_vm_save = QPushButton("💾 保存"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
+        lg_vm.addLayout(rr_vm)
+        self.vision_status_lbl = QLabel(""); lg_vm.addWidget(self.vision_status_lbl)
+        l4.addWidget(g4)
+        l4.addWidget(g_vm)
+
+        l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
 
         # ───── Tab 5: Whisper ─────
         p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
@@ -582,7 +627,7 @@ class PageSetupMixin:
         self.llm_api_url_input.setText(self.ai_config.get("llm_api_url","https://api.deepseek.com"))
         self.llm_api_key_input.setText(self.ai_config.get("llm_api_key",""))
         self.llm_model_input.setText(self.ai_config.get("llm_model","deepseek-v4-flash"))
-        self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url",""))
+        self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
         self.load_voxcpm_config()
         self.refresh_llm_page_status()

@@ -124,7 +124,7 @@ class AIStatusCheckThread(QThread):
                     api_key = (cfg.get("llm_vision_api_key") or cfg.get("llm_api_key", "")).strip()
                     model   = cfg.get("llm_vision_model", "").strip()
                     
-                    if api_url and model:
+                    if api_url:
                         try:
                             res = req.get(
                                 f"{api_url.rstrip('/')}/v1/models",
@@ -133,19 +133,20 @@ class AIStatusCheckThread(QThread):
                             )
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
-                                try:
-                                    models_data = res.json().get("data", [])
-                                    model_names = [m.get("id") for m in models_data]
-                                    matched = False
-                                    for m_name in model_names:
-                                        if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0]:
-                                            matched = True
-                                            break
-                                    is_cloud = any(x in api_url for x in ("api.deepseek.com", "aliyuncs.com", "openai.com", "openrouter.ai"))
-                                    if matched or is_cloud:
+                                if model:
+                                    try:
+                                        models_data = res.json().get("data", [])
+                                        model_names = [m.get("id") for m in models_data]
+                                        matched = False
+                                        for m_name in model_names:
+                                            if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0]:
+                                                matched = True
+                                                break
+                                        is_cloud = any(x in api_url for x in ("api.deepseek.com", "aliyuncs.com", "openai.com", "openrouter.ai"))
+                                        if matched or is_cloud:
+                                            status["vision_ok"] = True
+                                    except Exception:
                                         status["vision_ok"] = True
-                                except Exception:
-                                    status["vision_ok"] = True
                         except Exception:
                             pass
             except Exception:

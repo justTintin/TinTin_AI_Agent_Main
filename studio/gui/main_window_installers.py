@@ -140,8 +140,10 @@ class PaddleOcrInstallWorker(QThread):
             # 验证安装
             self.stage.emit("正在验证 PaddleOCR 环境...")
             try:
+                # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
+                cmd_str = f"import sys; sys.path.insert(0, r'{paddleocr_src}'); import paddleocr, paddlex, aiohttp"
                 subprocess.check_call(
-                    [PADDLEOCR_PYTHON, "-c", "import paddleocr, paddlex, aiohttp"],
+                    [PADDLEOCR_PYTHON, "-c", cmd_str],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0

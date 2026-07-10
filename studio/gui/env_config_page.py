@@ -541,8 +541,11 @@ class EnvConfigPage(BasePage):
         info["voxcpm_ok"] = False
         info["voxcpm_status"] = "未安装"
         try:
+            # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
+            voxcpm_src = os.path.abspath(os.path.join(WORKSPACE_ROOT, "apps", "voxcpm2", "src"))
+            cmd_str = f"import sys; sys.path.insert(0, r'{voxcpm_src}'); import voxcpm"
             subprocess.check_call(
-                [get_voxcpm_python(), "-c", "import voxcpm"],
+                [get_voxcpm_python(), "-c", cmd_str],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -580,8 +583,11 @@ class EnvConfigPage(BasePage):
         info["paddleocr_status"] = "未安装"
         if os.path.isfile(PADDLEOCR_PYTHON):
             try:
+                # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
+                paddleocr_src = os.path.abspath(os.path.join(WORKSPACE_ROOT, "apps", "PaddleOCR"))
+                cmd_str = f"import sys; sys.path.insert(0, r'{paddleocr_src}'); import paddleocr, paddlex, aiohttp"
                 result = subprocess.run(
-                    [PADDLEOCR_PYTHON, "-c", "import paddleocr, paddlex, aiohttp"],
+                    [PADDLEOCR_PYTHON, "-c", cmd_str],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -592,9 +598,10 @@ class EnvConfigPage(BasePage):
                     info["paddleocr_status"] = "已就绪"
                 else:
                     err = result.stderr.strip() or result.stdout.strip()
-                    info["paddleocr_status"] = f"依赖缺失: {err[:120]}"
+                    last_line = err.splitlines()[-1] if err else "未知错误"
+                    info["paddleocr_status"] = f"依赖缺失: {last_line}"
             except Exception as e:
-                info["paddleocr_status"] = f"依赖缺失: {str(e)[:120]}"
+                info["paddleocr_status"] = f"依赖缺失: {str(e)}"
         else:
             info["paddleocr_status"] = "未安装 (缺少专属虚拟环境)"
 

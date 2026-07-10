@@ -133,7 +133,7 @@ class AIConfigMixin:
             "llm_api_key": "",
             "llm_api_url": "https://api.deepseek.com",
             "llm_model": "deepseek-v4-flash",
-            "llm_vision_api_url": "",
+            "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_mode": "api",
@@ -256,7 +256,10 @@ class AIConfigMixin:
     # ──────────────────── Ollama 管理 ────────────────────
 
     def _test_llm_connection(self):
-        self.btn_test_llm.setEnabled(False)
+        sender = self.sender()
+        btn = sender if sender else (self.btn_test_llm if hasattr(self, "btn_test_llm") else None)
+        if btn:
+            btn.setEnabled(False)
         self.llm_status_lbl.setText("正在测试...")
         self.llm_status_lbl.setStyleSheet("color: #f39c12;")
         try:
@@ -267,7 +270,8 @@ class AIConfigMixin:
             if not api_key or not api_url:
                 self.llm_status_lbl.setText("⚠️ 请填写 API Key 和接口地址")
                 self.llm_status_lbl.setStyleSheet("color: #f39c12;")
-                self.btn_test_llm.setEnabled(True)
+                if btn:
+                    btn.setEnabled(True)
                 return
             url = f"{api_url.rstrip('/')}/v1/chat/completions"
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -290,7 +294,51 @@ class AIConfigMixin:
             err = str(e)[:80]
             self.llm_status_lbl.setText(f"❌ 连接失败: {err}")
             self.llm_status_lbl.setStyleSheet("color: #e74c3c;")
-        self.btn_test_llm.setEnabled(True)
+        if btn:
+            btn.setEnabled(True)
+
+    def _test_vision_connection(self):
+        sender = self.sender()
+        if sender:
+            sender.setEnabled(False)
+        self.vision_status_lbl.setText("正在测试...")
+        self.vision_status_lbl.setStyleSheet("color: #f39c12;")
+        try:
+            import requests
+            api_url = self.llm_vision_api_url_input.text().strip()
+            api_key = self.llm_api_key_input.text().strip()
+            model = self.llm_vision_model_input.currentText().strip()
+            if not api_url:
+                self.vision_status_lbl.setText("⚠️ 请填写接口地址")
+                self.vision_status_lbl.setStyleSheet("color: #f39c12;")
+                if sender:
+                    sender.setEnabled(True)
+                return
+            url = f"{api_url.rstrip('/')}/v1/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            payload = {"model": model or "qwen2.5vl:7b", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                self.vision_status_lbl.setText(f"✅ 连接成功 ({model})")
+                self.vision_status_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            elif res.status_code == 401:
+                self.vision_status_lbl.setText(f"❌ 认证失败，请检查 API Key")
+                self.vision_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            elif res.status_code == 404:
+                self.vision_status_lbl.setText(f"❌ 接口地址或模型名错误 (404)")
+                self.vision_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            else:
+                msg = res.json().get("error", {}).get("message", res.text[:60])
+                self.vision_status_lbl.setText(f"❌ HTTP {res.status_code}: {msg}")
+                self.vision_status_lbl.setStyleSheet("color: #e74c3c;")
+        except Exception as e:
+            err = str(e)[:80]
+            self.vision_status_lbl.setText(f"❌ 连接失败: {err}")
+            self.vision_status_lbl.setStyleSheet("color: #e74c3c;")
+        if sender:
+            sender.setEnabled(True)
 
     def on_backend_changed(self, index):
         is_rh = (index == 1)

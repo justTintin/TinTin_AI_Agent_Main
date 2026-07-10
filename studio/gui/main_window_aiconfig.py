@@ -139,7 +139,7 @@ class AIConfigMixin:
             "llm_model": "deepseek-v4-flash",
             "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
-            "ollama_mode": "local",
+            "ollama_mode": "remote",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_mode": "api",
             "vox_timesteps": 20,

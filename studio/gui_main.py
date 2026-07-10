@@ -434,10 +434,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.ai_status_collector.status_updated.connect(handle_ai_status)
         self.ai_status_collector.start()
         
-        # 自启动本地 Ollama 服务的后台线程
+        # 自启动本地 Ollama 服务的后台线程（仅在 local 模式执行，remote 模式不拉起本地进程）
         def auto_start_ollama():
             try:
-                from utils.ollama_manager import OllamaManager
+                from utils.ollama_manager import OllamaManager, read_ollama_mode
+                if read_ollama_mode() != "local":
+                    log.info("Ollama 来源为远程模式，跳过本地进程自启动。")
+                    return
                 mgr = OllamaManager.get()
                 if mgr.is_binary_present():
                     log.info("正在初始化并后台启动内置 GPU 优化版 Ollama...")

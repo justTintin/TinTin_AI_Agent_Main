@@ -2066,23 +2066,15 @@ class MaterialClipPage(BasePage):
         self.db_category_filter.blockSignals(False)
 
     def _start_reanalyze_selected(self):
-        if not getattr(self.main_window, "_models_ready", False):
-            self.show_error(
-                "❌ 视觉大模型尚未就绪（未启动或未加载），请先启动 Ollama 并测试大模型状态！",
-                "大模型未就绪"
-            )
-            return
-
-        # 优先收集已勾选复选框的行
+        # 收集选中行
         materials = []
         for r in range(self.db_table.rowCount()):
             item = self.db_table.item(r, 0)
             if item and item.checkState() == Qt.Checked:
                 data = item.data(Qt.UserRole)
                 if data and data.get("id"):
-                    materials.append({"id": data["id"], "path": data.get("path", "")})
+                    materials.append({"id": data["id"], "path": data.get("path", ""), "filename": data.get("filename", "")})
 
-        # 如果没有勾选任何行，则回退到通过表格选择的高亮行
         if not materials:
             selected_rows = self.db_table.selectionModel().selectedRows()
             for idx in selected_rows:
@@ -2090,7 +2082,7 @@ class MaterialClipPage(BasePage):
                 if item:
                     data = item.data(Qt.UserRole)
                     if data and data.get("id"):
-                        materials.append({"id": data["id"], "path": data.get("path", "")})
+                        materials.append({"id": data["id"], "path": data.get("path", ""), "filename": data.get("filename", "")})
 
         if not materials:
             self.show_warning("请先勾选或在表格中选中要进行 AI 分析的素材行。", "未选择")
@@ -2098,17 +2090,21 @@ class MaterialClipPage(BasePage):
 
         self._set_busy(True)
         self.log_box.clear()
-        self.log_box.append(f"开始进行 AI 分析（共 {len(materials)} 个素材）…\n")
-        self.idx_stat.setText("")
-
         self.db_pbar.setRange(0, len(materials))
         self.db_pbar.setValue(0)
         self.db_pbar.setVisible(True)
-        self.lbl_db_pbar_status.setText(f"正在进行 AI 分析：0 / {len(materials)}")
         self.lbl_db_pbar_status.setVisible(True)
 
+        # 立即打印选中素材的信息
+        self.log_box.append(f"开始进行 AI 分析（共 {len(materials)} 个素材）…\n")
+        for i, mat in enumerate(materials):
+            self.log_box.append(f"  [{i+1}] id={mat['id']}  文件={mat.get('filename', os.path.basename(mat.get('path','')))}  路径={mat.get('path','')}")
+        self.log_box.append("")
+        QApplication.processEvents()  # 强制刷新UI
+
+        # 启动 worker
         self.reanalyze_worker = self.track_worker(_ReAnalyzeSelectedWorker(materials, self._nas_root))
-        self.reanalyze_worker.log_line.connect(lambda m: self.log_box.append(m))
+        self.reanalyze_worker.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         self.reanalyze_worker.progress.connect(self._on_reanalyze_progress)
         self.reanalyze_worker.finished.connect(self._on_reanalyze_done)
         self.reanalyze_worker.error.connect(self._on_reanalyze_err)

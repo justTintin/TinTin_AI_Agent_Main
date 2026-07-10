@@ -36,6 +36,29 @@ from utils.material_clip_indexer import to_local_path, to_relative_path
 from utils.nas_client import NASClient
 
 
+def _resolve_file_path(rel_path: str) -> str:
+    """统一路径解析：从 material_index_config.json 读 nas_root，
+    将数据库相对路径解析为完整本地路径（支持盘符映射和 UNC）。
+    不依赖运行时变量，确保任何入口都能正确解析。"""
+    if not rel_path:
+        return ""
+    # 绝对路径直接返回
+    if len(rel_path) >= 2 and rel_path[1] == ":":
+        return os.path.normpath(rel_path)
+    # 从配置读 nas_root
+    try:
+        import json as _json
+        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                cfg = _json.load(f)
+            nas_root = cfg.get("nas_root", "")
+            return to_local_path(rel_path, nas_root)
+    except Exception:
+        pass
+    return to_local_path(rel_path, "")
+
+
 # ── Workers ───────────────────────────────────────────────────────────────────
 
 class _IndexMetaWorker(BaseWorker):
@@ -2123,8 +2146,7 @@ class MaterialClipPage(BasePage):
         if not data:
             return
         rel_path = data.get("path", "")
-        nas_root = getattr(self, "_nas_root", "")
-        full_path = to_local_path(rel_path, nas_root)
+        full_path = _resolve_file_path(rel_path)
         if index.column() == 2:
             self._play_file_by_path(full_path)
         else:
@@ -2171,8 +2193,7 @@ class MaterialClipPage(BasePage):
         if not data:
             return
         rel_path = data.get("path", "")
-        nas_root = getattr(self, "_nas_root", "")
-        full_path = to_local_path(rel_path, nas_root)
+        full_path = _resolve_file_path(rel_path)
 
         # 双击统一播放文件（避免 checkbox 列干扰 column index）
         self._play_file_by_path(full_path)
@@ -2199,8 +2220,7 @@ class MaterialClipPage(BasePage):
             return
 
         rel_path = data.get("path", "")
-        nas_root = getattr(self, "_nas_root", "")
-        full_path = to_local_path(rel_path, nas_root)
+        full_path = _resolve_file_path(rel_path)
 
         from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction, QGuiApplication
@@ -2256,8 +2276,7 @@ class MaterialClipPage(BasePage):
             return
 
         rel_path = data.get("path", "")
-        nas_root = getattr(self, "_nas_root", "")
-        full_path = to_local_path(rel_path, nas_root)
+        full_path = _resolve_file_path(rel_path)
 
         from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction, QGuiApplication

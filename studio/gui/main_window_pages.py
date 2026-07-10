@@ -560,6 +560,9 @@ class PageSetupMixin:
         # ───── Tab 4: Ollama ─────
         p4 = _page(); l4 = QVBoxLayout(p4); l4.setContentsMargins(16,20,16,16); l4.setSpacing(10)
         g4 = QGroupBox("🖥️ Ollama 本地视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        _rl(lg4, "Ollama 来源:", lambda r: (setattr(self,'ollama_mode_combo',QComboBox()), self.ollama_mode_combo.setView(QListView()),
+            self.ollama_mode_combo.addItem("内置（本地）","local"), self.ollama_mode_combo.addItem("远程（外部已运行）","remote"),
+            self.ollama_mode_combo.currentIndexChanged.connect(self._on_ollama_mode_changed), r.addWidget(self.ollama_mode_combo)))
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
         lg4.addLayout(_row(lambda r: (setattr(self,'btn_ollama_start',QPushButton("▶ 启动")), self.btn_ollama_start.setObjectName("primary_button"), self.btn_ollama_start.setFixedWidth(70), self.btn_ollama_start.clicked.connect(self._ollama_start),
@@ -629,6 +632,14 @@ class PageSetupMixin:
         self.llm_model_input.setText(self.ai_config.get("llm_model","deepseek-v4-flash"))
         self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
+        # Ollama 来源模式初始化（触发 _on_ollama_mode_changed 设置控件可见性）
+        ollama_mode = self.ai_config.get("ollama_mode", "local")
+        midx = self.ollama_mode_combo.findData(ollama_mode)
+        if midx >= 0:
+            self.ollama_mode_combo.setCurrentIndex(midx)
+        else:
+            self.ollama_mode_combo.setCurrentIndex(0)
+        self._on_ollama_mode_changed(self.ollama_mode_combo.currentIndex())
         self.load_voxcpm_config()
         self.refresh_llm_page_status()
 

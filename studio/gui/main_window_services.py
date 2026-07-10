@@ -182,21 +182,23 @@ class ServicesMixin:
                 free_gb = free / (1024**3)
                 log.info(f"[VoxCPM] GPU空闲显存: {free_gb:.1f} GB")
                 if free_gb < 4.0:
-                    from utils.ollama_manager import OllamaManager
-                    ollama_running = OllamaManager.get().is_running()
-                    log.info(f"[VoxCPM] Ollama运行中: {ollama_running}")
-                    if ollama_running:
-                        reply = QMessageBox.question(
-                            self, "显存不足",
-                            f"当前 GPU 空闲显存仅 {free_gb:.1f} GB，VoxCPM 启动可能失败。\n\n"
-                            "是否停止 Ollama 释放显存后再启动 VoxCPM？",
-                            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-                        )
-                        if reply == QMessageBox.Yes:
-                            OllamaManager.get().stop()
-                            log.info("[VoxCPM] 已停止 Ollama")
-                        else:
-                            log.info("[VoxCPM] 用户选择不停止 Ollama")
+                    from utils.ollama_manager import OllamaManager, read_ollama_mode
+                    # 仅本地内置 Ollama 才会占显存；远程模式无需询问
+                    if read_ollama_mode() == "local":
+                        ollama_running = OllamaManager.get().is_running()
+                        log.info(f"[VoxCPM] Ollama运行中: {ollama_running}")
+                        if ollama_running:
+                            reply = QMessageBox.question(
+                                self, "显存不足",
+                                f"当前 GPU 空闲显存仅 {free_gb:.1f} GB，VoxCPM 启动可能失败。\n\n"
+                                "是否停止 Ollama 释放显存后再启动 VoxCPM？",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                            )
+                            if reply == QMessageBox.Yes:
+                                OllamaManager.get().stop()
+                                log.info("[VoxCPM] 已停止 Ollama")
+                            else:
+                                log.info("[VoxCPM] 用户选择不停止 Ollama")
         except Exception as e:
             log.warning(f"[VoxCPM] 显存检测失败: {e}")
         
@@ -366,9 +368,60 @@ class ServicesMixin:
                 self.btn_toggle_voxcpm.setText("▶️ 启动 VoxCPM 服务")
                 self.btn_toggle_voxcpm.setEnabled(True)
 
+    def _on_ollama_mode_changed(self, index):
+        """Ollama 来源模式切换：local 显示进程管理控件，remote 隐藏它们只保留连接检测。"""
+        is_local = (self.ollama_mode_combo.currentData() == "local")
+        # 进程管理 & 本地专属控件：仅 local 模式可见
+        for attr in ("btn_ollama_start", "btn_ollama_stop",
+                     "lbl_runners_warn", "btn_fix_runners", "runners_bar",
+                     "ollama_pull_input", "btn_ollama_pull",
+                     "ollama_pull_bar", "ollama_progress_lbl"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setVisible(is_local)
+        # 视觉模型地址输入框 placeholder 提示
+        if is_local:
+            self.llm_vision_api_url_input.setPlaceholderText("http://127.0.0.1:11434")
+        else:
+            self.llm_vision_api_url_input.setPlaceholderText("http://远程服务器IP:11434")
+        # remote 模式下 local 专属控件若有残留状态，先清掉 runners 警告
+        if not is_local:
+            self.lbl_runners_warn.setVisible(False)
+            self.btn_fix_runners.setVisible(False)
+        # 切换后立即刷新一次状态（remote 检测连通性，local 检测进程）
+        self._ollama_refresh_status()
+
     def _ollama_refresh_status(self):
-        from utils.ollama_manager import OllamaManager, OLLAMA_BIN
+        from utils.ollama_manager import OllamaManager, OLLAMA_BIN, read_ollama_mode
         mgr = OllamaManager.get()
+        is_remote = (read_ollama_mode() == "remote")
+
+        # ── 远程模式：跳过本地二进制/runners 检查，直接检测远程连通性 ──
+        if is_remote:
+            self.lbl_runners_warn.setVisible(False)
+            self.btn_fix_runners.setVisible(False)
+            if mgr.is_running():
+                models = mgr.list_local_models()
+                self.ollama_status_lbl.setText("● 已连接（远程）")
+                self._set_ollama_status_state("green")
+                self.ollama_models_lbl.setText(
+                    "远程模型: " + ("、".join(models) if models else "（无）")
+                )
+                cur = self.llm_vision_model_input.currentText().strip()
+                self.llm_vision_model_input.blockSignals(True)
+                self.llm_vision_model_input.clear()
+                for m in models:
+                    self.llm_vision_model_input.addItem(m)
+                if cur:
+                    self.llm_vision_model_input.setCurrentText(cur)
+                self.llm_vision_model_input.blockSignals(False)
+            else:
+                self.ollama_status_lbl.setText("● 远程连接失败")
+                self._set_ollama_status_state("red")
+                self.ollama_models_lbl.setText("请检查远程地址及网络")
+            return
+
+        # ── 本地模式：原有逻辑 ──
         if not mgr.is_binary_present():
             self.ollama_status_lbl.setText("● ollama.exe 未找到")
             self._set_ollama_status_state("red")

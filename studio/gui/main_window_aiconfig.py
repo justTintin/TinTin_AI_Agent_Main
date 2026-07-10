@@ -50,9 +50,13 @@ class AIConfigMixin:
         self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
         self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
         self.ai_config["llm_model"] = self.llm_model_input.text().strip()
+        # Ollama 来源模式（local 内置进程 / remote 外部已运行）
+        ollama_mode = getattr(self, "ollama_mode_combo", None)
+        self.ai_config["ollama_mode"] = ollama_mode.currentData() if ollama_mode else "local"
         vision_url = self.llm_vision_api_url_input.text().strip()
         vision_model = self.llm_vision_model_input.currentText().strip()
-        if vision_model and not vision_url:
+        # local 模式：vision_url 为空时补本地地址；remote 模式不补（由用户填远程地址）
+        if vision_model and not vision_url and self.ai_config["ollama_mode"] == "local":
             vision_url = "http://127.0.0.1:11434"
             self.llm_vision_api_url_input.setText(vision_url)
         self.ai_config["llm_vision_api_url"] = vision_url
@@ -135,6 +139,7 @@ class AIConfigMixin:
             "llm_model": "deepseek-v4-flash",
             "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
+            "ollama_mode": "local",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_mode": "api",
             "vox_timesteps": 20,
@@ -317,7 +322,9 @@ class AIConfigMixin:
 
         # 本地 Ollama：测试前先预热模型（避免冷加载读超时）。整个测试放到后台线程，
         # 预热+测试可能耗时数十秒，避免卡死 UI。
-        is_local_ollama = "127.0.0.1:11434" in api_url or "localhost:11434" in api_url
+        # remote 模式不预热（远程通常已加载或由服务端管理）。
+        from utils.ollama_manager import read_ollama_mode
+        is_local_ollama = read_ollama_mode() == "local"
 
         class _TestWorker(QThread):
             done = Signal(bool, str, str)  # (ok, status_text, color)

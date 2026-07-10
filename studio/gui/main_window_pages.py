@@ -716,11 +716,11 @@ class PageSetupMixin:
         r5.addStretch(); l5.addLayout(r5)
         l5.addStretch(); tabs.addTab(p5, "🏪 旺店通")
 
-        # ── Tab 6: 素材服务 ──
+        # ── Tab 6: 算力服务 ──
         p6 = QWidget(); l6 = QVBoxLayout(p6); l6.setContentsMargins(30,30,30,30)
-        l6.addWidget(QLabel("素材向量库由远程服务器统一接管（数据库 + 素材扫描 + AI 分析）。\n客户端只需配置服务端地址，无需直接连接 PostgreSQL。"))
+        l6.addWidget(QLabel("算力服务器统一地址（视觉/语音/向量/素材/克隆服务均由该服务器提供）。\n客户端所有 AI 任务通过此地址调度。"))
         l6.addSpacing(10)
-        _inp("素材服务地址:", "material_api_url_input", "http://192.168.111.18:8000", l6)
+        _inp("算力服务器地址:", "material_api_url_input", "http://192.168.111.18:8000", l6)
         r6 = QHBoxLayout(); r6.addStretch()
         b_test_db = mdi_button("测试连接", "link"); b_test_db.setObjectName("secondary_button")
         b_test_db.clicked.connect(self._test_material_server)

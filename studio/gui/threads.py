@@ -152,23 +152,18 @@ class AIStatusCheckThread(QThread):
             except Exception:
                 pass
 
-            # 2. 检测本地声音克隆 API (VoxCPM) 端口状态
+            # 2. 检测远程声音克隆 API (VoxCPM) 连通性
             try:
-                import configparser
-                import socket
-                config = configparser.ConfigParser()
-                config_path = CONFIG_INI_FILE
-                port = 7861
-                if os.path.exists(config_path):
-                    config.read(config_path, encoding='utf-8')
-                    if config.has_section('VoxCPM'):
-                        port = config.getint('VoxCPM', 'Port', fallback=7861)
-                
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.5)
-                s.connect(("127.0.0.1", port))
-                s.close()
-                status["clone_ok"] = True
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    vox_url = cfg.get("vox_api_url", "").strip()
+                    if vox_url:
+                        base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
+                        r = req.get(f"{base}/voxcpm/health", timeout=3)
+                        if r.status_code == 200:
+                            status["clone_ok"] = True
             except Exception:
                 pass
 

@@ -8,7 +8,7 @@
     "llm_api_url": "https://api.deepseek.com",
     "llm_model": "deepseek-v4-flash",
     "llm_vision_api_url": "http://192.168.111.18:8000",
-    "llm_vision_model": "qwen2.5vl:7b-16k",
+    "llm_vision_model": "qwen2.5vl:7b",
     "vox_api_url": "http://192.168.111.18:8000/voxcpm/tts",
     "vox_mode": "api",
     "vox_timesteps": 20,

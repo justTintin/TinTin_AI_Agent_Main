@@ -602,6 +602,10 @@ class PageSetupMixin:
         # ───── Tab 5: Whisper ─────
         p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
         g5 = QGroupBox("🎙️ Whisper 语音转写"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
+        _rl(lg5, "Whisper 来源:", lambda r: (setattr(self,'whisper_source_combo',QComboBox()), self.whisper_source_combo.setView(QListView()),
+            self.whisper_source_combo.addItem("内置（本地模型）","local"), self.whisper_source_combo.addItem("远程（ASR 服务）","remote"),
+            self.whisper_source_combo.currentIndexChanged.connect(self._on_whisper_source_changed), r.addWidget(self.whisper_source_combo)))
+        _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
         _rl(lg5, "引擎:", lambda r: (setattr(self,'llm_whisper_status_val',QLabel("正在检测...")), r.addWidget(self.llm_whisper_status_val)))
         _rl(lg5, "DLL:", lambda r: (setattr(self,'llm_dll_status_val',QLabel("正在检测...")), r.addWidget(self.llm_dll_status_val)))
         _rl(lg5, "模型:", lambda r: (setattr(self,'llm_models_status_val',QLabel("正在检测...")), r.addWidget(self.llm_models_status_val)))
@@ -644,6 +648,15 @@ class PageSetupMixin:
             self.ollama_mode_combo.setCurrentIndex(0)
         self._on_ollama_mode_changed(self.ollama_mode_combo.currentIndex())
         self.load_voxcpm_config()
+        # Whisper 来源模式初始化
+        whisper_source = self.ai_config.get("whisper_source", "remote")
+        wsidx = self.whisper_source_combo.findData(whisper_source)
+        if wsidx >= 0:
+            self.whisper_source_combo.setCurrentIndex(wsidx)
+        else:
+            self.whisper_source_combo.setCurrentIndex(1)  # 默认 remote
+        self.whisper_api_url_input.setText(self.ai_config.get("whisper_api_url", ""))
+        self._on_whisper_source_changed(self.whisper_source_combo.currentIndex())
         self.refresh_llm_page_status()
 
     # ═══════════════════════════════════════════════════════════════

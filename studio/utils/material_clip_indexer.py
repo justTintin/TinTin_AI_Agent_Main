@@ -821,29 +821,24 @@ class _ClipEncoder:
                             batch_result[vi] = [0.0] * dim
                 except Exception as ex:
                     log.warning(f"远程图片编码失败: {ex}")
-                    dim = len(batch_result[0]) if batch_result else 0
-                    for vi in valid_idx:
-                        if not batch_result[vi]:
-                            batch_result[vi] = [0.0] * dim
+                    raise  # 抛出异常，让外层 except 清空 frame_records
             # 补全空向量（维度未知时用 0 长度占位，下游 SQL 插入会跳过）
             result.extend(batch_result)
         return result
 
     def encode_text(self, texts: list[str]) -> list[list[float]]:
         """远程文本编码 -> 返回向量列表（与本地实现签名一致）。"""
-        try:
-            embs = self._post_embeddings(list(texts), input_type="text")
-            dim = len(embs[0]) if embs else 0
-            result: list[list[float]] = []
-            for k in range(len(texts)):
-                if k < len(embs) and embs[k]:
-                    result.append(embs[k])
-                else:
-                    result.append([0.0] * dim)
-            return result
-        except Exception as ex:
-            log.warning(f"远程文本编码失败: {ex}")
-            return [[] for _ in texts]
+        embs = self._post_embeddings(list(texts), input_type="text")
+        dim = len(embs[0]) if embs else 0
+        if dim == 0:
+            raise RuntimeError("远程文本编码返回空向量")
+        result: list[list[float]] = []
+        for k in range(len(texts)):
+            if k < len(embs) and embs[k]:
+                result.append(embs[k])
+            else:
+                result.append([0.0] * dim)
+        return result
 
 
 class _MaterialDB:
@@ -928,7 +923,7 @@ class _MaterialDB:
 
     def get_material_by_id(self, material_id: int) -> dict:
         """按 ID 查询单条素材记录，返回字段字典。"""
-        self._ensure_schema()
+        self._connect()
         try:
             cur = self._conn.cursor()
             cur.execute(

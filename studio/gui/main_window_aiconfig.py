@@ -122,6 +122,7 @@ class AIConfigMixin:
             "llm_model": "deepseek-v4-flash",
             "llm_vision_api_url": "http://127.0.0.1:11434",
             "llm_vision_model": "",
+            "compute_server_url": "http://192.168.111.18:8000",
             "whisper_api_url": "",
             "clip_api_url": "",
             "material_api_url": "",

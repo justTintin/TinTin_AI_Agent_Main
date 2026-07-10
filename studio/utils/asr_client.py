@@ -28,8 +28,14 @@ def _read_ai_config() -> dict:
 
 
 def read_asr_url() -> str:
-    """远程 ASR 服务地址。"""
-    return (_read_ai_config().get("whisper_api_url") or "").strip()
+    """远程 ASR 服务地址。优先 whisper_api_url，否则从 compute_server_url 派生。"""
+    cfg = _read_ai_config()
+    url = (cfg.get("whisper_api_url") or "").strip()
+    if not url:
+        base = (cfg.get("compute_server_url") or "").strip()
+        if base:
+            url = base
+    return url
 
 
 # ═══════════════════════════════════════════════════════════════

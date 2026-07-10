@@ -18,5 +18,7 @@
     "ollama_mode": "remote",
     "whisper_api_url": "http://192.168.111.18:8000",
     "clip_api_url": "http://192.168.111.18:8000",
-    "vox_source": "remote"
+    "vox_source": "remote",
+    "material_api_url": "http://192.168.111.18:8000",
+    "compute_server_url": "http://192.168.111.18:8000"
 }

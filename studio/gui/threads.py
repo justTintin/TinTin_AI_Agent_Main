@@ -139,7 +139,7 @@ class AIStatusCheckThread(QThread):
                                         model_names = [m.get("id") for m in models_data]
                                         matched = False
                                         for m_name in model_names:
-                                            if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0]:
+                                            if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0] or model.startswith(m_name) or m_name.startswith(model):
                                                 matched = True
                                                 break
                                         is_cloud = any(x in api_url for x in ("api.deepseek.com", "aliyuncs.com", "openai.com", "openrouter.ai"))

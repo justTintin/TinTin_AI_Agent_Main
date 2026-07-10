@@ -977,7 +977,8 @@ class _MaterialDB:
             cur.execute(
                 "SELECT id, path, file_hash, file_size, mtime, brand, product, model, "
                 "category, ai_status, ai_confidence, audio_script, "
-                "scene_desc_primary, scene_desc_secondary "
+                "scene_desc_primary, scene_desc_secondary, "
+                "COALESCE(share_name, split_part(path, '/', 1)) AS shared_folder "
                 "FROM materials WHERE id = %s",
                 (material_id,)
             )
@@ -990,7 +991,7 @@ class _MaterialDB:
                     "product": row[6], "model": row[7], "category": row[8],
                     "ai_status": row[9], "ai_confidence": row[10],
                     "audio_script": row[11], "scene_desc_primary": row[12],
-                    "scene_desc_secondary": row[13],
+                    "scene_desc_secondary": row[13], "shared_folder": row[14],
                 }
         except Exception:
             try:
@@ -1066,7 +1067,7 @@ class _MaterialDB:
                        brand, product, model, category,
                        COALESCE(ai_status,'pending') AS ai_status,
                        ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary,
-                       split_part(path, '/', 1) AS shared_folder
+                       COALESCE(share_name, split_part(path, '/', 1)) AS shared_folder
                 FROM materials
                 {where}
                 ORDER BY id DESC
@@ -1121,7 +1122,7 @@ class _MaterialDB:
                        brand, product, model, category,
                        COALESCE(ai_status,'pending') AS ai_status,
                        ai_confidence, file_hash, scene_desc_primary, scene_desc_secondary,
-                       split_part(path, '/', 1) AS shared_folder
+                       COALESCE(share_name, split_part(path, '/', 1)) AS shared_folder
                 FROM materials
                 {where}
                 ORDER BY id DESC

@@ -77,6 +77,9 @@ class _IndexMetaWorker(BaseWorker):
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
+        self.log_line.emit(f"  📂 目录: {self.directory}")
+        self.log_line.emit(f"  ⏳ 连接数据库...")
+        QApplication.processEvents()
         with MaterialClipIndexer(nas_root=self.nas_root,
                                   progress_cb=self.log_line.emit) as idx:
             ok, skip, fail = idx.index_directory_meta(
@@ -1379,7 +1382,7 @@ class MaterialClipPage(BasePage):
         w = self.track_worker(
             _IndexMetaWorker(resolved, self._nas_root, self.chk_force.isChecked())
         )
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.progress.connect(self._on_meta_progress)
         w.finished.connect(self._on_meta_done)
         w.error.connect(self._on_work_err)
@@ -1437,7 +1440,7 @@ class MaterialClipPage(BasePage):
         self.lbl_db_pbar_status.setVisible(True)
 
         w = self.track_worker(_OcrRenameWorker(directory, self._nas_root))
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.finished.connect(self._on_ocr_rename_done)
         w.error.connect(self._on_work_err)
         w.start()
@@ -1507,7 +1510,7 @@ class MaterialClipPage(BasePage):
         w = self.track_worker(_StatsWorker(dirs))
         w.finished.connect(self._on_stats_done)
         w.error.connect(lambda _: self.lbl_stats_ingest.setText("对齐与统计失败"))
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.start()
 
     def _refresh_stats_light(self):
@@ -1552,7 +1555,7 @@ class MaterialClipPage(BasePage):
         self.lbl_stats_ingest.setText("对齐入库中…")
         self.log_box.append("开始扫描磁盘目录，对齐文件 Hash 并入库新文件...\n")
         w = self.track_worker(_AlignAndIngestWorker(dirs))
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.finished.connect(lambda _: self._reload_stats())
         w.error.connect(lambda _: self.lbl_stats_ingest.setText("对齐入库失败"))
         w.start()
@@ -1834,7 +1837,7 @@ class MaterialClipPage(BasePage):
         self._toggle_log_box()
         
         w = self.track_worker(_BatchIndexMetaWorker(checked_paths, force=False))
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.progress.connect(self._on_diff_ingest_progress)
         w.finished.connect(self._on_diff_ingest_finished)
         w.error.connect(self._on_diff_ingest_error)
@@ -1861,7 +1864,7 @@ class MaterialClipPage(BasePage):
             self._toggle_log_box()
 
         w = self.track_worker(_ImportMaterialTasksWorker(tasks_file))
-        w.log_line.connect(lambda m: self.log_box.append(m))
+        w.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
         w.progress.connect(self._on_import_material_tasks_progress)
         w.finished.connect(self._on_import_material_tasks_finished)
         w.error.connect(self._on_work_err)

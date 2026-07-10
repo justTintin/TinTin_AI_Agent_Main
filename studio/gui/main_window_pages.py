@@ -547,6 +547,7 @@ class PageSetupMixin:
             r.addWidget(QLabel("CFG:")), setattr(self,'vox_cfg_spin',QDoubleSpinBox()), self.vox_cfg_spin.setRange(0.5,10.0), self.vox_cfg_spin.setSingleStep(0.1), self.vox_cfg_spin.setValue(2.0), self.vox_cfg_spin.setFixedWidth(70), r.addWidget(self.vox_cfg_spin), r.addStretch())))
         rr3 = QHBoxLayout()
         self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); rr3.addWidget(self.llm_vox_status_val); rr3.addStretch()
+        b3_test = QPushButton("🔍 测试连接"); b3_test.setObjectName("secondary_button"); b3_test.setFixedWidth(110); b3_test.clicked.connect(self._test_vox_connection); rr3.addWidget(b3_test)
         b3 = QPushButton("💾 保存"); b3.setObjectName("secondary_button"); b3.setFixedWidth(80); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
         lg3.addLayout(rr3)
         l3.addWidget(g3); l3.addStretch(); tabs.addTab(p3, "🗣️ VoxCPM")
@@ -581,7 +582,9 @@ class PageSetupMixin:
         g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
         whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
-        lg5.addLayout(_row(lambda r: (setattr(self,'btn_save_whisper',QPushButton("💾 保存")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper), r.addStretch())))
+        lg5.addLayout(_row(lambda r: (setattr(self,'btn_test_whisper',QPushButton("🔍 测试连接")), self.btn_test_whisper.setObjectName("secondary_button"), self.btn_test_whisper.setFixedWidth(110), self.btn_test_whisper.clicked.connect(self._test_whisper_connection),
+            r.addWidget(self.btn_test_whisper),
+            setattr(self,'btn_save_whisper',QPushButton("💾 保存")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper), r.addStretch())))
         self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
         l5.addWidget(g5); l5.addStretch(); tabs.addTab(p5, "🎙️ Whisper")
 
@@ -603,7 +606,9 @@ class PageSetupMixin:
         g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
         clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
         _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
-        lg7.addLayout(_row(lambda r: (setattr(self,'btn_save_clip',QPushButton("💾 保存")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip), r.addStretch())))
+        lg7.addLayout(_row(lambda r: (setattr(self,'btn_test_clip',QPushButton("🔍 测试连接")), self.btn_test_clip.setObjectName("secondary_button"), self.btn_test_clip.setFixedWidth(110), self.btn_test_clip.clicked.connect(self._test_clip_connection),
+            r.addWidget(self.btn_test_clip),
+            setattr(self,'btn_save_clip',QPushButton("💾 保存")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip), r.addStretch())))
         self.clip_status_lbl = QLabel(""); self.clip_status_lbl.setObjectName("muted_text"); lg7.addWidget(self.clip_status_lbl)
         l7.addWidget(g7); l7.addStretch(); tabs.addTab(p7, "🖼️ CLIP")
 

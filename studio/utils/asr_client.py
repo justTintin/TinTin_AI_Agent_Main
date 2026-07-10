@@ -174,11 +174,11 @@ def transcribe_remote(
         # 2. POST 到远程
         import requests
         url = asr_url.rstrip("/")
-        if not url.endswith("/asr") and not url.endswith("/transcribe"):
-            url = url + "/asr"
+        if not url.endswith("/transcribe"):
+            url = url + "/whisper/transcribe"
 
         with open(tmp_wav, "rb") as f:
-            files = {"audio": (os.path.basename(tmp_wav), f, "audio/wav")}
+            files = {"file": (os.path.basename(tmp_wav), f, "audio/wav")}
             data = {}
             if language:
                 data["language"] = language

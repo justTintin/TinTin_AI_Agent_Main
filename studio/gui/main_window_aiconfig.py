@@ -350,6 +350,105 @@ class AIConfigMixin:
         self._vision_test_worker.done.connect(_on_done)
         self._vision_test_worker.start()
 
+    def _test_vox_connection(self):
+        """测试远程 VoxCPM TTS 服务连接。"""
+        sender = self.sender()
+        if sender: sender.setEnabled(False)
+        self.llm_vox_status_val.setText("正在测试...")
+        self.llm_vox_status_val.setStyleSheet("color: #f39c12;")
+
+        api_url = self.vox_api_url_input.text().strip()
+        if not api_url:
+            self.llm_vox_status_val.setText("⚠️ 请填写 API 地址")
+            self.llm_vox_status_val.setStyleSheet("color: #f39c12;")
+            if sender: sender.setEnabled(True)
+            return
+
+        def _run():
+            import requests
+            try:
+                base = api_url.rstrip("/v1/tts").rstrip("/voxcpm/tts").rstrip("/")
+                r = requests.get(f"{base}/voxcpm/health", timeout=5)
+                if r.status_code == 200:
+                    self.llm_vox_status_val.setText("✅ 连接成功")
+                    self.llm_vox_status_val.setStyleSheet("color: #2ecc71;")
+                else:
+                    self.llm_vox_status_val.setText(f"❌ HTTP {r.status_code}")
+                    self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
+            except Exception as e:
+                self.llm_vox_status_val.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
+            if sender: sender.setEnabled(True)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _test_whisper_connection(self):
+        """测试远程 Whisper ASR 服务连接。"""
+        sender = self.sender()
+        if sender: sender.setEnabled(False)
+        self.whisper_status_lbl.setText("正在测试...")
+        self.whisper_status_lbl.setStyleSheet("color: #f39c12;")
+
+        api_url = self.whisper_api_url_input.text().strip()
+        if not api_url:
+            self.whisper_status_lbl.setText("⚠️ 请填写 ASR 服务地址")
+            self.whisper_status_lbl.setStyleSheet("color: #f39c12;")
+            if sender: sender.setEnabled(True)
+            return
+
+        def _run():
+            import requests
+            try:
+                base = api_url.rstrip("/")
+                r = requests.get(f"{base}/whisper/health", timeout=5)
+                if r.status_code == 200:
+                    self.whisper_status_lbl.setText("✅ 连接成功")
+                    self.whisper_status_lbl.setStyleSheet("color: #2ecc71;")
+                else:
+                    self.whisper_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
+            except Exception as e:
+                self.whisper_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
+            if sender: sender.setEnabled(True)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _test_clip_connection(self):
+        """测试远程 CLIP embedding 服务连接。"""
+        sender = self.sender()
+        if sender: sender.setEnabled(False)
+        self.clip_status_lbl.setText("正在测试...")
+        self.clip_status_lbl.setStyleSheet("color: #f39c12;")
+
+        api_url = self.clip_api_url_input.text().strip()
+        if not api_url:
+            self.clip_status_lbl.setText("⚠️ 请填写 CLIP API 地址")
+            self.clip_status_lbl.setStyleSheet("color: #f39c12;")
+            if sender: sender.setEnabled(True)
+            return
+
+        def _run():
+            import requests
+            try:
+                base = api_url.rstrip("/")
+                r = requests.get(f"{base}/clip/health", timeout=5)
+                if r.status_code == 200:
+                    self.clip_status_lbl.setText("✅ 连接成功")
+                    self.clip_status_lbl.setStyleSheet("color: #2ecc71;")
+                else:
+                    self.clip_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
+            except Exception as e:
+                self.clip_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
+            if sender: sender.setEnabled(True)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
     def on_backend_changed(self, index):
         is_rh = (index == 1)
         # ComfyUI section now includes image/audio inputs

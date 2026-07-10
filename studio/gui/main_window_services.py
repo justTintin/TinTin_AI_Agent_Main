@@ -147,7 +147,9 @@ class ServicesMixin:
         else:
             self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts")
             # remote 模式确保走 API（cli 是本地专属）
-            self.vox_mode_combo.setCurrentData("api")
+            api_idx = self.vox_mode_combo.findData("api")
+            if api_idx >= 0:
+                self.vox_mode_combo.setCurrentIndex(api_idx)
 
     def toggle_voxcpm_service(self):
         is_active = False

@@ -111,8 +111,8 @@ class AIStatusCheckThread(QThread):
             status = {
                 "ollama_ok": False,
                 "vision_ok": False,
-                "whisper_ok": True,
-                "clip_ok": True,
+                "whisper_ok": False,
+                "clip_ok": False,
                 "clone_ok": False,
             }
             try:
@@ -164,6 +164,36 @@ class AIStatusCheckThread(QThread):
                         r = req.get(f"{base}/voxcpm/health", timeout=3)
                         if r.status_code == 200:
                             status["clone_ok"] = True
+            except Exception:
+                pass
+
+            # 3. 检测远程 Whisper ASR 服务连通性
+            try:
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    whisper_url = cfg.get("whisper_api_url", "").strip()
+                    if whisper_url:
+                        base = whisper_url.rstrip("/")
+                        r = req.get(f"{base}/whisper/health", timeout=3)
+                        if r.status_code == 200:
+                            status["whisper_ok"] = True
+            except Exception:
+                pass
+
+            # 4. 检测远程 CLIP embedding 服务连通性
+            try:
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    clip_url = cfg.get("clip_api_url", "").strip()
+                    if clip_url:
+                        base = clip_url.rstrip("/")
+                        r = req.get(f"{base}/clip/health", timeout=3)
+                        if r.status_code == 200:
+                            status["clip_ok"] = True
             except Exception:
                 pass
 

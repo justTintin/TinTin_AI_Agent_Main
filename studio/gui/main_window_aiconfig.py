@@ -315,6 +315,15 @@ class AIConfigMixin:
 
             def run(self):
                 import requests
+                # 1. 先尝试加载模型（服务端 /ollama/load），冷启动时需要
+                try:
+                    base = self.url.rstrip("/")
+                    load_url = f"{base}/ollama/load"
+                    model_name = self.mdl or "qwen2.5vl:7b"
+                    requests.post(load_url, json={"model": model_name}, timeout=30)
+                except Exception:
+                    pass  # 加载失败不影响后续测试
+                # 2. 测试 /v1/chat/completions
                 full_url = f"{self.url.rstrip('/')}/v1/chat/completions"
                 headers = {"Content-Type": "application/json"}
                 if self.key:

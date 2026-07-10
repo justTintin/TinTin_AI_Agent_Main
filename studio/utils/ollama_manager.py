@@ -12,6 +12,41 @@ OLLAMA_HOST    = "127.0.0.1:11434"
 OLLAMA_API     = f"http://{OLLAMA_HOST}"
 
 
+def _read_ai_config() -> dict:
+    """读取 ai_config.json；读不到返回空字典。"""
+    try:
+        from config.paths import AI_CONFIG_FILE
+        import json
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def read_ollama_mode() -> str:
+    """当前 Ollama 来源模式：'local'(内置进程) 或 'remote'(外部已运行)。默认 local。"""
+    return (_read_ai_config().get("ollama_mode") or "local").strip()
+
+
+def _read_ollama_api() -> str:
+    """返回当前模式应使用的 Ollama API 基地址。
+
+    - local: 固定 http://127.0.0.1:11434（内置进程）
+    - remote: 读 ai_config['llm_vision_api_url']，缺省回退本地
+    """
+    if read_ollama_mode() == "remote":
+        url = (_read_ai_config().get("llm_vision_api_url") or "").strip()
+        if not url:
+            return OLLAMA_API
+        # 自动补 http:// 前缀
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "http://" + url
+        return url.rstrip("/")
+    return OLLAMA_API
+
+
 class OllamaManager:
     _instance = None
 
@@ -30,14 +65,14 @@ class OllamaManager:
 
     def is_running(self) -> bool:
         try:
-            r = requests.get(f"{OLLAMA_API}/api/tags", timeout=2)
+            r = requests.get(f"{_read_ollama_api()}/api/tags", timeout=5)
             return r.status_code == 200
         except Exception:
             return False
 
     def list_local_models(self) -> list[str]:
         try:
-            r = requests.get(f"{OLLAMA_API}/api/tags", timeout=5)
+            r = requests.get(f"{_read_ollama_api()}/api/tags", timeout=5)
             if r.status_code == 200:
                 return [m["name"] for m in r.json().get("models", [])]
         except Exception:
@@ -165,7 +200,7 @@ class OllamaManager:
         log.info(f"开始预热视觉模型「{model_name}」(timeout={timeout}s)...")
         try:
             res = requests.post(
-                f"{OLLAMA_API}/api/generate",
+                f"{_read_ollama_api()}/api/generate",
                 json={"model": model_name, "prompt": "", "stream": False, "predict": 1},
                 timeout=timeout,
             )

@@ -10,15 +10,14 @@ import requests
 import time
 
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
-if sys.platform == 'win32':
-    class _patched_Popen(subprocess.Popen):
-        def __init__(self, *args, **kwargs):
-            if 'creationflags' not in kwargs:
-                kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-            else:
-                kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
-            super().__init__(*args, **kwargs)
-    subprocess.Popen = _patched_Popen
+class _patched_Popen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        if 'creationflags' not in kwargs:
+            kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
+        super().__init__(*args, **kwargs)
+subprocess.Popen = _patched_Popen
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QListWidget, QTableWidget,
@@ -449,12 +448,7 @@ class DubbedVideosDialog(QDialog):
     def _play_video(self, path):
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self, "播放失败", f"无法播放该视频:\n{e}")
         else:
@@ -467,12 +461,7 @@ class DubbedVideosDialog(QDialog):
     def _open_dir(self, path):
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self, "打开失败", f"无法打开该目录:\n{e}")
 
@@ -558,12 +547,7 @@ class FinalMixedVideosDialog(QDialog):
     def _play_video(self, path):
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self, "播放失败", f"无法播放该视频:\n{e}")
         else:
@@ -572,13 +556,7 @@ class FinalMixedVideosDialog(QDialog):
     def _locate_video(self, path):
         if os.path.exists(path):
             try:
-                p = os.path.dirname(path)
-                if sys.platform == "win32":
-                    subprocess.Popen(f'explorer /select,"{path}"')
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", "-R", path])
-                else:
-                    subprocess.Popen(["xdg-open", p])
+                subprocess.Popen(f'explorer /select,"{path}"')
             except Exception as e:
                 QMessageBox.warning(self, "定位失败", f"无法定位该视频:\n{e}")
         else:
@@ -587,12 +565,7 @@ class FinalMixedVideosDialog(QDialog):
     def _open_dir(self, path):
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self, "打开失败", f"无法打开该目录:\n{e}")
 
@@ -825,7 +798,7 @@ class BestClipWorker(BaseWorker):
         out_path = os.path.abspath(os.path.join(self.output_dir, out_name))
         dur = max(0.1, end - start)
 
-        creationflags = 0x08000000 if sys.platform == "win32" else 0
+        creationflags = 0x08000000
         cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path,
                "-t", f"{dur:.3f}", "-c:v", "libx264", "-preset", "veryfast",
                "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
@@ -1729,7 +1702,7 @@ class VideoConcatWorker(BaseWorker):
             if not os.path.isfile(ffprobe):
                 ff = find_ffmpeg()
                 ffprobe = ff.replace("ffmpeg", "ffprobe")
-            cf = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            cf = subprocess.CREATE_NO_WINDOW
             cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
                    "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", clip]
             r = subprocess.run(cmd, capture_output=True, text=True,
@@ -1764,7 +1737,7 @@ class VideoConcatWorker(BaseWorker):
         if len(clips) == 1:
             cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
             return subprocess.run(cmd, capture_output=True, text=True,
-                                  creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
 
         xfade_type = self._XFADE_MAP.get(self.transition, "fade")
         transition_dur = 0.5  # 转场时长 0.5 秒
@@ -1777,7 +1750,7 @@ class VideoConcatWorker(BaseWorker):
                 cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
                        "-of", "csv=p=0", clip]
                 pr = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
                 if pr.returncode == 0 and pr.stdout.strip():
                     dur = float(pr.stdout.strip())
             except Exception:
@@ -1827,7 +1800,7 @@ class VideoConcatWorker(BaseWorker):
             out_file
         ]
         return subprocess.run(cmd, capture_output=True, text=True,
-                              creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                              creationflags=subprocess.CREATE_NO_WINDOW)
 
     def run(self):
         try:
@@ -1881,7 +1854,7 @@ class VideoConcatWorker(BaseWorker):
                              "-of", "csv=p=0", clip_abspath]
                 try:
                     probe_r = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15,
-                                             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                                             creationflags=subprocess.CREATE_NO_WINDOW)
                     if probe_r.returncode != 0 or not probe_r.stdout.strip():
                         self.stage.emit(f"⚠ 跳过无法读取的文件: {os.path.basename(clip)}")
                         skipped_clips.append(clip)
@@ -1905,7 +1878,7 @@ class VideoConcatWorker(BaseWorker):
                     "-c:a", "aac", "-ar", "44100", "-ac", "2",
                     norm_out
                 ]
-                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 if r.returncode != 0:
                     log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
                     self.stage.emit(f"⚠ 转码失败，跳过: {os.path.basename(clip)}")
@@ -1990,7 +1963,7 @@ class VideoConcatWorker(BaseWorker):
                             safe_path = n_clip.replace("\\", "/")
                             f.write(f"file '{safe_path}'\n")
                     cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
-                    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     if r.returncode != 0:
                         raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
                 
@@ -2393,7 +2366,7 @@ class VoiceCloneWorker(BaseWorker):
                             if abs(clamped - 1.0) > 0.005:
                                 temp_wav = out_wav_path + ".tmp.wav"
                                 ffmpeg_exe = find_ffmpeg()
-                                creationflags = 0x08000000 if sys.platform == "win32" else 0
+                                creationflags = 0x08000000
                                 speed_cmd = [
                                     ffmpeg_exe, "-y", "-i", out_wav_path,
                                     "-filter:a", f"atempo={clamped:.4f}",
@@ -2461,7 +2434,7 @@ class FinalMixWorker(BaseWorker):
             if not ffmpeg_path:
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
 
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            creationflags = subprocess.CREATE_NO_WINDOW
             has_bgm = bool(self.bgm_path and os.path.exists(self.bgm_path))
             bgm_vol = self.bgm_volume / 100.0
             
@@ -2753,7 +2726,7 @@ class VideoDubbingWorker(BaseWorker):
                     ]
                 cmd.append(output_video_path)
                 
-                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 if r.returncode != 0:
                     err = r.stderr or r.stdout or "(无输出)"
                     raise RuntimeError(f"视频原声替换配音失败：\n{err}\n命令: {' '.join(cmd)}")
@@ -4190,11 +4163,8 @@ class VideoMontagePage(BasePage):
             w = getattr(self, attr, None)
             if w and w.isRunning():
                 try:
-                    if sys.platform == "win32":
-                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
-                                       capture_output=True, timeout=5)
-                    else:
-                        w.terminate()
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
+                                   capture_output=True, timeout=5)
                 except Exception:
                     try:
                         w.terminate()
@@ -6243,7 +6213,7 @@ class VideoMontagePage(BasePage):
             import subprocess as _sp
             r = _sp.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
                         capture_output=True, text=True, timeout=5,
-                        creationflags=0x08000000 if sys.platform == "win32" else 0)
+                        creationflags=0x08000000)
             free_mb = int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else 99999
             if free_mb < 6144:
                 self.stage_label.setText(f"空闲显存 {free_mb}MB 不足，正在停止 Ollama 释放显存...")
@@ -6821,12 +6791,7 @@ class VideoMontagePage(BasePage):
             p = os.path.dirname(self.final_video_path)
             if os.path.exists(p):
                 try:
-                    if sys.platform == "win32":
-                        os.startfile(p)
-                    elif sys.platform == "darwin":
-                        subprocess.Popen(["open", p])
-                    else:
-                        subprocess.Popen(["xdg-open", p])
+                    os.startfile(p)
                 except Exception as e:
                     QMessageBox.warning(self.parent_widget, "打开失败", str(e))
 
@@ -6916,7 +6881,7 @@ class VideoMontagePage(BasePage):
                 stdout=self.api_server_log_file,
                 stderr=subprocess.STDOUT,
                 cwd=PROJECT_ROOT,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
 
             if not hasattr(self, "api_status_timer") or not self.api_status_timer:
@@ -6985,10 +6950,7 @@ class VideoMontagePage(BasePage):
             self.api_server_process = None
             if proc.poll() is None:
                 try:
-                    if sys.platform == "win32":
-                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-                    else:
-                        proc.terminate()
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
                 except Exception:
                     try:
                         proc.terminate()
@@ -7028,12 +6990,7 @@ class VideoMontagePage(BasePage):
     def _view_server_log(self):
         if hasattr(self, "api_server_log_path") and os.path.exists(self.api_server_log_path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(self.api_server_log_path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", self.api_server_log_path])
-                else:
-                    subprocess.Popen(["xdg-open", self.api_server_log_path])
+                os.startfile(self.api_server_log_path)
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "无法打开日志", f"无法打开日志文件:\n{e}")
         else:
@@ -7048,12 +7005,7 @@ class VideoMontagePage(BasePage):
             splits_dir = os.path.join(video_dir, video_basename, "splits")
             os.makedirs(splits_dir, exist_ok=True)
             try:
-                if sys.platform == "win32":
-                    os.startfile(splits_dir)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", splits_dir])
-                else:
-                    subprocess.Popen(["xdg-open", splits_dir])
+                os.startfile(splits_dir)
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "打开失败", f"无法打开文件夹:\n{e}")
         else:
@@ -7062,12 +7014,7 @@ class VideoMontagePage(BasePage):
                 splits_dir = os.path.join(dir_path, "splits")
                 os.makedirs(splits_dir, exist_ok=True)
                 try:
-                    if sys.platform == "win32":
-                        os.startfile(splits_dir)
-                    elif sys.platform == "darwin":
-                        subprocess.Popen(["open", splits_dir])
-                    else:
-                        subprocess.Popen(["xdg-open", splits_dir])
+                    os.startfile(splits_dir)
                 except Exception as e:
                     QMessageBox.warning(self.parent_widget, "打开失败", f"无法打开文件夹:\n{e}")
             else:
@@ -8235,12 +8182,7 @@ class VideoMontagePage(BasePage):
         
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "无法播放", f"播放视频失败:\n{e}")
         else:
@@ -8249,12 +8191,7 @@ class VideoMontagePage(BasePage):
     def _play_video(self, path):
         if os.path.exists(path):
             try:
-                if sys.platform == "win32":
-                    os.startfile(path)
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
+                os.startfile(path)
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "播放失败", f"无法播放该视频:\n{e}")
         else:

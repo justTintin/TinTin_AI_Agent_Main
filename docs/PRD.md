@@ -265,7 +265,7 @@ GET  /api/analytics/dashboard → 数据看板
 - **faster-whisper** 语音转写
 - **DeepSeek API** 文本生成
 - **Git + Gitea** 代码管理（jckunji.com:3000）
-- **Windows 为主**运行平台，Linux 开发环境
+- **Windows 专用**运行平台
 - 最低硬件：RTX 3060 12G + 16GB RAM + 500GB SSD
 
 ---

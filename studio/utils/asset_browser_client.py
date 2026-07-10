@@ -13,7 +13,6 @@
 """
 import os
 import re
-import sys
 import json
 import time
 import shutil
@@ -46,9 +45,9 @@ def _electron_exe() -> str | None:
     """定位可用的 electron 启动器（优先工程内 node_modules）。"""
     candidates = [
         os.path.join(ASSET_BROWSER_DIR, "node_modules", "electron", "dist",
-                     "electron.exe" if sys.platform == "win32" else "electron"),
+                     "electron.exe"),
         os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin",
-                     "electron.cmd" if sys.platform == "win32" else "electron"),
+                     "electron.cmd"),
         os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin", "electron"),
     ]
     for p in candidates:
@@ -79,21 +78,16 @@ def _launch_asset_browser_process() -> tuple[bool, str]:
             launch_errors.append(f"electron 启动失败: {e}")
 
     npm_candidates = []
-    if sys.platform == "win32":
-        npm_candidates.extend([
-            os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
-            os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
-            shutil.which("npm.cmd") or "",
-        ])
-    else:
-        npm_candidates.extend([
-            shutil.which("npm") or "",
-        ])
+    npm_candidates.extend([
+        os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
+        os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
+        shutil.which("npm.cmd") or "",
+    ])
 
     for npm in [x for x in npm_candidates if x]:
         try:
             if npm.lower().endswith("npm-cli.js"):
-                node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe" if sys.platform == "win32" else "node")
+                node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe")
                 if not os.path.isfile(node_exe):
                     continue
                 p = subprocess.Popen([node_exe, npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)

@@ -5,7 +5,7 @@ import threading
 import requests
 from utils.logger_utils import log
 from config.paths import PROJECT_ROOT, OLLAMA_BIN, get_bin
-from utils.platform_utils import IS_WIN, create_no_window_flag
+from utils.platform_utils import create_no_window_flag
 
 OLLAMA_MODELS  = os.path.join(PROJECT_ROOT, "assets", "ollama_models")
 OLLAMA_HOST    = "127.0.0.1:11434"
@@ -226,18 +226,11 @@ class OllamaManager:
             self._proc = None
 
         # 清理可能残留的 ollama 进程（仅在旧进程已正常终止时）
-        if IS_WIN:
-            for img in ["ollama.exe", "llama-server.exe"]:
-                try:
-                    subprocess.run(["taskkill", "/F", "/T", "/IM", img],
-                                   capture_output=True, timeout=10,
-                                   creationflags=create_no_window_flag())
-                except Exception:
-                    pass
-        else:
+        for img in ["ollama.exe", "llama-server.exe"]:
             try:
-                subprocess.run(["pkill", "-x", "ollama"],
-                               capture_output=True, timeout=2)
+                subprocess.run(["taskkill", "/F", "/T", "/IM", img],
+                               capture_output=True, timeout=10,
+                               creationflags=create_no_window_flag())
             except Exception:
                 pass
 
@@ -322,7 +315,7 @@ class OllamaManager:
 
     def runners_ok(self) -> bool:
         bin_dir = os.path.dirname(OLLAMA_BIN)
-        suffix = ".exe" if IS_WIN else ""
+        suffix = ".exe"
         candidates = [
             os.path.join(bin_dir, f"llama-server{suffix}"),
             os.path.join(bin_dir, "lib", "ollama", f"llama-server{suffix}"),
@@ -345,15 +338,14 @@ class OllamaManager:
 
         bin_dir  = os.path.dirname(OLLAMA_BIN)
 
-        # Linux: 新版用 tar.zst，旧版用 zip；Windows: 始终 zip
-        formats = [("tar.zst", "tar.zst")] if not IS_WIN else []
-        formats.append(("zip", "zip"))
+        # Windows: 始终 zip
+        formats = [("zip", "zip")]
 
         last_error = None
         for fmt_key, fmt_ext in formats:
             url = (
                 "https://github.com/ollama/ollama/releases/download/"
-                f"v{version}/ollama-{'windows' if IS_WIN else 'linux'}-amd64.{fmt_ext}"
+                f"v{version}/ollama-windows-amd64.{fmt_ext}"
             )
             log.info(f"尝试下载 Ollama 运行库 ({fmt_key}): {url}")
             if progress_cb:
@@ -481,8 +473,8 @@ class OllamaManager:
 
         return False, (
             f"下载失败。\n"
-            f"请手动下载 ollama-{'windows' if IS_WIN else 'linux'}-amd64.{{tar.zst|zip}} (v{version}) "
-            f"并将其中 lib/ 目录解压到 studio/bin/{'win' if IS_WIN else 'linux'}/ 下。\n"
+            f"请手动下载 ollama-windows-amd64.zip (v{version}) "
+            f"并将其中 lib/ 目录解压到 studio/bin/win/ 下。\n"
             f"({last_error})"
         )
 

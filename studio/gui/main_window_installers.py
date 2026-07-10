@@ -90,7 +90,7 @@ class PaddleOcrInstallWorker(QThread):
                         [PADDLEOCR_PYTHON, "-c", "import paddle"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        creationflags=subprocess.CREATE_NO_WINDOW
                     )
                     self.log_line.emit("[INFO] GPU 版 PaddlePaddle 验证成功，支持 GPU 加速识别！\n")
                     paddle_ok = True
@@ -114,7 +114,7 @@ class PaddleOcrInstallWorker(QThread):
                         [PADDLEOCR_PYTHON, "-c", "import paddle"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        creationflags=subprocess.CREATE_NO_WINDOW
                     )
                     self.log_line.emit("[INFO] CPU 版 PaddlePaddle 验证成功！\n")
                 except Exception as e_test:
@@ -146,7 +146,7 @@ class PaddleOcrInstallWorker(QThread):
                     [PADDLEOCR_PYTHON, "-c", cmd_str],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 self.log_line.emit("[INFO] PaddleOCR 环境验证通过（paddleocr/paddlex/aiohttp 均可正常导入）\n")
             except Exception as e:
@@ -170,7 +170,7 @@ class PaddleOcrInstallWorker(QThread):
             encoding="utf-8",
             errors="ignore",
             bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         while True:
             line = p.stdout.readline()
@@ -184,7 +184,7 @@ class PaddleOcrInstallWorker(QThread):
 
     def run_command_silent(self, cmd):
         subprocess.run(cmd, capture_output=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            creationflags=subprocess.CREATE_NO_WINDOW)
 
 
 class InstallersMixin:

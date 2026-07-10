@@ -4,7 +4,7 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Windows 10/11 64位 或 Ubuntu 24.04+ |
+| 操作系统 | Windows 10/11 64位 |
 | GPU | NVIDIA GPU，CUDA 12.x，显存 ≥ 8GB（推荐 24GB RTX 4090） |
 | Python | 主程序使用内置 `python_embeded`（3.11），各子应用有独立 venv |
 | 磁盘空间 | ≥ 100GB（含模型权重） |
@@ -59,12 +59,6 @@ TinTin_AI_Agent_Main/
 studio\run_gui_integrated.bat
 ```
 该脚本自动定位 `python_embeded\pythonw.exe` 并启动 `gui_main.py`。
-
-### Linux
-```bash
-make install   # 首次：创建 .venv，安装依赖，下载 Chromium
-make run       # 启动 GUI
-```
 
 ---
 

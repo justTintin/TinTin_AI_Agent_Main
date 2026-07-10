@@ -415,8 +415,7 @@ class VoiceClonePage(BasePage):
     def _open_voice_output_dir(self):
         d = self.voice_video_dir_input.text().strip()
         if d and os.path.isdir(d):
-            if sys.platform == "win32":
-                os.startfile(d)
+            os.startfile(d)
         else:
             QMessageBox.warning(self.parent_widget, "目录无效", "输出目录不存在，请先选择或生成文件。")
 
@@ -1390,7 +1389,7 @@ class VoiceClonePage(BasePage):
                     cmd,
                     capture_output=True,
                     text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 try:
                     if os.path.exists(concat_txt):
@@ -1684,7 +1683,7 @@ class VoiceClonePage(BasePage):
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             if r.returncode != 0:
                 log.error(f"裁剪音频失败 (返回码 {r.returncode}):\nSTDOUT: {r.stdout}\nSTDERR: {r.stderr}")

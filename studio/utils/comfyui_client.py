@@ -8,7 +8,7 @@ import requests
 
 from config.paths import APPS_DIR, PYTHON_EMBEDED_DIR, LOG_DIR
 from utils.logger_utils import log
-from utils.platform_utils import IS_WIN, find_python, create_no_window_flag
+from utils.platform_utils import find_python, create_no_window_flag
 
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 COMFYUI_MAIN = os.path.join(COMFYUI_DIR, "main.py")
@@ -101,22 +101,13 @@ class ComfyUILocal:
                     self._proc.kill()
                 self._proc = None
 
-            if IS_WIN:
-                for img in ["python.exe", "pythonw.exe"]:
-                    try:
-                        subprocess.call(
-                            ["taskkill", "/F", "/IM", img, "/FI",
-                             f"COMMANDLINE eq '*{COMFYUI_MAIN.replace('/', os.sep)}*'"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            creationflags=_CREATE_NO_WINDOW, timeout=5,
-                        )
-                    except Exception:
-                        pass
-            else:
+            for img in ["python.exe", "pythonw.exe"]:
                 try:
                     subprocess.call(
-                        ["pkill", "-f", f"python.*{COMFYUI_MAIN}"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                        ["taskkill", "/F", "/IM", img, "/FI",
+                         f"COMMANDLINE eq '*{COMFYUI_MAIN.replace('/', os.sep)}*'"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        creationflags=_CREATE_NO_WINDOW, timeout=5,
                     )
                 except Exception:
                     pass

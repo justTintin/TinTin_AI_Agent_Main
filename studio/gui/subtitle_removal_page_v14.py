@@ -15,7 +15,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_V14_DIR
-from utils.platform_utils import python_binary, IS_WIN
+from utils.platform_utils import python_binary
 
 class SubtitleRemovalWorkerV14(QThread):
     progress_updated = Signal(int)
@@ -65,11 +65,9 @@ class SubtitleRemovalWorkerV14(QThread):
         err_msg = ""
 
         # Hide console window on Windows
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         for idx, box in enumerate(self.boxes):
             if self.is_aborted:
@@ -126,13 +124,10 @@ class SubtitleRemovalWorkerV14(QThread):
 
                 while self.process.poll() is None:
                     if self.is_aborted:
-                        if sys.platform == "win32":
-                            subprocess.run(
-                                ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                                capture_output=True
-                            )
-                        else:
-                            self.process.terminate()
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                            capture_output=True
+                        )
                         break
                         
                     line = self.process.stdout.readline()
@@ -195,19 +190,15 @@ class SubtitleRemovalWorkerV14(QThread):
         self.is_aborted = True
         if self.process:
             try:
-                if sys.platform == "win32":
-                    # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                        capture_output=True
-                    )
-                    try:
-                        self.process.wait(timeout=5)
-                    except Exception:
-                        pass
-                else:
-                    self.process.terminate()
+                # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    capture_output=True
+                )
+                try:
                     self.process.wait(timeout=5)
+                except Exception:
+                    pass
             except Exception:
                 try:
                     self.process.kill()
@@ -979,13 +970,9 @@ class SubtitleRemovalPageV14(BasePage):
         vsr_dir = VSR_V14_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
-        if not os.path.exists(vsr_python) and IS_WIN:
+        if not os.path.exists(vsr_python):
             vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "vsr_run.py")
-
-        # On Linux, the bundled Python is Windows-only; fall back to project venv
-        if not os.path.exists(vsr_python) and not IS_WIN:
-            vsr_python = sys.executable
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
             QMessageBox.critical(
@@ -1089,10 +1076,7 @@ class SubtitleRemovalPageV14(BasePage):
             if msg_box.clickedButton() == open_btn:
                 try:
                     import subprocess
-                    if sys.platform == "win32":
-                        subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
-                    else:
-                        os.system(f'open "{os.path.dirname(out_path)}"')
+                    subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
                 except Exception as e:
                     log.error(f"Failed to open output directory: {e}")
 

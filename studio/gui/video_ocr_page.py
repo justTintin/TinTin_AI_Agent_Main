@@ -60,11 +60,9 @@ class VideoOcrWorker(BaseWorker):
         self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")
         self.log_received.emit(f"[INFO] 执行后端命令: {' '.join(cmd)}")
 
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         try:
             self.process = subprocess.Popen(

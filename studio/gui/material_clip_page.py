@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor
 
+from utils.gui_icons import mdi_button, mdi_icon
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.material_clip_indexer import to_local_path, to_relative_path
@@ -755,7 +756,7 @@ class MaterialClipPage(BasePage):
         nas_lbl.setObjectName("nas_root_label")
         nas_row.addWidget(nas_lbl, 1)
         setattr(self, f"lbl_nas_root_{tree_attr}", nas_lbl)
-        btn_reload_cfg = QPushButton("↺")
+        btn_reload_cfg = mdi_button("", "refresh")
         btn_reload_cfg.setFixedWidth(36)
         btn_reload_cfg.setStyleSheet("padding: 2px; min-width: 28px;")
         btn_reload_cfg.setToolTip("重新读取「资源配置」中的目录设置")
@@ -795,7 +796,7 @@ class MaterialClipPage(BasePage):
 
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)
         sep.setObjectName("separator"); left_lay.addWidget(sep)
-        self.btn_toggle_log = QPushButton("▶ 显示操作日志")
+        self.btn_toggle_log = mdi_button("显示操作日志", "play")
         self.btn_toggle_log.setObjectName("secondary_button")
         self.btn_toggle_log.clicked.connect(self._toggle_log_box)
         left_lay.addWidget(self.btn_toggle_log)
@@ -910,7 +911,7 @@ class MaterialClipPage(BasePage):
         self.db_hash_filter.returnPressed.connect(self._refresh_db_table)
         filter_row.addWidget(self.db_hash_filter)
         
-        btn_db_refresh = QPushButton("↺ 刷新")
+        btn_db_refresh = mdi_button("刷新", "refresh")
         btn_db_refresh.setObjectName("secondary_button")
         btn_db_refresh.clicked.connect(self._refresh_db_table)
         filter_row.addWidget(btn_db_refresh)
@@ -966,18 +967,18 @@ class MaterialClipPage(BasePage):
         self.db_stat.setMaximumHeight(24)
         bot_row.addWidget(self.db_stat, 1)
 
-        self.btn_toggle_log = QPushButton("▶ 显示操作日志")
+        self.btn_toggle_log = mdi_button("显示操作日志", "play")
         self.btn_toggle_log.setObjectName("secondary_button")
         self.btn_toggle_log.clicked.connect(self._toggle_log_box)
         bot_row.addWidget(self.btn_toggle_log)
 
-        self.btn_reanalyze = QPushButton("🔍 进行AI分析内容")
+        self.btn_reanalyze = mdi_button("进行AI分析内容", "search")
         self.btn_reanalyze.setObjectName("secondary_button")
         self.btn_reanalyze.setToolTip("对选中的行执行或重新执行视觉LLM + Whisper + CLIP 分析")
         self.btn_reanalyze.clicked.connect(self._start_reanalyze_selected)
         bot_row.addWidget(self.btn_reanalyze)
 
-        self.btn_stop_reanalyze = QPushButton("⏹ 停止AI分析")
+        self.btn_stop_reanalyze = mdi_button("停止AI分析", "stop")
         self.btn_stop_reanalyze.setObjectName("secondary_button")
         self.btn_stop_reanalyze.setProperty("danger", True)
         self.btn_stop_reanalyze.setToolTip("停止当前的 AI 分析任务")
@@ -985,7 +986,7 @@ class MaterialClipPage(BasePage):
         self.btn_stop_reanalyze.clicked.connect(self._stop_reanalyze)
         bot_row.addWidget(self.btn_stop_reanalyze)
 
-        btn_open = QPushButton("🗂 打开目录")
+        btn_open = mdi_button("打开目录", "folder")
         btn_open.setObjectName("secondary_button")
         btn_open.clicked.connect(lambda: self._open_db_file_dir(
             self.db_table.currentIndex()
@@ -1009,15 +1010,15 @@ class MaterialClipPage(BasePage):
     def _toggle_log_box(self):
         if self.log_dialog.isVisible():
             self.log_dialog.hide()
-            self.btn_toggle_log.setText("▶ 显示操作日志")
+            self.btn_toggle_log.setText("显示操作日志")
         else:
             self.log_dialog.show()
             self.log_dialog.raise_()
             self.log_dialog.activateWindow()
-            self.btn_toggle_log.setText("▼ 隐藏操作日志")
+            self.btn_toggle_log.setText("隐藏操作日志")
 
     def _on_log_dialog_closed(self, result):
-        self.btn_toggle_log.setText("▶ 显示操作日志")
+        self.btn_toggle_log.setText("显示操作日志")
 
     def _is_nas_path(self, path: str) -> bool:
         """判断路径是否需要通过 SMB 访问。"""
@@ -1624,17 +1625,17 @@ class MaterialClipPage(BasePage):
         self.lbl_stats_ingest = QLabel("—")
         self.lbl_stats_ingest.setObjectName("stats_ingest")
         stats_hdr_row.addWidget(self.lbl_stats_ingest)
-        btn_refresh_stats = QPushButton("↺ 刷新")
+        btn_refresh_stats = mdi_button("刷新", "refresh")
         btn_refresh_stats.setToolTip("刷新统计（数据库 + 目录文件数），不扫描新文件")
         btn_refresh_stats.setObjectName("btn_refresh_stats")
         btn_refresh_stats.clicked.connect(self._reload_stats)
         stats_hdr_row.addWidget(btn_refresh_stats)
-        btn_align = QPushButton("📂 对齐入库")
+        btn_align = mdi_button("对齐入库", "folder")
         btn_align.setToolTip("扫描磁盘目录，将新文件 Hash 对齐后批量入库")
         btn_align.setObjectName("btn_align")
         btn_align.clicked.connect(self._align_and_ingest)
         stats_hdr_row.addWidget(btn_align)
-        self.btn_import_tasks = QPushButton("📥 导入浏览器任务")
+        self.btn_import_tasks = mdi_button("导入浏览器任务", "download")
         self.btn_import_tasks.setToolTip("读取 material_import_tasks.json，将待处理项批量快速入库")
         self.btn_import_tasks.setObjectName("secondary_button")
         self.btn_import_tasks.clicked.connect(self._start_import_material_tasks)
@@ -1695,13 +1696,13 @@ class MaterialClipPage(BasePage):
         self.db_stat_ingest.setObjectName("muted_text")
         bot_row.addWidget(self.db_stat_ingest, 1)
 
-        self.btn_meta = QPushButton("📂 快速入库（仅元数据）")
+        self.btn_meta = mdi_button("快速入库（仅元数据）", "folder")
         self.btn_meta.setObjectName("primary_button")
         self.btn_meta.setToolTip("只记录 hash/路径/大小，不做 AI 分析，速度极快")
         self.btn_meta.clicked.connect(self._start_meta_index)
         bot_row.addWidget(self.btn_meta)
 
-        self.btn_ocr_rename = QPushButton("🏷️ 智能 OCR 重命名（仅图片）")
+        self.btn_ocr_rename = mdi_button("智能 OCR 重命名（仅图片）", "tag")
         self.btn_ocr_rename.setObjectName("secondary_button")
         self.btn_ocr_rename.setToolTip("对当前目录下已入库的图片执行 OCR 识别文字并重命名物理文件与数据库")
         self.btn_ocr_rename.clicked.connect(self._start_ocr_rename)

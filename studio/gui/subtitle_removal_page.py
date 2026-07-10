@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
 from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
 from utils.platform_utils import python_binary
@@ -436,7 +437,7 @@ class SubtitleRemovalPage(BasePage):
         area_layout.addLayout(sliders_layout)
 
         # Reset button
-        self.btn_reset_area = QPushButton("🔄 重置到默认字幕下方范围")
+        self.btn_reset_area = mdi_button("重置到默认字幕下方范围", "refresh")
         self.btn_reset_area.setObjectName("secondary_button")
         self.btn_reset_area.clicked.connect(self.reset_default_area)
         area_layout.addWidget(self.btn_reset_area)
@@ -479,12 +480,12 @@ class SubtitleRemovalPage(BasePage):
 
         # Run buttons
         btn_action_layout = QHBoxLayout()
-        self.btn_start = QPushButton("🚀 开始去除字幕")
+        self.btn_start = mdi_button("开始去除字幕", "rocket")
         self.btn_start.setObjectName("primary_button")
         self.btn_start.clicked.connect(self.start_removal)
         btn_action_layout.addWidget(self.btn_start)
 
-        self.btn_stop = QPushButton("⏹️ 停止运行")
+        self.btn_stop = mdi_button("停止运行", "stop")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_removal)
         btn_action_layout.addWidget(self.btn_stop)
@@ -517,7 +518,7 @@ class SubtitleRemovalPage(BasePage):
 
         # Video progress slider for scrubbing / previewing frames
         seek_row = QHBoxLayout()
-        self.btn_prev_frame = QPushButton("◀")
+        self.btn_prev_frame = mdi_button("", "left")
         self.btn_prev_frame.setFixedWidth(30)
         self.btn_prev_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
         self.btn_prev_frame.clicked.connect(self._step_prev_frame)
@@ -531,7 +532,7 @@ class SubtitleRemovalPage(BasePage):
         self.seek_slider.sliderReleased.connect(self._on_seek_released)
         seek_row.addWidget(self.seek_slider)
         
-        self.btn_next_frame = QPushButton("▶")
+        self.btn_next_frame = mdi_button("", "play")
         self.btn_next_frame.setFixedWidth(30)
         self.btn_next_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
         self.btn_next_frame.clicked.connect(self._step_next_frame)

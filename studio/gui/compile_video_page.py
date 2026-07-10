@@ -18,6 +18,7 @@ from PySide6.QtCore import Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from utils.media_library_manager import MediaLibraryManager
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
@@ -92,7 +93,7 @@ class CompileVideoPage(BasePage):
         tts_row.addWidget(QLabel("　TTS 音色"))
         self.combo_voice = QComboBox()
         tts_row.addWidget(self.combo_voice, 1)
-        self.btn_tts = QPushButton("🎙️ 用文案生成配音(TTS)")
+        self.btn_tts = mdi_button("用文案生成配音(TTS)", "audio")
         self.btn_tts.setObjectName("secondary_button")
         self.btn_tts.clicked.connect(self._tts_generate)
         tts_row.addWidget(self.btn_tts)
@@ -102,7 +103,7 @@ class CompileVideoPage(BasePage):
                                        placeholder="片头开场视频，如 MG 动态标题；拼在最前面")
         intro_row = QHBoxLayout()
         intro_row.addStretch()
-        self.btn_mg_intro = QPushButton("🎞️ 用动态标题生成开场(MG)")
+        self.btn_mg_intro = mdi_button("用动态标题生成开场(MG)", "film")
         self.btn_mg_intro.setObjectName("secondary_button")
         self.btn_mg_intro.clicked.connect(self._gen_mg_intro)
         intro_row.addWidget(self.btn_mg_intro)
@@ -131,7 +132,7 @@ class CompileVideoPage(BasePage):
         self.combo_predict_platform.setFixedWidth(96)
         opt.addWidget(self.combo_predict_platform)
         opt.addStretch()
-        self.btn_make = QPushButton("🎬 生成成片"); self.btn_make.setObjectName("primary_button")
+        self.btn_make = mdi_button("生成成片", "video"); self.btn_make.setObjectName("primary_button")
         self.btn_make.clicked.connect(self._make)
         opt.addWidget(self.btn_make)
         form.addLayout(opt)
@@ -141,7 +142,7 @@ class CompileVideoPage(BasePage):
         self.score_label = QLabel("")
         self.score_label.setObjectName("muted_text"); self.score_label.setWordWrap(True)
         score_row.addWidget(self.score_label, 1)
-        self.btn_detail = QPushButton("查看详情/建议 →"); self.btn_detail.setObjectName("secondary_button")
+        self.btn_detail = mdi_button("查看详情/建议", "right"); self.btn_detail.setObjectName("secondary_button")
         self.btn_detail.clicked.connect(self._open_detail); self.btn_detail.setVisible(False)
         score_row.addWidget(self.btn_detail)
         root.addLayout(score_row)

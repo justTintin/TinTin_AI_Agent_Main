@@ -161,6 +161,7 @@ from gui.voice_samples_page import VoiceSamplesPage
 from gui.video_ocr_page import VideoOcrPage
 from gui.image_folder_ocr_page import ImageFolderOcrPage
 from utils.logger_utils import log, get_last_logs
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.account_manager import AccountManager
 from core.creator_browser_controller import CreatorBrowserController
 try:
@@ -1127,13 +1128,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         actions_layout.setContentsMargins(5, 2, 5, 2)
         actions_layout.setSpacing(5)
         
-        btn_preview = QPushButton("👁️")
+        btn_preview = mdi_button("", "eye")
         btn_preview.setToolTip("预览")
         btn_preview.setFixedSize(30, 24)
         btn_preview.setEnabled(False)
         btn_preview.clicked.connect(lambda: self.preview_result(prompt_id))
         
-        btn_download = QPushButton("💾")
+        btn_download = mdi_button("", "save")
         btn_download.setToolTip("下载")
         btn_download.setFixedSize(30, 24)
         btn_download.setEnabled(False)

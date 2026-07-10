@@ -922,29 +922,31 @@ class MaterialClipPage(BasePage):
 
         # 数据表
         self.db_table = QTableWidget()
-        self.db_table.setColumnCount(13)
+        self.db_table.setColumnCount(14)
         self.db_table.setHorizontalHeaderLabels(
-            ["", "文件名", "主要画面描述", "次要画面描述", "类型", "品牌", "型号", "类别", "大小", "时长", "置信度", "AI状态", "Hash"]
+            ["", "文件名", "共享文件", "主要画面描述", "次要画面描述", "类型", "品牌", "型号", "类别", "大小", "时长", "置信度", "AI状态", "Hash"]
         )
         hh = self.db_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Fixed)
         self.db_table.setColumnWidth(0, 40)
         
         hh.setSectionResizeMode(1, QHeaderView.Interactive)
-        self.db_table.setColumnWidth(1, 400)
+        self.db_table.setColumnWidth(1, 300)
         
-        hh.setSectionResizeMode(2, QHeaderView.Interactive)
-        self.db_table.setColumnWidth(2, 150)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         
         hh.setSectionResizeMode(3, QHeaderView.Interactive)
         self.db_table.setColumnWidth(3, 150)
         
-        # 类型、品牌、型号、类别、大小、时长（列 4-9）
-        for c in range(4, 10):
+        hh.setSectionResizeMode(4, QHeaderView.Interactive)
+        self.db_table.setColumnWidth(4, 150)
+        
+        # 类型、品牌、型号、类别、大小、时长（列 5-10）
+        for c in range(5, 11):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
             
-        # 置信度、AI状态（列 10-11）
-        for c in range(10, 12):
+        # 置信度、AI状态（列 11-12）
+        for c in range(11, 13):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         
         # Hash（列 12）
@@ -1977,6 +1979,7 @@ class MaterialClipPage(BasePage):
 
             for r, row in enumerate(rows):
                 fname  = row.get("filename") or os.path.basename(row.get("path", ""))
+                shared = row.get("shared_folder") or "—"
                 desc_p = row.get("scene_desc_primary") or "—"
                 desc_s = row.get("scene_desc_secondary") or "—"
                 mtype  = row.get("media_type") or "—"
@@ -2004,18 +2007,18 @@ class MaterialClipPage(BasePage):
                 chk_item.setData(Qt.UserRole, row)
                 self.db_table.setItem(r, 0, chk_item)
 
-                vals = [fname, desc_p, desc_s, mtype, brand, model, cat, size_text, dur_text, conf_text, status, fhash]
+                vals = [fname, shared, desc_p, desc_s, mtype, brand, model, cat, size_text, dur_text, conf_text, status, fhash]
                 for c, v in enumerate(vals):
                     cell = QTableWidgetItem(str(v))
                     cell.setData(Qt.UserRole, row)
-                    if c == 7:  # 大小右对齐
+                    if c == 8:  # 大小右对齐
                         cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    if c == 8:  # 时长右对齐
+                    if c == 9:  # 时长右对齐
                         cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    if c == 9 and conf is not None:  # 置信度
+                    if c == 10 and conf is not None:  # 置信度
                         key = "high" if conf >= 0.7 else ("medium" if conf >= 0.4 else "low")
                         cell.setForeground(QColor(_CONF_COLOR[key]))
-                    if c == 10:  # AI状态
+                    if c == 11:  # AI状态
                         cell.setForeground(QColor(_STATUS_COLOR.get(status, "#9ca3af")))
                     self.db_table.setItem(r, c + 1, cell)
             self.db_table.setUpdatesEnabled(True)

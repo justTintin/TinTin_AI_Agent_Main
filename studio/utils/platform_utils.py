@@ -123,26 +123,18 @@ def get_bin(name: str) -> str:
     return _get_bin(name)
 
 
-def _ffmpeg_platform_dir() -> str:
-    """Return the platform-specific subdirectory name used under apps/*/ffmpeg/."""
-    if IS_WIN:
-        return "win_x64"
-    else:
-        return "linux_x64"
-
-
 def _ffmpeg_fallback_candidates(exe: str) -> list:
-    """Return a list of fallback paths to search for ffmpeg/ffprobe executables."""
+    """Return a list of fallback paths to search for ffmpeg/ffprobe executables.
+
+    ffmpeg 是通用工具，标准位置是 studio/bin/<platform>/（由 find_ffmpeg 第一顺位命中）。
+    这里只在项目 bin 与系统 PATH 都未命中时，兜底查工程根目录，不再依赖各子应用内部目录。
+    """
     try:
         from config.paths import WORKSPACE_ROOT
     except Exception:
         return []
-    plat = _ffmpeg_platform_dir()
     return [
         os.path.join(WORKSPACE_ROOT, exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "asset-browser", "bin", exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.4.0", "backend", "ffmpeg", plat, exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.1.1-windows-nvidia-cuda", "resources", "backend", "ffmpeg", plat, exe),
     ]
 
 

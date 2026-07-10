@@ -136,19 +136,16 @@ def main():
         workspace_root = os.path.dirname(os.path.dirname(curr_dir))
         ffmpeg_exe = "ffmpeg.exe" if is_win else "ffmpeg"
 
-        # 优先使用主进程传入的路径；否则回退到本地搜索（覆盖内置 ffmpeg 所在目录）
+        # 优先使用主进程传入的路径；否则回退到本地搜索（项目 bin / 系统 PATH / 工程根）
         ffmpeg_path = args.ffmpeg_path
         if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):
-            plat = "win_x64" if is_win else "linux_x64"
             candidates = [
                 os.path.join(curr_dir, ffmpeg_exe),
                 os.path.join(os.path.dirname(curr_dir), ffmpeg_exe),
                 os.path.join(workspace_root, ffmpeg_exe),
                 os.path.join(workspace_root, "python_embeded", ffmpeg_exe),
                 os.path.join(workspace_root, "python_embeded", "Scripts", ffmpeg_exe),
-                os.path.join(workspace_root, "apps", "asset-browser", "bin", ffmpeg_exe),
-                os.path.join(workspace_root, "apps", "vsr-v1.4.0", "backend", "ffmpeg", plat, ffmpeg_exe),
-                os.path.join(workspace_root, "apps", "vsr-v1.1.1-windows-nvidia-cuda", "resources", "backend", "ffmpeg", plat, ffmpeg_exe),
+                os.path.join(workspace_root, "studio", "bin", "win" if is_win else "linux", ffmpeg_exe),
             ]
             ffmpeg_path = shutil.which("ffmpeg")
             if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):

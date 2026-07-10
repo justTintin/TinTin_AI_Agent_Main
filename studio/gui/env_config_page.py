@@ -14,13 +14,9 @@ from utils.base_worker import BaseWorker
 import configparser
 from utils.logger_utils import log
 from config.paths import (WORKSPACE_ROOT, APPS_DIR,
-                           VSR_DIR, VOXCPM2_DIR, KNOWLEDGE_MATERIALS_DIR,
+                           VSR_DIR, KNOWLEDGE_MATERIALS_DIR,
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
-def get_voxcpm_python():
-    from utils.platform_utils import find_venv_python
-    from config.paths import VOXCPM2_DIR
-    return find_venv_python(VOXCPM2_DIR)
 
 class EnvInstallWorker(BaseWorker):
     log_line = Signal(str)
@@ -443,46 +439,10 @@ class EnvConfigPage(BasePage):
             info["vsr_ok"] = False
             info["vsr_status"] = "未就绪 (缺少 apps/vsr-v1.1.1-windows-nvidia-cuda 主目录或内嵌 Python 环境)"
 
-        # 8. VoxCPM
-        info["voxcpm_installed"] = False
-        info["voxcpm_ok"] = False
-        info["voxcpm_status"] = "未安装"
-        try:
-            # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
-            voxcpm_src = os.path.abspath(os.path.join(WORKSPACE_ROOT, "apps", "voxcpm2", "src"))
-            cmd_str = f"import sys; sys.path.insert(0, r'{voxcpm_src}'); import voxcpm"
-            subprocess.check_call(
-                [get_voxcpm_python(), "-c", cmd_str],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            info["voxcpm_installed"] = True
-        except Exception:
-            pass
-
-        port = 7861
-        try:
-            config = configparser.ConfigParser()
-            config.read(CONFIG_INI_FILE, encoding='utf-8')
-            if config.has_section('VoxCPM'):
-                port = config.getint('VoxCPM', 'Port', fallback=7861)
-        except Exception:
-            pass
-
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.1)
-            s.connect(("127.0.0.1", port))
-            s.close()
-            info["voxcpm_ok"] = True
-            info["voxcpm_status"] = f"正在运行 (监听端口: {port})"
-        except Exception:
-            if info["voxcpm_installed"]:
-                info["voxcpm_status"] = f"已安装但未启动 (端口 {port} 空闲, 环境: {get_voxcpm_python()})"
-            else:
-                info["voxcpm_status"] = f"未安装 (在环境 {get_voxcpm_python()} 中未找到 'voxcpm')"
+        # 8. VoxCPM（纯远程模式）
+        info["voxcpm_installed"] = True
+        info["voxcpm_ok"] = True
+        info["voxcpm_status"] = "远程模式（由 ai_config 配置 vox_api_url）"
 
         # 9. PaddleOCR Isolated Environment & Models
         from config.paths import PADDLEOCR_PYTHON, PADDLEOCR_SCRIPT

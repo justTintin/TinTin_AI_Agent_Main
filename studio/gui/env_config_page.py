@@ -248,79 +248,15 @@ class EnvConfigPage(BasePage):
         # RustFS 配置组暂时隐藏，尚未接入对象存储
         # scroll_layout.addWidget(group_rustfs)
 
-        # Group 8: 素材向量库数据库配置
-        group_matdb = QGroupBox("🗄️ 素材向量库数据库配置（PostgreSQL + pgvector）")
-        group_matdb.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
-            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #8b5cf6; }
-        """)
-        layout_matdb = QVBoxLayout(group_matdb)
-        layout_matdb.setContentsMargins(16, 20, 16, 16)
-        layout_matdb.setSpacing(10)
-
-        matdb_desc = QLabel(
-            "供「向量素材库」页面连接的 PostgreSQL 数据库（需安装 pgvector 扩展）。\n"
-            "配置后点击「保存」即生效，无需重启。"
-        )
-        matdb_desc.setObjectName("muted_text")
-        matdb_desc.setWordWrap(True)
-        layout_matdb.addWidget(matdb_desc)
-
-        row_matdb1 = QHBoxLayout()
-        row_matdb1.addWidget(QLabel("主机地址："))
-        self.edit_matdb_host = QLineEdit()
-        self.edit_matdb_host.setPlaceholderText("192.168.111.17")
-        row_matdb1.addWidget(self.edit_matdb_host, 2)
-        row_matdb1.addWidget(QLabel("端口："))
-        self.spin_matdb_port = QSpinBox()
-        self.spin_matdb_port.setRange(1, 65535)
-        self.spin_matdb_port.setValue(15432)
-        self.spin_matdb_port.setFixedWidth(80)
-        row_matdb1.addWidget(self.spin_matdb_port)
-        row_matdb1.addWidget(QLabel("数据库名："))
-        self.edit_matdb_name = QLineEdit()
-        self.edit_matdb_name.setPlaceholderText("material_index")
-        row_matdb1.addWidget(self.edit_matdb_name, 1)
-        layout_matdb.addLayout(row_matdb1)
-
-        row_matdb2 = QHBoxLayout()
-        row_matdb2.addWidget(QLabel("用户名："))
-        self.edit_matdb_user = QLineEdit()
-        self.edit_matdb_user.setPlaceholderText("postgres")
-        row_matdb2.addWidget(self.edit_matdb_user, 1)
-        row_matdb2.addWidget(QLabel("密码："))
-        self.edit_matdb_pass = QLineEdit()
-        self.edit_matdb_pass.setEchoMode(QLineEdit.Password)
-        self.edit_matdb_pass.setPlaceholderText("数据库密码")
-        row_matdb2.addWidget(self.edit_matdb_pass, 1)
-        layout_matdb.addLayout(row_matdb2)
-
-        row_matdb3 = QHBoxLayout()
-        self.lbl_matdb_status = QLabel("")
-        self.lbl_matdb_status.setObjectName("muted_text")
-        row_matdb3.addWidget(self.lbl_matdb_status, 1)
-        btn_test_matdb = QPushButton("🔌 测试连接")
-        btn_test_matdb.setObjectName("secondary_button")
-        btn_test_matdb.clicked.connect(self._test_matdb_connection)
-        row_matdb3.addWidget(btn_test_matdb)
-        btn_save_matdb = QPushButton("💾 保存数据库配置")
-        btn_save_matdb.setObjectName("secondary_button")
-        btn_save_matdb.clicked.connect(self._save_matdb_config)
-        row_matdb3.addWidget(btn_save_matdb)
-        layout_matdb.addLayout(row_matdb3)
-
-        # 注：CLIP 向量检索已切换为纯远程 embedding 服务模式，
+        # 注：素材向量库 PostgreSQL 数据库配置已移至「平台接入」→「🗄️ 数据库」标签页，此处不再重复。
+        # CLIP 向量检索已切换为纯远程 embedding 服务模式，
         # 服务地址请在「AI 模型配置」→「🖼️ CLIP」标签页中填写。
 
-        scroll_layout.addWidget(group_matdb)
+        scroll_layout.addWidget(scroll_widget)
 
-        # 注：素材目录配置（NAS/本机）已移至「📦 资源配置」页，此处不再重复。
-
-        scroll_area.setWidget(scroll_widget)
         card_layout.addWidget(scroll_area)
 
         layout.addWidget(self.card, 1)
-        self._load_matdb_config()
 
         # Run initial check asynchronously
         self.refresh_status_async()
@@ -667,66 +603,15 @@ class EnvConfigPage(BasePage):
         self.lbl_rustfs_status.setText(f"<font color='{color}'>{icon} {msg}</font>")
 
     # ── 素材向量库数据库配置 ──
+    # 注：数据库配置 UI 已移至「平台接入」→「🗄️ 数据库」标签页，此处仅保留空实现避免外部调用报错。
 
     def _load_matdb_config(self):
-        import json as _json
-        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        try:
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                self.edit_matdb_host.setText(cfg.get("db_host", "192.168.111.17"))
-                self.spin_matdb_port.setValue(int(cfg.get("db_port", 15432)))
-                self.edit_matdb_name.setText(cfg.get("db_name", "material_index"))
-                self.edit_matdb_user.setText(cfg.get("db_user", "postgres"))
-                self.edit_matdb_pass.setText(cfg.get("db_password", ""))
-        except Exception as e:
-            log.error(f"加载素材向量库数据库配置失败: {e}")
+        pass
 
     def _save_matdb_config(self):
-        import json as _json
-        cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-        try:
-            cfg = {}
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-            cfg["db_host"]     = self.edit_matdb_host.text().strip()
-            cfg["db_port"]     = self.spin_matdb_port.value()
-            cfg["db_name"]     = self.edit_matdb_name.text().strip()
-            cfg["db_user"]     = self.edit_matdb_user.text().strip()
-            cfg["db_password"] = self.edit_matdb_pass.text()
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            self.lbl_matdb_status.setText("✅ 配置已保存")
-        except Exception as e:
-            self.lbl_matdb_status.setText(f"❌ 保存失败: {e}")
-            log.error(f"保存素材向量库数据库配置失败: {e}")
+        pass
 
     # ── 旺店通 ERP 配置 ──
 
     def _test_matdb_connection(self):
-        self._save_matdb_config()
-        self.lbl_matdb_status.setText("正在连接…")
-        host = self.edit_matdb_host.text().strip()
-        port = self.spin_matdb_port.value()
-        dbname = self.edit_matdb_name.text().strip()
-        user = self.edit_matdb_user.text().strip()
-        password = self.edit_matdb_pass.text()
-        try:
-            import psycopg2
-            conn = psycopg2.connect(
-                host=host, port=port, dbname=dbname,
-                user=user, password=password, connect_timeout=5
-            )
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM materials")
-            cnt = cur.fetchone()[0]
-            conn.close()
-            self.lbl_matdb_status.setText(
-                f"<font color='#16a34a'>✅ 连接成功，materials 表共 {cnt} 条记录</font>"
-            )
-        except Exception as e:
-            self.lbl_matdb_status.setText(
-                f"<font color='#dc2626'>❌ 连接失败: {e}</font>"
-            )
+        pass

@@ -133,20 +133,20 @@ class AIStatusCheckThread(QThread):
                             )
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
-                                if model:
-                                    try:
-                                        models_data = res.json().get("data", [])
-                                        model_names = [m.get("id") for m in models_data]
-                                        matched = False
-                                        for m_name in model_names:
-                                            if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0] or model.startswith(m_name) or m_name.startswith(model):
-                                                matched = True
-                                                break
-                                        is_cloud = any(x in api_url for x in ("api.deepseek.com", "aliyuncs.com", "openai.com", "openrouter.ai"))
-                                        if matched or is_cloud:
+                                # vision_ok：服务端存在带 vision 能力的模型即为可用
+                                # 模型名由服务端定义，客户端不做字符串匹配
+                                try:
+                                    models_data = res.json().get("data", [])
+                                    for m in models_data:
+                                        caps = m.get("capabilities", [])
+                                        if "vision" in caps:
                                             status["vision_ok"] = True
-                                    except Exception:
-                                        status["vision_ok"] = True
+                                            break
+                                    if not status["vision_ok"]:
+                                        # 兼容无 capabilities 字段的旧服务端
+                                        status["vision_ok"] = bool(models_data)
+                                except Exception:
+                                    status["vision_ok"] = True
                         except Exception:
                             pass
             except Exception:

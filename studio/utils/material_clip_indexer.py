@@ -900,11 +900,14 @@ class _MaterialDB:
                 r = _req.get(f"{server_url.rstrip('/')}/material/config", timeout=3)
                 if r.status_code == 200:
                     server_cfg = r.json()
-                    db_cfg["db_host"] = server_cfg.get("host", db_cfg.get("db_host"))
-                    db_cfg["db_port"] = server_cfg.get("port", db_cfg.get("db_port"))
-                    db_cfg["db_name"] = server_cfg.get("database", db_cfg.get("db_name"))
-                    db_cfg["db_user"] = server_cfg.get("user", db_cfg.get("db_user"))
-                    db_cfg["db_password"] = server_cfg.get("password", db_cfg.get("db_password"))
+                    s_host = server_cfg.get("host", "")
+                    # 服务端返回 localhost 时不可用，跳过（回退本地配置）
+                    if s_host and s_host not in ("localhost", "127.0.0.1", "::1"):
+                        db_cfg["db_host"] = s_host
+                        db_cfg["db_port"] = server_cfg.get("port", db_cfg.get("db_port"))
+                        db_cfg["db_name"] = server_cfg.get("database", db_cfg.get("db_name"))
+                        db_cfg["db_user"] = server_cfg.get("user", db_cfg.get("db_user"))
+                        db_cfg["db_password"] = server_cfg.get("password", db_cfg.get("db_password"))
         except Exception:
             pass  # 回退本地配置
 

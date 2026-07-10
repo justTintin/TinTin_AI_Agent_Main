@@ -79,6 +79,14 @@ class ServicesMixin:
                 self.vox_mode_combo.setCurrentIndex(idx)
             self.vox_timesteps_spin.setValue(self.ai_config.get("vox_timesteps", 20))
             self.vox_cfg_spin.setValue(self.ai_config.get("vox_cfg", 2.0))
+            # VoxCPM 来源模式初始化（触发 _on_vox_source_changed 设置控件可见性）
+            vox_source = self.ai_config.get("vox_source", "remote")
+            sidx = self.vox_source_combo.findData(vox_source)
+            if sidx >= 0:
+                self.vox_source_combo.setCurrentIndex(sidx)
+            else:
+                self.vox_source_combo.setCurrentIndex(1)  # 默认 remote
+            self._on_vox_source_changed(self.vox_source_combo.currentIndex())
 
     def _save_voxcpm_config_silent(self):
         config = configparser.ConfigParser()
@@ -100,6 +108,7 @@ class ServicesMixin:
                     url = f"http://127.0.0.1:{port}/v1/tts"
                     self.vox_api_url_input.setText(url)
                 self.ai_config["vox_api_url"] = url
+                self.ai_config["vox_source"] = self.vox_source_combo.currentData()
                 self.ai_config["vox_mode"] = self.vox_mode_combo.currentData()
                 self.ai_config["vox_timesteps"] = self.vox_timesteps_spin.value()
                 self.ai_config["vox_cfg"] = self.vox_cfg_spin.value()
@@ -121,6 +130,24 @@ class ServicesMixin:
             self.refresh_llm_page_status()
         else:
             QMessageBox.critical(self, "错误", "保存 VoxCPM 配置失败，请检查文件权限。")
+
+    def _on_vox_source_changed(self, index):
+        """VoxCPM 来源模式切换：local 显示本地进程管理控件，remote 隐藏只留 API 地址。"""
+        is_local = (self.vox_source_combo.currentData() == "local")
+        # 本地专属控件：仅 local 模式可见
+        for attr in ("vox_mode_combo", "edit_voxcpm_model_path", "_browse_vox_btn",
+                     "spin_voxcpm_port", "btn_toggle_voxcpm"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setVisible(is_local)
+        # 推理步数/CFG 在两种模式下都有意义，保留可见
+        # API 地址 placeholder 提示
+        if is_local:
+            self.vox_api_url_input.setPlaceholderText("http://127.0.0.1:7861/v1/tts")
+        else:
+            self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts")
+            # remote 模式确保走 API（cli 是本地专属）
+            self.vox_mode_combo.setCurrentData("api")
 
     def toggle_voxcpm_service(self):
         is_active = False

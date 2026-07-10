@@ -141,6 +141,7 @@ class AIConfigMixin:
             "llm_vision_model": "",
             "ollama_mode": "remote",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
+            "vox_source": "remote",
             "vox_mode": "api",
             "vox_timesteps": 20,
             "vox_cfg": 2.0

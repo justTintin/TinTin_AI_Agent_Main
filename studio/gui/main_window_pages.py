@@ -542,6 +542,9 @@ class PageSetupMixin:
         # ───── Tab 2: VoxCPM ─────
         p3 = _page(); l3 = QVBoxLayout(p3); l3.setContentsMargins(16,20,16,16); l3.setSpacing(10)
         g3 = QGroupBox("🗣️ 声音克隆 VoxCPM"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
+        _rl(lg3, "VoxCPM 来源:", lambda r: (setattr(self,'vox_source_combo',QComboBox()), self.vox_source_combo.setView(QListView()),
+            self.vox_source_combo.addItem("内置（本地）","local"), self.vox_source_combo.addItem("远程（外部已运行）","remote"),
+            self.vox_source_combo.currentIndexChanged.connect(self._on_vox_source_changed), r.addWidget(self.vox_source_combo)))
         _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://127.0.0.1:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         _rl(lg3, "调用方式:", lambda r: (setattr(self,'vox_mode_combo',QComboBox()), self.vox_mode_combo.setView(QListView()),
             self.vox_mode_combo.addItem("API 接口服务调用","api"), self.vox_mode_combo.addItem("本地命令行直接调用","cli"), r.addWidget(self.vox_mode_combo)))

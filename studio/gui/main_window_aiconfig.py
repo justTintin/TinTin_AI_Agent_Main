@@ -654,11 +654,10 @@ class AIConfigMixin:
         self.lbl_material_server_status.setText("⏳ 测试中...")
         self.lbl_material_server_status.setStyleSheet("color: #facc15;")
         try:
-            r = _req.get(f"{url.rstrip('/')}/material/stats", timeout=5)
+            r = _req.get(f"{url.rstrip('/')}/material/config", timeout=5)
             if r.status_code == 200:
                 d = r.json()
-                total = d.get("total", "?")
-                self.lbl_material_server_status.setText(f"✅ 连接成功，素材共 {total} 条")
+                self.lbl_material_server_status.setText(f"✅ 连接成功")
                 self.lbl_material_server_status.setStyleSheet("color: #4ade80;")
             else:
                 self.lbl_material_server_status.setText(f"❌ HTTP {r.status_code}")

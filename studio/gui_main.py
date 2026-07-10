@@ -181,52 +181,54 @@ from gui.threads import SystemMonitorThread, ComfyWSThread, AIStatusCheckThread
 
 
 class _StatsCollector(QThread):
-    """后台线程：采集 CPU/RAM/网速和 GPU 显存，不阻塞主线程。"""
-    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up_bytes/s, down_bytes/s, gpu_vram
+    """后台线程：从远程服务器 /health 采集 CPU/RAM/GPU 资源状态。"""
+    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up, down, gpu_vram
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = True
-        self._last_net = None
-        self._last_t = time.time()
+
+    def _get_server_url(self):
+        """从 ai_config 读远程服务地址。"""
+        try:
+            import json as _json
+            from config.paths import AI_CONFIG_FILE
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+                    cfg = _json.load(f)
+                url = cfg.get("llm_vision_api_url", "").strip()
+                if url:
+                    return url.rstrip("/")
+        except Exception:
+            pass
+        return ""
 
     def run(self):
+        import requests as _req
         while self._running:
             try:
-                cpu = 0.0
-                ram = 0.0
+                base = self._get_server_url()
+                cpu = ram = 0.0
                 up = down = 0.0
-                if psutil:
+                gpu_vram = "--"
+
+                if base:
                     try:
-                        cpu = psutil.cpu_percent(interval=None)
-                        ram = psutil.virtual_memory().percent
-                        curr_net = psutil.net_io_counters()
-                        curr_t = time.time()
-                        dt = curr_t - self._last_t
-                        if dt > 0 and self._last_net:
-                            up   = (curr_net.bytes_sent - self._last_net.bytes_sent) / dt
-                            down = (curr_net.bytes_recv - self._last_net.bytes_recv) / dt
-                        self._last_net = curr_net
-                        self._last_t = curr_t
+                        resp = _req.get(f"{base}/health", timeout=4)
+                        if resp.status_code == 200:
+                            d = resp.json()
+                            cpu = float(d.get("cpu", {}).get("percent", 0))
+                            mem = d.get("memory", {})
+                            ram = float(mem.get("percent", 0))
+                            gpu = d.get("gpu")
+                            if gpu:
+                                vram_used = float(gpu.get("vram_used_mb", 0)) / 1024.0
+                                vram_total = float(gpu.get("vram_total_mb", 0)) / 1024.0
+                                gpu_util = int(gpu.get("gpu_util_percent", 0))
+                                gpu_vram = f"{vram_used:.1f}G/{vram_total:.1f}G {gpu_util}%"
                     except Exception:
                         pass
-                
-                # 安全查询 GPU 显存，进程隔离，避免使用 pynvml 导致 C 层面崩溃
-                gpu_vram = "--"
-                try:
-                    out = subprocess.check_output(
-                        ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-                        stderr=subprocess.DEVNULL,
-                        timeout=2
-                    ).decode(errors="ignore").strip()
-                    parts = [p.strip() for p in out.split(",")]
-                    if len(parts) >= 2:
-                        used_gb = float(parts[0]) / 1024.0
-                        total_gb = float(parts[1]) / 1024.0
-                        gpu_vram = f"{used_gb:.1f}G/{total_gb:.1f}G"
-                except Exception:
-                    pass
-                
+
                 self.stats_ready.emit(cpu, ram, up, down, gpu_vram)
             except Exception:
                 pass
@@ -304,12 +306,10 @@ class SystemStatusOverlay(QWidget):
         self.clone_lbl.setText(f"克隆: {_color(status.get('clone_ok'))}")
 
     def _on_stats_ready(self, cpu, ram, up, down, gpu_vram):
-        self.cpu_lbl.setText(f"CPU: <font color='#facc15'>{cpu:.1f}%</font>")
-        self.ram_lbl.setText(f"RAM: <font color='#facc15'>{ram:.1f}%</font>")
-        self.net_lbl.setText(
-            f"NET: <font color='#facc15'>↑{self.format_speed(up)} ↓{self.format_speed(down)}</font>"
-        )
-        self.gpu_lbl.setText(f"VRAM: <font color='#facc15'>{gpu_vram}</font>")
+        self.cpu_lbl.setText(f"CPU: <font color='#facc15'>{cpu:.0f}%</font>")
+        self.ram_lbl.setText(f"RAM: <font color='#facc15'>{ram:.0f}%</font>")
+        self.net_lbl.setText(f"<font color='#facc15'>{gpu_vram}</font>")
+        self.gpu_lbl.setText(f"<font color='#8b949e'>🖥️ 服务器</font>")
 
     def update_stats(self):
         pass  # kept for compatibility

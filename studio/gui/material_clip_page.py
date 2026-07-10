@@ -22,6 +22,7 @@ from utils.platform_utils import open_path
 from utils.logger_utils import log
 from config.paths import CONFIG_DIR
 from PySide6.QtWidgets import (
+    QApplication,
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QFrame, QSplitter, QFileDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QProgressBar, QAbstractItemView,

@@ -510,8 +510,11 @@ class _ReAnalyzeSelectedWorker(BaseWorker):
 
     def do_work(self):
         from utils.material_clip_indexer import MaterialClipIndexer
+        from utils.logger_utils import log as _log
+        _log.info("[ReAnalyze] do_work() 开始执行")
         ok = fail = 0
         total = len(self.materials)
+        _log.info(f"[ReAnalyze] 共 {total} 个素材")
         if total == 0:
             self.finished.emit(0, 0)
             return

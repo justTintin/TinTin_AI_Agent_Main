@@ -14,13 +14,18 @@ from utils.logger_utils import log
 
 
 def _read_vox_url() -> str:
-    """从 ai_config 读 vox_api_url。"""
+    """从 ai_config 读 vox_api_url。优先 vox_api_url，否则从 compute_server_url + /voxcpm/tts 派生。"""
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
             with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            return cfg.get("vox_api_url", "").strip()
+            url = (cfg.get("vox_api_url") or "").strip()
+            if not url:
+                base = (cfg.get("compute_server_url") or "").strip()
+                if base:
+                    url = base.rstrip("/") + "/voxcpm/tts"
+            return url
     except Exception:
         pass
     return ""

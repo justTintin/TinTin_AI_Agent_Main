@@ -197,7 +197,7 @@ class _StatsCollector(QThread):
             if os.path.isfile(AI_CONFIG_FILE):
                 with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                     cfg = _json.load(f)
-                url = cfg.get("llm_vision_api_url", "").strip()
+                url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url") or "").strip()
                 if url:
                     return url.rstrip("/")
         except Exception:

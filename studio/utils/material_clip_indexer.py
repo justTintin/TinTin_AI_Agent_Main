@@ -347,26 +347,32 @@ def _load_config() -> dict:
 
 
 def _read_clip_api_url() -> str:
-    """从 ai_config.json 读取 clip_api_url（远程 CLIP embedding 服务地址）。"""
+    """从 ai_config.json 读取 clip embedding 地址。优先 clip_api_url，否则从 compute_server_url 派生。"""
     ai_cfg_path = os.path.join(CONFIG_DIR, "ai_config.json")
     try:
         if os.path.isfile(ai_cfg_path):
             with open(ai_cfg_path, encoding="utf-8") as f:
                 ac = json.load(f)
-            return (ac.get("clip_api_url") or "").strip()
+            url = (ac.get("clip_api_url") or "").strip()
+            if not url:
+                url = (ac.get("compute_server_url") or "").strip()
+            return url
     except Exception as e:
         log.warning(f"读取 ai_config.json 中 clip_api_url 失败: {e}")
     return ""
 
 
 def _read_material_server_url() -> str:
-    """从 ai_config.json 读取 material_api_url（素材服务端地址）。"""
+    """从 ai_config.json 读取素材服务地址。优先 material_api_url，否则从 compute_server_url 派生。"""
     ai_cfg_path = os.path.join(CONFIG_DIR, "ai_config.json")
     try:
         if os.path.isfile(ai_cfg_path):
             with open(ai_cfg_path, encoding="utf-8") as f:
                 ac = json.load(f)
-            return (ac.get("material_api_url") or "").strip()
+            url = (ac.get("material_api_url") or "").strip()
+            if not url:
+                url = (ac.get("compute_server_url") or "").strip()
+            return url
     except Exception as e:
         log.warning(f"读取 ai_config.json 中 material_api_url 失败: {e}")
     return ""

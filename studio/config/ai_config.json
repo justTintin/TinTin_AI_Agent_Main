@@ -17,5 +17,6 @@
     "vision_concurrency": 2,
     "ollama_mode": "remote",
     "whisper_api_url": "http://192.168.111.18:8000",
-    "clip_api_url": "http://192.168.111.18:8000"
+    "clip_api_url": "http://192.168.111.18:8000",
+    "vox_source": "remote"
 }

@@ -359,6 +359,19 @@ def _read_clip_api_url() -> str:
     return ""
 
 
+def _read_material_server_url() -> str:
+    """从 ai_config.json 读取 material_api_url（素材服务端地址）。"""
+    ai_cfg_path = os.path.join(CONFIG_DIR, "ai_config.json")
+    try:
+        if os.path.isfile(ai_cfg_path):
+            with open(ai_cfg_path, encoding="utf-8") as f:
+                ac = json.load(f)
+            return (ac.get("material_api_url") or "").strip()
+    except Exception as e:
+        log.warning(f"读取 ai_config.json 中 material_api_url 失败: {e}")
+    return ""
+
+
 def _get_video_meta(file_path: str, ffmpeg_path: Optional[str]) -> tuple[float, int, int]:
     """鐢 ffprobe 鑾峰彇 (鏃堕暱绉, 瀹, 楂)锛屽け璐ヨ繑鍥 (0, 0, 0)銆"""
     ffprobe = (ffmpeg_path or "ffmpeg").replace("ffmpeg", "ffprobe")
@@ -871,10 +884,27 @@ class _MaterialDB:
             raise RuntimeError(
                 f"缺少依赖: {e}\n请安装: pip install psycopg2-binary pgvector"
             ) from e
-        c = self._cfg
+
+        # 优先从服务端动态拉取 PG 配置；不可达时回退本地文件
+        db_cfg = self._cfg.copy()
+        try:
+            import requests as _req
+            server_url = _read_material_server_url()
+            if server_url:
+                r = _req.get(f"{server_url.rstrip('/')}/material/config", timeout=3)
+                if r.status_code == 200:
+                    server_cfg = r.json()
+                    db_cfg["db_host"] = server_cfg.get("host", db_cfg.get("db_host"))
+                    db_cfg["db_port"] = server_cfg.get("port", db_cfg.get("db_port"))
+                    db_cfg["db_name"] = server_cfg.get("database", db_cfg.get("db_name"))
+                    db_cfg["db_user"] = server_cfg.get("user", db_cfg.get("db_user"))
+                    db_cfg["db_password"] = server_cfg.get("password", db_cfg.get("db_password"))
+        except Exception:
+            pass  # 回退本地配置
+
         self._conn = psycopg2.connect(
-            host=c["db_host"], port=c["db_port"],
-            dbname=c["db_name"], user=c["db_user"], password=c["db_password"],
+            host=db_cfg["db_host"], port=db_cfg["db_port"],
+            dbname=db_cfg["db_name"], user=db_cfg["db_user"], password=db_cfg["db_password"],
             connect_timeout=10,
         )
         # register_vector 闇瑕佸湪浜嬪姟澶栬皟鐢锛屽繀椤诲厛鎵撳紑 autocommit

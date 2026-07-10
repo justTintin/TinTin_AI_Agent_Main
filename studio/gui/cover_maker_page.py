@@ -28,6 +28,7 @@ from PySide6.QtCore import Qt, Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.media_library_manager import MediaLibraryManager
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
 
@@ -247,13 +248,13 @@ class CoverMakerPage(BasePage):
         lay.addWidget(self.chk_safe)
         self.lbl_src = QLabel("（未选模板/视频）"); self.lbl_src.setObjectName("muted_text")
         lay.addWidget(self.lbl_src, 1)
-        b3 = QPushButton("🤖 文案→标题/副标题"); b3.setObjectName("secondary_button"); b3.clicked.connect(self._ai_suggest)
+        b3 = mdi_button("文案→标题/副标题", "robot"); b3.setObjectName("secondary_button"); b3.clicked.connect(self._ai_suggest)
         lay.addWidget(b3)
-        b5 = QPushButton("🎯 模板→复刻构图"); b5.setObjectName("secondary_button"); b5.clicked.connect(self._replicate_layout)
+        b5 = mdi_button("模板→复刻构图", "search"); b5.setObjectName("secondary_button"); b5.clicked.connect(self._replicate_layout)
         lay.addWidget(b5)
-        b4 = QPushButton("💾 导出当前"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._export)
+        b4 = mdi_button("导出当前", "save"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._export)
         lay.addWidget(b4)
-        b6 = QPushButton("💾 导出横+竖"); b6.setObjectName("primary_button"); b6.clicked.connect(self._export_both)
+        b6 = mdi_button("导出横+竖", "save"); b6.setObjectName("primary_button"); b6.clicked.connect(self._export_both)
         lay.addWidget(b6)
         return card
 
@@ -265,9 +266,9 @@ class CoverMakerPage(BasePage):
         self.layer_list.currentRowChanged.connect(self._on_layer_selected)
         lay.addWidget(self.layer_list, 1)
         r1 = QHBoxLayout()
-        ba = QPushButton("➕图片"); ba.setObjectName("secondary_button"); ba.clicked.connect(lambda: self._add_layer("image"))
+        ba = mdi_button("图片", "plus"); ba.setObjectName("secondary_button"); ba.clicked.connect(lambda: self._add_layer("image"))
         r1.addWidget(ba)
-        bt = QPushButton("➕文字"); bt.setObjectName("secondary_button"); bt.clicked.connect(lambda: self._add_layer("text"))
+        bt = mdi_button("文字", "plus"); bt.setObjectName("secondary_button"); bt.clicked.connect(lambda: self._add_layer("text"))
         r1.addWidget(bt)
         lay.addLayout(r1)
         r2 = QHBoxLayout()

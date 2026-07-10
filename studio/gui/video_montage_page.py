@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QListView, QMenu)
 from PySide6.QtCore import Signal, QThread, Qt, QMimeData
 from PySide6.QtGui import QDrag, QAction
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from config.paths import APPS_DIR
@@ -318,7 +319,7 @@ class ScriptCompareDialog(QDialog):
         btn_box = QHBoxLayout()
         btn_box.addStretch()
         
-        btn_use_original = QPushButton("⏪ 还原为原始文案")
+        btn_use_original = mdi_button("还原为原始文案", "backward")
         btn_use_original.setStyleSheet("""
             QPushButton {
                 background-color: #4b5563;
@@ -330,7 +331,7 @@ class ScriptCompareDialog(QDialog):
         btn_use_original.clicked.connect(self._use_original)
         btn_box.addWidget(btn_use_original)
         
-        btn_save = QPushButton("💾 保存修改")
+        btn_save = mdi_button("保存修改", "save")
         btn_save.clicked.connect(self.accept)
         btn_box.addWidget(btn_save)
         
@@ -409,11 +410,11 @@ class DubbedVideosDialog(QDialog):
             name_lbl.setToolTip(f"原视频: {orig_path}\n配音视频: {dubbed_path}")
             item_layout.addWidget(name_lbl, 1)
 
-            btn_play = QPushButton("▶️ 播放视频")
+            btn_play = mdi_button("播放视频", "play")
             btn_play.clicked.connect(lambda checked=False, path=dubbed_path: self._play_video(path))
             item_layout.addWidget(btn_play)
 
-            btn_locate = QPushButton("📂 打开所在目录")
+            btn_locate = mdi_button("打开所在目录", "folder")
             btn_locate.clicked.connect(lambda checked=False, path=dubbed_path: self._locate_video(path))
             item_layout.addWidget(btn_locate)
 
@@ -424,7 +425,7 @@ class DubbedVideosDialog(QDialog):
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
 
-        btn_open_all = QPushButton("📂 打开整体输出文件夹")
+        btn_open_all = mdi_button("打开整体输出文件夹", "folder")
         if results:
             btn_open_all.clicked.connect(lambda checked=False, path=out_dir: self._open_dir(path))
         footer_layout.addWidget(btn_open_all)
@@ -508,11 +509,11 @@ class FinalMixedVideosDialog(QDialog):
             name_lbl.setToolTip(f"输出视频: {path}")
             item_layout.addWidget(name_lbl, 1)
 
-            btn_play = QPushButton("▶️ 播放视频")
+            btn_play = mdi_button("播放视频", "play")
             btn_play.clicked.connect(lambda checked=False, p=path: self._play_video(p))
             item_layout.addWidget(btn_play)
 
-            btn_locate = QPushButton("📂 打开所在目录")
+            btn_locate = mdi_button("打开所在目录", "folder")
             btn_locate.clicked.connect(lambda checked=False, p=path: self._locate_video(p))
             item_layout.addWidget(btn_locate)
 
@@ -523,7 +524,7 @@ class FinalMixedVideosDialog(QDialog):
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
 
-        btn_open_all = QPushButton("📂 打开整体输出文件夹")
+        btn_open_all = mdi_button("打开整体输出文件夹", "folder")
         if paths:
             btn_open_all.clicked.connect(lambda checked=False, p=out_dir: self._open_dir(p))
         footer_layout.addWidget(btn_open_all)
@@ -3090,7 +3091,7 @@ class VideoMontagePage(BasePage):
             lbl_dep.setStyleSheet("color: #2ecc71; font-weight: bold;")
             dep_layout.addWidget(lbl_dep)
         else:
-            self.btn_install_deps = QPushButton("🔧 安装智能分割依赖")
+            self.btn_install_deps = mdi_button("安装智能分割依赖", "wrench")
             self.btn_install_deps.setObjectName("secondary_button")
             self.btn_install_deps.clicked.connect(self._install_scenedetect)
             dep_layout.addWidget(self.btn_install_deps)
@@ -3098,12 +3099,12 @@ class VideoMontagePage(BasePage):
         split_row.addWidget(self.dep_status_widget)
 
         # 仅保留批量分割入口（单条智能分割按钮隐藏，仅用于兼容旧逻辑）
-        self.btn_split = QPushButton("✂️ 开始智能镜头分割")
+        self.btn_split = mdi_button("开始智能镜头分割", "cut")
         self.btn_split.setObjectName("action_button")
         self.btn_split.setFixedHeight(35)
         self.btn_split.setVisible(False)
 
-        self.btn_split_all = QPushButton("📚 批量分割镜头")
+        self.btn_split_all = mdi_button("批量分割镜头", "book")
         self.btn_split_all.setObjectName("action_button")
         self.btn_split_all.setFixedHeight(35)
         self.btn_split_all.setToolTip("对列表中所有视频依次进行镜头分割（不自动转写/描述）")
@@ -3121,7 +3122,7 @@ class VideoMontagePage(BasePage):
         self.spin_highlight_sec.setToolTip("从每个视频里挑出多长的精华片段")
         split_row.addWidget(self.spin_highlight_sec)
 
-        self.btn_pick_highlights = QPushButton("🌟 批量选精华")
+        self.btn_pick_highlights = mdi_button("批量选精华", "star")
         self.btn_pick_highlights.setObjectName("secondary_button")
         self.btn_pick_highlights.setFixedHeight(35)
         self.btn_pick_highlights.setToolTip(
@@ -3159,13 +3160,13 @@ class VideoMontagePage(BasePage):
 
         # Navigation row (Open split clips directory button moved here!)
         nav_row = QHBoxLayout()
-        self.btn_open_splits_dir = QPushButton("📂 打开已分割镜头目录")
+        self.btn_open_splits_dir = mdi_button("打开已分割镜头目录", "folder")
         self.btn_open_splits_dir.setObjectName("secondary_button")
         self.btn_open_splits_dir.clicked.connect(self._open_splits_dir)
         nav_row.addWidget(self.btn_open_splits_dir)
         
         nav_row.addStretch()
-        self.btn_next_to_step_2 = QPushButton("下一步：镜头重组 ➔")
+        self.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.btn_next_to_step_2.setObjectName("primary_button")
         self.btn_next_to_step_2.setEnabled(True)
         self.btn_next_to_step_2.clicked.connect(lambda: self._go_to_step(1))
@@ -3360,7 +3361,7 @@ class VideoMontagePage(BasePage):
 
         row_params2.addStretch()
 
-        self.btn_assemble_video = QPushButton("🎬 镜头重组")
+        self.btn_assemble_video = mdi_button("镜头重组", "video")
         self.btn_assemble_video.setObjectName("action_button")
         self.btn_assemble_video.setFixedHeight(35)
         self.btn_assemble_video.clicked.connect(self._start_assemble_video)
@@ -3456,7 +3457,7 @@ class VideoMontagePage(BasePage):
         # Control buttons row
         player_controls = QHBoxLayout()
         player_controls.setSpacing(6)
-        self.btn_preview_play = QPushButton("▶")
+        self.btn_preview_play = mdi_button("", "play")
         self.btn_preview_play.setFixedWidth(44)
         self.btn_preview_play.setFixedHeight(24)
         self.btn_preview_play.setStyleSheet("padding: 0px; font-size: 14px;")
@@ -3507,13 +3508,13 @@ class VideoMontagePage(BasePage):
 
         # Navigation row
         nav_row = QHBoxLayout()
-        btn_prev = QPushButton("⇠ 上一步：镜头分割")
+        btn_prev = mdi_button("上一步：镜头分割", "left")
         btn_prev.setObjectName("secondary_button")
         btn_prev.clicked.connect(lambda: self._go_to_step(0))
         nav_row.addWidget(btn_prev)
         nav_row.addStretch()
 
-        self.btn_next_to_step_3 = QPushButton("下一步：克隆口播 ➔")
+        self.btn_next_to_step_3 = mdi_button("下一步：克隆口播", "right")
         self.btn_next_to_step_3.setObjectName("primary_button")
         self.btn_next_to_step_3.setEnabled(True)
         self.btn_next_to_step_3.clicked.connect(lambda: self._go_to_step(2))
@@ -3565,7 +3566,7 @@ class VideoMontagePage(BasePage):
         self.ref_audio_combo.currentIndexChanged.connect(self._on_ref_audio_combo_changed)
         row_voice.addWidget(self.ref_audio_combo)
 
-        self.btn_play_ref = QPushButton("🔊")
+        self.btn_play_ref = mdi_button("", "volume")
         self.btn_play_ref.setToolTip("播放人声样本")
         self.btn_play_ref.setStyleSheet("padding: 0px; font-size: 14px;")
         self.btn_play_ref.setFixedWidth(30)
@@ -3574,7 +3575,7 @@ class VideoMontagePage(BasePage):
         self.btn_play_ref.clicked.connect(self._play_ref_audio)
         row_voice.addWidget(self.btn_play_ref)
 
-        self.btn_upload_ref = QPushButton("📂 上传声音")
+        self.btn_upload_ref = mdi_button("上传声音", "folder")
         self.btn_upload_ref.setToolTip("上传本地音频文件作为参考声音 (wav/mp3/m4a)")
         self.btn_upload_ref.setObjectName("secondary_button")
         self.btn_upload_ref.setFixedHeight(30)
@@ -3678,13 +3679,13 @@ class VideoMontagePage(BasePage):
         row_table_title.addWidget(lbl_title)
         row_table_title.addStretch()
 
-        self.btn_ai_rewrite_settings = QPushButton("⚙️ 文案生成设置")
+        self.btn_ai_rewrite_settings = mdi_button("文案生成设置", "gear")
         self.btn_ai_rewrite_settings.setObjectName("secondary_button")
         self.btn_ai_rewrite_settings.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         self.btn_ai_rewrite_settings.clicked.connect(self._show_ai_rewrite_settings)
         row_table_title.addWidget(self.btn_ai_rewrite_settings)
 
-        self.btn_batch_ai_rewrite = QPushButton("✨ 一键AI修改全部文案")
+        self.btn_batch_ai_rewrite = mdi_button("一键AI修改全部文案", "sparkles")
         self.btn_batch_ai_rewrite.setObjectName("action_button")
         self.btn_batch_ai_rewrite.setStyleSheet("padding: 4px 12px; font-size: 12px; font-weight: bold;")
         self.btn_batch_ai_rewrite.clicked.connect(self._batch_ai_rewrite_scripts)
@@ -3741,13 +3742,13 @@ class VideoMontagePage(BasePage):
 
         # 7. Action buttons row
         row_actions = QHBoxLayout()
-        self.btn_synthesize_voice = QPushButton("🗣️ 开始批量克隆人声合成")
+        self.btn_synthesize_voice = mdi_button("开始批量克隆人声合成", "voice")
         self.btn_synthesize_voice.setObjectName("action_button")
         self.btn_synthesize_voice.setFixedHeight(35)
         self.btn_synthesize_voice.clicked.connect(self._start_synthesize_voice)
         row_actions.addWidget(self.btn_synthesize_voice, 2)
 
-        self.btn_dub_videos = QPushButton("🎬 开始给视频配音 (替换原声)")
+        self.btn_dub_videos = mdi_button("开始给视频配音 (替换原声)", "video")
         self.btn_dub_videos.setObjectName("primary_button")
         self.btn_dub_videos.setFixedHeight(35)
         self.btn_dub_videos.clicked.connect(self._start_dubbing_videos)
@@ -3759,13 +3760,13 @@ class VideoMontagePage(BasePage):
 
         # Navigation row
         nav_row = QHBoxLayout()
-        btn_prev = QPushButton("⇠ 上一步：镜头重组")
+        btn_prev = mdi_button("上一步：镜头重组", "left")
         btn_prev.setObjectName("secondary_button")
         btn_prev.clicked.connect(lambda: self._go_to_step(1))
         nav_row.addWidget(btn_prev)
         nav_row.addStretch()
 
-        self.btn_next_to_step_4 = QPushButton("下一步：特效包装 ➔")
+        self.btn_next_to_step_4 = mdi_button("下一步：特效包装", "right")
         self.btn_next_to_step_4.setObjectName("primary_button")
         self.btn_next_to_step_4.setEnabled(True)
         self.btn_next_to_step_4.clicked.connect(lambda: self._go_to_step(3))
@@ -3793,13 +3794,13 @@ class VideoMontagePage(BasePage):
         row_select_video.addWidget(QLabel("📹 待合成最终视频列表:"))
         row_select_video.addStretch()
         
-        btn_add_mix_vid = QPushButton("➕ 选择添加视频")
+        btn_add_mix_vid = mdi_button("选择添加视频", "plus")
         btn_add_mix_vid.setObjectName("secondary_button")
         btn_add_mix_vid.setFixedHeight(28)
         btn_add_mix_vid.clicked.connect(self._add_mix_videos)
         row_select_video.addWidget(btn_add_mix_vid)
         
-        btn_clear_mix_vid = QPushButton("🗑️ 清空列表")
+        btn_clear_mix_vid = mdi_button("清空列表", "trash")
         btn_clear_mix_vid.setObjectName("secondary_button")
         btn_clear_mix_vid.setFixedHeight(28)
         btn_clear_mix_vid.clicked.connect(self._clear_mix_videos)
@@ -3849,14 +3850,14 @@ class VideoMontagePage(BasePage):
         # BGM Audition / Preview Row
         row_bgm_play = QHBoxLayout()
         
-        self.btn_bgm_play = QPushButton("▶️ 播放")
+        self.btn_bgm_play = mdi_button("播放", "play")
         self.btn_bgm_play.setObjectName("secondary_button")
         self.btn_bgm_play.setFixedWidth(80)
         self.btn_bgm_play.setFixedHeight(32)
         self.btn_bgm_play.clicked.connect(self._toggle_bgm_play)
         row_bgm_play.addWidget(self.btn_bgm_play)
         
-        self.btn_bgm_stop = QPushButton("⏹️ 停止")
+        self.btn_bgm_stop = mdi_button("停止", "stop")
         self.btn_bgm_stop.setObjectName("secondary_button")
         self.btn_bgm_stop.setFixedWidth(80)
         self.btn_bgm_stop.setFixedHeight(32)
@@ -3898,7 +3899,7 @@ class VideoMontagePage(BasePage):
         card_layout.addLayout(row_bgm_play)
 
         # Run Final mix
-        self.btn_final_assemble = QPushButton("🎉 开始智能音视配乐一键合成")
+        self.btn_final_assemble = mdi_button("开始智能音视配乐一键合成", "celebration")
         self.btn_final_assemble.setObjectName("action_button")
         self.btn_final_assemble.setFixedHeight(40)
         self.btn_final_assemble.clicked.connect(self._start_final_mix)
@@ -3923,7 +3924,7 @@ class VideoMontagePage(BasePage):
         self.final_video_list.itemDoubleClicked.connect(self._preview_final_video)
         left_vbox.addWidget(self.final_video_list)
 
-        self.btn_open_final_dir = QPushButton("📂 打开视频输出目录")
+        self.btn_open_final_dir = mdi_button("打开视频输出目录", "folder")
         self.btn_open_final_dir.setObjectName("secondary_button")
         self.btn_open_final_dir.setEnabled(False)
         self.btn_open_final_dir.clicked.connect(self._open_output_dir)
@@ -3961,7 +3962,7 @@ class VideoMontagePage(BasePage):
 
         # Navigation row
         nav_row = QHBoxLayout()
-        btn_prev = QPushButton("⇠ 上一步：克隆人声")
+        btn_prev = mdi_button("上一步：克隆人声", "left")
         btn_prev.setObjectName("secondary_button")
         btn_prev.clicked.connect(lambda: self._go_to_step(2))
         nav_row.addWidget(btn_prev)
@@ -4664,7 +4665,7 @@ class VideoMontagePage(BasePage):
             # Build action buttons
             action_widgets = []
 
-            btn_play = QPushButton("🔊")
+            btn_play = mdi_button("", "volume")
             btn_play.setToolTip("播放克隆的声音")
             btn_play.setStyleSheet("padding: 0px; font-size: 12px;")
             btn_play.setFixedWidth(28)
@@ -4673,7 +4674,7 @@ class VideoMontagePage(BasePage):
             btn_play.clicked.connect(lambda checked=False, path=filepath: self._on_btn_play_clicked(path))
             action_widgets.append(btn_play)
 
-            btn_export = QPushButton("💾")
+            btn_export = mdi_button("", "save")
             btn_export.setToolTip("导出该克隆声音")
             btn_export.setStyleSheet("padding: 0px; font-size: 12px;")
             btn_export.setFixedWidth(28)
@@ -4682,7 +4683,7 @@ class VideoMontagePage(BasePage):
             btn_export.clicked.connect(lambda checked=False, path=filepath: self._on_btn_export_clicked(path))
             action_widgets.append(btn_export)
 
-            btn_compare = QPushButton("⚖️")
+            btn_compare = mdi_button("", "balance-scale")
             btn_compare.setToolTip("对比与编辑文案")
             btn_compare.setStyleSheet("padding: 0px; font-size: 12px;")
             btn_compare.setFixedWidth(28)
@@ -4690,7 +4691,7 @@ class VideoMontagePage(BasePage):
             btn_compare.clicked.connect(lambda checked=False, idx=i: self._on_btn_compare_clicked(idx))
             action_widgets.append(btn_compare)
 
-            btn_regen = QPushButton("🔄")
+            btn_regen = mdi_button("", "refresh")
             btn_regen.setToolTip("仅重新生成该声音")
             btn_regen.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_regen.setFixedWidth(28)
@@ -4700,7 +4701,7 @@ class VideoMontagePage(BasePage):
 
             # Length mode toggle button (video-based vs audio-based)
             current_mode = self.voice_length_mode.get(filepath, "video")
-            btn_length_mode = QPushButton("🎬" if current_mode == "video" else "🎙")
+            btn_length_mode = mdi_button("", "video" if current_mode == "video" else "audio")
             btn_length_mode.setToolTip(
                 "以视频长度为准（点击切换为以音频长度为准）" if current_mode == "video"
                 else "以音频长度为准，视频不够用最后一帧补足（点击切回）"
@@ -4714,7 +4715,7 @@ class VideoMontagePage(BasePage):
                     current = self.voice_length_mode.get(fp, "video")
                     new_mode = "audio" if current == "video" else "video"
                     self.voice_length_mode[fp] = new_mode
-                    btn.setText("🎙" if new_mode == "audio" else "🎬")
+                    btn.setIcon(mdi_icon("audio" if new_mode == "audio" else "video"))
                     btn.setToolTip(
                         "以音频长度为准，视频不够用最后一帧补足（点击切回）" if new_mode == "audio"
                         else "以视频长度为准（点击切换为以音频长度为准）"
@@ -4725,7 +4726,7 @@ class VideoMontagePage(BasePage):
             action_widgets.append(btn_length_mode)
 
             # Play original video button (next to filename in top row)
-            btn_play_original = QPushButton("▶")
+            btn_play_original = mdi_button("", "play")
             btn_play_original.setToolTip("播放原视频")
             btn_play_original.setStyleSheet("padding: 0px; font-size: 10px;")
             btn_play_original.setFixedWidth(24)
@@ -4735,7 +4736,7 @@ class VideoMontagePage(BasePage):
             # Play dubbed video button (last action button)
             dubbed_path = self.dubbed_video_paths.get(filepath, "")
             has_dubbed = bool(dubbed_path and os.path.exists(dubbed_path))
-            btn_play_dubbed = QPushButton("📽")
+            btn_play_dubbed = mdi_button("", "projector")
             btn_play_dubbed.setToolTip("播放配音后的视频" if has_dubbed else "尚未生成配音视频")
             btn_play_dubbed.setStyleSheet("padding: 0px; font-size: 10px;")
             btn_play_dubbed.setFixedWidth(28)
@@ -6275,7 +6276,7 @@ class VideoMontagePage(BasePage):
         action_layout.setContentsMargins(2, 0, 2, 0)
         action_layout.setSpacing(2)
 
-        btn_play_final = QPushButton("▶")
+        btn_play_final = mdi_button("", "play")
         btn_play_final.setToolTip("播放该视频")
         btn_play_final.setStyleSheet("padding: 0px; font-size: 10px;")
         btn_play_final.setFixedWidth(26)
@@ -6286,11 +6287,11 @@ class VideoMontagePage(BasePage):
         # Per-video BGM selection
         bgm_path = self.per_video_bgm.get(filepath, "")
         if bgm_path:
-            btn_bgm = QPushButton("🎵")
+            btn_bgm = mdi_button("", "music")
             btn_bgm.setToolTip(f"已选: {os.path.basename(bgm_path)}\n点击更换")
             btn_bgm.setStyleSheet("padding: 0px; font-size: 11px; background-color: rgba(46,204,113,0.2);")
         else:
-            btn_bgm = QPushButton("🎵")
+            btn_bgm = mdi_button("", "music")
             btn_bgm.setToolTip("选择该视频的背景音乐")
             btn_bgm.setStyleSheet("padding: 0px; font-size: 11px;")
         btn_bgm.setFixedWidth(26)
@@ -6300,7 +6301,7 @@ class VideoMontagePage(BasePage):
         btn_bgm.clicked.connect(make_bgm_cb(filepath, btn_bgm))
         action_layout.addWidget(btn_bgm)
 
-        btn_del = QPushButton("🗑️")
+        btn_del = mdi_button("", "trash")
         btn_del.setToolTip("从合成列表中移除")
         btn_del.setStyleSheet("padding: 0px; font-size: 11px; color: #e74c3c;")
         btn_del.setFixedWidth(26)
@@ -6431,11 +6432,11 @@ class VideoMontagePage(BasePage):
                 
             if self._bgm_player.playbackState() == QMediaPlayer.PlayingState:
                 self._bgm_player.pause()
-                self.btn_bgm_play.setText("▶️ 播放")
+                self.btn_bgm_play.setText("播放")
             else:
                 self._bgm_audio_output.setVolume(1.0)
                 self._bgm_player.play()
-                self.btn_bgm_play.setText("⏸️ 暂停")
+                self.btn_bgm_play.setText("暂停")
                 self.btn_bgm_stop.setEnabled(True)
         except Exception as e:
             log.error(f"播放背景音乐失败: {e}")
@@ -6445,7 +6446,7 @@ class VideoMontagePage(BasePage):
         try:
             from PySide6.QtMultimedia import QMediaPlayer
             self._bgm_player.stop()
-            self.btn_bgm_play.setText("▶️ 播放")
+            self.btn_bgm_play.setText("播放")
             self.btn_bgm_stop.setEnabled(False)
             self.bgm_progress_slider.setValue(0)
             self.lbl_bgm_time.setText("00:00 / 00:00")
@@ -6765,7 +6766,7 @@ class VideoMontagePage(BasePage):
                 self.concat_clips_list_widget.setItem(idx, 3, dir_item)
                 
                 # Col 4: 操作 (Play button)
-                play_btn = QPushButton("▶")
+                play_btn = mdi_button("", "play")
                 play_btn.setToolTip("播放该镜头")
                 play_btn.setFixedWidth(28)
                 play_btn.setFixedHeight(20)
@@ -7302,7 +7303,7 @@ class VideoMontagePage(BasePage):
             self._preview_sequence_clips = []
             self.preview_player.stop()
             self.preview_overlay_label.hide()
-            self.btn_preview_play.setText("▶")
+            self.btn_preview_play.setIcon(mdi_icon("play"))
             return
         plan = self.precompose_plans[plan_index]
         clips = list(plan.get("clips") or [])
@@ -7316,7 +7317,7 @@ class VideoMontagePage(BasePage):
         if not active_clips:
             self.preview_player.stop()
             self.preview_overlay_label.hide()
-            self.btn_preview_play.setText("▶")
+            self.btn_preview_play.setIcon(mdi_icon("play"))
             return
         self._preview_sequence_idx = 0
         self._play_current_sequence_clip()
@@ -7326,7 +7327,7 @@ class VideoMontagePage(BasePage):
         if not self._preview_sequence_clips:
             self.preview_player.stop()
             self.preview_overlay_label.hide()
-            self.btn_preview_play.setText("▶")
+            self.btn_preview_play.setIcon(mdi_icon("play"))
             return
         self._preview_sequence_idx = max(0, min(start_idx, len(self._preview_sequence_clips) - 1))
         self._play_current_sequence_clip()
@@ -7338,7 +7339,7 @@ class VideoMontagePage(BasePage):
         from PySide6.QtCore import QUrl
         self.preview_player.setSource(QUrl.fromLocalFile(clip))
         self.preview_player.play()
-        self.btn_preview_play.setText("⏸")
+        self.btn_preview_play.setIcon(mdi_icon("pause"))
         total = len(self._preview_sequence_clips)
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")
         self.preview_overlay_label.adjustSize()
@@ -7710,16 +7711,16 @@ class VideoMontagePage(BasePage):
         else:
             self.preview_player.stop()
             self.preview_overlay_label.hide()
-            self.btn_preview_play.setText("▶")
+            self.btn_preview_play.setIcon(mdi_icon("play"))
 
     def _toggle_preview_video(self):
         from PySide6.QtMultimedia import QMediaPlayer
         if self.preview_player.playbackState() == QMediaPlayer.PlayingState:
             self.preview_player.pause()
-            self.btn_preview_play.setText("▶")
+            self.btn_preview_play.setIcon(mdi_icon("play"))
         else:
             self.preview_player.play()
-            self.btn_preview_play.setText("⏸")
+            self.btn_preview_play.setIcon(mdi_icon("pause"))
             
     def _set_preview_position(self, position):
         self.preview_player.setPosition(position)
@@ -7813,7 +7814,7 @@ class VideoMontagePage(BasePage):
             layout.addWidget(desc_edit)
             
             btn_row = QHBoxLayout()
-            btn_save = QPushButton("💾 保存修改")
+            btn_save = mdi_button("保存修改", "save")
             btn_save.setObjectName("primary_button")
             btn_close = QPushButton("关闭")
             btn_close.setObjectName("secondary_button")

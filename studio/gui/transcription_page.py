@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
 from PySide6.QtCore import Signal, QThread, QUrl
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QDesktopServices
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import RUNTIME_DIR, TMP_DIR, OUTPUTS_DIR, WHISPER_MODELS_DIR, APPS_DIR, BUNDLE_ASSETS_DIR
 
@@ -194,7 +195,7 @@ class TranscriptionToolPage(BasePage):
         self.model_combo.setCurrentIndex(self.model_combo.findData("large-v3"))
         model_row.addWidget(self.model_combo)
         
-        btn_open_model_dir = QPushButton("📁 打开模型目录")
+        btn_open_model_dir = mdi_button("打开模型目录", "folder")
         btn_open_model_dir.setObjectName("secondary_button")
         btn_open_model_dir.clicked.connect(self._open_model_directory)
         model_row.addWidget(btn_open_model_dir)
@@ -248,7 +249,7 @@ class TranscriptionToolPage(BasePage):
         install_row.addWidget(self.btn_install_deps)
         card_layout.addLayout(install_row)
 
-        btn_run = QPushButton("🎬 开始生成字幕")
+        btn_run = mdi_button("开始生成字幕", "video")
         btn_run.setObjectName("action_button")
         btn_run.setFixedHeight(46)
         btn_run.clicked.connect(self._start_transcription)
@@ -277,7 +278,7 @@ class TranscriptionToolPage(BasePage):
         res_header.addWidget(self.format_combo)
         res_header.addSpacing(10)
 
-        btn_save = QPushButton("💾 保存结果")
+        btn_save = mdi_button("保存结果", "save")
         btn_save.setObjectName("secondary_button")
         btn_save.clicked.connect(self._save_result)
         self.btn_save = btn_save

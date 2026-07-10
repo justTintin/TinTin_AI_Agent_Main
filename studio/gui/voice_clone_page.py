@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QSpinBox)
 from PySide6.QtCore import Signal, QThread, Qt, QUrl
 from utils.base_worker import BaseWorker
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import PROJECT_ROOT, OUTPUTS_DIR
 from gui.voice_samples_page import load_voice_samples
@@ -189,7 +190,7 @@ class VoiceClonePage(BasePage):
         btn_sel_ref.clicked.connect(self._select_ref_audio)
         row_ref_audio.addWidget(btn_sel_ref)
         
-        self.btn_play_ref = QPushButton("🔊")
+        self.btn_play_ref = mdi_button("", "volume")
         self.btn_play_ref.setToolTip("播放人声样本")
         self.btn_play_ref.setStyleSheet("padding: 0px; font-size: 14px;")
         self.btn_play_ref.setFixedWidth(32)
@@ -228,7 +229,7 @@ class VoiceClonePage(BasePage):
         v_btn_layout.setSpacing(6)
         v_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_transcribe_ref = QPushButton("📝 识别参考音频文本")
+        self.btn_transcribe_ref = mdi_button("识别参考音频文本", "edit")
         self.btn_transcribe_ref.setObjectName("secondary_button")
         self.btn_transcribe_ref.setFixedHeight(100)
         self.btn_transcribe_ref.setEnabled(False)
@@ -257,7 +258,7 @@ class VoiceClonePage(BasePage):
         btn_sel_vid_dir.clicked.connect(self._select_voice_video_dir)
         row_vid_dir.addWidget(btn_sel_vid_dir)
 
-        btn_open_dir = QPushButton("📂 打开目录")
+        btn_open_dir = mdi_button("打开目录", "folder")
         btn_open_dir.setObjectName("secondary_button")
         btn_open_dir.clicked.connect(self._open_voice_output_dir)
         row_vid_dir.addWidget(btn_open_dir)
@@ -295,13 +296,13 @@ class VoiceClonePage(BasePage):
         v_btn_clone_layout.setSpacing(6)
         v_btn_clone_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_clone_whole = QPushButton("🗣️ 一键生成整体克隆人声")
+        self.btn_clone_whole = mdi_button("一键生成整体克隆人声", "voice")
         self.btn_clone_whole.setObjectName("primary_button")
         self.btn_clone_whole.setFixedHeight(85)
         self.btn_clone_whole.clicked.connect(self._clone_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_clone_whole)
         
-        self.btn_play_whole = QPushButton("🔊 播放整体克隆声音")
+        self.btn_play_whole = mdi_button("播放整体克隆声音", "volume")
         self.btn_play_whole.setObjectName("secondary_button")
         self.btn_play_whole.setFixedHeight(30)
         self.btn_play_whole.setEnabled(False)
@@ -316,25 +317,25 @@ class VoiceClonePage(BasePage):
         row_table_header.addWidget(QLabel("📝 待合成人声音频列表与文案配置:"))
         row_table_header.addStretch()
         
-        self.btn_split_text = QPushButton("📋 一键拆分填充")
+        self.btn_split_text = mdi_button("一键拆分填充", "clipboard")
         self.btn_split_text.setObjectName("secondary_button")
         self.btn_split_text.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         self.btn_split_text.clicked.connect(self._split_and_populate_manually)
         row_table_header.addWidget(self.btn_split_text)
 
-        btn_add_row = QPushButton("➕ 添加行")
+        btn_add_row = mdi_button("添加行", "plus")
         btn_add_row.setObjectName("secondary_button")
         btn_add_row.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_add_row.clicked.connect(self._add_table_row)
         row_table_header.addWidget(btn_add_row)
 
-        btn_del_row = QPushButton("🗑️ 删除选中行")
+        btn_del_row = mdi_button("删除选中行", "trash")
         btn_del_row.setObjectName("secondary_button")
         btn_del_row.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_del_row.clicked.connect(self._delete_selected_row)
         row_table_header.addWidget(btn_del_row)
 
-        btn_clear_table = QPushButton("🧹 清空所有行")
+        btn_clear_table = mdi_button("清空所有行", "broom")
         btn_clear_table.setObjectName("secondary_button")
         btn_clear_table.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_clear_table.clicked.connect(self._clear_table)
@@ -370,7 +371,7 @@ class VoiceClonePage(BasePage):
 
         # 7. Action buttons row
         row_actions = QHBoxLayout()
-        self.btn_synthesize_voice = QPushButton("🗣️ 开始批量克隆人声合成")
+        self.btn_synthesize_voice = mdi_button("开始批量克隆人声合成", "voice")
         self.btn_synthesize_voice.setObjectName("action_button")
         self.btn_synthesize_voice.setFixedHeight(35)
         self.btn_synthesize_voice.clicked.connect(self._start_synthesize_voice)
@@ -577,7 +578,7 @@ class VoiceClonePage(BasePage):
         h_layout.setContentsMargins(4, 2, 4, 2)
         h_layout.setSpacing(4)
         
-        btn_play = QPushButton("🔊")
+        btn_play = mdi_button("", "volume")
         btn_play.setToolTip("播放克隆的声音")
         btn_play.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_play.setFixedWidth(30)
@@ -585,14 +586,14 @@ class VoiceClonePage(BasePage):
         btn_play.clicked.connect(lambda checked=False, b=btn_play: self._on_btn_play_clicked_by_btn(b))
         h_layout.addWidget(btn_play)
         
-        btn_regen = QPushButton("🔄")
+        btn_regen = mdi_button("", "refresh")
         btn_regen.setToolTip("仅重新生成该声音")
         btn_regen.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_regen.setFixedWidth(30)
         btn_regen.clicked.connect(lambda checked=False, b=btn_regen: self._on_btn_regen_clicked_by_btn(b))
         h_layout.addWidget(btn_regen)
         
-        btn_export = QPushButton("💾")
+        btn_export = mdi_button("", "save")
         btn_export.setToolTip("导出该克隆声音")
         btn_export.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_export.setFixedWidth(30)
@@ -735,7 +736,7 @@ class VoiceClonePage(BasePage):
 
         def on_finished(srt_content, path):
             self.btn_transcribe_ref.setEnabled(True)
-            self.btn_transcribe_ref.setText("📝 识别参考音频文本")
+            self.btn_transcribe_ref.setText("识别参考音频文本")
             self.stage_label.setText("✅ 识别参考音频文本完成")
             
             plain_text = self._clean_srt_to_text(srt_content)
@@ -773,7 +774,7 @@ class VoiceClonePage(BasePage):
 
         def on_error(err):
             self.btn_transcribe_ref.setEnabled(True)
-            self.btn_transcribe_ref.setText("📝 识别参考音频文本")
+            self.btn_transcribe_ref.setText("识别参考音频文本")
             self.stage_label.setText("❌ 识别文本失败")
             QMessageBox.critical(self.parent_widget, "识别文本失败", f"无法从参考音频中提取文本：\n{err}")
 
@@ -832,7 +833,7 @@ class VoiceClonePage(BasePage):
             
             def on_align_finished(srt_content, srt_path):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ 音频时间戳分析完成，正在裁切音频并填充列表...")
                 
                 llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
@@ -875,7 +876,7 @@ class VoiceClonePage(BasePage):
                     
             def on_align_error(err):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("❌ 识别音频时间戳失败")
                 QMessageBox.warning(self.parent_widget, "识别失败", f"分析整段音频失败，已退回纯文本拆分模式。\n错误：{err}")
                 self._split_and_populate_text_only(text)
@@ -1441,7 +1442,7 @@ class VoiceClonePage(BasePage):
         
         def on_whole_finished(results):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("🗣️ 一键生成整体克隆人声")
+            self.btn_clone_whole.setText("一键生成整体克隆人声")
             self.progress_bar.setValue(100)
             self.stage_label.setText("✅ 整体克隆人声生成成功！可以开始点击一键拆分填充。")
             self._check_whole_audio_exists()
@@ -1453,7 +1454,7 @@ class VoiceClonePage(BasePage):
             
         def on_whole_error(err):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("🗣️ 一键生成整体克隆人声")
+            self.btn_clone_whole.setText("一键生成整体克隆人声")
             self.progress_bar.setValue(0)
             self.stage_label.setText("❌ 整体生成失败")
             if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:
@@ -1483,7 +1484,7 @@ class VoiceClonePage(BasePage):
 
             def on_split_done(result_text):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ AI 智能拆分完成")
                 
                 lines = [line.strip() for line in result_text.split('\n') if line.strip()]
@@ -1501,7 +1502,7 @@ class VoiceClonePage(BasePage):
             def on_split_err(err):
                 log.warning(f"AI 智能拆分失败: {err}，将使用本地分词规则进行拆分。")
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("⚠️ AI 智能拆分失败，已自动使用本地规则")
                 
                 self._populate_sentences_to_table(text)

@@ -41,6 +41,7 @@ from PySide6.QtGui import QIcon, QFont, QPixmap
 from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
+from utils.gui_icons import mdi_button, mdi_icon
 
 
 class SidebarMixin:
@@ -101,14 +102,16 @@ class SidebarMixin:
         script_layout.addWidget(script_header)
         
         script_menus = [
-            ("📚 我的知识库", 29),
-            ("📦 产品资料", 28),
-            ("🛒 产品文案创作", 30),
-            ("📝 分镜脚本创作", 38),
-            # ("✍️ 飞书选题文案", 20),       # 下版本
+            ("📚 我的知识库", 29, None),
+            ("产品资料", 28, "download"),
+            ("🛒 产品文案创作", 30, None),
+            ("分镜脚本创作", 38, "edit"),
         ]
-        for text, index in script_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in script_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -129,15 +132,18 @@ class SidebarMixin:
         media_layout.addWidget(media_header)
 
         media_menus = [
-            ("🎨 即梦生成", 32),
+            ("🎨 即梦生成", 32, None),
             # ("🧺 即梦素材", 43),          # 暂时隐藏
             # ("🪄 MG 动画", 36),          # 暂时隐藏
-            ("🗄️ 素材管理", 42),
-            ("🔍 向量检索", 39),
+            ("素材管理", 42, "server"),
+            ("向量检索", 39, "search"),
             # ("📋 任务列表", 9),           # 暂时隐藏
         ]
-        for text, index in media_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in media_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -165,11 +171,14 @@ class SidebarMixin:
 
         compose_menus = [
             # ("🚀 一键成片", 34),           # 下版本
-            ("✂️ 智能混剪", 15),
-            ("📡 直播切片", 19),
+            ("智能混剪", 15, "cut"),
+            ("📡 直播切片", 19, None),
         ]
-        for text, index in compose_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in compose_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -218,18 +227,21 @@ class SidebarMixin:
         
         video_menus = [
             # ("🗣️ 数字人", 3),             # 下版本
-            ("💬 视频转文字", 12),
-            ("🎙️ 声音克隆", 21),
-            ("🎞️ 视频去字幕", 18),
+            ("💬 视频转文字", 12, None),
+            ("声音克隆", 21, "audio"),
+            ("🎞️ 视频去字幕", 18, None),
             # ("✨ 视频修复", 11),          # 暂时隐藏
-            ("🔎 视频框选 OCR", 24),
+            ("视频框选 OCR", 24, "search"),
             # ("🏷️ 视频智能重命名", 26),   # 暂时隐藏
             # ("🌈 批量 LUT 调色", 27),     # 暂时隐藏
-            ("📈 视频预测评价", 35),
-            ("📢 营销视频检测", 41),
+            ("📈 视频预测评价", 35, None),
+            ("📢 营销视频检测", 41, None),
         ]
-        for text, index in video_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in video_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -250,14 +262,17 @@ class SidebarMixin:
         system_layout.addWidget(system_header)
         
         other_menus = [
-            ("⚙️ 模型配置", 7),
-            ("🔌 平台接入", 23),
-            ("📦 资源配置", 22),
-            ("🖥️ 运行环境", 37),
-            ("❓ 帮助", 6)
+            ("模型配置", 7, "cog"),
+            ("平台接入", 23, "link"),
+            ("资源配置", 22, "download"),
+            ("运行环境", 37, "server"),
+            ("❓ 帮助", 6, None),
         ]
-        for text, index in other_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in other_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)

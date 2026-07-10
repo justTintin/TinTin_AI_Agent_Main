@@ -20,6 +20,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import OUTPUTS_DIR, TMP_DIR
 
@@ -638,7 +639,7 @@ class AudioPlayerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = mdi_button("播放", "play")
         self.btn_play.setFixedWidth(70)
         self.btn_play.setObjectName("secondary_button")
         self.btn_play.clicked.connect(self.toggle_play)
@@ -685,17 +686,17 @@ class AudioPlayerWidget(QWidget):
         self.audio_path = audio_path
         self.player.setSource(QUrl.fromLocalFile(audio_path))
         self.setEnabled(True)
-        self.btn_play.setText("▶ 播放")
+        self.btn_play.setText("播放")
         self.lbl_time.setText("00:00 / 00:00")
         self.slider.setValue(0)
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def position_changed(self, position):
         if not self.slider.isSliderDown():
@@ -815,7 +816,7 @@ class CoverEditDialog(QDialog):
         ctrl_layout = QHBoxLayout()
         ctrl_layout.setSpacing(10)
         
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = mdi_button("播放", "play")
         self.btn_play.setStyleSheet("""
             QPushButton {
                 background-color: #27272a;
@@ -841,7 +842,7 @@ class CoverEditDialog(QDialog):
         
         ctrl_layout.addStretch()
         
-        self.btn_capture = QPushButton("📸 选择当前帧为封面")
+        self.btn_capture = mdi_button("选择当前帧为封面", "camera")
         self.btn_capture.setStyleSheet("""
             QPushButton {
                 background-color: #10b981;
@@ -983,15 +984,15 @@ class CoverEditDialog(QDialog):
     def on_slider_pressed(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def set_position(self, position):
         self.pending_seek_pos = position
@@ -1029,7 +1030,7 @@ class CoverEditDialog(QDialog):
     def capture_current_frame(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
             
         time_sec = self.player.position() / 1000.0
         self.btn_capture.setEnabled(False)
@@ -1043,7 +1044,7 @@ class CoverEditDialog(QDialog):
             QMessageBox.warning(self, "截图失败", f"无法捕获当前帧:\n{str(e)}")
         finally:
             self.btn_capture.setEnabled(True)
-            self.btn_capture.setText("📸 选择当前帧为封面")
+            self.btn_capture.setText("选择当前帧为封面")
             
     def on_title_changed(self, text):
         self.current_title = text.strip()
@@ -1159,7 +1160,7 @@ class ClipListItemWidget(QFrame):
         """)
         self.slice_layout.addWidget(self.pbar_slice, 1)
         
-        self.btn_slice_single = QPushButton("✂ 单独切片")
+        self.btn_slice_single = mdi_button("单独切片", "cut")
         self.btn_slice_single.setStyleSheet("""
             QPushButton {
                 background-color: #d97706;
@@ -1194,7 +1195,7 @@ class ClipListItemWidget(QFrame):
         play_layout = QHBoxLayout()
         play_layout.setSpacing(6)
         
-        self.btn_play = QPushButton("▶ 播放声音")
+        self.btn_play = mdi_button("播放声音", "play")
         self.btn_play.setStyleSheet("""
             QPushButton {
                 background-color: #27272a;
@@ -1246,7 +1247,7 @@ class ClipListItemWidget(QFrame):
         """)
         play_layout.addWidget(self.slider)
         
-        self.btn_edit_cover = QPushButton("🎨 编辑封面")
+        self.btn_edit_cover = mdi_button("编辑封面", "palette")
         self.btn_edit_cover.setStyleSheet("""
             QPushButton {
                 background-color: #3b82f6;
@@ -1321,7 +1322,7 @@ class ClipListItemWidget(QFrame):
         self.btn_edit_cover.setEnabled(True)
         self.slider.setEnabled(True)
         
-        self.btn_slice_single.setText("✓ 已切片")
+        self.btn_slice_single.setText("已切片")
         self.btn_slice_single.setEnabled(False)
         self.pbar_slice.setVisible(False)
         
@@ -1331,16 +1332,16 @@ class ClipListItemWidget(QFrame):
             
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放声音")
+            self.btn_play.setText("播放声音")
         else:
             self.main_page.pause_all_players_except(self.clip_index)
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def pause_audio(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放声音")
+            self.btn_play.setText("播放声音")
             
     def open_cover_editor(self):
         video_path = self.clip_info.get("video_path")
@@ -1404,7 +1405,7 @@ class ClipListItemWidget(QFrame):
         
     def on_individual_slice_error(self, err):
         self.btn_slice_single.setEnabled(True)
-        self.btn_slice_single.setText("✂ 单独切片")
+        self.btn_slice_single.setText("单独切片")
         self.pbar_slice.setVisible(False)
         QMessageBox.critical(self.main_page.parent_widget, "错误", f"单独切片失败:\n{err}")
         
@@ -1449,10 +1450,7 @@ class ClipListItemWidget(QFrame):
         self.enable_playback(ci["video_path"])
         self.main_page.update_covers_info_for_index(self.clip_index, ci)
         
-        self.btn_slice_single.setText("✓ 已切片")
-        self.btn_slice_single.setEnabled(False)
-        self.pbar_slice.setVisible(False)
-        
+        self.btn_slice_single.setText("已切片")
     def position_changed(self, position):
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
@@ -1521,7 +1519,7 @@ class LiveClipPage(BasePage):
         self.pause_all_players_except(-1)
         if hasattr(self, "audio_player"):
             self.audio_player.player.pause()
-            self.audio_player.btn_play.setText("▶ 播放")
+            self.audio_player.btn_play.setText("播放")
 
         if index == 0:
             self.progress_bar = self.progress_bar_p0
@@ -1624,7 +1622,7 @@ class LiveClipPage(BasePage):
         self.transcribe_lang.setCurrentIndex(0)  # Default to Chinese
         ar.addWidget(self.transcribe_lang)
 
-        self.btn_analyze = QPushButton("🎤 开始提取并分析")
+        self.btn_analyze = mdi_button("开始提取并分析", "mic")
         self.btn_analyze.setObjectName("action_button")
         self.btn_analyze.setFixedHeight(30)
         self.btn_analyze.clicked.connect(self._start_analysis_pipeline)
@@ -1659,7 +1657,7 @@ class LiveClipPage(BasePage):
         sub_vl.addWidget(self.transcript_preview)
 
         # Export Subtitles Button
-        self.btn_export_sub = QPushButton("💾 导出字幕")
+        self.btn_export_sub = mdi_button("导出字幕", "save")
         self.btn_export_sub.setObjectName("secondary_button")
         self.btn_export_sub.setEnabled(False)
         self.btn_export_sub.clicked.connect(self._export_subtitles)
@@ -1735,7 +1733,7 @@ class LiveClipPage(BasePage):
         self.progress_bar_p0.setRange(0, 100)
         bot_layout.addWidget(self.progress_bar_p0, 1)
 
-        self.btn_to_step2 = QPushButton("下一步：切片与封面 ➔")
+        self.btn_to_step2 = mdi_button("下一步：切片与封面", "right")
         self.btn_to_step2.setObjectName("primary_button")
         self.btn_to_step2.setEnabled(False)
         self.btn_to_step2.clicked.connect(lambda: self._go_to_step(1))
@@ -1771,7 +1769,7 @@ class LiveClipPage(BasePage):
         self.clip_status_lbl.setObjectName("clip_status_label")
         header_layout.addWidget(self.clip_status_lbl)
         
-        self.btn_clip = QPushButton("\u2702 开始切片")
+        self.btn_clip = mdi_button("开始切片", "cut")
         self.btn_clip.setObjectName("action_button")
         self.btn_clip.setFixedHeight(30)
         self.btn_clip.setFixedWidth(120)
@@ -1809,14 +1807,14 @@ class LiveClipPage(BasePage):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
         
-        self.btn_export = QPushButton("\U0001F680 确认封面并导出最终视频")
+        self.btn_export = mdi_button("确认封面并导出最终视频", "rocket")
         self.btn_export.setObjectName("action_button")
         self.btn_export.setFixedHeight(40)
         self.btn_export.clicked.connect(self._start_final_export)
         self.btn_export.setEnabled(False)
         btn_layout.addWidget(self.btn_export, 1)
 
-        self.btn_open_output = QPushButton("\U0001F4C2 打开输出目录")
+        self.btn_open_output = mdi_button("打开输出目录", "folder")
         self.btn_open_output.setObjectName("secondary_button")
         self.btn_open_output.setFixedHeight(40)
         self.btn_open_output.clicked.connect(self._open_output)
@@ -1844,7 +1842,7 @@ class LiveClipPage(BasePage):
 
         # Nav
         nav = QHBoxLayout()
-        nav.addWidget(QPushButton("⇠ 上一步：视频分析"))
+        nav.addWidget(mdi_button("上一步：视频分析", "left"))
         nav.itemAt(0).widget().setObjectName("secondary_button")
         nav.itemAt(0).widget().clicked.connect(lambda: self._go_to_step(0))
         nav.addStretch()
@@ -2365,7 +2363,7 @@ class LiveClipPage(BasePage):
         for widget in getattr(self, "clip_item_widgets", []):
             if not widget.clip_info.get("video_path"):
                 widget.btn_slice_single.setEnabled(True)
-                widget.btn_slice_single.setText("✂ 单独切片")
+                widget.btn_slice_single.setText("单独切片")
                 
         s = ""
         for line in (err or "").splitlines()[::-1]:

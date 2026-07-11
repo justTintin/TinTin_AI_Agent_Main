@@ -19,29 +19,21 @@ class _IndexAnalyzeWorker(BaseWorker):
     log_line = Signal(str)
     finished = Signal(dict)
 
-    def __init__(self, directory: str, run_ai: bool):
+    def __init__(self, directory: str):
         super().__init__()
         self.directory = directory
-        self.run_ai = run_ai
 
     def do_work(self):
         result = {
             "index_ok": 0,
             "index_skip": 0,
             "index_fail": 0,
-            "ai_ok": 0,
-            "ai_fail": 0,
-            "run_ai": self.run_ai,
         }
         with MaterialClipIndexer(progress_cb=self.log_line.emit) as idx:
             ok, skip, fail = idx.index_directory_meta(self.directory, force=False)
             result["index_ok"] = ok
             result["index_skip"] = skip
             result["index_fail"] = fail
-            if self.run_ai:
-                a_ok, a_fail = idx.analyze_directory(self.directory)
-                result["ai_ok"] = a_ok
-                result["ai_fail"] = a_fail
         self.finished.emit(result)
 
 
@@ -61,7 +53,7 @@ class DreaminaAssetsPage(BasePage):
         heading.setObjectName("heading")
         root.addWidget(heading)
 
-        tip = QLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库并进行 AI 分析。")
+        tip = QLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库。")
         tip.setObjectName("muted_text")
         tip.setWordWrap(True)
         root.addWidget(tip)
@@ -124,15 +116,10 @@ class DreaminaAssetsPage(BasePage):
         self.lbl_stat.setObjectName("muted_text")
         top.addWidget(self.lbl_stat, 1)
 
-        self.btn_index = QPushButton("⚡ 快速入库")
-        self.btn_index.setObjectName("secondary_button")
-        self.btn_index.clicked.connect(lambda: self._start_index(run_ai=False))
+        self.btn_index = QPushButton("⚡ 一键入库")
+        self.btn_index.setObjectName("primary_button")
+        self.btn_index.clicked.connect(self._start_index)
         top.addWidget(self.btn_index)
-
-        self.btn_index_ai = QPushButton("🧠 入库 + AI分析")
-        self.btn_index_ai.setObjectName("primary_button")
-        self.btn_index_ai.clicked.connect(lambda: self._start_index(run_ai=True))
-        top.addWidget(self.btn_index_ai)
 
         lay.addLayout(top)
 
@@ -214,17 +201,16 @@ class DreaminaAssetsPage(BasePage):
         self.btn_open_browser.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
 
-    def _start_index(self, run_ai: bool):
+    def _start_index(self):
         d = self._dir()
         if not os.path.isdir(d):
             self.show_warning("请先选择有效的下载目录。")
             return
 
         self._set_busy(True)
-        mode = "入库 + AI分析" if run_ai else "快速入库"
-        self.log_box.append(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始{mode}: {d}")
+        self.log_box.append(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始一键入库: {d}")
 
-        w = self.track_worker(_IndexAnalyzeWorker(d, run_ai=run_ai))
+        w = self.track_worker(_IndexAnalyzeWorker(d))
         w.log_line.connect(self.log_box.append)
         w.finished.connect(self._on_index_done)
         w.error.connect(self._on_index_error)
@@ -235,10 +221,6 @@ class DreaminaAssetsPage(BasePage):
         self.log_box.append(
             f"\n✅ 入库完成  新增:{result.get('index_ok',0)}  跳过:{result.get('index_skip',0)}  失败:{result.get('index_fail',0)}"
         )
-        if result.get("run_ai"):
-            self.log_box.append(
-                f"✅ AI分析完成  成功:{result.get('ai_ok',0)}  失败:{result.get('ai_fail',0)}"
-            )
         self._scan_local_files()
 
     def _on_index_error(self, msg: str):

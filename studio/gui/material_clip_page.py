@@ -90,24 +90,6 @@ class _IndexMetaWorker(BaseWorker):
         self.finished.emit(ok, skip, fail)
 
 
-class _AnalyzeWorker(BaseWorker):
-    """Phase 2: 视觉 LLM + Whisper + CLIP，识别品牌/型号。"""
-    log_line = Signal(str)
-    finished = Signal(int, int)   # ok, fail
-
-    def __init__(self, directory: str, nas_root: str):
-        super().__init__()
-        self.directory = directory
-        self.nas_root  = nas_root
-
-    def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
-        with MaterialClipIndexer(nas_root=self.nas_root,
-                                  progress_cb=self.log_line.emit) as idx:
-            ok, fail = idx.analyze_directory(self.directory)
-        self.finished.emit(ok, fail)
-
-
 class _StatsLightWorker(BaseWorker):
     """仅从数据库读取统计（不扫磁盘），快速。"""
     finished = Signal(dict)
@@ -498,95 +480,6 @@ class _QueryMaterialsWorker(BaseWorker):
         self.finished.emit(rows)
 
 
-class _ReAnalyzeSelectedWorker(BaseWorker):
-    """对选定的素材行（{id, path}）重新执行 AI 分析，支持进度汇报与终止任务。"""
-    log_line = Signal(str)
-    progress = Signal(int, int)   # done, total
-    finished = Signal(int, int)   # ok, fail
-
-    def __init__(self, materials: list, nas_root: str):
-        super().__init__()
-        self.materials = materials
-        self.nas_root  = nas_root
-        self._is_cancelled = False
-
-    def cancel(self):
-        self._is_cancelled = True
-
-    def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
-        ok = fail = 0
-        total = len(self.materials)
-        if total == 0:
-            self.finished.emit(0, 0)
-            return
-
-        self.log_line.emit(f"  📋 队列: {total} 个素材待分析")
-        self.log_line.emit(f"  🌐 服务端: {self._get_server_info()}")
-        QApplication.processEvents()
-
-        env_workers = os.environ.get("TINTIN_AI_ANALYZE_WORKERS", "2").strip()
-        try:
-            max_workers = int(env_workers)
-        except Exception:
-            max_workers = 2
-        max_workers = max(1, min(max_workers, 4, total))
-
-        self.log_line.emit(f"  🚀 并发数: {max_workers}")
-        QApplication.processEvents()
-
-        done = 0
-        ok_count = 0
-        for i, mat in enumerate(self.materials):
-            if self._is_cancelled:
-                self.log_line.emit("  ⚠️ 用户终止")
-                break
-            fname = os.path.basename(mat.get("path", ""))
-            self.log_line.emit(f"")
-            self.log_line.emit(f"  [{i+1}/{total}] {fname}")
-            self.log_line.emit(f"    路径: {mat.get('path','')}")
-            QApplication.processEvents()
-
-            # 每步分开，卡在哪能从日志直接看出
-            try:
-                self.log_line.emit(f"    ⏳ 连接数据库...")
-                QApplication.processEvents()
-
-                idx = MaterialClipIndexer(nas_root=self.nas_root, progress_cb=lambda m: self.log_line.emit(f"    📝 {m}"))
-                QApplication.processEvents()
-
-                success = idx.analyze_material(mat["id"], mat["path"])
-                if success:
-                    ok_count += 1
-                done += 1
-                self.progress.emit(done, total)
-            except Exception as e:
-                import traceback
-                self.log_line.emit(f"    ❌ 异常: {e}")
-                fail += 1
-
-        self.progress.emit(total, total)
-        self.finished.emit(ok_count, fail)
-
-    def _get_server_info(self):
-        """快速获取服务端信息（不阻塞）。"""
-        try:
-            import json, os as _os
-            from config.paths import AI_CONFIG_FILE
-            if _os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
-                    cfg = json.load(f)
-                parts = []
-                for k, label in [("llm_vision_api_url", "视觉"), ("whisper_api_url", "语音"), ("clip_api_url", "CLIP")]:
-                    v = cfg.get(k, "").strip()
-                    if v:
-                        parts.append(f"{label}={v.replace('http://','').rstrip('/')}")
-                return " | ".join(parts) if parts else "未配置"
-        except Exception:
-            pass
-        return "未读取到配置"
-
-
 class _OcrRenameWorker(BaseWorker):
     """对目录下已入库的图片执行 OCR 智能重命名。"""
     log_line = Signal(str)
@@ -693,7 +586,7 @@ class MaterialClipPage(BasePage):
         step_layout.setContentsMargins(4, 6, 4, 6)
         step_layout.setSpacing(0)
         self.step_labels = []
-        for i, text in enumerate(["📥 素材入库", "🤖 智能分析"]):
+        for i, text in enumerate(["📥 素材入库", "📋 素材浏览"]):
             lbl = QLabel(text)
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setCursor(Qt.PointingHandCursor)
@@ -976,20 +869,6 @@ class MaterialClipPage(BasePage):
         self.btn_toggle_log.setObjectName("secondary_button")
         self.btn_toggle_log.clicked.connect(self._toggle_log_box)
         bot_row.addWidget(self.btn_toggle_log)
-
-        self.btn_reanalyze = mdi_button("进行AI分析内容", "search")
-        self.btn_reanalyze.setObjectName("secondary_button")
-        self.btn_reanalyze.setToolTip("对选中的行执行或重新执行视觉LLM + Whisper + CLIP 分析")
-        self.btn_reanalyze.clicked.connect(self._start_reanalyze_selected)
-        bot_row.addWidget(self.btn_reanalyze)
-
-        self.btn_stop_reanalyze = mdi_button("停止AI分析", "stop")
-        self.btn_stop_reanalyze.setObjectName("secondary_button")
-        self.btn_stop_reanalyze.setProperty("danger", True)
-        self.btn_stop_reanalyze.setToolTip("停止当前的 AI 分析任务")
-        self.btn_stop_reanalyze.setEnabled(False)
-        self.btn_stop_reanalyze.clicked.connect(self._stop_reanalyze)
-        bot_row.addWidget(self.btn_stop_reanalyze)
 
         btn_open = mdi_button("打开目录", "folder")
         btn_open.setObjectName("secondary_button")
@@ -1324,7 +1203,6 @@ class MaterialClipPage(BasePage):
     def _set_busy(self, busy: bool):
         self.btn_meta.setEnabled(not busy)
         self.btn_ocr_rename.setEnabled(not busy)
-        self.btn_reanalyze.setEnabled(not busy)
         if hasattr(self, "btn_import_tasks"):
             self.btn_import_tasks.setEnabled(not busy)
 
@@ -2082,80 +1960,6 @@ class MaterialClipPage(BasePage):
         if idx >= 0:
             self.db_category_filter.setCurrentIndex(idx)
         self.db_category_filter.blockSignals(False)
-
-    def _start_reanalyze_selected(self):
-        # 收集选中行
-        materials = []
-        for r in range(self.db_table.rowCount()):
-            item = self.db_table.item(r, 0)
-            if item and item.checkState() == Qt.Checked:
-                data = item.data(Qt.UserRole)
-                if data and data.get("id"):
-                    materials.append({"id": data["id"], "path": data.get("path", ""), "filename": data.get("filename", "")})
-
-        if not materials:
-            selected_rows = self.db_table.selectionModel().selectedRows()
-            for idx in selected_rows:
-                item = self.db_table.item(idx.row(), 0)
-                if item:
-                    data = item.data(Qt.UserRole)
-                    if data and data.get("id"):
-                        materials.append({"id": data["id"], "path": data.get("path", ""), "filename": data.get("filename", "")})
-
-        if not materials:
-            self.show_warning("请先勾选或在表格中选中要进行 AI 分析的素材行。", "未选择")
-            return
-
-        self._set_busy(True)
-        self.log_box.clear()
-        self.db_pbar.setRange(0, len(materials))
-        self.db_pbar.setValue(0)
-        self.db_pbar.setVisible(True)
-        self.lbl_db_pbar_status.setVisible(True)
-
-        # 立即打印选中素材的信息
-        self.log_box.append(f"开始进行 AI 分析（共 {len(materials)} 个素材）…\n")
-        for i, mat in enumerate(materials):
-            self.log_box.append(f"  [{i+1}] id={mat['id']}  文件={mat.get('filename', os.path.basename(mat.get('path','')))}  路径={mat.get('path','')}")
-        self.log_box.append("")
-        QApplication.processEvents()  # 强制刷新UI
-
-        # 启动 worker
-        self.reanalyze_worker = self.track_worker(_ReAnalyzeSelectedWorker(materials, self._nas_root))
-        self.reanalyze_worker.log_line.connect(lambda m: (self.log_box.append(m), QApplication.processEvents()))
-        self.reanalyze_worker.progress.connect(self._on_reanalyze_progress)
-        self.reanalyze_worker.finished.connect(self._on_reanalyze_done)
-        self.reanalyze_worker.error.connect(self._on_reanalyze_err)
-        self.reanalyze_worker.start()
-        self.btn_stop_reanalyze.setEnabled(True)
-
-    def _stop_reanalyze(self):
-        if hasattr(self, "reanalyze_worker") and self.reanalyze_worker and self.reanalyze_worker.isRunning():
-            self.reanalyze_worker.cancel()
-            self.log_box.append("\n⏳ 正在发送终止信号，请稍候...")
-            self.btn_stop_reanalyze.setEnabled(False)
-
-    def _on_reanalyze_progress(self, done, total):
-        self.db_pbar.setValue(done)
-        self.lbl_db_pbar_status.setText(f"正在进行 AI 分析，已完成：{done} / {total}")
-
-    def _on_reanalyze_done(self, ok: int, fail: int):
-        self._set_busy(False)
-        self.db_pbar.setVisible(False)
-        self.lbl_db_pbar_status.setVisible(False)
-        self.btn_stop_reanalyze.setEnabled(False)
-        self.log_box.append(f"\n✅ AI 分析完成  成功:{ok}  失败:{fail}")
-        self.idx_stat.setText(f"✅ AI 分析完成  成功:{ok}  失败:{fail}")
-        self._refresh_db_table()
-        self._reload_stats()
-
-    def _on_reanalyze_err(self, msg: str):
-        self._set_busy(False)
-        self.db_pbar.setVisible(False)
-        self.lbl_db_pbar_status.setVisible(False)
-        self.btn_stop_reanalyze.setEnabled(False)
-        self.log_box.append(f"\n❌ {msg}")
-        self.show_error(f"进行 AI 分析出错：\n{msg}")
 
     def _open_diff_file_dir(self, index):
         if not index.isValid():

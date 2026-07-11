@@ -3,7 +3,7 @@ import traceback
 import sys
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
-                               QFileDialog, QProgressBar, QMessageBox, QFrame)
+                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame)
 from PySide6.QtCore import Signal, QThread, QUrl
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QDesktopServices
@@ -214,6 +214,9 @@ class TranscriptionToolPage(BasePage):
 
         layout.addWidget(result_card, 1)
         self._refresh_dep_status()
+
+    def _refresh_dep_status(self):
+        self.btn_run.setEnabled(True)
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(

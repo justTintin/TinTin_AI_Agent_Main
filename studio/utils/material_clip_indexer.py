@@ -286,6 +286,25 @@ def _should_skip_path(path: str) -> bool:
         return True
     return False
 
+
+# 回收站路径匹配模式：#recycle（Synology）、$recycle.bin（Windows）
+# 作为参数值传入 SQL（不内联），避免 #recycle/% 中的 % 被 psycopg2 误判为占位符
+_RECYCLE_PATH_PATTERNS = (
+    "#recycle/%",      "%/#recycle/%",
+    "$recycle.bin/%",  "%/$recycle.bin/%",
+)
+
+
+def _recycle_exclude_cond(table_alias: str = "") -> tuple:
+    """构建 WHERE 片段，排除回收站路径（#recycle / $recycle.bin）。
+    返回 (sql_fragment, params)：sql_fragment 含 %s 占位符，需与 params 配对传入。
+    table_alias: JOIN 场景下 materials 表的别名（如 'm'），留空则不带别名前缀。
+    """
+    col = f"{table_alias}.path" if table_alias else "path"
+    clauses = [f"{col} NOT LIKE %s" for _ in _RECYCLE_PATH_PATTERNS]
+    return " AND ".join(clauses), list(_RECYCLE_PATH_PATTERNS)
+
+
 _SCRIPT_BRAND_PATTERNS = [
     ("罗技", ["logitech", "logi", "罗技", "gpw", "g pro wireless", "g pro x superlight", "gpx"]),
     ("雷蛇", ["razer", "雷蛇"]),
@@ -1058,7 +1077,10 @@ class _MaterialDB:
         if hash_prefix:
             conds.append("file_hash ILIKE %s")
             params.append(hash_prefix.strip() + "%")
-        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        ex_cond, ex_params = _recycle_exclude_cond()
+        conds.append(ex_cond)
+        params.extend(ex_params)
+        where = "WHERE " + " AND ".join(conds)
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
             total = cur.fetchone()[0]
@@ -1113,6 +1135,9 @@ class _MaterialDB:
         if ai_status:
             conds.append("COALESCE(ai_status,'pending') = %s")
             params.append(ai_status)
+        ex_cond, ex_params = _recycle_exclude_cond()
+        conds.append(ex_cond)
+        params.extend(ex_params)
         where = "WHERE " + " AND ".join(conds)
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
@@ -1233,8 +1258,11 @@ class _MaterialDB:
             conds.append("ai_confidence >= 0.4 AND ai_confidence < 0.7")
         elif conf_filter == "low":
             conds.append("(ai_confidence < 0.4 OR ai_confidence IS NULL)")
+        ex_cond, ex_params = _recycle_exclude_cond()
+        conds.append(ex_cond)
+        params.extend(ex_params)
 
-        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        where = "WHERE " + " AND ".join(conds)
         with self._conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM materials {where}", params)
             total = cur.fetchone()[0]
@@ -1258,12 +1286,14 @@ class _MaterialDB:
         """返回 {total, pending, analyzed, failed}"""
         self._connect()
         try:
+            ex_cond, ex_params = _recycle_exclude_cond()
             with self._conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) FROM materials")
+                cur.execute(f"SELECT COUNT(*) FROM materials WHERE {ex_cond}", ex_params)
                 total = cur.fetchone()[0]
                 cur.execute(
                     "SELECT COALESCE(ai_status,'pending'), COUNT(*) "
-                    "FROM materials GROUP BY 1"
+                    f"FROM materials WHERE {ex_cond} GROUP BY 1",
+                    ex_params
                 )
                 by_status = {row[0]: row[1] for row in cur.fetchall()}
             self._conn.commit()
@@ -1281,23 +1311,26 @@ class _MaterialDB:
             return {"total": 0, "pending": 0, "analyzed": 0, "failed": 0}
 
     def get_pending_materials(self, path_prefix: str = "", limit: int = 10000) -> list:
-        """杩斿洖 ai_status='pending'锛堟垨涓 NULL锛夌殑绱犳潗 [{id, path}, ...]銆"""
+        """杩斿洖 ai_status='pending'锛堟垨涓 NULL锞夌殑绱犳潗 [{id, path}, ...]銆"""
         self._connect()
+        ex_cond, ex_params = _recycle_exclude_cond()
         with self._conn.cursor() as cur:
             if path_prefix:
                 normalized_prefix = to_relative_path(path_prefix, self._cfg.get("nas_root", ""))
                 cur.execute(
                     "SELECT id, path FROM materials "
                     "WHERE COALESCE(ai_status,'pending')='pending' AND path LIKE %s "
+                    f"AND {ex_cond} "
                     "ORDER BY id LIMIT %s",
-                    (normalized_prefix + "%", limit),
+                    (normalized_prefix + "%", *ex_params, limit),
                 )
             else:
                 cur.execute(
                     "SELECT id, path FROM materials "
                     "WHERE COALESCE(ai_status,'pending')='pending' "
+                    f"AND {ex_cond} "
                     "ORDER BY id LIMIT %s",
-                    (limit,),
+                    (*ex_params, limit),
                 )
             rows = cur.fetchall()
         self._conn.commit()
@@ -2532,6 +2565,9 @@ def search_by_text(
                     )
                     params.extend([like, like, like])
                 conditions.append("(" + " OR ".join(color_ors) + ")")
+        ex_cond, ex_params = _recycle_exclude_cond("m")
+        conditions.append(ex_cond)
+        params.extend(ex_params)
         where = " AND ".join(conditions)
 
         # 组合分数: 向量相似度 60% + 文本匹配 30% + 置信度 10%
@@ -2602,18 +2638,19 @@ def search_by_image(
     db = _MaterialDB(cfg)
     try:
         db._connect()
+        ex_cond, ex_params = _recycle_exclude_cond("m")
         with db._conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT m.id, m.path, m.filename, f.ts_s,
                        f.brand, f.product, f.model, f.category,
                        1 - (f.embedding <=> %s) AS score,
                        m.file_hash, m.scene_desc_primary, m.scene_desc_secondary
                 FROM frames f
                 JOIN materials m ON m.id = f.material_id
-                WHERE f.embedding IS NOT NULL
+                WHERE f.embedding IS NOT NULL AND {ex_cond}
                 ORDER BY f.embedding <=> %s
                 LIMIT %s
-            """, (query_vec, query_vec, top_k))
+            """, (*ex_params, query_vec, query_vec, top_k))
             rows = cur.fetchall()
         return [
             {

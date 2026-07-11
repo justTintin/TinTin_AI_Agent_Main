@@ -1640,6 +1640,10 @@ class LiveClipPage(BasePage):
         self.transcribe_lang.setCurrentIndex(0)  # Default to Chinese
         ar.addWidget(self.transcribe_lang)
 
+        self.chk_reextract = QCheckBox("强制重新提取音频")
+        self.chk_reextract.setToolTip("勾选后每次重新用 ffmpeg 提取音频")
+        ar.addWidget(self.chk_reextract)
+
         self.btn_analyze = mdi_button("开始提取并分析", "mic")
         self.btn_analyze.setObjectName("action_button")
         self.btn_analyze.setFixedHeight(30)
@@ -1653,10 +1657,6 @@ class LiveClipPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_analysis)
         ar.addWidget(self.btn_stop)
-
-        self.chk_reextract = QCheckBox("强制重新提取音频")
-        self.chk_reextract.setToolTip("勾选后每次重新用 ffmpeg 提取音频（不勾选则复用上次提取的音频文件）")
-        ar.addWidget(self.chk_reextract)
         cl.addLayout(ar)
 
         layout.addWidget(card)

@@ -255,19 +255,24 @@ class AudioExtractWorker(BaseWorker):
     def run(self):
         try:
             self.stage.emit("正在流式提取音频...")
+            log.info(f"[AudioExtractWorker] 开始提取音频: {self.video_path}")
             last = -1
+            count = 0
             for sec in self._extract():
                 if self.isInterruptionRequested():
                     return
+                count += 1
                 pct = min(99, int(sec / 10 if sec < 1000 else sec / 60))
                 if pct > last:
                     self.progress.emit(pct)
                     last = pct
             if self.isInterruptionRequested():
                 return
+            log.info(f"[AudioExtractWorker] 提取完成, 进度更新{count}次")
             self.progress.emit(100)
             self.finished.emit(self.audio_path)
         except Exception:
+            log.exception("[AudioExtractWorker] 提取异常")
             self.error.emit(traceback.format_exc())
 
     def _extract(self):
@@ -275,6 +280,7 @@ class AudioExtractWorker(BaseWorker):
         cmd = [ffmpeg, "-y", "-threads", "0", "-i", self.video_path, "-vn",
                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                "-progress", "pipe:1", "-nostats", self.audio_path]
+        log.info(f"[AudioExtractWorker] ffmpeg: {' '.join(cmd)}")
         self._ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                               bufsize=0, startupinfo=_startupinfo())
         for line in iter(self._ffmpeg_proc.stdout.readline, b""):
@@ -1918,6 +1924,7 @@ class LiveClipPage(BasePage):
         # 音频缓存：存在且未勾选"重新提取"则跳过
         reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
         if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
+            log.info(f"[LiveClip] 使用缓存音频: {self.audio_path}")
             self.btn_analyze.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_to_step2.setEnabled(False)
@@ -1942,6 +1949,7 @@ class LiveClipPage(BasePage):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
 
+        log.info(f"[LiveClip] 创建 AudioExtractWorker, video={video_path}")
         self._audio_worker = AudioExtractWorker(video_path, self.audio_path)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)

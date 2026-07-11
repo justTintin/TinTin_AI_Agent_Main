@@ -1297,8 +1297,28 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         if keyword:
             lines = [l for l in lines if keyword.lower() in l.lower()]
 
-        content = "\n".join(lines[-500:])
-        self.log_viewer.setPlainText(content)
+        lines = lines[-500:]
+
+        # 按级别着色
+        colors = {
+            "ERROR": "#ef4444",
+            "WARNING": "#f59e0b",
+            "INFO": "#e4e4e7",
+            "DEBUG": "#6b7280",
+            "CRITICAL": "#dc2626",
+        }
+        html_parts = ['<pre style="margin:0; font-family:Consolas,monospace; font-size:12px; background:transparent;">']
+        for line in lines:
+            level = "INFO"
+            for lvl in ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"):
+                if f"| {lvl: <8} |" in line or f"| {lvl}" in line:
+                    level = lvl
+                    break
+            color = colors.get(level, "#e4e4e7")
+            html_parts.append(f'<div style="color:{color};">{line}</div>')
+        html_parts.append("</pre>")
+
+        self.log_viewer.setHtml("\n".join(html_parts))
         self.log_viewer.verticalScrollBar().setValue(
             self.log_viewer.verticalScrollBar().maximum()
         )

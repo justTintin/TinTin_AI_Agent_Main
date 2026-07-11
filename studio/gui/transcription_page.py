@@ -278,7 +278,7 @@ class TranscriptionToolPage(BasePage):
                     self.stage.emit("正在发送到远程 Whisper 服务...")
                     from utils.asr_client import read_asr_url
                     asr_url = read_asr_url()
-                    segments, _info = transcribe_remote(
+                    segments = transcribe_remote(
                         self.video_path, asr_url,
                         language=self.language, task_type=self.task_type,
                         diarize=self.diarize,

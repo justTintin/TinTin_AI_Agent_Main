@@ -187,14 +187,14 @@ class TranscriptionToolPage(BasePage):
             self.file_table.removeRow(idx)
 
     def _on_context_menu(self, pos):
-        item = self.file_table.itemAt(pos)
-        if item is None:
+        idx = self.file_table.indexAt(pos)
+        if not idx.isValid():
             return
-        row = item.row()
+        row = idx.row()
         menu = self.file_table.createStandardContextMenu()
         menu.addSeparator()
         act = QAction("从列表移除", self.parent_widget)
-        act.triggered.connect(lambda: self._remove_file(row))
+        act.triggered.connect(lambda r=row: self._remove_file(r))
         menu.addAction(act)
         menu.exec(self.file_table.viewport().mapToGlobal(pos))
 

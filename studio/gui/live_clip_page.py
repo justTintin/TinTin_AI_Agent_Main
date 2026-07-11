@@ -2021,6 +2021,10 @@ class LiveClipPage(BasePage):
             self._tw.requestInterruption()
             self._tw.terminate()
             self._tw.wait(2000)
+        if hasattr(self, "_analyzer") and self._analyzer and self._analyzer.isRunning():
+            self._analyzer.requestInterruption()
+            self._analyzer.terminate()
+            self._analyzer.wait(2000)
         self._reset_ui()
         self.stage_lbl.setText("⏹ 已停止")
         log.info("[LiveClip] _stop_analysis 完成")

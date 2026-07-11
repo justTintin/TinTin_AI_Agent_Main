@@ -1650,6 +1650,10 @@ class LiveClipPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_analysis)
         ar.addWidget(self.btn_stop)
+
+        self.chk_reextract = QCheckBox("强制重新提取音频")
+        self.chk_reextract.setToolTip("勾选后每次重新用 ffmpeg 提取音频（不勾选则复用上次提取的音频文件）")
+        ar.addWidget(self.chk_reextract)
         cl.addLayout(ar)
 
         layout.addWidget(card)
@@ -1899,7 +1903,21 @@ class LiveClipPage(BasePage):
         os.makedirs(TMP_DIR, exist_ok=True)
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
-        # 删除旧的音频文件，确保每次都重新提取
+
+        # 音频缓存：存在且未勾选"重新提取"则跳过
+        reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
+        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
+            self.btn_analyze.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_to_step2.setEnabled(False)
+            self.stage_lbl.setText("使用已提取的音频...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+            self.audio_player.set_audio_path(self.audio_path)
+            self._do_transcribe(self.audio_path)
+            return
+
+        # 勾选了重新提取或首次运行，删除旧文件
         if os.path.exists(self.audio_path):
             try:
                 os.remove(self.audio_path)

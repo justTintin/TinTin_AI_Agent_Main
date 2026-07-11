@@ -1702,13 +1702,6 @@ class LiveClipPage(BasePage):
         self.transcript_preview.setPlaceholderText("转写完成后在此预览字幕...")
         sub_vl.addWidget(self.transcript_preview)
 
-        # Export Subtitles Button
-        self.btn_export_sub = mdi_button("导出字幕", "save")
-        self.btn_export_sub.setObjectName("secondary_button")
-        self.btn_export_sub.setEnabled(False)
-        self.btn_export_sub.clicked.connect(self._export_subtitles)
-        sub_vl.addWidget(self.btn_export_sub)
-
         lower_layout.addWidget(sub_card, 1)
 
         # Right: Hotspot list

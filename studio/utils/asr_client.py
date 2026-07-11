@@ -181,11 +181,21 @@ def transcribe_remote(
         tmp_wav = _extract_audio(video_path, ffmpeg_path)
         log.info(f"[ASR] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")
 
-        # 2. POST 到远程
+        # 2. 确保模型已加载
         import requests
-        url = asr_url.rstrip("/")
-        if not url.endswith("/transcribe"):
-            url = url + "/whisper/transcribe"
+        base = asr_url.rstrip("/")
+        if progress_cb:
+            progress_cb("正在加载 Whisper 模型...")
+        try:
+            ensure_url = f"{base}/models/ensure/whisper"
+            log.info(f"[ASR] 确保模型加载: {ensure_url}")
+            er = requests.post(ensure_url, timeout=60)
+            log.info(f"[ASR] 模型加载状态: HTTP {er.status_code}")
+        except Exception as e:
+            log.warning(f"[ASR] 确保模型加载失败(继续尝试转写): {e}")
+
+        # 3. POST 到远程
+        url = f"{base}/whisper/transcribe"
 
         if progress_cb:
             progress_cb("正在上传音频到服务端...")

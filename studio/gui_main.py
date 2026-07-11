@@ -526,11 +526,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception:
             pass
         try:
-            from utils import comfyui_client as comfy
-            comfy.ComfyUILocal.get().stop()
-        except Exception:
-            pass
-        try:
             from core.creator_browser_controller import close_all_active_browsers
             close_all_active_browsers()
         except Exception:

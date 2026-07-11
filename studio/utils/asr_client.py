@@ -8,6 +8,7 @@ import os
 import json
 import subprocess
 import tempfile
+from typing import Optional, Callable
 
 from utils.logger_utils import log
 
@@ -150,6 +151,7 @@ def transcribe_remote(
     task_type: str = "transcribe",
     diarize: bool = False,
     timeout: int = 600,
+    progress_cb: Optional[Callable[[str], None]] = None,
 ) -> list:
     """远程转写：提取音频 → POST 到远程 ASR 服务 → 返回 segments 列表。
 
@@ -174,6 +176,8 @@ def transcribe_remote(
     # 1. 提取音频
     tmp_wav = None
     try:
+        if progress_cb:
+            progress_cb("正在提取音频...")
         tmp_wav = _extract_audio(video_path, ffmpeg_path)
         log.info(f"[ASR] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")
 
@@ -182,6 +186,9 @@ def transcribe_remote(
         url = asr_url.rstrip("/")
         if not url.endswith("/transcribe"):
             url = url + "/whisper/transcribe"
+
+        if progress_cb:
+            progress_cb("正在上传音频到服务端...")
 
         with open(tmp_wav, "rb") as f:
             files = {"file": (os.path.basename(tmp_wav), f, "audio/wav")}
@@ -194,6 +201,8 @@ def transcribe_remote(
                 data["diarize"] = "true"
 
             log.info(f"[ASR] 上传到远程: {url}")
+            if progress_cb:
+                progress_cb("正在等待服务端处理...")
             resp = requests.post(url, files=files, data=data, timeout=timeout)
 
         if resp.status_code != 200:

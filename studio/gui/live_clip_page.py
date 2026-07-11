@@ -1937,11 +1937,10 @@ class LiveClipPage(BasePage):
 
                 def do_work(self):
                     try:
-                        self.stage.emit("正在上传音频并等待服务端返回结果...")
-                        asr_url = read_asr_url()
                         segments = transcribe_remote(
-                            self.video_path, asr_url,
+                            self.video_path, read_asr_url(),
                             language=self.language, task_type="transcribe",
+                            progress_cb=lambda m: self.stage.emit(m),
                         )
                         lines = []
                         for i, seg in enumerate(segments):

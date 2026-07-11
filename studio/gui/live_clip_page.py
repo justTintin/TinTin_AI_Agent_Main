@@ -1921,6 +1921,58 @@ class LiveClipPage(BasePage):
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
 
+        def _do_transcribe(audio_path):
+            log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
+            out_dir = os.path.join(OUTPUTS_DIR, "transcription")
+            os.makedirs(out_dir, exist_ok=True)
+            vn = os.path.splitext(os.path.basename(self.video_path))[0]
+            out = os.path.join(out_dir, f"{vn}.srt")
+            self.srt_path = out
+            self.stage_lbl.setText("正在上传音频到服务端...")
+            self.progress_bar.setRange(0, 0)
+            self.progress_bar.setVisible(True)
+            lang_choice = self.transcribe_lang.currentData()
+            language = None if lang_choice == "auto" else lang_choice
+            from utils.asr_client import transcribe_remote, read_asr_url
+            from utils.base_worker import BaseWorker
+            class _RemoteWorker(BaseWorker):
+                stage = Signal(str)
+                progress = Signal(int)
+                finished = Signal(str)
+                error = Signal(str)
+                def __init__(self, vp, op, lg):
+                    super().__init__()
+                    self.video_path = vp
+                    self.output_path = op
+                    self.language = lg
+                def do_work(self):
+                    if self.isInterruptionRequested(): return
+                    try:
+                        log.info(f"[_RemoteWorker] 开始 file={self.video_path}")
+                        segs = transcribe_remote(self.video_path, read_asr_url(),
+                            language=self.language, task_type="transcribe",
+                            progress_cb=lambda m: (self.stage.emit(m), log.info(f"[_RemoteWorker] {m}")))
+                        if self.isInterruptionRequested(): return
+                        lines = []
+                        for i, s in enumerate(segs):
+                            t = s.get("text","").strip().replace("\n"," ")
+                            lines.append(f"{i+1}")
+                            lines.append(f"{int(s.get('start',0)//3600):02d}:{int(s.get('start',0)%3600//60):02d}:{s.get('start',0)%60:06.3f} --> {int(s.get('end',0)//3600):02d}:{int(s.get('end',0)%3600//60):02d}:{s.get('end',0)%60:06.3f}")
+                            lines.append(t)
+                            lines.append("")
+                        with open(self.output_path, "w", encoding="utf-8") as fp:
+                            fp.write("\n".join(lines))
+                        self.stage.emit("转写完成")
+                        self.finished.emit(self.output_path)
+                    except Exception as e:
+                        self.error.emit(str(e))
+            self._tw = _RemoteWorker(audio_path, out, language)
+            self.audio_player.set_audio_path(audio_path)
+            self._tw.stage.connect(self.stage_lbl.setText)
+            self._tw.finished.connect(self._do_analyze)
+            self._tw.error.connect(self._on_err)
+            self._tw.start()
+
         # 音频缓存：存在且未勾选"重新提取"则跳过
         reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
         if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
@@ -1932,7 +1984,7 @@ class LiveClipPage(BasePage):
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)
             self.audio_player.set_audio_path(self.audio_path)
-            self._do_transcribe(self.audio_path)
+            _do_transcribe(self.audio_path)
             return
 
         # 勾选了重新提取或首次运行，删除旧文件
@@ -1953,99 +2005,9 @@ class LiveClipPage(BasePage):
         self._audio_worker = AudioExtractWorker(video_path, self.audio_path)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)
-        self._audio_worker.finished.connect(self._do_transcribe)
+        self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
-
-        def _do_transcribe(self, audio_path):
-            log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
-            out_dir = os.path.join(OUTPUTS_DIR, "transcription")
-            os.makedirs(out_dir, exist_ok=True)
-            vname = os.path.splitext(os.path.basename(self.video_path))[0]
-            out = os.path.join(out_dir, f"{vname}.srt")
-            self.srt_path = out
-
-            self.stage_lbl.setText("正在上传音频到服务端...")
-            self.progress_bar.setRange(0, 0)  # 不确定模式
-            self.progress_bar.setVisible(True)
-
-            lang_choice = self.transcribe_lang.currentData()
-            language = None if lang_choice == "auto" else lang_choice
-
-            from utils.asr_client import transcribe_remote, read_asr_url
-            from utils.base_worker import BaseWorker
-
-            class RemoteTranscribeWorker(BaseWorker):
-                stage = Signal(str)
-                progress = Signal(int)
-                finished = Signal(str)
-                error = Signal(str)
-
-                def __init__(self, video_path, output_path, language):
-                    super().__init__()
-                    self.video_path = video_path
-                    self.output_path = output_path
-                    self.language = language
-
-                def do_work(self):
-                    if self.isInterruptionRequested():
-                        return
-                    try:
-                        log.info(f"[RemoteTranscribeWorker] 开始, file={self.video_path}")
-                        asr_url = read_asr_url()
-                        segments = transcribe_remote(
-                            self.video_path, asr_url,
-                            language=self.language, task_type="transcribe",
-                            progress_cb=lambda m: (self.stage.emit(m), log.info(f"[RemoteTranscribeWorker] {m}")),
-                        )
-                        if self.isInterruptionRequested():
-                            return
-                        lines = []
-                        lines = []
-                        for i, seg in enumerate(segments):
-                            start = seg.get("start", 0)
-                            end = seg.get("end", 0)
-                            text = seg.get("text", "").strip().replace("\n", " ")
-                            lines.append(f"{i+1}")
-                            lines.append(
-                                f"{int(start//3600):02d}:{int(start%3600//60):02d}:{start%60:06.3f} --> "
-                                f"{int(end//3600):02d}:{int(end%3600//60):02d}:{end%60:06.3f}"
-                            )
-                            lines.append(text)
-                            lines.append("")
-                        srt_text = "\n".join(lines)
-                        with open(self.output_path, "w", encoding="utf-8") as f:
-                            f.write(srt_text)
-                        self.stage.emit("转写完成")
-                        self.finished.emit(self.output_path)
-                    except Exception as e:
-                        self.error.emit(str(e))
-
-            self._tw = RemoteTranscribeWorker(audio_path, out, language)
-            self.audio_player.set_audio_path(audio_path)
-            self._tw.stage.connect(self.stage_lbl.setText)
-            self._tw.finished.connect(self._do_analyze)
-            self._tw.error.connect(self._on_err)
-            self._tw.start()
-
-    def _stop_analysis(self):
-        log.info("[LiveClip] _stop_analysis 用户请求停止")
-        self._stop_requested = True
-        # 停止音频提取（直接杀 ffmpeg 进程）
-        if hasattr(self, "_audio_worker") and self._audio_worker:
-            self._audio_worker.kill_ffmpeg()
-            self._audio_worker.requestInterruption()
-            self._audio_worker.terminate()
-            self._audio_worker.wait(2000)
-        # 停止转写（HTTP 阻塞无法优雅中断，强制终止线程）
-        if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
-            self._tw.requestInterruption()
-            self._tw.terminate()
-            self._tw.wait(2000)
-        self._reset_ui()
-        self.stage_lbl.setText("⏹ 已停止")
-        log.info("[LiveClip] _stop_analysis 完成")
-
     def _do_analyze(self, srt_content, srt_path):
         self._parse_srt(srt_content)
         self._update_transcript_preview_html()

@@ -274,10 +274,14 @@ class AudioExtractWorker(BaseWorker):
             self.stage.emit("正在流式提取音频...")
             last = -1
             for sec in extract_audio_streaming(self.video_path, self.audio_path):
+                if self.isInterruptionRequested():
+                    return
                 pct = min(99, int(sec / 10 if sec < 1000 else sec / 60))
                 if pct > last:
                     self.progress.emit(pct)
                     last = pct
+            if self.isInterruptionRequested():
+                return
             self.progress.emit(100)
             self.finished.emit(self.audio_path)
         except Exception:
@@ -1482,6 +1486,7 @@ class LiveClipPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
+        self._stop_requested = False
         self.hotspots = []
         self.transcript_segments = []
         self.audio_path = ""
@@ -1563,7 +1568,10 @@ class LiveClipPage(BasePage):
             lbl.setFont(self._get_step_font(i == 0))
             sl.addWidget(lbl)
             self.step_labels.append(lbl)
-        layout.addWidget(self.step_bar, 0)
+            layout.addWidget(self.step_bar, 0)
+    
+            # 初始化第一步为激活状态
+            QTimer.singleShot(0, lambda: self._update_step_indicator(0))
 
         # Stacked widget
         self.stacked = QStackedWidget()
@@ -1634,6 +1642,14 @@ class LiveClipPage(BasePage):
         self.btn_analyze.setFixedHeight(30)
         self.btn_analyze.clicked.connect(self._start_analysis_pipeline)
         ar.addWidget(self.btn_analyze, 1)
+
+        self.btn_stop = mdi_button("停止", "stop")
+        self.btn_stop.setObjectName("secondary_button")
+        self.btn_stop.setProperty("danger", True)
+        self.btn_stop.setFixedHeight(30)
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._stop_analysis)
+        ar.addWidget(self.btn_stop)
         cl.addLayout(ar)
 
         layout.addWidget(card)
@@ -1850,7 +1866,7 @@ class LiveClipPage(BasePage):
 
         self.stacked.addWidget(page)
 
-    # ===== Actions =====
+        # ===== Actions =====
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择直播视频", "",
@@ -1871,6 +1887,7 @@ class LiveClipPage(BasePage):
                 self.audio_player.lbl_time.setText("等待提取音频...")
 
     def _start_analysis_pipeline(self):
+        self._stop_requested = False
         log.info("[LiveClip] _start_analysis_pipeline")
         video_path = self.video_path_input.text().strip()
         if not video_path or not os.path.exists(video_path):
@@ -1895,6 +1912,7 @@ class LiveClipPage(BasePage):
             return
 
         self.btn_analyze.setEnabled(False)
+        self.btn_stop.setEnabled(True)
         self.btn_to_step2.setEnabled(False)
         self.stage_lbl.setText("正在读取视频并转换为声音文件...")
         self.progress_bar.setVisible(True)
@@ -1938,6 +1956,8 @@ class LiveClipPage(BasePage):
                     self.language = language
 
                 def do_work(self):
+                    if self.isInterruptionRequested():
+                        return
                     try:
                         log.info(f"[RemoteTranscribeWorker] 开始, file={self.video_path}")
                         asr_url = read_asr_url()
@@ -1946,6 +1966,9 @@ class LiveClipPage(BasePage):
                             language=self.language, task_type="transcribe",
                             progress_cb=lambda m: (self.stage.emit(m), log.info(f"[RemoteTranscribeWorker] {m}")),
                         )
+                        if self.isInterruptionRequested():
+                            return
+                        lines = []
                         lines = []
                         for i, seg in enumerate(segments):
                             start = seg.get("start", 0)
@@ -1972,6 +1995,23 @@ class LiveClipPage(BasePage):
             self._tw.finished.connect(self._do_analyze)
             self._tw.error.connect(self._on_err)
             self._tw.start()
+
+    def _stop_analysis(self):
+        log.info("[LiveClip] _stop_analysis 用户请求停止")
+        self._stop_requested = True
+        # 停止音频提取
+        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
+            self._audio_worker.requestInterruption()
+            self._audio_worker.quit()
+            self._audio_worker.wait(3000)
+        # 停止转写
+        if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
+            self._tw.requestInterruption()
+            self._tw.quit()
+            self._tw.wait(3000)
+        self._reset_ui()
+        self.stage_lbl.setText("⏹ 已停止")
+        log.info("[LiveClip] _stop_analysis 完成")
 
     def _do_analyze(self, srt_content, srt_path):
         self._parse_srt(srt_content)
@@ -2394,9 +2434,10 @@ class LiveClipPage(BasePage):
             if line.strip(): s = line.strip(); break
         QMessageBox.critical(self.parent_widget, "错误", f"操作失败:\n{s or err[:500]}")
 
-    def _reset_ui(self):
-        self.btn_analyze.setEnabled(True)
-        self.btn_to_step2.setEnabled(False)
+        def _reset_ui(self):
+            self.btn_analyze.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self.btn_to_step2.setEnabled(False)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)
         self.btn_export_sub.setEnabled(False)

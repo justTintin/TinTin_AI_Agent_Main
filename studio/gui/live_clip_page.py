@@ -1814,14 +1814,14 @@ class LiveClipPage(BasePage):
         self.clip_status_lbl = QLabel("已选 0 个片段待切片")
         self.clip_status_lbl.setObjectName("clip_status_label")
         header_layout.addWidget(self.clip_status_lbl)
-        
-        self.btn_clip = mdi_button("开始切片", "cut")
-        self.btn_clip.setObjectName("action_button")
-        self.btn_clip.setFixedHeight(30)
-        self.btn_clip.setFixedWidth(120)
-        self.btn_clip.clicked.connect(self._start_clip_pipeline)
-        header_layout.addWidget(self.btn_clip)
-        
+
+        self.btn_open_output = mdi_button("打开输出目录", "folder")
+        self.btn_open_output.setObjectName("secondary_button")
+        self.btn_open_output.setFixedHeight(30)
+        self.btn_open_output.clicked.connect(self._open_output)
+        self.btn_open_output.setEnabled(False)
+        header_layout.addWidget(self.btn_open_output)
+
         ccl.addLayout(header_layout)
         
         # Scroll Area for the list of clips
@@ -1852,7 +1852,14 @@ class LiveClipPage(BasePage):
         
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
-        
+
+        self.btn_clip = mdi_button("开始切片", "cut")
+        self.btn_clip.setObjectName("action_button")
+        self.btn_clip.setFixedHeight(40)
+        self.btn_clip.setFixedWidth(120)
+        self.btn_clip.clicked.connect(self._start_clip_pipeline)
+        btn_layout.addWidget(self.btn_clip)
+
         self.btn_export = mdi_button("确认封面并导出最终视频", "rocket")
         self.btn_export.setObjectName("action_button")
         self.btn_export.setFixedHeight(40)
@@ -1860,13 +1867,6 @@ class LiveClipPage(BasePage):
         self.btn_export.setEnabled(False)
         btn_layout.addWidget(self.btn_export, 1)
 
-        self.btn_open_output = mdi_button("打开输出目录", "folder")
-        self.btn_open_output.setObjectName("secondary_button")
-        self.btn_open_output.setFixedHeight(40)
-        self.btn_open_output.clicked.connect(self._open_output)
-        self.btn_open_output.setEnabled(False)
-        btn_layout.addWidget(self.btn_open_output, 1)
-        
         evl.addLayout(btn_layout)
 
         self.export_result_lbl = QLabel("")

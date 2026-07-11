@@ -275,12 +275,12 @@ class TranscriptionToolPage(BasePage):
 
             def do_work(self):
                 try:
-                    self.stage.emit("正在提取音频...")
-                    from utils.asr_client import _extract_audio
-                    audio_path = _extract_audio(self.video_path)
                     self.stage.emit("正在发送到远程 Whisper 服务...")
+                    from utils.asr_client import read_asr_url
+                    asr_url = read_asr_url()
                     segments, _info = transcribe_remote(
-                        audio_path, language=self.language, task_type=self.task_type,
+                        self.video_path, asr_url,
+                        language=self.language, task_type=self.task_type,
                         diarize=self.diarize,
                     )
                     # 生成 SRT

@@ -185,7 +185,7 @@ def transcribe_remote(
 
         with open(tmp_wav, "rb") as f:
             files = {"file": (os.path.basename(tmp_wav), f, "audio/wav")}
-            data = {}
+            data = {"fmt": "json"}
             if language:
                 data["language"] = language
             if task_type:

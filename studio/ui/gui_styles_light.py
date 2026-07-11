@@ -548,9 +548,16 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #step_label {
     color: #86868b; padding: 4px 0; font-size: 13px;
 }
-#step_label[active="true"] {
+#step_label[status="active"] {
     color: #2563eb; font-weight: bold;
     background-color: rgba(37, 99, 235, 0.1); border-radius: 4px;
+}
+#step_label[status="done"] {
+    color: #059669;
+    background-color: rgba(5, 150, 105, 0.08); border-radius: 4px;
+}
+#step_label[status="pending"] {
+    color: #86868b;
 }
 #nas_root_label { font-size: 13px; font-weight: bold; color: #1d1d1f; }
 #stats_analyze, #stats_ingest { font-size: 13px; color: #1d1d1f; }

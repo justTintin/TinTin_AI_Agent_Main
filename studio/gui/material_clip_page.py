@@ -622,12 +622,11 @@ class MaterialClipPage(BasePage):
         self.log_box_analyze.setVisible(index == 1)
         for i, lbl in enumerate(self.step_labels):
             if i == index:
-                lbl.setProperty("active", True)
+                lbl.setProperty("status", "active")
             else:
-                lbl.setProperty("active", False)
+                lbl.setProperty("status", "pending")
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
-            
         if index == 1:
             self._refresh_db_table()
 

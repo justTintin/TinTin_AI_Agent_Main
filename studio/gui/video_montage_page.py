@@ -2964,9 +2964,11 @@ class VideoMontagePage(BasePage):
     def update_step_indicator(self, index):
         for i, lbl in enumerate(self.step_labels):
             if i == index:
-                lbl.setProperty("active", True)
+                lbl.setProperty("status", "active")
+            elif i < index:
+                lbl.setProperty("status", "done")
             else:
-                lbl.setProperty("active", False)
+                lbl.setProperty("status", "pending")
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
 

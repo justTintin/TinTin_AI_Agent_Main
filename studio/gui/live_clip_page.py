@@ -1914,7 +1914,8 @@ class LiveClipPage(BasePage):
             self.srt_path = out
 
             self.stage_lbl.setText("正在连接远程转写服务...")
-            self.progress_bar.setValue(0)
+            self.progress_bar.setRange(0, 0)  # 不确定模式
+            self.progress_bar.setVisible(True)
 
             lang_choice = self.transcribe_lang.currentData()
             language = None if lang_choice == "auto" else lang_choice
@@ -1925,21 +1926,21 @@ class LiveClipPage(BasePage):
             class RemoteTranscribeWorker(BaseWorker):
                 stage = Signal(str)
                 progress = Signal(int)
-                finished = Signal(str)  # output_path
+                finished = Signal(str)
                 error = Signal(str)
 
-                def __init__(self, audio_path, output_path, language):
+                def __init__(self, video_path, output_path, language):
                     super().__init__()
-                    self.audio_path = audio_path
+                    self.video_path = video_path
                     self.output_path = output_path
                     self.language = language
 
                 def do_work(self):
                     try:
-                        self.stage.emit("正在发送到远程 Whisper 服务...")
+                        self.stage.emit("正在加载 Whisper 模型并转写（首次加载约需 1-2 分钟）...")
                         asr_url = read_asr_url()
                         segments = transcribe_remote(
-                            self.audio_path, asr_url,
+                            self.video_path, asr_url,
                             language=self.language, task_type="transcribe",
                         )
                         lines = []
@@ -1962,14 +1963,12 @@ class LiveClipPage(BasePage):
                     except Exception as e:
                         self.error.emit(str(e))
 
-            self._tw = RemoteTranscribeWorker(audio_path, out, language)
+            self._tw = RemoteTranscribeWorker(self.video_path, out, language)
             self.audio_player.set_audio_path(audio_path)
             self._tw.stage.connect(self.stage_lbl.setText)
             self._tw.finished.connect(self._do_analyze)
             self._tw.error.connect(self._on_err)
             self._tw.start()
-            log.exception("创建转写 Worker 失败")
-            self._on_err(traceback.format_exc())
 
     def _do_analyze(self, srt_content, srt_path):
         self._parse_srt(srt_content)

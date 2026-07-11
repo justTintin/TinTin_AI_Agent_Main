@@ -200,12 +200,14 @@ def transcribe_remote(
             if diarize:
                 data["diarize"] = "true"
 
-            log.info(f"[ASR] 上传到远程: {url}")
+            log.info(f"[ASR] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")
             if progress_cb:
                 progress_cb("正在等待服务端处理...")
             resp = requests.post(url, files=files, data=data, timeout=timeout)
+            log.info(f"[ASR] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")
 
         if resp.status_code != 200:
+            log.error(f"[ASR] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")
             raise RuntimeError(f"远程 ASR 返回 HTTP {resp.status_code}: {resp.text[:200]}")
 
         result = resp.json()

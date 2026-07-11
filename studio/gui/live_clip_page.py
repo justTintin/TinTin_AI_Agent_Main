@@ -1871,6 +1871,7 @@ class LiveClipPage(BasePage):
                 self.audio_player.lbl_time.setText("等待提取音频...")
 
     def _start_analysis_pipeline(self):
+        log.info("[LiveClip] _start_analysis_pipeline")
         video_path = self.video_path_input.text().strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择视频文件")
@@ -1907,6 +1908,7 @@ class LiveClipPage(BasePage):
         self._audio_worker.start()
 
         def _do_transcribe(self, audio_path):
+            log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
             out_dir = os.path.join(OUTPUTS_DIR, "transcription")
             os.makedirs(out_dir, exist_ok=True)
             vname = os.path.splitext(os.path.basename(self.video_path))[0]
@@ -1937,10 +1939,12 @@ class LiveClipPage(BasePage):
 
                 def do_work(self):
                     try:
+                        log.info(f"[RemoteTranscribeWorker] 开始, file={self.video_path}")
+                        asr_url = read_asr_url()
                         segments = transcribe_remote(
-                            self.video_path, read_asr_url(),
+                            self.video_path, asr_url,
                             language=self.language, task_type="transcribe",
-                            progress_cb=lambda m: self.stage.emit(m),
+                            progress_cb=lambda m: (self.stage.emit(m), log.info(f"[RemoteTranscribeWorker] {m}")),
                         )
                         lines = []
                         for i, seg in enumerate(segments):

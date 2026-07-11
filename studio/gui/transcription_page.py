@@ -71,24 +71,6 @@ class TranscriptionToolPage(BasePage):
         row1.addStretch()
         ctrl_lay.addLayout(row1)
 
-        # 进度条 + 状态
-        self.stage_label = QLabel("就绪")
-        self.stage_label.setObjectName("muted_text")
-        ctrl_lay.addWidget(self.stage_label)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        ctrl_lay.addWidget(self.progress_bar)
-
-        btn_process = mdi_button("开始处理", "play")
-        btn_process.setObjectName("action_button")
-        btn_process.setFixedHeight(40)
-        btn_process.clicked.connect(self._start_batch)
-        self.btn_process = btn_process
-        ctrl_lay.addWidget(btn_process)
-
         layout.addWidget(ctrl_card, 0)
 
         # ── 文件列表 ──
@@ -113,6 +95,23 @@ class TranscriptionToolPage(BasePage):
         self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_table.customContextMenuRequested.connect(self._on_context_menu)
         list_lay.addWidget(self.file_table, 1)
+
+        self.stage_label = QLabel("就绪")
+        self.stage_label.setObjectName("muted_text")
+        list_lay.addWidget(self.stage_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        list_lay.addWidget(self.progress_bar)
+
+        btn_process = mdi_button("开始处理", "play")
+        btn_process.setObjectName("action_button")
+        btn_process.setFixedHeight(40)
+        btn_process.clicked.connect(self._start_batch)
+        self.btn_process = btn_process
+        list_lay.addWidget(btn_process)
 
         layout.addWidget(list_card, 1)
 

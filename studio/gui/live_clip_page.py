@@ -1913,7 +1913,7 @@ class LiveClipPage(BasePage):
             out = os.path.join(out_dir, f"{vname}.srt")
             self.srt_path = out
 
-            self.stage_lbl.setText("正在连接远程转写服务...")
+            self.stage_lbl.setText("正在转写...")
             self.progress_bar.setRange(0, 0)  # 不确定模式
             self.progress_bar.setVisible(True)
 
@@ -1937,7 +1937,7 @@ class LiveClipPage(BasePage):
 
                 def do_work(self):
                     try:
-                        self.stage.emit("正在加载 Whisper 模型并转写（首次加载约需 1-2 分钟）...")
+                        self.stage.emit("正在上传音频并等待服务端返回结果...")
                         asr_url = read_asr_url()
                         segments = transcribe_remote(
                             self.video_path, asr_url,

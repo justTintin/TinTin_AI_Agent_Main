@@ -1283,9 +1283,22 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
     def refresh_logs(self):
-        content = get_last_logs(200)
+        level_filter = getattr(self, "log_level_filter", None)
+        keyword_filter = getattr(self, "log_keyword_input", None)
+        level_text = level_filter.currentText() if level_filter else "全部"
+        keyword = keyword_filter.text().strip() if keyword_filter else ""
+
+        raw = get_last_logs(2000)
+        lines = raw.split("\n")
+
+        if level_text != "全部":
+            lines = [l for l in lines if f"| {level_text: <8} |" in l or f"| {level_text}" in l]
+
+        if keyword:
+            lines = [l for l in lines if keyword.lower() in l.lower()]
+
+        content = "\n".join(lines[-500:])
         self.log_viewer.setPlainText(content)
-        # Scroll to bottom
         self.log_viewer.verticalScrollBar().setValue(
             self.log_viewer.verticalScrollBar().maximum()
         )

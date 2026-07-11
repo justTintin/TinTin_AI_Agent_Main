@@ -157,6 +157,9 @@ class TranscriptionToolPage(BasePage):
         task_row.addWidget(self.task_combo)
         card_layout.addLayout(task_row)
 
+        self.multi_speaker_check = QCheckBox("👥 多人模式（启用说话人分离）")
+        card_layout.addWidget(self.multi_speaker_check)
+
         self.stage_label = QLabel("就绪")
         self.stage_label.setObjectName("muted_text")
         card_layout.addWidget(self.stage_label)
@@ -236,6 +239,7 @@ class TranscriptionToolPage(BasePage):
 
         language = self.lang_input.text().strip() or None
         task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
+        diarize = self.multi_speaker_check.isChecked()
 
         out_dir = os.path.join(OUTPUTS_DIR, "transcription")
         os.makedirs(out_dir, exist_ok=True)
@@ -258,12 +262,13 @@ class TranscriptionToolPage(BasePage):
             finished = Signal(str, str)  # srt_text, output_path
             error = Signal(str)
 
-            def __init__(self, video_path, output_path, language, task_type):
+            def __init__(self, video_path, output_path, language, task_type, diarize):
                 super().__init__()
                 self.video_path = video_path
                 self.output_path = output_path
                 self.language = language
                 self.task_type = task_type
+                self.diarize = diarize
 
             def do_work(self):
                 try:
@@ -272,7 +277,8 @@ class TranscriptionToolPage(BasePage):
                     audio_path = _extract_audio(self.video_path)
                     self.stage.emit("正在发送到远程 Whisper 服务...")
                     segments, _info = transcribe_remote(
-                        audio_path, language=self.language, task_type=self.task_type
+                        audio_path, language=self.language, task_type=self.task_type,
+                        diarize=self.diarize,
                     )
                     # 生成 SRT
                     srt_lines = []
@@ -295,7 +301,7 @@ class TranscriptionToolPage(BasePage):
                 except Exception as e:
                     self.error.emit(str(e))
 
-        self.worker = RemoteTranscribeWorker(video_path, output_path, language, task_type)
+        self.worker = RemoteTranscribeWorker(video_path, output_path, language, task_type, diarize)
         self.worker.stage.connect(self._on_stage)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)

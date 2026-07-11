@@ -1605,7 +1605,14 @@ class LiveClipPage(BasePage):
         vr.addWidget(self.video_info_lbl)
         cl.addLayout(vr)
 
-        # Row 2: Analysis method, transcription engine and Start button in one line
+        # Row 2: Audio player for seek and playback
+        pr = QHBoxLayout()
+        pr.addWidget(QLabel("音频预览:"))
+        self.audio_player = AudioPlayerWidget()
+        pr.addWidget(self.audio_player, 1)
+        cl.addLayout(pr)
+
+        # Row 3: Analysis method, transcription engine and Start button in one line
         ar = QHBoxLayout()
         ar.addWidget(QLabel("分析方法:"))
         self.analysis_mode = QComboBox()
@@ -1628,13 +1635,6 @@ class LiveClipPage(BasePage):
         self.btn_analyze.clicked.connect(self._start_analysis_pipeline)
         ar.addWidget(self.btn_analyze, 1)
         cl.addLayout(ar)
-
-        # Row 3: Audio player for seek and playback
-        pr = QHBoxLayout()
-        pr.addWidget(QLabel("音频预览:"))
-        self.audio_player = AudioPlayerWidget()
-        pr.addWidget(self.audio_player, 1)
-        cl.addLayout(pr)
 
         layout.addWidget(card)
 

@@ -1963,7 +1963,7 @@ class LiveClipPage(BasePage):
                     except Exception as e:
                         self.error.emit(str(e))
 
-            self._tw = RemoteTranscribeWorker(self.video_path, out, language)
+            self._tw = RemoteTranscribeWorker(audio_path, out, language)
             self.audio_player.set_audio_path(audio_path)
             self._tw.stage.connect(self.stage_lbl.setText)
             self._tw.finished.connect(self._do_analyze)

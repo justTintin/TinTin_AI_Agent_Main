@@ -1504,6 +1504,7 @@ class LiveClipPage(BasePage):
         super().__init__(parent_widget, main_window)
         self.worker = None
         self._stop_requested = False
+        self._workers = []  # 所有可停止的 worker 列表
         self.hotspots = []
         self.transcript_segments = []
         self.audio_path = ""
@@ -1967,6 +1968,7 @@ class LiveClipPage(BasePage):
                     except Exception as e:
                         self.error.emit(str(e))
             self._tw = _RemoteWorker(audio_path, out, language)
+            self._workers.append(self._tw)
             self.audio_player.set_audio_path(audio_path)
             self._tw.stage.connect(self.stage_lbl.setText)
             self._tw.finished.connect(self._do_analyze)
@@ -2003,6 +2005,7 @@ class LiveClipPage(BasePage):
 
         log.info(f"[LiveClip] 创建 AudioExtractWorker, video={video_path}")
         self._audio_worker = AudioExtractWorker(video_path, self.audio_path)
+        self._workers.append(self._audio_worker)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)
         self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
@@ -2012,19 +2015,15 @@ class LiveClipPage(BasePage):
     def _stop_analysis(self):
         log.info("[LiveClip] _stop_analysis 用户请求停止")
         self._stop_requested = True
-        if hasattr(self, "_audio_worker") and self._audio_worker:
-            self._audio_worker.kill_ffmpeg()
-            self._audio_worker.requestInterruption()
-            self._audio_worker.terminate()
-            self._audio_worker.wait(2000)
-        if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
-            self._tw.requestInterruption()
-            self._tw.terminate()
-            self._tw.wait(2000)
-        if hasattr(self, "_analyzer") and self._analyzer and self._analyzer.isRunning():
-            self._analyzer.requestInterruption()
-            self._analyzer.terminate()
-            self._analyzer.wait(2000)
+        # 杀死所有 worker
+        for w in list(self._workers):
+            if hasattr(w, "kill_ffmpeg"):
+                w.kill_ffmpeg()
+            if w and w.isRunning():
+                w.requestInterruption()
+                w.terminate()
+                w.wait(2000)
+        self._workers.clear()
         self._reset_ui()
         self.stage_lbl.setText("⏹ 已停止")
         log.info("[LiveClip] _stop_analysis 完成")
@@ -2069,6 +2068,7 @@ class LiveClipPage(BasePage):
 
         self._analyzer = HotSpotAnalyzer(self.transcript_segments,
                                          use_llm=use_llm, llm_url=llm_url, llm_key=llm_key, llm_model=llm_model)
+        self._workers.append(self._analyzer)
         self._analyzer.stage.connect(self.stage_lbl.setText)
         self._analyzer.progress.connect(self.progress_bar.setValue)
         self._analyzer.finished.connect(self._on_analysis)

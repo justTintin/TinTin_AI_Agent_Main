@@ -16,6 +16,7 @@ from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import PROJECT_ROOT, OUTPUTS_DIR
 from gui.voice_samples_page import load_voice_samples
+from utils import voxcpm_client
 
 # Import workers and helper dialogs/widgets from video_montage_page to avoid duplicate definitions
 from gui.video_montage_page import (
@@ -1084,7 +1085,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
@@ -1155,7 +1156,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
@@ -1415,7 +1416,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 

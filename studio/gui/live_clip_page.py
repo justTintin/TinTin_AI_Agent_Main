@@ -56,7 +56,7 @@ def extract_audio_streaming(video_path, audio_path):
     ffmpeg = _ffmpeg()
     cmd = [ffmpeg, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
            "-ar", "16000", "-ac", "1", "-progress", "pipe:1", "-nostats", audio_path]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
     for line in proc.stdout:
         line = line.strip()
@@ -1906,46 +1906,68 @@ class LiveClipPage(BasePage):
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
 
-    def _do_transcribe(self, audio_path):
-        import sys
-        import traceback
-        from gui.transcription_page import setup_nvidia_dll_path
-        from config.paths import WHISPER_MODELS_DIR, WORKSPACE_ROOT
-        
-        # Ensure workspace root is in sys.path so we can import apps.*
-        if WORKSPACE_ROOT not in sys.path:
-            sys.path.insert(0, WORKSPACE_ROOT)
-            
-        setup_nvidia_dll_path()
+        def _do_transcribe(self, audio_path):
+            out_dir = os.path.join(OUTPUTS_DIR, "transcription")
+            os.makedirs(out_dir, exist_ok=True)
+            vname = os.path.splitext(os.path.basename(self.video_path))[0]
+            out = os.path.join(out_dir, f"{vname}.srt")
+            self.srt_path = out
 
-        out_dir = os.path.join(OUTPUTS_DIR, "transcription")
-        os.makedirs(out_dir, exist_ok=True)
-        vname = os.path.splitext(os.path.basename(self.video_path))[0]
-        out = os.path.join(out_dir, f"{vname}.srt")
-        self.srt_path = out
+            self.stage_lbl.setText("正在连接远程转写服务...")
+            self.progress_bar.setValue(0)
 
-        self.stage_lbl.setText("正在准备加载/下载模型并转写字幕...")
-        self.progress_bar.setValue(0)
+            lang_choice = self.transcribe_lang.currentData()
+            language = None if lang_choice == "auto" else lang_choice
 
-        lang_choice = self.transcribe_lang.currentData()
-        language = None if lang_choice == "auto" else lang_choice
+            from utils.asr_client import transcribe_remote, read_asr_url
+            from utils.base_worker import BaseWorker
 
-        try:
-            from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
-            self._tw = WhisperXTranscribeWorker(
-                video_path=self.video_path, audio_path=audio_path, output_path=out,
-                model_name="large-v3", language=language, task_type="transcribe",
-                multi_mode=False,
-                download_root=WHISPER_MODELS_DIR,
-                device_mode="auto",
-            )
+            class RemoteTranscribeWorker(BaseWorker):
+                stage = Signal(str)
+                progress = Signal(int)
+                finished = Signal(str)  # output_path
+                error = Signal(str)
+
+                def __init__(self, audio_path, output_path, language):
+                    super().__init__()
+                    self.audio_path = audio_path
+                    self.output_path = output_path
+                    self.language = language
+
+                def do_work(self):
+                    try:
+                        self.stage.emit("正在发送到远程 Whisper 服务...")
+                        asr_url = read_asr_url()
+                        segments = transcribe_remote(
+                            self.audio_path, asr_url,
+                            language=self.language, task_type="transcribe",
+                        )
+                        lines = []
+                        for i, seg in enumerate(segments):
+                            start = seg.get("start", 0)
+                            end = seg.get("end", 0)
+                            text = seg.get("text", "").strip().replace("\n", " ")
+                            lines.append(f"{i+1}")
+                            lines.append(
+                                f"{int(start//3600):02d}:{int(start%3600//60):02d}:{start%60:06.3f} --> "
+                                f"{int(end//3600):02d}:{int(end%3600//60):02d}:{end%60:06.3f}"
+                            )
+                            lines.append(text)
+                            lines.append("")
+                        srt_text = "\n".join(lines)
+                        with open(self.output_path, "w", encoding="utf-8") as f:
+                            f.write(srt_text)
+                        self.stage.emit("转写完成")
+                        self.finished.emit(self.output_path)
+                    except Exception as e:
+                        self.error.emit(str(e))
+
+            self._tw = RemoteTranscribeWorker(audio_path, out, language)
             self.audio_player.set_audio_path(audio_path)
             self._tw.stage.connect(self.stage_lbl.setText)
-            self._tw.progress.connect(self.progress_bar.setValue)
             self._tw.finished.connect(self._do_analyze)
             self._tw.error.connect(self._on_err)
             self._tw.start()
-        except Exception as e:
             log.exception("创建转写 Worker 失败")
             self._on_err(traceback.format_exc())
 

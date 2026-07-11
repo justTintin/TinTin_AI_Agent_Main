@@ -2051,7 +2051,7 @@ class VoiceCloneWorker(BaseWorker):
         while time.time() < deadline:
             try:
                 r = requests.get(health, timeout=3)
-                if r.status_code == 200 and r.json().get("model_loaded"):
+                if r.status_code == 200 and r.json().get("loaded"):
                     return True
             except Exception:
                 pass
@@ -2125,19 +2125,16 @@ class VoiceCloneWorker(BaseWorker):
         return text
 
     def _post_tts(self, text, ref_audio_b64, row_idx, label=""):
-        """向 VoxCPM 发起一次合成请求，带连接级/503 重试，返回 wav 字节；失败抛异常。"""
+        """向服务端 VoxCPM API 发起一次合成请求，带重试，返回 wav 字节；失败抛异常。
+
+        服务端接口：POST /voxcpm/tts
+          {"text": "...", "prompt_audio": "base64...", "speaker": "default"}
+        """
         payload = {
             "text": self._preprocess_tts_text(text),
-            "format": "wav",
-            "normalize": True,
-            "inference_timesteps": self.inference_timesteps,
-            "cfg_value": self.cfg_value,
+            "prompt_audio": ref_audio_b64 or None,
+            "speaker": "default",
         }
-        if ref_audio_b64:
-            payload["references"] = [{
-                "audio": ref_audio_b64,
-                "text": self.voice_ref_text or ""
-            }]
         max_attempts = 3
         last_err = None
         for attempt in range(1, max_attempts + 1):

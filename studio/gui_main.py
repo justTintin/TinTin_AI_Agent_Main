@@ -1280,8 +1280,17 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
     def refresh_logs(self):
         level_filter = getattr(self, "log_level_filter", None)
         keyword_filter = getattr(self, "log_keyword_input", None)
+        btn_server = getattr(self, "btn_server_log", None)
         level_text = level_filter.currentText() if level_filter else "全部"
         keyword = keyword_filter.text().strip() if keyword_filter else ""
+
+        # 服务端日志按钮勾选时，自动加上服务端相关关键词
+        if btn_server and btn_server.isChecked():
+            server_keys = ["[ASR]", "[_RemoteWorker]", "[RemoteTranscribeWorker]", "[VoxCPM]", "POST ", "HTTP "]
+            if keyword:
+                keyword = f"({keyword})"
+            keyword = "|".join(server_keys)
+            keyword_filter.setText(f"[服务端] {keyword[:50]}")
 
         raw = get_last_logs(2000)
         lines = raw.split("\n")
@@ -1296,24 +1305,20 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 按级别着色
         colors = {
-            "ERROR": "#ef4444",
-            "WARNING": "#f59e0b",
-            "INFO": "#e4e4e7",
-            "DEBUG": "#6b7280",
-            "CRITICAL": "#dc2626",
+            "CRITICAL": "#dc2626", "ERROR": "#ef4444",
+            "WARNING": "#f59e0b", "INFO": "#e4e4e7", "DEBUG": "#6b7280",
         }
-        html_parts = ['<pre style="margin:0; font-family:Consolas,monospace; font-size:12px; background:transparent;">']
+        html = '<html><body style="background:transparent; font-family:Consolas,monospace; font-size:12px; margin:0; padding:0;">'
         for line in lines:
             level = "INFO"
             for lvl in ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"):
                 if f"| {lvl: <8} |" in line or f"| {lvl}" in line:
                     level = lvl
                     break
-            color = colors.get(level, "#e4e4e7")
-            html_parts.append(f'<div style="color:{color};">{line}</div>')
-        html_parts.append("</pre>")
-
-        self.log_viewer.setHtml("\n".join(html_parts))
+            c = colors.get(level, "#e4e4e7")
+            html += f'<div style="color:{c};">{line}</div>'
+        html += "</body></html>"
+        self.log_viewer.setHtml(html)
         self.log_viewer.verticalScrollBar().setValue(
             self.log_viewer.verticalScrollBar().maximum()
         )

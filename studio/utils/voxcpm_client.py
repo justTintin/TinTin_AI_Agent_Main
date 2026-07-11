@@ -63,12 +63,16 @@ def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
             prompt_audio = base64.b64encode(f.read()).decode()
 
     payload = {"text": text, "prompt_audio": prompt_audio, "speaker": "default"}
+    url = tts_url()
+    log.info(f"[VoxCPM] 请求 TTS: {url} text_len={len(text)}")
 
     try:
-        r = requests.post(tts_url(), json=payload, timeout=timeout)
+        r = requests.post(url, json=payload, timeout=timeout)
+        log.info(f"[VoxCPM] 响应 HTTP {r.status_code} ({len(r.content)//1024}KB)")
     except requests.exceptions.RequestException:
+        log.error(f"[VoxCPM] 连接失败: {url}")
         raise RuntimeError(
-            f"无法连接 VoxCPM 远程服务（{tts_url()}）。"
+            f"无法连接 VoxCPM 远程服务（{url}）。"
             "请到『大模型配置』→『声音克隆』页检查 API 地址是否正确，"
             "并确认远程服务已启动。"
         )

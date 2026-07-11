@@ -10,6 +10,9 @@ from utils.logger_utils import log
 
 
 def _read_ai_config() -> dict:
+
+
+def _read_ai_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         import json
@@ -51,16 +54,23 @@ class OllamaManager:
 
     def is_running(self) -> bool:
         """检测远程 Ollama 服务是否可达。"""
+        url = f"{_read_ollama_api()}/ollama/status"
         try:
-            r = requests.get(f"{_read_ollama_api()}/ollama/status", timeout=5)
-            return r.status_code == 200
-        except Exception:
+            r = requests.get(url, timeout=5)
+            ok = r.status_code == 200
+            log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
+            return ok
+        except Exception as e:
+            log.warning(f"[Ollama] GET {url} 失败: {e}")
             return False
 
     def list_local_models(self) -> list[str]:
         """列出远程 Ollama 已加载的模型。"""
+        url = f"{_read_ollama_api()}/ollama/models"
         try:
             r = requests.get(f"{_read_ollama_api()}/ollama/models", timeout=5)
+            log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
+            if r.status_code == 200:
             if r.status_code == 200:
                 data = r.json()
                 models = data.get("models") or data.get("data") or []

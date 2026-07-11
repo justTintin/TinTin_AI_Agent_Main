@@ -807,9 +807,16 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #step_label {
     color: #7f8c8d; padding: 4px 0; font-size: 13px;
 }
-#step_label[active="true"] {
+#step_label[status="active"] {
     color: #3498db; font-weight: bold;
     background-color: rgba(52, 152, 219, 0.1); border-radius: 4px;
+}
+#step_label[status="done"] {
+    color: #2ecc71;
+    background-color: rgba(46, 204, 113, 0.08); border-radius: 4px;
+}
+#step_label[status="pending"] {
+    color: #7f8c8d;
 }
 #nas_root_label { font-size: 13px; font-weight: bold; color: #ffffff; }
 #stats_analyze, #stats_ingest { font-size: 13px; color: #ffffff; }

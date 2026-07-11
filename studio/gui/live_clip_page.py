@@ -1899,17 +1899,12 @@ class LiveClipPage(BasePage):
         os.makedirs(TMP_DIR, exist_ok=True)
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
-
-        # Skip audio extraction if audio_path already exists and is valid
-        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
-            self.btn_analyze.setEnabled(False)
-            self.btn_to_step2.setEnabled(False)
-            self.stage_lbl.setText("检测到已提取的音频，直接进入转写...")
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(100)
-            self.audio_player.set_audio_path(self.audio_path)
-            self._do_transcribe(self.audio_path)
-            return
+        # 删除旧的音频文件，确保每次都重新提取
+        if os.path.exists(self.audio_path):
+            try:
+                os.remove(self.audio_path)
+            except Exception:
+                pass
 
         self.btn_analyze.setEnabled(False)
         self.btn_stop.setEnabled(True)
@@ -2002,13 +1997,13 @@ class LiveClipPage(BasePage):
         # 停止音频提取
         if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
             self._audio_worker.requestInterruption()
-            self._audio_worker.quit()
-            self._audio_worker.wait(3000)
-        # 停止转写
+            self._audio_worker.terminate()
+            self._audio_worker.wait(2000)
+        # 停止转写（HTTP 阻塞无法优雅中断，强制终止）
         if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
             self._tw.requestInterruption()
-            self._tw.quit()
-            self._tw.wait(3000)
+            self._tw.terminate()
+            self._tw.wait(2000)
         self._reset_ui()
         self.stage_lbl.setText("⏹ 已停止")
         log.info("[LiveClip] _stop_analysis 完成")

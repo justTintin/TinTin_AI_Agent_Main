@@ -203,10 +203,11 @@ class TranscriptionToolPage(BasePage):
         if not index.isValid():
             return
         row = index.row()
+        col = index.column()
         f = self.files[row]
 
-        # 已完成 → 打开保存对话框
-        if f["status"] == "✅ 完成" and f["srt_text"]:
+        # 已完成且在结果列(2-3) → 保存对话框
+        if f["status"] == "✅ 完成" and f["srt_text"] and col >= 2:
             self._show_save_dialog(row)
             return
 
@@ -234,7 +235,8 @@ class TranscriptionToolPage(BasePage):
 
         dlg = QDialog(self.parent_widget)
         dlg.setWindowTitle("保存字幕")
-        dlg.setMinimumWidth(420)
+        dlg.resize(640, 480)
+        dlg.setMinimumWidth(560)
         lay = QVBoxLayout(dlg)
 
         lay.addWidget(QLabel(f"文件：{os.path.basename(f['path'])}"))
@@ -247,14 +249,20 @@ class TranscriptionToolPage(BasePage):
         fmt_combo.addItem("TXT 带有时间戳 (*.txt)", "txt")
         fmt_combo.addItem("TXT 纯文本 (*.txt)", "plain")
         fmt_row.addWidget(fmt_combo)
+        fmt_row.addStretch()
         lay.addLayout(fmt_row)
 
-        preview = QLabel()
-        preview.setWordWrap(True)
-        preview.setStyleSheet("color: #8b949e;")
-        text_preview = f["srt_text"][:200] + ("..." if len(f["srt_text"]) > 200 else "")
-        preview.setText(f"预览（前 200 字）:\n{text_preview}")
-        lay.addWidget(preview)
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        preview.setPlaceholderText("选择格式后预览...")
+        lay.addWidget(preview, 1)
+
+        def _update_preview():
+            text = self._convert_format(f["srt_text"], fmt_combo.currentData())
+            preview.setPlainText(text[:1000])
+
+        fmt_combo.currentIndexChanged.connect(_update_preview)
+        _update_preview()
 
         btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         btn_box.accepted.connect(dlg.accept)
@@ -266,42 +274,7 @@ class TranscriptionToolPage(BasePage):
 
         fmt = fmt_combo.currentData()
         ext = "txt" if fmt in ("txt", "plain") else fmt
-        full_text = f["srt_text"]
-
-        # 转换成对应格式
-        if fmt == "vtt":
-            lines = []
-            for seg in full_text.split("\n\n"):
-                seg = seg.strip()
-                if not seg:
-                    continue
-                parts = seg.split("\n")
-                if len(parts) >= 3:
-                    lines.append(parts[0])
-                    lines.append(parts[1].replace(",", "."))
-                    lines.extend(parts[2:])
-                    lines.append("")
-            full_text = "WEBVTT\n\n" + "\n".join(lines)
-        elif fmt == "txt":
-            lines = []
-            for seg in full_text.split("\n\n"):
-                seg = seg.strip()
-                if not seg:
-                    continue
-                parts = seg.split("\n")
-                if len(parts) >= 3:
-                    lines.append(f"[{parts[1].split('-->')[0].strip()}] {parts[2]}")
-            full_text = "\n".join(lines)
-        elif fmt == "plain":
-            lines = []
-            for seg in full_text.split("\n\n"):
-                seg = seg.strip()
-                if not seg:
-                    continue
-                parts = seg.split("\n")
-                if len(parts) >= 3:
-                    lines.append(parts[2])
-            full_text = "\n".join(lines)
+        full_text = self._convert_format(f["srt_text"], fmt)
 
         default_path = f"{base}.{ext}"
         save_path, _ = QFileDialog.getSaveFileName(
@@ -315,6 +288,34 @@ class TranscriptionToolPage(BasePage):
                 QMessageBox.information(dlg, "已保存", f"字幕已保存:\n{save_path}")
             except Exception as e:
                 QMessageBox.critical(dlg, "保存失败", str(e))
+
+    @staticmethod
+    def _convert_format(srt_text: str, fmt: str) -> str:
+        """将 SRT 格式文本转换为指定格式。"""
+        if fmt == "srt":
+            return srt_text
+        lines = []
+        for seg in srt_text.split("\n\n"):
+            seg = seg.strip()
+            if not seg:
+                continue
+            parts = seg.split("\n")
+            if len(parts) >= 3:
+                idx = parts[0]
+                time_line = parts[1]
+                text = parts[2]
+                if fmt == "vtt":
+                    lines.append(idx)
+                    lines.append(time_line.replace(",", "."))
+                    lines.append(text)
+                    lines.append("")
+                elif fmt == "txt":
+                    lines.append(f"[{time_line.split('-->')[0].strip()}] {text}")
+                elif fmt == "plain":
+                    lines.append(text)
+        if fmt == "vtt":
+            return "WEBVTT\n\n" + "\n".join(lines)
+        return "\n".join(lines)
 
     # ══════════════════════════════════════════
     #  批量处理

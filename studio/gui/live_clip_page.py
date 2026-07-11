@@ -1933,7 +1933,7 @@ class LiveClipPage(BasePage):
             out = os.path.join(out_dir, f"{vname}.srt")
             self.srt_path = out
 
-            self.stage_lbl.setText("正在转写...")
+            self.stage_lbl.setText("正在上传音频到服务端...")
             self.progress_bar.setRange(0, 0)  # 不确定模式
             self.progress_bar.setVisible(True)
 

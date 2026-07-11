@@ -2008,7 +2008,33 @@ class LiveClipPage(BasePage):
         self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
-    def _do_analyze(self, srt_content, srt_path):
+
+    def _stop_analysis(self):
+        log.info("[LiveClip] _stop_analysis 用户请求停止")
+        self._stop_requested = True
+        if hasattr(self, "_audio_worker") and self._audio_worker:
+            self._audio_worker.kill_ffmpeg()
+            self._audio_worker.requestInterruption()
+            self._audio_worker.terminate()
+            self._audio_worker.wait(2000)
+        if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
+            self._tw.requestInterruption()
+            self._tw.terminate()
+            self._tw.wait(2000)
+        self._reset_ui()
+        self.stage_lbl.setText("⏹ 已停止")
+        log.info("[LiveClip] _stop_analysis 完成")
+
+    def _do_analyze(self, srt_path):
+        """转写完成后的分析入口。srt_path 是 SRT 文件路径。"""
+        try:
+            with open(srt_path, "r", encoding="utf-8") as f:
+                srt_content = f.read()
+        except Exception:
+            log.error(f"[LiveClip] 读取 SRT 失败: {srt_path}")
+            QMessageBox.warning(self.parent_widget, "错误", "读取字幕文件失败")
+            self._reset_ui()
+            return
         self._parse_srt(srt_content)
         self._update_transcript_preview_html()
         self.btn_export_sub.setEnabled(True)
@@ -2429,10 +2455,10 @@ class LiveClipPage(BasePage):
             if line.strip(): s = line.strip(); break
         QMessageBox.critical(self.parent_widget, "错误", f"操作失败:\n{s or err[:500]}")
 
-        def _reset_ui(self):
-            self.btn_analyze.setEnabled(True)
-            self.btn_stop.setEnabled(False)
-            self.btn_to_step2.setEnabled(False)
+    def _reset_ui(self):
+        self.btn_analyze.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_to_step2.setEnabled(False)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)
         self.btn_export_sub.setEnabled(False)

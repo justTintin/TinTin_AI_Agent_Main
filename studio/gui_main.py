@@ -146,12 +146,32 @@ try:
                                  QProgressBar, QComboBox, QInputDialog, QSplitter,
                                  QAbstractItemView, QButtonGroup, QGroupBox, QListView,
                                  QSpinBox)
-    from PySide6.QtGui import QIcon, QFont, QPixmap
+    from PySide6.QtGui import QIcon, QFont, QPixmap, QSyntaxHighlighter, QTextCharFormat, QColor
     from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent, QSharedMemory
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     print("Please install PySide6 using: pip install PySide6 shiboken6")
     sys.exit(1)
+
+
+class LogHighlighter(QSyntaxHighlighter):
+    """用 QSyntaxHighlighter 给日志按级别着色，比 setHtml 稳定。"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._rules = []
+        for level, color in [("CRITICAL","#dc2626"),("ERROR","#ef4444"),
+                              ("WARNING","#f59e0b"),("INFO","#e4e4e7"),("DEBUG","#6b7280")]:
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(color))
+            self._rules.append((f"| {level: <8} |", fmt))
+
+    def highlightBlock(self, text):
+        for pattern, fmt in self._rules:
+            if pattern in text:
+                self.setFormat(0, len(text), fmt)
+                return
+
+
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.subtitle_removal_page import SubtitleRemovalPage
@@ -1303,22 +1323,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         lines = lines[-500:]
 
-        # 按级别着色
-        colors = {
-            "CRITICAL": "#dc2626", "ERROR": "#ef4444",
-            "WARNING": "#f59e0b", "INFO": "#e4e4e7", "DEBUG": "#6b7280",
-        }
-        html = '<html><body style="background:transparent; font-family:Consolas,monospace; font-size:12px; margin:0; padding:0;">'
-        for line in lines:
-            level = "INFO"
-            for lvl in ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"):
-                if f"| {lvl: <8} |" in line or f"| {lvl}" in line:
-                    level = lvl
-                    break
-            c = colors.get(level, "#e4e4e7")
-            html += f'<div style="color:{c};">{line}</div>'
-        html += "</body></html>"
-        self.log_viewer.setHtml(html)
+        self.log_viewer.setPlainText("\n".join(lines))
+        # 首次调用时挂上高亮器（只挂一次）
+        if not hasattr(self, "_log_highlighter"):
+            self._log_highlighter = LogHighlighter(self.log_viewer.document())
         self.log_viewer.verticalScrollBar().setValue(
             self.log_viewer.verticalScrollBar().maximum()
         )

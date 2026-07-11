@@ -52,25 +52,6 @@ def _ffmpeg():
     return p
 
 
-def extract_audio_streaming(video_path, audio_path):
-    """用 ffmpeg 提取音频，yield 进度秒数。"""
-    ffmpeg = _ffmpeg()
-    cmd = [ffmpeg, "-y", "-threads", "0", "-i", video_path, "-vn",
-           "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-           "-progress", "pipe:1", "-nostats", audio_path]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            bufsize=0, startupinfo=_startupinfo())
-    for line in iter(proc.stdout.readline, b""):
-        if line.startswith(b"out_time_ms="):
-            try:
-                yield int(line.split(b"=")[1]) / 1_000_000
-            except ValueError:
-                pass
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError("音频提取失败")
-
-
 def extract_frame(video_path, out_image, time_sec=1.0):
     cmd = [_ffmpeg(), "-y", "-ss", str(time_sec), "-i", video_path,
            "-vframes", "1", "-q:v", "2", out_image]
@@ -269,12 +250,13 @@ class AudioExtractWorker(BaseWorker):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
+        self._ffmpeg_proc = None
 
     def run(self):
         try:
             self.stage.emit("正在流式提取音频...")
             last = -1
-            for sec in extract_audio_streaming(self.video_path, self.audio_path):
+            for sec in self._extract():
                 if self.isInterruptionRequested():
                     return
                 pct = min(99, int(sec / 10 if sec < 1000 else sec / 60))
@@ -285,6 +267,34 @@ class AudioExtractWorker(BaseWorker):
                 return
             self.progress.emit(100)
             self.finished.emit(self.audio_path)
+        except Exception:
+            self.error.emit(traceback.format_exc())
+
+    def _extract(self):
+        ffmpeg = _ffmpeg()
+        cmd = [ffmpeg, "-y", "-threads", "0", "-i", self.video_path, "-vn",
+               "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+               "-progress", "pipe:1", "-nostats", self.audio_path]
+        self._ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                              bufsize=0, startupinfo=_startupinfo())
+        for line in iter(self._ffmpeg_proc.stdout.readline, b""):
+            if self.isInterruptionRequested():
+                self._ffmpeg_proc.kill()
+                return
+            if line.startswith(b"out_time_ms="):
+                try:
+                    yield int(line.split(b"=")[1]) / 1_000_000
+                except ValueError:
+                    pass
+        self._ffmpeg_proc.wait()
+        if self._ffmpeg_proc.returncode != 0:
+            raise RuntimeError("音频提取失败")
+
+    def kill_ffmpeg(self):
+        try:
+            if self._ffmpeg_proc and self._ffmpeg_proc.poll() is None:
+                self._ffmpeg_proc.kill()
+                self.finished.emit(self.audio_path)
         except Exception:
             self.error.emit(traceback.format_exc())
 
@@ -2013,12 +2023,13 @@ class LiveClipPage(BasePage):
     def _stop_analysis(self):
         log.info("[LiveClip] _stop_analysis 用户请求停止")
         self._stop_requested = True
-        # 停止音频提取
-        if hasattr(self, "_audio_worker") and self._audio_worker and self._audio_worker.isRunning():
+        # 停止音频提取（直接杀 ffmpeg 进程）
+        if hasattr(self, "_audio_worker") and self._audio_worker:
+            self._audio_worker.kill_ffmpeg()
             self._audio_worker.requestInterruption()
             self._audio_worker.terminate()
             self._audio_worker.wait(2000)
-        # 停止转写（HTTP 阻塞无法优雅中断，强制终止）
+        # 停止转写（HTTP 阻塞无法优雅中断，强制终止线程）
         if hasattr(self, "_tw") and self._tw and self._tw.isRunning():
             self._tw.requestInterruption()
             self._tw.terminate()

@@ -29,7 +29,7 @@ class TranscriptionToolPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
-        self.files = []  # [{"path": str, "status": str, "srt_text": str, "preview": str}, ...]
+        self.files = []  # [{"path": str, "size": int, "status": str, "srt_text": str, "preview": str}, ...]
 
     def setup(self):
         layout = QVBoxLayout(self.parent_widget)
@@ -99,11 +99,12 @@ class TranscriptionToolPage(BasePage):
 
         list_lay.addWidget(QLabel("文件列表（双击播放，右键移除）："))
 
-        self.file_table = QTableWidget(0, 3)
-        self.file_table.setHorizontalHeaderLabels(["文件名", "状态", "结果预览"])
+        self.file_table = QTableWidget(0, 4)
+        self.file_table.setHorizontalHeaderLabels(["文件名", "文件大小", "状态", "结果预览"])
         self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.file_table.setColumnWidth(0, 350)
         self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -137,7 +138,11 @@ class TranscriptionToolPage(BasePage):
             # 去重
             if any(f["path"] == p for f in self.files):
                 continue
-            self.files.append({"path": p, "status": "等待处理", "srt_text": "", "preview": ""})
+            try:
+                fsize = os.path.getsize(p)
+            except Exception:
+                fsize = 0
+            self.files.append({"path": p, "size": fsize, "status": "等待处理", "srt_text": "", "preview": ""})
             self._insert_file_row(len(self.files) - 1)
 
     def _insert_file_row(self, idx):
@@ -146,15 +151,36 @@ class TranscriptionToolPage(BasePage):
         f = self.files[idx]
         name = os.path.basename(f["path"])
         self.file_table.setItem(row, 0, QTableWidgetItem(name))
-        self.file_table.setItem(row, 1, QTableWidgetItem(f["status"]))
-        self.file_table.setItem(row, 2, QTableWidgetItem(f["preview"]))
+        size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
+        self.file_table.setItem(row, 1, QTableWidgetItem(size_text))
+        self.file_table.setItem(row, 2, QTableWidgetItem(f["status"]))
+        self.file_table.setItem(row, 3, QTableWidgetItem(f["preview"]))
+        self._apply_row_color(row, f["status"])
 
     def _refresh_file_row(self, idx):
         f = self.files[idx]
         name = os.path.basename(f["path"])
         self.file_table.item(idx, 0).setText(name)
-        self.file_table.item(idx, 1).setText(f["status"])
-        self.file_table.item(idx, 2).setText(f["preview"])
+        size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
+        self.file_table.item(idx, 1).setText(size_text)
+        self.file_table.item(idx, 2).setText(f["status"])
+        self.file_table.item(idx, 3).setText(f["preview"])
+        self._apply_row_color(idx, f["status"])
+
+    def _apply_row_color(self, row, status):
+        from PySide6.QtGui import QColor
+        colors = {
+            "等待处理": QColor(60, 60, 70),
+            "⏳ 处理中": QColor(80, 70, 30),
+            "✅ 完成":   QColor(30, 70, 40),
+            "❌ 失败":   QColor(70, 35, 35),
+        }
+        bg = colors.get(status)
+        if bg:
+            for c in range(self.file_table.columnCount()):
+                item = self.file_table.item(row, c)
+                if item:
+                    item.setBackground(bg)
 
     def _remove_file(self, idx):
         if 0 <= idx < len(self.files):

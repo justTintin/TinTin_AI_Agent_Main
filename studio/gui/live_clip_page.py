@@ -53,19 +53,17 @@ def _ffmpeg():
 
 
 def extract_audio_streaming(video_path, audio_path):
-    import io
+    """用 ffmpeg 提取音频，yield 进度秒数。"""
     ffmpeg = _ffmpeg()
     cmd = [ffmpeg, "-y", "-threads", "0", "-i", video_path, "-vn",
            "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
            "-progress", "pipe:1", "-nostats", audio_path]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             bufsize=0, startupinfo=_startupinfo())
-    reader = io.TextIOWrapper(proc.stdout, encoding="latin-1", errors="ignore")
-    for line in reader:
-        line = line.strip()
-        if line.startswith("out_time_ms="):
+    for line in iter(proc.stdout.readline, b""):
+        if line.startswith(b"out_time_ms="):
             try:
-                yield int(line.split("=")[1]) / 1_000_000
+                yield int(line.split(b"=")[1]) / 1_000_000
             except ValueError:
                 pass
     proc.wait()

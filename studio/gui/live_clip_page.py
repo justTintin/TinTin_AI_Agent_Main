@@ -53,13 +53,15 @@ def _ffmpeg():
 
 
 def extract_audio_streaming(video_path, audio_path):
+    import io
     ffmpeg = _ffmpeg()
     cmd = [ffmpeg, "-y", "-threads", "0", "-i", video_path, "-vn",
            "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
            "-progress", "pipe:1", "-nostats", audio_path]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
-    for line in proc.stdout:
+                            bufsize=0, startupinfo=_startupinfo())
+    reader = io.TextIOWrapper(proc.stdout, encoding="latin-1", errors="ignore")
+    for line in reader:
         line = line.strip()
         if line.startswith("out_time_ms="):
             try:
@@ -68,7 +70,7 @@ def extract_audio_streaming(video_path, audio_path):
                 pass
     proc.wait()
     if proc.returncode != 0:
-        raise RuntimeError(f"音频提取失败:\n{proc.stderr.read() if proc.stderr else ''}")
+        raise RuntimeError("音频提取失败")
 
 
 def extract_frame(video_path, out_image, time_sec=1.0):

@@ -54,8 +54,9 @@ def _ffmpeg():
 
 def extract_audio_streaming(video_path, audio_path):
     ffmpeg = _ffmpeg()
-    cmd = [ffmpeg, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
-           "-ar", "16000", "-ac", "1", "-progress", "pipe:1", "-nostats", audio_path]
+    cmd = [ffmpeg, "-y", "-threads", "0", "-i", video_path, "-vn",
+           "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+           "-progress", "pipe:1", "-nostats", audio_path]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
     for line in proc.stdout:

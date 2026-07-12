@@ -127,7 +127,7 @@
     </main>
 
     <!-- 中间：收藏记录视图 -->
-    <main class="main-browser" id="knowledge-base-view" style="display: none; padding: 20px 24px; overflow-y: auto;">
+    <main class="main-browser" id="knowledge-base-view" style="display: none; padding: 20px 24px; overflow-y: auto; display: none; flex-direction: column;">
       <header class="kb-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
         <h2 style="font-size: 1.4rem; font-weight: 700; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-family: var(--font-family);">收藏记录同步</h2>
         <div style="display: flex; gap: 15px; align-items: center;">
@@ -195,7 +195,7 @@
       </div>
 
       <!-- 数据内容展示列表 -->
-      <div id="kb-list-container" style="background-color: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); overflow-y: auto; display: flex; flex-direction: column; min-height: 350px; max-height: calc(100vh - 360px);">
+      <div id="kb-list-container" style="background-color: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); overflow-y: auto; display: flex; flex-direction: column; flex: 1; min-height: 200px;">
         <div class="empty-state" id="kb-empty-state" style="padding: 100px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: var(--text-muted); font-size: 0.8rem; line-height: 1.6; height: 100%;">
           暂无抓取数据<br>请点击右上角“抓取收藏数据”，或在网页浏览器打开你的收藏页后点“自动加载到底”
         </div>

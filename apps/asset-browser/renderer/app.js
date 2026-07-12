@@ -68,6 +68,18 @@ const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
 let proxyNodes = [];       // 当前解析到的节点列表
 let proxyRunning = false;  // 代理是否运行中
 
+// 节点列表持久化（localStorage 跨进程/重启不丢失）
+const PROXY_NODES_KEY = 'tintin_proxy_nodes';
+function saveProxyNodes() {
+  try { localStorage.setItem(PROXY_NODES_KEY, JSON.stringify(proxyNodes)); } catch(e){}
+}
+function loadProxyNodes() {
+  try {
+    const saved = localStorage.getItem(PROXY_NODES_KEY);
+    if (saved) { const arr = JSON.parse(saved); if (Array.isArray(arr) && arr.length > 0) proxyNodes = arr; }
+  } catch(e){}
+}
+
 // 显示可复制的错误信息（取代 alert）
 function showProxyError(msg) {
   const box = document.getElementById('proxy-error-box');
@@ -820,10 +832,8 @@ function setupEventListeners() {
   btnProxyConfig.addEventListener('click', () => {
     proxyOverlay.style.display = 'flex';
     refreshProxyStatus();
-    // 从 sessionStorage 恢复节点（刷新页面后不丢失）
-    if (proxyNodes.length === 0) {
-      try { const saved = sessionStorage.getItem('proxyNodes'); if (saved) proxyNodes = JSON.parse(saved); } catch(e){}
-    }
+    // 从 localStorage 恢复节点（重启也不丢失）
+    if (proxyNodes.length === 0) loadProxyNodes();
     renderProxyNodes();
   });
   btnProxyClose.addEventListener('click', () => { proxyOverlay.style.display = 'none'; });
@@ -932,8 +942,7 @@ function setupEventListeners() {
         proxyNodes = [node];
       }
 
-      // 保存到 sessionStorage，刷新页面后恢复
-      try { sessionStorage.setItem('proxyNodes', JSON.stringify(proxyNodes)); } catch(e){}
+      saveProxyNodes();
       renderProxyNodes();
       // 自动测试所有节点的延迟
       testAllNodesLatency();
@@ -1007,6 +1016,7 @@ function setupEventListeners() {
       if (!result.ok) throw new Error(result.error);
       if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
       proxyNodes = result.nodes;
+      saveProxyNodes();
       renderProxyNodes();
       testAllNodesLatency();
     } catch (e) {
@@ -1017,7 +1027,8 @@ function setupEventListeners() {
     btnProxyUpdateSub.disabled = false;
   });
 
-  // 初始化状态
+  // 初始化状态 + 恢复节点
+  loadProxyNodes();
   setTimeout(refreshProxyStatus, 1000);
 
   // --- IPC Listeners (Download Events) ---

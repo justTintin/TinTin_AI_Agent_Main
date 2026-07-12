@@ -160,6 +160,13 @@ async function init() {
     const saved = await window.api.loadKbItems();
     if (Array.isArray(saved) && saved.length) allKnowledgeItems = saved;
   } catch (e) {}
+  // 如果 IPC 没有数据，尝试从本地镜像文件恢复
+  if (allKnowledgeItems.length === 0) {
+    try {
+      const resp = await fetch('../../studio/outputs/materials/knowledge/kb_items.json');
+      if (resp.ok) { const arr = await resp.json(); if (Array.isArray(arr) && arr.length > 0) allKnowledgeItems = arr; }
+    } catch(e) {}
+  }
 
   // Set initial address input value
   addressInput.value = webview.src;
@@ -1258,20 +1265,22 @@ function setupWebviewListeners() {
     } else if (channel === 'hotspot-items-synced') {
       _ingestHotspot(payload);
     } else if (channel === 'network-media-sniffed' || channel === 'dom-assets-scanned') {
-      if (payload) addSniffedAssets(Array.isArray(payload) ? payload : [payload]);
+      try { if (payload) addSniffedAssets(Array.isArray(payload) ? payload : [payload]); } catch(e) {}
     } else if (channel === 'mse-segment-appended') {
-      const { url, type, blobUrl } = payload;
-      if (!blobToMediaUrlsMap.has(blobUrl)) blobToMediaUrlsMap.set(blobUrl, { videoUrl: null, audioUrl: null, title: '' });
-      const entry = blobToMediaUrlsMap.get(blobUrl);
-      if (type === 'video') entry.videoUrl = url;
-      else if (type === 'audio') entry.audioUrl = url;
-      // 如果有 video+audio 对，加入嗅探列表
-      if (entry.videoUrl && entry.audioUrl) {
-        addSniffedAssets([{ url: entry.videoUrl, type: 'combined', videoUrl: entry.videoUrl, audioUrl: entry.audioUrl }]);
-      }
+      try {
+        const { url, type, blobUrl } = payload;
+        if (url && type && blobUrl) {
+          if (!blobToMediaUrlsMap.has(blobUrl)) blobToMediaUrlsMap.set(blobUrl, { videoUrl: null, audioUrl: null, title: '' });
+          const entry = blobToMediaUrlsMap.get(blobUrl);
+          if (type === 'video') entry.videoUrl = url;
+          else if (type === 'audio') entry.audioUrl = url;
+          if (entry.videoUrl && entry.audioUrl) {
+            addSniffedAssets([{ url: entry.videoUrl, type: 'combined', videoUrl: entry.videoUrl, audioUrl: entry.audioUrl }]);
+          }
+        }
+      } catch(e) { console.warn('scraper mse error:', e); }
     } else if (channel === 'video-active-changed') {
-      activeVideoSrc = payload.src || '';
-      activeVideoTitle = payload.title || '';
+      try { activeVideoSrc = payload.src || ''; activeVideoTitle = payload.title || ''; } catch(e) {}
     }
   });
 }
@@ -2015,12 +2024,17 @@ async function syncKnowledgeBase() {
   
   await checkLoginStatus();
 
+  // 给采集任务加超时（最多 60 秒），防止卡死
   try {
-    await captureFavorites((m) => { kbLoadingText.textContent = m; });
-    // 保存前去重
-    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
-    try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
-  } catch (e) { console.error('captureFavorites failed', e); }
+    await Promise.race([
+      captureFavorites((m) => { kbLoadingText.textContent = m; }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('采集超时')), 60000))
+    ]);
+  } catch (e) { console.error('captureFavorites error:', e.message); }
+
+  // 去重保存
+  allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
+  try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
 
   kbSyncProgressBar.style.width = '100%';
   setTimeout(() => {
@@ -2038,13 +2052,10 @@ async function syncKnowledgeBase() {
       kbEmptyState.innerHTML = `
         <div style="text-align: left; padding: 10px 20px; line-height: 1.6;">
           ${loginLine}
-          <p style="color: var(--text-secondary);">进入你的「我的收藏 / 点赞」页，点工具栏「⬇️ 自动加载到底」，样本会自动出现在这里，可直接批量下载。</p>
+          <p style="color: var(--text-secondary);">进入你的「我的收藏 / 点赞」页，点工具栏「⬇️ 自动加载到底」，样本会自动出现在这里，可直接下载。</p>
         </div>
       `;
     }
-    // 再次去重后保存（保险）
-    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
-    try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   }, 500);
 }
 

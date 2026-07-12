@@ -1,12 +1,16 @@
-# DingDaGuai E-commerce Agent Matrix (GUI / Web)
+# DingDaGuai E-commerce Agent Matrix (Client-Server)
 
 Dự án dùng cho mục đích học tập và nội bộ.
 
-Kho này hiện có:
-- **Ứng dụng GUI (khuyến nghị, Windows)**: PySide6 (phân tích Douyin, hàng đợi tải, quản lý tải, AI tools).
-- **Web backend (tuỳ chọn / legacy)**: Flask (cần `config.ini` và DB).
+Hệ thống sử dụng **kiến trúc client-server**:
+- **GUI Client (Windows)**: Ứng dụng PySide6 — xử lý giao diện người dùng, tiền xử lý media (ffmpeg) và điều phối các tác vụ AI qua API từ xa.
+- **Compute Server (remote)**: Máy chủ AI hợp nhất — cung cấp dịch vụ Whisper (ASR), VoxCPM (TTS), Ollama (vision LLM) và CLIP (vector embedding).
+- **ComfyUI Server (remote)**: Tạo hình ảnh AI.
+- **DeepSeek API (cloud)**: Tạo văn bản / nội dung quảng cáo.
 
-## 1. GUI (Windows)
+> **Lưu ý**: Flask web backend cũ đã được loại bỏ. Tất cả AI inference hiện được xử lý qua compute server từ xa.
+
+## 1. GUI Client (Windows)
 
 Chạy:
 - `run_gui_integrated.bat`
@@ -14,7 +18,7 @@ Chạy:
 Hoặc:
 
 ```powershell
-.\python_embeded\python.exe gui_main.py
+.\python_embeded\python.exe studio\gui_main.py
 ```
 
 Cài Playwright browser:
@@ -24,26 +28,36 @@ Cài Playwright browser:
 ```
 
 Cấu hình AI (local):
-- Ví dụ: `config/ai_config.example.json`
-- File thật: `config/ai_config.json`
+- Ví dụ: `studio/config/ai_config.json.example`
+- File thật: `studio/config/ai_config.json`
 
 ```powershell
-copy .\config\ai_config.example.json .\config\ai_config.json
+copy .\studio\config\ai_config.json.example .\studio\config\ai_config.json
+```
+
+Cấu hình **compute server URL** trong `ai_config.json`:
+```json
+{
+  "compute_server_url": "http://<your-server-ip>:8000",
+  "comfyui_addr": "http://<your-comfyui-ip>:8188",
+  "llm_api_key": "sk-xxx"
+}
 ```
 
 Log & temp:
-- `.runtime/logs/app.log`
-- `.runtime/tmp/`
+- `studio/.runtime/logs/app.log`
+- `studio/.runtime/tmp/`
 
-## 2. Web backend (optional / legacy)
+## 2. Kiến trúc dịch vụ AI
 
-Khuyến nghị dùng venv riêng:
+| Dịch vụ | Vai trò | Giao thức | Trường cấu hình |
+|---------|---------|-----------|-----------------|
+| **Compute Server** | Whisper ASR + VoxCPM TTS + Ollama Vision + CLIP Embedding | HTTP REST | `compute_server_url` |
+| **ComfyUI** | Tạo hình ảnh AI | HTTP | `comfyui_addr` |
+| **DeepSeek API** | LLM tạo nội dung | HTTP | `llm_api_url` |
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run_server.py test
-```
-
-URL mặc định:
-- http://127.0.0.1:5050/video_list
+### Xử lý cục bộ (vẫn chạy trên client)
+- **VSR** (xóa phụ đề video)
+- **rembg** (xóa nền)
+- **PaddleOCR** (nhận dạng văn bản)
+- **ffmpeg** (trích xuất và xử lý media)

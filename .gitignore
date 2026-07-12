@@ -37,6 +37,9 @@ tmp/
 *.manifest.json
 pack_log.txt
 
+# ZCode internal plans
+.zcode/
+
 # IDE
 .vscode/
 .idea/

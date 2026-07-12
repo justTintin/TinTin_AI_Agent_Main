@@ -4,34 +4,57 @@
 >
 > 智能混剪 · 直播切片 · 声音克隆 · 素材检索 · AI 图像生成
 
-**Windows 专用**：Windows 10+ 64位  |  **GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
+**Windows 专用**：Windows 10+ 64位  |  **客户端 GUI**：PySide6 (Qt 6)  |  **版本**：v2.1.1
 
 ---
 
-## 架构
+## 架构（客户端-服务端分离）
+
+系统采用**客户端-服务端**（Client-Server）架构：客户端负责交互界面与轻量预处理，AI 推理任务统一交由远程服务端处理。
 
 ```
-project-root/
-├── studio/                    主应用 (Python)
-│   ├── gui_main.py            入口，侧边栏 + QStackedWidget 页面切换
-│   ├── gui/                   页面层 (40+ 功能页面)
-│   ├── core/                  抖音解析 / 下载引擎
-│   ├── utils/                 管理器 & 外部服务客户端
-│   ├── config/paths.py        全局路径 & 二进制定位
-│   └── ui/gui_styles.py       暗色主题 QSS
-├── apps/                      第三方工具 & 模型 (~59 GB，不入库)
-│   ├── voxcpm2/               声音克隆 (VoxCPM2)
-│   ├── vsr-v1.4.0/            视频超分辨率
-│   ├── whisper-models/        语音转文字 (WhisperX)
-│   ├── PaddleOCR/             光学字符识别
-│   ├── rembg/                 AI 抠图
-│   ├── comfyui/               AI 图像生成 (ComfyUI)
-│   ├── clip-models/           CLIP 向量模型 (Chinese-CLIP)
-│   └── asset-browser/         Electron 素材浏览器
-├── docs/                      文档
-├── build.py                   PyInstaller 构建
-├── Makefile                   开发辅助
-└── config.ini                 飞书 & VoxCPM 配置
+┌─────────────────────────────────────────────────────────────────┐
+│                    客户端 (本机 Windows)                           │
+│                                                                  │
+│  studio/                    主应用 (Python + PySide6)              │
+│   ├── gui_main.py           入口，侧边栏 + 页面切换                  │
+│   ├── gui/                  40+ 功能页面                            │
+│   ├── utils/                管理器 & 远程服务客户端                   │
+│   │   ├── asr_client.py     → 远程 Whisper 语音转写                  │
+│   │   ├── voxcpm_client.py  → 远程 VoxCPM 声音克隆                   │
+│   │   ├── comfyui_client.py → 远程 ComfyUI 图像生成                  │
+│   │   ├── ollama_manager.py → 远程 Ollama 视觉模型                   │
+│   │   └── material_clip_indexer.py → 远程 CLIP 向量检索              │
+│   ├── core/                 本地抖音解析 / 下载引擎                   │
+│   ├── config/paths.py       全局路径 & 二进制定位                    │
+│   └── ui/gui_styles.py      暗色/亮色主题 QSS                       │
+│                                                                  │
+│  apps/                      本地第三方工具 (~59 GB，不入库)           │
+│   ├── vsr-v1.4.0/           视频去字幕 (本地处理)                    │
+│   ├── PaddleOCR/            OCR 引擎 (本地处理)                     │
+│   ├── rembg/                AI 抠图 (本地处理)                      │
+│   ├── clip-models/          CLIP 向量模型 (fallback)                │
+│   └── asset-browser/        Electron 素材浏览器                     │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+             HTTP / WebSocket  │  (局域网 / 公网)
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    服务端 (远程 Linux/Windows)                     │
+│                                                                  │
+│  compute_server (统一计算节点)       http://<server>:8000          │
+│   ├── /whisper/transcribe     → 语音转写 (Whisper)                │
+│   ├── /voxcpm/tts             → 声音克隆 TTS (VoxCPM)             │
+│   ├── /vllm/chat              → 视觉分析 (Qwen2.5VL)              │
+│   ├── /clip/embed             → 向量嵌入 (Chinese-CLIP)           │
+│   └── /material/*             → 素材管理 API                       │
+│                                                                  │
+│  comfyui_server               http://<server>:8188                │
+│   └── AI 图像生成 (ComfyUI)                                       │
+│                                                                  │
+│  DeepSeek API (云端)          https://api.deepseek.com            │
+│   └── 文案生成 (LLM)                                             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 > ⚠️ **`apps/` 与敏感文件不入库**：约 59 GB 的模型/工具二进制、Cookie、License 白名单、用户主题偏好等均通过 `.gitignore` 排除。开发者克隆后需自行下载模型或从分发包获取（见 [docs/SETUP.md](docs/SETUP.md)）。
@@ -172,18 +195,20 @@ project-root/
 - 内嵌 Python 终端：在应用内执行命令
 
 ### 🔌 平台接入
-- **ComfyUI**：本地服务启停、地址配置、连接测试
+- **统一计算节点**：远程服务端地址配置、连通性测试（集中管理 ASR/VoxCPM/Ollama/CLIP）
+- **ComfyUI**：远程地址配置、连接测试
 - **RunningHub**：API Key 配置、用户信息验证
 - **即梦**：二进制路径显示
 - **飞书**：App ID/Secret/Token/Table 配置，保存到 `config.ini`
 
 ### 🧠 模型配置
-- **Ollama**：启停、模型列表、下载/删除、CUDA runner 自动匹配
-- **VoxCPM**：TTS 服务启停、端口配置
-- **Whisper**：模型加载测试 (base/large-v3)
-- **CLIP**：Chinese-CLIP 下载 (ModelScope)、加载预热、批大小配置
-- **PaddleOCR**：Python 环境检测、导入测试
-- **rembg**：抠图模型可用性检测
+- **大语言模型**（云端）：API 地址 / Key / 模型名配置
+- **视觉模型**（服务端）：远程 Ollama 视觉模型列表、下载/删除
+- **语音转写**（服务端）：远程 Whisper 服务连通性测试
+- **声音克隆**（服务端）：远程 VoxCPM 服务连通性测试
+- **向量模型**（服务端）：远程 CLIP 服务连通性测试
+- **PaddleOCR**（本地）：Python 环境检测、导入测试
+- **rembg**（本地）：抠图模型可用性检测
 
 ### 📊 系统信息
 - 硬件信息：OS / CPU / RAM / GPU / VRAM
@@ -208,24 +233,33 @@ project-root/
   "llm_api_key": "sk-xxx",
   "llm_api_url": "https://api.deepseek.com",
   "llm_model": "deepseek-v4-flash",
-  "llm_vision_api_url": "http://127.0.0.1:11434",
-  "llm_vision_model": "qwen2.5vl:7b-16k",
-  "ollama_num_parallel": 4,
-  "vision_concurrency": 4,
-  "comfyui_addr": "http://127.0.0.1:8188",
+  "compute_server_url": "http://192.168.111.18:8000",
+  "whisper_api_url": "http://192.168.111.18:8000",
+  "llm_vision_api_url": "http://192.168.111.18:8000",
+  "vox_api_url": "http://192.168.111.18:8000/voxcpm/tts",
+  "clip_api_url": "http://192.168.111.18:8000",
+  "material_api_url": "http://192.168.111.18:8000",
+  "comfyui_addr": "http://192.168.111.36:8188",
   "runninghub_api_key": "",
   "runninghub_base_url": "https://www.runninghub.cn",
-  "voice_clone_addr": "http://127.0.0.1:7860",
-  "vox_api_url": "http://127.0.0.1:7861/v1/tts",
-  "vox_mode": "api",
-  "vox_timesteps": 20,
-  "vox_cfg": 2.0,
   "rustfs_endpoint": "http://192.168.111.17:9000",
   "rustfs_access_key": "xxx",
   "rustfs_secret_key": "xxx",
   "rustfs_bucket": "photos"
 }
 ```
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `compute_server_url` | **统一计算节点地址**（ASR / VoxCPM / Ollama / CLIP 共用） | `http://192.168.111.18:8000` |
+| `whisper_api_url` | 语音转写服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `llm_vision_api_url` | 视觉分析（Ollama）地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `vox_api_url` | 声音克隆 TTS 地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000/voxcpm/tts` |
+| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://192.168.111.36:8188` |
+| `llm_api_url` | 文案生成 LLM API（云端） | `https://api.deepseek.com` |
+| `rustfs_endpoint` | RustFS/S3 对象存储地址 | `http://192.168.111.17:9000` |
 
 ### 服务配置 (`config.ini`)
 
@@ -243,6 +277,8 @@ foldertoken =
 modelpath = apps/voxcpm2/models/openbmb__VoxCPM2
 port = 7861
 ```
+
+> **注意**：VoxCPM 目前使用远程服务端模式，本地 `VoxCPM` 配置段为保留项。远程地址统一在 `ai_config.json` 中配置。
 
 ### 激活与授权
 
@@ -290,14 +326,18 @@ make clean           # 清理构建产物
 
 | 层 | 技术 |
 |----|------|
-| GUI | PySide6 (Qt 6) |
+| 客户端 GUI | PySide6 (Qt 6) |
+| 服务端 (AI 推理) | FastAPI · Whisper · VoxCPM2 · Ollama (vLLM) · Chinese-CLIP |
+| 图像生成 | ComfyUI（独立服务节点）|
+| 文案生成 | DeepSeek API（云端） |
 | Web 引擎 | QtWebEngine / Playwright |
-| AI 推理 | VoxCPM2 · WhisperX · CLIP · rembg · PaddleOCR · ComfyUI |
-| 视频 | ffmpeg · VSR |
-| 数据 | MySQL · PostgreSQL+pgvector · MongoDB |
+| 本地处理 | ffmpeg · VSR · rembg · PaddleOCR |
+| 数据 | PostgreSQL+pgvector · MySQL · MongoDB · RustFS/S3 |
 | 构建 | PyInstaller · Makefile |
 | 素材浏览器 | Electron |
 
 ---
+
+> 💡 **设计原则**：客户端只做 UI 渲染和轻量预处理（ffmpeg 提取音频、本地 VSR 去字幕等），所有 AI 推理任务（语音转写、声音克隆、视觉分析、向量嵌入）统一由远程服务端执行。这种分离让客户端保持轻量，同时支持服务端 GPU 资源共享与横向扩展。
 
 > ⚠️ 仅供学习交流，请勿用于违反平台规则或法律的用途。

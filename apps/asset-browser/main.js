@@ -6,6 +6,7 @@ const http = require('http');
 const { URL } = require('url');
 const { exec, spawn } = require('child_process');
 const proxyManager = require('./proxy-manager');
+const v2rayManager = require('./v2ray-manager');
 
 // 捕获未捕获的异常，防止因为 Electron/Chromium 内部的 WebFrameMain 销毁竞争等底层问题弹出 JavaScript 错误弹窗
 process.on('uncaughtException', (err) => {
@@ -1557,3 +1558,59 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '', log = '') {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  v2ray 代理 IPC
+// ═══════════════════════════════════════════════════════════════
+
+// 解析分享链接（用于 UI 预览）
+ipcMain.handle('v2ray-parse-link', (event, link) => {
+  return v2rayManager.parseShareLink(link);
+});
+
+// 下载订阅并解析节点列表
+ipcMain.handle('v2ray-fetch-subscription', async (event, subUrl) => {
+  try {
+    const text = await v2rayManager.downloadSubscription(subUrl);
+    const nodes = v2rayManager.parseSubscription(text);
+    return { ok: true, nodes };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 启动 v2ray（传入节点列表）
+ipcMain.handle('v2ray-start', async (event, nodes) => {
+  try {
+    const proxyUrl = await v2rayManager.start(nodes);
+    // 启动后自动设置代理
+    const db = getDatabase();
+    db.settings = { ...db.settings, proxyUrl };
+    saveDatabase(db);
+    proxyManager.applyProxy(db.settings);
+    return { ok: true, proxyUrl };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 停止 v2ray
+ipcMain.handle('v2ray-stop', () => {
+  const stopped = v2rayManager.stop();
+  // 清除代理设置
+  const db = getDatabase();
+  if (db.settings && db.settings.proxyUrl === v2rayManager.LOCAL_PROXY) {
+    delete db.settings.proxyUrl;
+    saveDatabase(db);
+    proxyManager.applyProxy(db.settings);
+  }
+  return { ok: true, stopped };
+});
+
+// 检查 v2ray 运行状态
+ipcMain.handle('v2ray-status', () => {
+  return {
+    running: v2rayManager.isRunning(),
+    proxyUrl: v2rayManager.getProxyUrl(),
+  };
+});

@@ -68,6 +68,13 @@ contextBridge.exposeInMainWorld('api', {
   onHandoffUpdated: (callback) => {
     ipcRenderer.removeAllListeners('handoff-updated');
     ipcRenderer.on('handoff-updated', (event, handoff) => callback(handoff));
-  }
+  },
+
+  // v2ray 代理
+  v2rayParseLink: (link) => ipcRenderer.invoke('v2ray-parse-link', link),
+  v2rayFetchSubscription: (subUrl) => ipcRenderer.invoke('v2ray-fetch-subscription', subUrl),
+  v2rayStart: (nodes) => ipcRenderer.invoke('v2ray-start', nodes),
+  v2rayStop: () => ipcRenderer.invoke('v2ray-stop'),
+  v2rayStatus: () => ipcRenderer.invoke('v2ray-status'),
 
 });

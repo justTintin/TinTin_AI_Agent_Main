@@ -68,6 +68,7 @@ studio/config/erp_config.json
 node_modules/
 *.exe
 !apps/asset-browser/bin/yt-dlp.exe
+!apps/asset-browser/bin/v2rayN/bin/xray/xray.exe
 *.dll
 *.so
 *.whl
@@ -94,7 +95,14 @@ studio/bin/**/*ggml-cuda*
 
 # Bundled binaries
 apps/pw-browsers/
-apps/asset-browser/bin/v2rayN/
+apps/asset-browser/bin/v2rayN/guiConfigs/
+apps/asset-browser/bin/v2rayN/guiLogs/
+apps/asset-browser/bin/v2rayN/v2rayN.exe
+apps/asset-browser/bin/v2rayN/AmazTool.exe.tmp
+apps/asset-browser/bin/v2rayN/bin/v2fly_v5/
+apps/asset-browser/bin/v2rayN/bin/sing_box/
+apps/asset-browser/bin/v2rayN/bin/srss/
+apps/asset-browser/bin/v2rayN/bin/cache.db
 apps/asset-browser/bin/node.exe
 apps/asset-browser/bin/ffmpeg.exe
 

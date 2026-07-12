@@ -1346,3 +1346,19 @@ body {
   border-color: var(--color-primary); background: rgba(99,102,241,0.1);
 }
 .proxy-mode-radio input { display: none; }
+
+/* ── 底部状态栏 ── */
+.browser-statusbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  font-size: 0.7rem; min-height: 28px;
+}
+.statusbar-btn {
+  display: flex; align-items: center; gap: 4px;
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; padding: 2px 8px; border-radius: 4px;
+  font-size: 0.7rem; font-family: var(--font-family);
+  transition: all 0.2s;
+}
+.statusbar-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }

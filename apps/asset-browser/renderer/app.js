@@ -67,6 +67,26 @@ const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
 let proxyNodes = [];       // 当前解析到的节点列表
 let proxyRunning = false;  // 代理是否运行中
 
+// 显示可复制的错误信息（取代 alert）
+function showProxyError(msg) {
+  const box = document.getElementById('proxy-error-box');
+  if (!box) return;
+  box.textContent = msg;
+  box.style.display = 'block';
+  // 自动选中方便复制
+  setTimeout(() => {
+    const range = document.createRange();
+    range.selectNodeContents(box);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, 100);
+}
+function clearProxyError() {
+  const box = document.getElementById('proxy-error-box');
+  if (box) { box.style.display = 'none'; box.textContent = ''; }
+}
+
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
 const knowledgeBaseView = document.getElementById('knowledge-base-view');
@@ -867,6 +887,7 @@ function setupEventListeners() {
 
   // 解析按钮
   btnProxyParse.addEventListener('click', async () => {
+    clearProxyError();
     const input = proxyInputField.value.trim();
     if (!input) return;
 
@@ -892,7 +913,7 @@ function setupEventListeners() {
 
       renderProxyNodes();
     } catch (e) {
-      alert('解析失败: ' + e.message);
+      showProxyError('解析失败:\n' + e.message);
     }
 
     btnProxyParse.textContent = '解析';
@@ -901,7 +922,8 @@ function setupEventListeners() {
 
   // 启动代理
   btnProxyStart.addEventListener('click', async () => {
-    if (proxyNodes.length === 0) { alert('请先解析节点'); return; }
+    clearProxyError();
+    if (proxyNodes.length === 0) { showProxyError('请先解析节点'); return; }
     // 获取选中的节点（如果有），否则用全部
     const selected = document.querySelector('.proxy-node-item.selected');
     const nodesToUse = selected ? [proxyNodes[Array.from(proxyNodeList.children).indexOf(selected)]] : proxyNodes;
@@ -914,7 +936,7 @@ function setupEventListeners() {
       if (!result.ok) throw new Error(result.error);
       await refreshProxyStatus();
     } catch (e) {
-      alert('启动失败: ' + e.message);
+      showProxyError('启动失败:\n' + e.message);
     }
 
     btnProxyStart.textContent = '▶ 重启代理';
@@ -923,20 +945,22 @@ function setupEventListeners() {
 
   // 停止代理
   btnProxyStop.addEventListener('click', async () => {
+    clearProxyError();
     await window.api.v2rayStop();
     await refreshProxyStatus();
   });
 
   // 更新订阅
   btnProxyUpdateSub.addEventListener('click', async () => {
+    clearProxyError();
     const activeTab = document.querySelector('.proxy-input-tab.active');
     const proto = activeTab ? activeTab.dataset.proto : 'sub';
     if (proto !== 'sub') {
-      alert('请在订阅地址标签下使用此功能');
+      showProxyError('请在「订阅地址」标签下使用此功能');
       return;
     }
     const subUrl = proxyInputField.value.trim();
-    if (!subUrl.startsWith('http')) { alert('请输入有效的订阅地址'); return; }
+    if (!subUrl.startsWith('http')) { showProxyError('请输入有效的订阅地址'); return; }
 
     btnProxyUpdateSub.textContent = '更新中...';
     btnProxyUpdateSub.disabled = true;
@@ -947,7 +971,7 @@ function setupEventListeners() {
       proxyNodes = result.nodes;
       renderProxyNodes();
     } catch (e) {
-      alert('更新订阅失败: ' + e.message);
+      showProxyError('更新订阅失败:\n' + e.message);
     }
 
     btnProxyUpdateSub.textContent = '🔄 更新订阅';

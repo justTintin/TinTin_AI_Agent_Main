@@ -2424,22 +2424,29 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
   _dyLog(`[抖音下载] 开始: ${item.url}`);
   let videoUrl = '', audioUrl = '';
 
-  const beforeCount = lastSniffedAssetsFallback.length + sniffedAssets.length;
+  // 导航到视频页，等加载完成
   scraperWebview.src = item.url;
-  _dyLog('等待嗅探器捕获直链...');
-  for (let wait = 0; wait < 20; wait++) {
-    await new Promise(r => setTimeout(r, 500));
-    const current = [...lastSniffedAssetsFallback, ...sniffedAssets];
-    if (current.length > beforeCount) {
-      for (const c of current) {
-        if ((c.type === 'combined' || c.type === 'video') && !videoUrl) {
-          videoUrl = c.videoUrl || c.url;
-          audioUrl = c.audioUrl || '';
-        }
-      }
-      if (videoUrl) { _dyLog(`嗅探捕获: ${videoUrl.slice(0,80)}`); break; }
+  await new Promise(resolve => {
+    let done = false;
+    const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } };
+    scraperWebview.addEventListener('did-stop-loading', onStop);
+    setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 10000);
+  });
+  _dyLog('页面已加载');
+  await new Promise(r => setTimeout(r, 2000));
+
+  // 从嗅探缓存找直链
+  const snapshot = [...lastSniffedAssetsFallback, ...sniffedAssets];
+  _dyLog(`嗅探缓存共 ${snapshot.length} 条`);
+  for (const c of snapshot) {
+    if ((c.type === 'combined' || c.type === 'video') && !videoUrl) {
+      videoUrl = c.videoUrl || c.url;
+      audioUrl = c.audioUrl || '';
     }
   }
+  if (videoUrl) _dyLog(`直链: ${videoUrl.slice(0,80)}`);
+  else _dyLog('未找到直链');
+
   if (!videoUrl) {
     _dyLog('嗅探超时，回退 yt-dlp');
     await window.api.startDownload({

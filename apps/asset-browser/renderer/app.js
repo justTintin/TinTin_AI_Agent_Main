@@ -2514,21 +2514,24 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
   }
 
   if (!videoUrl) {
-    console.warn('抖音嗅探未找到直链，回退 yt-dlp');
-    // 回退到原来的 yt-dlp 方式
-    const dlId = 'dl-kb-fallback-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    _dyLog('无直链，回退 yt-dlp');
     await window.api.startDownload({
-      id: dlId, url: item.url, filename: `${filePrefix}.mp4`,
-      referer: item.url, subDir: subDir, useYtdlp: true
+      id: 'dl-kb-fallback-'+Date.now(), url: item.url,
+      filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: true
     });
   } else {
-    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-    await window.api.startDownload({
-      id: dlId, url: videoUrl, audioUrl: audioUrl || null,
-      filename: `${filePrefix}.mp4`,
-      referer: item.url, subDir: subDir,
-      useYtdlp: false
-    });
+    _dyLog('下载直链...');
+    // 用 Python 下载（更加稳定）
+    const dlPath = `${currentSettings?.downloadPath || ''}/${subDir}/${filePrefix}.mp4`.replace(/\\/g,'/');
+    const pyResult = await window.api.douyinDownload({ url: videoUrl, destPath: dlPath, referer: item.url });
+    _dyLog('结果: ' + JSON.stringify(pyResult));
+    if (!pyResult.ok) {
+      _dyLog('失败，回退 HTTP 下载');
+      await window.api.startDownload({
+        id: 'dl-kb-'+Date.now(), url: videoUrl, audioUrl: audioUrl||null,
+        filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: false
+      });
+    }
   }
   
   // 3. 下载封面和元数据（同原逻辑）

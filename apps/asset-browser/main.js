@@ -1816,6 +1816,52 @@ ipcMain.handle('check-cookie-status', async () => {
   return result;
 });
 
+// 用 python_embeded 下载抖音视频（绕过 CDN 鉴权/过期问题）
+ipcMain.handle('douyin-download', async (event, { url, destPath, referer }) => {
+  try {
+    const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+    if (!fs.existsSync(pyPath)) return { ok: false, error: 'python_embeded not found' };
+    const script = `
+import urllib.request, urllib.parse, json, sys, os, time, ssl
+url = ${JSON.stringify(url)}
+dest = ${JSON.stringify(destPath)}
+referer = ${JSON.stringify(referer)}
+ctx = ssl.create_default_context()
+req = urllib.request.Request(url, headers={
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Referer': referer,
+    'Accept': '*/*',
+})
+try:
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+        total = int(r.headers.get('Content-Length', 0) or 0)
+        with open(dest, 'wb') as f:
+            downloaded = 0
+            while True:
+                chunk = r.read(65536)
+                if not chunk: break
+                f.write(chunk)
+                downloaded += len(chunk)
+        print(json.dumps({'ok': True, 'size': downloaded}))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': str(e)[:200]}))
+`;
+    const { spawn } = require('child_process');
+    const result = await new Promise(resolve => {
+      const child = spawn(pyPath, ['-c', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', d => out += d.toString());
+      child.stderr.on('data', d => {});
+      child.on('close', () => {
+        try { resolve(JSON.parse(out.trim())); } catch(e) { resolve({ ok: false, error: 'parse failed: '+out.slice(0,100) }); }
+      });
+    });
+    return result;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // 写入调试日志到桌面（方便用户反馈问题）
 ipcMain.handle('write-debug-log', (event, filename, content) => {
   try {

@@ -1347,13 +1347,7 @@ body {
 }
 .proxy-mode-radio input { display: none; }
 
-/* ── 底部状态栏 ── */
-.browser-statusbar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 12px; background: var(--bg-tertiary);
-  border-top: 1px solid var(--border-color);
-  font-size: 0.7rem; min-height: 28px;
-}
+/* ── 左侧底部状态栏按钮 ── */
 .statusbar-btn {
   display: flex; align-items: center; gap: 4px;
   background: none; border: none; color: var(--text-secondary);

@@ -1,0 +1,10 @@
+2026-06-07 15:18:09.9579-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-07 15:18:17.9890-INFO Setup Scheduled Tasks
+2026-06-07 15:20:43.0981-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-07 15:20:49.5634-INFO Setup Scheduled Tasks
+2026-06-07 15:31:05.5840-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-07 15:31:07.5832-INFO Setup Scheduled Tasks
+2026-06-07 15:46:49.8716-INFO Current_SessionEnding
+2026-06-07 15:46:49.9277-INFO AppExitAsync Begin
+2026-06-07 15:48:12.0917-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-07 15:48:13.8831-INFO Setup Scheduled Tasks

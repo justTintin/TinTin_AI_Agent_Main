@@ -4,7 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const proxyManager = require('./proxy-manager');
 
 // 捕获未捕获的异常，防止因为 Electron/Chromium 内部的 WebFrameMain 销毁竞争等底层问题弹出 JavaScript 错误弹窗
@@ -107,28 +107,21 @@ function saveDatabase(db) {
 }
 
 
-// ── yt-dlp 命令解析：优先使用内置 Python 环境 ──
-function getPythonEmbededPath() {
-  // apps/asset-browser/  ->  ../../python_embeded/
-  const candidate = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
-  if (fs.existsSync(candidate)) return candidate;
-  return null;
-}
-
-function getYtdlpCommand() {
+// ── yt-dlp 启动参数：优先使用内置 Python 环境 ──
+function getYtdlpSpawnArgs() {
+  // 返回 { cmd, args } 供 spawn() 使用（避免 cmd.exe 引号转义问题）
   // 1) 优先用内置 python_embeded 的 python -m yt_dlp
-  const pyPath = getPythonEmbededPath();
-  if (pyPath) {
-    console.log(`使用内置 Python 运行 yt-dlp: ${pyPath}`);
-    return `"${pyPath}" -m yt_dlp`;
+  const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+  if (fs.existsSync(pyPath)) {
+    return { cmd: pyPath, args: ['-m', 'yt_dlp'] };
   }
-  // 2) 回退到 yt-dlp.exe（需在 PATH 中或 bin/ 目录下）
+  // 2) 回退到 bin/yt-dlp.exe
   const localBin = path.join(__dirname, 'bin', 'yt-dlp.exe');
   if (fs.existsSync(localBin)) {
-    return `"${localBin}"`;
+    return { cmd: localBin, args: [] };
   }
   // 3) 最后回退到系统命令
-  return 'yt-dlp';
+  return { cmd: 'yt-dlp', args: [] };
 }
 
 // ── studio 集成：握手文件（选题关键词 → 搜索页 + 下载目录）──
@@ -300,7 +293,8 @@ app.whenReady().then(() => {
   initDatabase();
 
   // 启动时检查 yt-dlp 环境
-  console.log('yt-dlp 命令:', getYtdlpCommand());
+  const ytArgs = getYtdlpSpawnArgs();
+  console.log('yt-dlp 启动参数:', ytArgs.cmd, ytArgs.args.join(' '));
 
   // 启动时把数据库中已有的 kbItems 镜像到 studio 共享目录
   // 解决「旧数据存在 database.json 但 kb_items.json 从未写过」的问题
@@ -1138,10 +1132,11 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       await exportCookiesForDomain(cookieDomain, cookieTempPath);
     }
 
-    // 获取 yt-dlp 命令（优先用内置 python_embeded 运行）
-    const ytdlpBin = getYtdlpCommand();
-    const cookieArg = fs.existsSync(cookieTempPath) ? `--cookies "${cookieTempPath}"` : '';
-    const proxyArg = proxyManager.getYtDlpProxyArg(db.settings);
+    // 获取 yt-dlp 启动参数（优先用内置 python_embeded）
+    const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
+    const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+    const proxyArgStr = proxyManager.getYtDlpProxyArg(db.settings);
+    const proxyArgArr = proxyArgStr ? proxyArgStr.split(' ') : [];
 
     // 尝试多种格式，依次降级
     const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
@@ -1151,45 +1146,67 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
       updateTaskProgress(id, 5, `正在通过 yt-dlp 下载 (格式: ${fmt})...`, 0);
 
-      const cmd = `${ytdlpBin} ${cookieArg} ${proxyArg} --no-warnings --extractor-retries 3 --retries 5 -f "${fmt}" --merge-output-format mp4 -o "${finalPath}" "${urlToDownload}"`;
+      // 用 spawn 避免 cmd.exe 引号转义问题（尤其 Windows 路径含空格/特殊字符时）
+      const allArgs = [
+        ...ytdlpBaseArgs,
+        ...cookieArg,
+        ...proxyArgArr,
+        '--no-warnings',
+        '--extractor-retries', '3',
+        '--retries', '5',
+        '-f', fmt,
+        '--merge-output-format', 'mp4',
+        '-o', finalPath,
+        urlToDownload,
+      ];
 
       const result = await new Promise((resolve) => {
-        const child = exec(cmd, (err, stdout, stderr) => {
+        let stderrBuf = '';
+        let stdoutBuf = '';
+        const child = spawn(ytdlpBin, allArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        });
+
+        child.stdout.on('data', (data) => {
+          stdoutBuf += data.toString();
+          const str = data.toString();
+          const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+          if (match) {
+            const progress = Math.round(parseFloat(match[1]));
+            const speed = match[3];
+            updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
+          }
+        });
+
+        child.stderr.on('data', (data) => {
+          stderrBuf += data.toString();
+        });
+
+        child.on('close', (code) => {
           // 清理 Cookie 临时文件
           try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch(e){}
 
-          if (err) {
-            // 即使 exit code 非零，若文件已成功生成则视为成功
+          if (code === 0) {
+            let finalSize = 0;
+            try { if (fs.existsSync(finalPath)) finalSize = fs.statSync(finalPath).size; } catch(e) {}
+            resolve({ success: true, size: finalSize });
+          } else {
+            // exit code 非零，但文件已成功生成则视为成功（yt-dlp 警告可能触发非零退出）
             let fileCreated = false;
             try { fileCreated = fs.existsSync(finalPath) && fs.statSync(finalPath).size > 0; } catch(e) {}
             if (fileCreated) {
               resolve({ success: true, size: fs.statSync(finalPath).size });
             } else {
-              const errLines = (stderr || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
-              const errMsg = errLines.join('\n').trim() || err.message;
+              const errLines = (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
+              const fullOutput = (stderrBuf + '\n' + stdoutBuf).trim();
+              const errMsg = errLines.join('\n').trim() || `exit code ${code}`;
               lastError = errMsg;
-              console.error(`yt-dlp 格式 ${fmt} 下载失败:`, errMsg);
+              console.error(`yt-dlp 格式 ${fmt} 下载失败 (exit ${code}):`, fullOutput.slice(0, 1000));
               resolve({ success: false, error: errMsg });
             }
-          } else {
-            let finalSize = 0;
-            try { if (fs.existsSync(finalPath)) finalSize = fs.statSync(finalPath).size; } catch(e) {}
-            resolve({ success: true, size: finalSize });
           }
         });
-
-        // 解析 stdout 得到进度和速度
-        if (child.stdout) {
-          child.stdout.on('data', (data) => {
-            const str = data.toString();
-            const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
-            if (match) {
-              const progress = Math.round(parseFloat(match[1]));
-              const speed = match[3];
-              updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
-            }
-          });
-        }
 
         child.on('error', (e) => {
           lastError = e.message;

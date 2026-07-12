@@ -1,0 +1,113 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "socks10829",
+      "port": 10829,
+      "listen": "127.0.0.1",
+      "protocol": "socks"
+    },
+    {
+      "tag": "socks10830",
+      "port": 10830,
+      "listen": "127.0.0.1",
+      "protocol": "socks"
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy10829",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "siailin.com",
+            "port": 59806,
+            "users": [
+              {
+                "id": "05a5fc1b-8f75-4d9f-8c95-1ff74197846b",
+                "email": "t@t.tt",
+                "security": "auto",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "allowInsecure": false,
+          "serverName": "siailin.com",
+          "alpn": [
+            "h3",
+            "h2",
+            "http/1.1"
+          ]
+        }
+      },
+      "mux": {
+        "enabled": false,
+        "concurrency": -1
+      }
+    },
+    {
+      "tag": "proxy10830",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "siailin.com",
+            "port": 27291,
+            "users": [
+              {
+                "id": "935449cd-067d-4199-8816-b0d9a2b1e9e6",
+                "email": "t@t.tt",
+                "security": "auto",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "google.com",
+          "fingerprint": "random",
+          "show": false,
+          "publicKey": "Z_7c10kU2SeEfkJtfqj2rUH9wxlUVL1-BLJttsqggyE",
+          "shortId": "239a3fae764c",
+          "spiderX": "/"
+        }
+      },
+      "mux": {
+        "enabled": false,
+        "concurrency": -1
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "socks10829"
+        ],
+        "outboundTag": "proxy10829"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "socks10830"
+        ],
+        "outboundTag": "proxy10830"
+      }
+    ]
+  }
+}

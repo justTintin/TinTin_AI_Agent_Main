@@ -1,0 +1,17 @@
+2026-06-09 20:55:05.8360-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\code_workspace\TInTIn_Brower\bin\v2rayN\ | D:\code_workspace\TInTIn_Brower\bin\v2rayN\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-09 20:55:07.0929-DEBUG SysProxyHandler,通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+2026-06-09 20:55:07.0994-DEBUG    at System.Net.Sockets.Socket.UpdateStatusAfterSocketErrorAndThrowException(SocketError error, Boolean disconnectOnFailure, String callerName)
+   at System.Net.Sockets.Socket.DoBind(EndPoint endPointSnapshot, SocketAddress socketAddress)
+   at System.Net.Sockets.Socket.Bind(EndPoint localEP)
+   at System.Net.Sockets.TcpListener.Start(Int32 backlog)
+   at ServiceLib.Manager.PacManager.RunListener() in /home/runner/work/v2rayN/v2rayN/v2rayN/ServiceLib/Manager/PacManager.cs:line 64
+   at ServiceLib.Manager.PacManager.StartAsync(Int32 httpPort, Int32 pacPort) in /home/runner/work/v2rayN/v2rayN/v2rayN/ServiceLib/Manager/PacManager.cs:line 27
+   at ServiceLib.Handler.SysProxy.SysProxyHandler.SetWindowsProxyPac(Int32 port) in /home/runner/work/v2rayN/v2rayN/v2rayN/ServiceLib/Handler/SysProxy/SysProxyHandler.cs:line 94
+   at ServiceLib.Handler.SysProxy.SysProxyHandler.UpdateSysProxy(Config config, Boolean forceDisable) in /home/runner/work/v2rayN/v2rayN/v2rayN/ServiceLib/Handler/SysProxy/SysProxyHandler.cs:line 53
+2026-06-09 20:55:07.0994-INFO Setup Scheduled Tasks
+2026-06-09 20:57:38.4834-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\code_workspace\TInTIn_Brower\bin\v2rayN\ | D:\code_workspace\TInTIn_Brower\bin\v2rayN\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-09 20:57:39.6188-INFO Setup Scheduled Tasks
+2026-06-09 21:07:15.2131-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\code_workspace\TInTIn_Brower\bin\v2rayN\ | D:\code_workspace\TInTIn_Brower\bin\v2rayN\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-09 21:07:16.4411-INFO Setup Scheduled Tasks
+2026-06-09 21:11:01.5126-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\code_workspace\TInTIn_Brower\bin\v2rayN\ | D:\code_workspace\TInTIn_Brower\bin\v2rayN\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
+2026-06-09 21:11:02.1376-INFO Setup Scheduled Tasks

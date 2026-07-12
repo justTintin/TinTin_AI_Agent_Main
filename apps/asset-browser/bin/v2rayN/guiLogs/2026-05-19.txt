@@ -1,5 +1,0 @@
-2026-05-19 14:09:49.7302-INFO Current_SessionEnding
-2026-05-19 14:09:49.8832-INFO AppExitAsync Begin
-2026-05-19 14:41:18.9451-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
-2026-05-19 14:42:46.9520-INFO v2rayN start up | v2rayN - V7.16.4 - X64 | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\ | D:\localProgram\v2rayN-windows-64-SelfContained-With-Core\v2rayN.exe | Microsoft Windows NT 10.0.26200.0
-2026-05-19 14:42:48.7145-INFO Setup Scheduled Tasks

@@ -1614,3 +1614,13 @@ ipcMain.handle('v2ray-status', () => {
     proxyUrl: v2rayManager.getProxyUrl(),
   };
 });
+
+// 测试节点延迟（TCP ping，不启动 xray）
+ipcMain.handle('v2ray-test-latency', async (event, node) => {
+  try {
+    const ms = await v2rayManager.testLatency(node);
+    return { ok: true, latency: ms };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});

@@ -288,6 +288,43 @@ function generateXrayConfig(nodes) {
   };
 }
 
+// ── 端口工具 ───────────────────────────────────────────────
+
+const net = require('net');
+
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(true));
+    server.once('listening', () => { server.close(); resolve(false); });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+function findFreePort(start, end = start + 100) {
+  const tryPort = (p) => isPortInUse(p).then(inUse => inUse ? (p < end ? tryPort(p + 1) : Promise.reject(new Error('无可用端口'))) : p);
+  return tryPort(start);
+}
+
+// ── 节点测速（TCP ping，不启动 xray）───────────────────────
+
+function testLatency(node) {
+  return new Promise((resolve) => {
+    if (!node || !node.host || !node.port) { resolve(-1); return; }
+    const start = Date.now();
+    const sock = new net.Socket();
+    sock.setTimeout(5000);
+    sock.on('connect', () => {
+      const ms = Date.now() - start;
+      sock.destroy();
+      resolve(ms);
+    });
+    sock.on('error', () => { sock.destroy(); resolve(-1); });
+    sock.on('timeout', () => { sock.destroy(); resolve(-1); });
+    sock.connect(node.port, node.host);
+  });
+}
+
 // ── 进程管理 ─────────────────────────────────────────────────
 
 function isRunning() {
@@ -298,85 +335,71 @@ function getProxyUrl() {
   return isRunning() ? LOCAL_PROXY : '';
 }
 
-function start(nodes) {
-  return new Promise((resolve, reject) => {
-    // 如果已有进程在运行，先停止并等端口释放
-    if (isRunning()) {
-      stop();
-    }
+async function start(nodes) {
+  // 如果已有进程在运行，先停止
+  if (isRunning()) stop();
 
-    if (!fs.existsSync(XRAY_BIN)) {
-      return reject(new Error(`xray 未找到: ${XRAY_BIN}`));
-    }
+  if (!fs.existsSync(XRAY_BIN)) {
+    throw new Error(`xray 未找到: ${XRAY_BIN}`);
+  }
 
-    // 生成配置
-    let config;
-    try {
-      config = generateXrayConfig(nodes);
-      const dir = path.dirname(XRAY_CONFIG);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(XRAY_CONFIG, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (e) {
-      return reject(new Error(`生成配置失败: ${e.message}`));
-    }
+  // 检查端口是否可用，被占用则自动找空闲端口
+  let socksPort = SOCKS_PORT;
+  let httpPort = HTTP_PORT;
+  if (await isPortInUse(socksPort)) {
+    socksPort = await findFreePort(10800, 10850);
+    httpPort = socksPort + 1;
+  }
 
-    // 等旧进程退出
-    const waitMs = 500;
+  // 生成配置
+  let config;
+  try {
+    config = generateXrayConfig(nodes);
+    // 覆盖端口（可能因冲突自动换了端口）
+    config.inbounds[0].port = socksPort;
+    config.inbounds[1].port = httpPort;
+    const proxyUrl = `http://127.0.0.1:${httpPort}`;
+
+    const dir = path.dirname(XRAY_CONFIG);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(XRAY_CONFIG, JSON.stringify(config, null, 2), 'utf-8');
+
     const child = spawn(XRAY_BIN, ['run', '-c', XRAY_CONFIG], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: { ...process.env, XRAY_LOCATION_ASSET: path.dirname(XRAY_BIN) },
     });
 
-    let started = false;
-    let stderrLog = '';
+    const result = await new Promise((resolve, reject) => {
+      let started = false;
+      let stderrLog = '';
 
-    // 启动超时（xray 需要连接远程服务器验证，给 15 秒）
-    const timeout = setTimeout(() => {
-      if (!started) {
-        child.kill();
-        const snippet = stderrLog.split('\n').filter(l => l.trim()).slice(-5).join('\n');
-        reject(new Error(`xray 启动超时\n${snippet}`));
-      }
-    }, 15000);
+      const timeout = setTimeout(() => {
+        if (!started) { child.kill(); reject(new Error(`启动超时\n${stderrLog.slice(-500)}`)); }
+      }, 15000);
 
-    child.stderr.on('data', (data) => {
-      const text = data.toString();
-      stderrLog += text;
-      // xray 启动成功后会在 stderr 输出类似 "Xray 26.3.27 started" 的信息
-      if (text.includes('started') || (text.includes('Xray') && (text.includes('.') || text.includes('info')))) {
-        if (!started) {
+      child.stderr.on('data', (d) => {
+        stderrLog += d.toString();
+        if (d.toString().includes('started')) {
           started = true;
           clearTimeout(timeout);
-          // 等一小会儿确保端口真的在监听了
-          setTimeout(() => {
-            xrayProcess = child;
-            resolve(LOCAL_PROXY);
-          }, waitMs);
+          setTimeout(() => resolve(proxyUrl), 300);
         }
-      }
+      });
+      child.stdout.on('data', (d) => { stderrLog += d.toString(); });
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        xrayProcess = null;
+        if (!started) reject(new Error(`xray 退出 (code=${code})\n${stderrLog.split('\n').filter(l => l.trim()).slice(-5).join('\n')}`));
+      });
+      child.on('error', (e) => { clearTimeout(timeout); reject(new Error(`无法启动: ${e.message}`)); });
     });
 
-    child.stdout.on('data', (data) => {
-      stderrLog += data.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      xrayProcess = null;
-      if (!started) {
-        const snippet = stderrLog.split('\n').filter(l => l.trim()).slice(-5).join('\n');
-        const msg = snippet ? `xray 异常退出 (code=${code})\n${snippet}` : `xray 异常退出 (code=${code})`;
-        reject(new Error(msg));
-      }
-    });
-
-    child.on('error', (e) => {
-      clearTimeout(timeout);
-      xrayProcess = null;
-      reject(new Error(`无法启动 xray: ${e.message}`));
-    });
-  });
+    xrayProcess = child;
+    return result;
+  } catch (e) {
+    throw e;
+  }
 }
 
 function stop() {

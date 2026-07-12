@@ -1055,16 +1055,21 @@ function setupEventListeners() {
   // Cookie 状态刷新
   async function refreshCookieStatus() {
     const display = document.getElementById('cookie-status-display');
-    if (!display) return;
+    const dot = document.getElementById('cookie-dot');
     try {
       const st = await window.api.checkCookieStatus();
-      display.innerHTML = Object.entries(st).map(([name, info]) => {
-        const color = info.count > 0 ? '#34d399' : '#f87171';
-        const detail = info.count > 0 ? `${info.count}条` : '未登录';
-        return `<span style="color:${color}">${name}: ${detail}</span>`;
-      }).join('');
+      if (display) {
+        display.innerHTML = Object.entries(st).map(([name, info]) => {
+          const color = info.count > 0 ? '#34d399' : '#f87171';
+          const detail = info.count > 0 ? `${info.count}条` : '未登录';
+          return `<span style="color:${color}">${name}: ${detail}</span>`;
+        }).join('');
+      }
+      // 侧边栏小点：至少一个平台有 cookie 就变绿
+      const anyOk = Object.values(st).some(v => v.count > 0);
+      if (dot) dot.style.background = anyOk ? '#34d399' : '#6b7280';
     } catch (e) {
-      display.textContent = '获取失败';
+      if (display) display.textContent = '获取失败';
     }
   }
   document.getElementById('btn-sync-cookies')?.addEventListener('click', refreshCookieStatus);

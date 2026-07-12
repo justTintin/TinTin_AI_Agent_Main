@@ -196,9 +196,9 @@ function generateXrayConfig(nodes) {
       };
       if (node.security === 'tls' || node.security === 'reality') {
         outbound.streamSettings.security = node.security;
-        outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: false };
+        outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: true };
         if (node.flow && node.flow.startsWith('xtls-rprx-')) {
-          outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: false, flow: node.flow };
+          outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: true, flow: node.flow };
         }
       }
       // 传输层
@@ -218,7 +218,7 @@ function generateXrayConfig(nodes) {
       };
       outbound.streamSettings.security = node.tls === 'tls' ? 'tls' : 'none';
       if (node.tls === 'tls') {
-        outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host, allowInsecure: false };
+        outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host, allowInsecure: true };
       }
       if (node.type === 'ws') {
         outbound.streamSettings.wsSettings = { path: node.path || '/', headers: { Host: node.sni || node.host } };
@@ -300,6 +300,7 @@ function getProxyUrl() {
 
 function start(nodes) {
   return new Promise((resolve, reject) => {
+    // 如果已有进程在运行，先停止并等端口释放
     if (isRunning()) {
       stop();
     }
@@ -308,56 +309,79 @@ function start(nodes) {
       return reject(new Error(`xray 未找到: ${XRAY_BIN}`));
     }
 
+    // 生成配置
+    let config;
     try {
-      const config = generateXrayConfig(nodes);
+      config = generateXrayConfig(nodes);
+      const dir = path.dirname(XRAY_CONFIG);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(XRAY_CONFIG, JSON.stringify(config, null, 2), 'utf-8');
     } catch (e) {
       return reject(new Error(`生成配置失败: ${e.message}`));
     }
 
+    // 等旧进程退出
+    const waitMs = 500;
     const child = spawn(XRAY_BIN, ['run', '-c', XRAY_CONFIG], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      env: { ...process.env, XRAY_LOCATION_ASSET: path.dirname(XRAY_BIN) },
     });
 
     let started = false;
+    let stderrLog = '';
+
+    // 启动超时（xray 需要连接远程服务器验证，给 15 秒）
     const timeout = setTimeout(() => {
       if (!started) {
         child.kill();
-        reject(new Error('xray 启动超时'));
+        const snippet = stderrLog.split('\n').filter(l => l.trim()).slice(-5).join('\n');
+        reject(new Error(`xray 启动超时\n${snippet}`));
       }
-    }, 8000);
+    }, 15000);
 
     child.stderr.on('data', (data) => {
       const text = data.toString();
-      // xray 启动成功后会在 stderr 输出 "Xray 26.3.27 started"
-      if (text.includes('started') || text.includes('Xray')) {
-        started = true;
-        clearTimeout(timeout);
-        xrayProcess = child;
-        resolve(LOCAL_PROXY);
+      stderrLog += text;
+      // xray 启动成功后会在 stderr 输出类似 "Xray 26.3.27 started" 的信息
+      if (text.includes('started') || (text.includes('Xray') && (text.includes('.') || text.includes('info')))) {
+        if (!started) {
+          started = true;
+          clearTimeout(timeout);
+          // 等一小会儿确保端口真的在监听了
+          setTimeout(() => {
+            xrayProcess = child;
+            resolve(LOCAL_PROXY);
+          }, waitMs);
+        }
       }
+    });
+
+    child.stdout.on('data', (data) => {
+      stderrLog += data.toString();
     });
 
     child.on('close', (code) => {
       clearTimeout(timeout);
       xrayProcess = null;
       if (!started) {
-        reject(new Error(`xray 退出 (code=${code})`));
+        const snippet = stderrLog.split('\n').filter(l => l.trim()).slice(-5).join('\n');
+        const msg = snippet ? `xray 异常退出 (code=${code})\n${snippet}` : `xray 异常退出 (code=${code})`;
+        reject(new Error(msg));
       }
     });
 
     child.on('error', (e) => {
       clearTimeout(timeout);
       xrayProcess = null;
-      reject(e);
+      reject(new Error(`无法启动 xray: ${e.message}`));
     });
   });
 }
 
 function stop() {
   if (xrayProcess && !xrayProcess.killed) {
-    xrayProcess.kill();
+    xrayProcess.kill('SIGTERM');
     xrayProcess = null;
     return true;
   }

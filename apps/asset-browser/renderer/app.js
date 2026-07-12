@@ -799,6 +799,11 @@ function setupEventListeners() {
 
       if (nodes.length === 0) throw new Error('未解析到有效节点');
 
+      // 显示解析到的节点信息
+      const nodeNames = nodes.map(n => n.remark || n.host).join(', ');
+      v2rayStatus.innerHTML = `📡 已解析: ${nodeNames}`;
+      v2rayStatus.style.color = '#fbbf24';
+
       // 启动 v2ray
       const startResult = await window.api.v2rayStart(nodes);
       if (!startResult.ok) throw new Error(startResult.error);

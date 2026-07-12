@@ -371,13 +371,17 @@ function showDownloadLog(id) {
     padding: 14px 18px; border-bottom: 1px solid #333;
   `;
   header.innerHTML = `<span style="font-weight:700;color:#fca5a5;">📋 下载日志 - ${task.filename}</span>
-    <span style="cursor:pointer;color:#888;font-size:1.2rem;" id="dl-log-close">✕</span>`;
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span style="cursor:pointer;color:#888;font-size:0.75rem;" id="dl-log-copy">📋 复制</span>
+      <span style="cursor:pointer;color:#888;font-size:1.2rem;" id="dl-log-close">✕</span>
+    </div>`;
 
   const body = document.createElement('pre');
   body.style.cssText = `
     margin: 0; padding: 16px 18px; overflow: auto; flex: 1;
     font-family: 'Consolas', 'Courier New', monospace; font-size: 0.75rem;
     color: #d1d5db; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+    user-select: text; cursor: text;
   `;
   body.textContent = task.log;
 
@@ -388,6 +392,12 @@ function showDownloadLog(id) {
 
   const close = () => overlay.remove();
   header.querySelector('#dl-log-close').onclick = close;
+  header.querySelector('#dl-log-copy').onclick = () => {
+    navigator.clipboard.writeText(task.log).then(() => {
+      header.querySelector('#dl-log-copy').textContent = '✅ 已复制';
+      setTimeout(() => { header.querySelector('#dl-log-copy').textContent = '📋 复制'; }, 2000);
+    });
+  };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 }
 

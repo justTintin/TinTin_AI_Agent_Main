@@ -48,10 +48,24 @@ const downloadPathDisplay = document.getElementById('download-path-display');
 const btnChangePath = document.getElementById('btn-change-path');
 const proxyUrlInput = document.getElementById('proxy-url-input');
 const btnSaveProxy = document.getElementById('btn-save-proxy');
-const v2raySubInput = document.getElementById('v2ray-sub-input');
-const btnV2rayApply = document.getElementById('btn-v2ray-apply');
-const btnV2rayStop = document.getElementById('btn-v2ray-stop');
-const v2rayStatus = document.getElementById('v2ray-status');
+
+// ── 代理配置弹窗 ──
+const proxyOverlay = document.getElementById('proxy-config-overlay');
+const btnProxyConfig = document.getElementById('btn-proxy-config');
+const btnProxyClose = document.getElementById('btn-proxy-close');
+const proxyStatusDot = document.getElementById('proxy-status-dot');
+const proxyInputField = document.getElementById('proxy-input-field');
+const btnProxyParse = document.getElementById('btn-proxy-parse');
+const proxyNodeList = document.getElementById('proxy-node-list');
+const proxyNodeCount = document.getElementById('proxy-node-count');
+const btnProxyStart = document.getElementById('btn-proxy-start');
+const btnProxyStop = document.getElementById('btn-proxy-stop');
+const btnProxyUpdateSub = document.getElementById('btn-proxy-update-sub');
+const proxyPanelStatus = document.getElementById('proxy-panel-status');
+const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
+
+let proxyNodes = [];       // 当前解析到的节点列表
+let proxyRunning = false;  // 代理是否运行中
 
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
@@ -755,75 +769,193 @@ function setupEventListeners() {
     setTimeout(() => { proxyUrlInput.style.borderColor = 'var(--border-color)'; }, 1500);
   });
 
-  // ── v2ray 代理管理 ──
-  async function updateV2rayStatus() {
+  // ── 代理配置弹窗 ──
+
+  // 更新状态指示（左侧按钮小圆点 + 弹窗底部文字）
+  async function refreshProxyStatus() {
     const st = await window.api.v2rayStatus();
+    proxyRunning = st.running;
     if (st.running) {
-      v2rayStatus.innerHTML = `▶️ 运行中 (${st.proxyUrl})`;
-      v2rayStatus.style.color = '#34d399';
-      btnV2rayStop.style.display = '';
-      // 自动填入代理地址
+      proxyStatusDot.style.background = '#34d399';
+      proxyPanelStatus.textContent = `▶️ 运行中 (${st.proxyUrl})`;
+      proxyPanelStatus.style.color = '#34d399';
+      btnProxyStop.style.display = '';
+      btnProxyStart.textContent = '▶ 重启代理';
+      // 自动填入代理地址到手动代理设置
       if (!proxyUrlInput.value.trim()) {
         proxyUrlInput.value = st.proxyUrl;
         await window.api.saveSettings({ proxyUrl: st.proxyUrl });
       }
     } else {
-      v2rayStatus.textContent = '⏹ 未启动';
-      v2rayStatus.style.color = 'var(--text-muted)';
-      btnV2rayStop.style.display = 'none';
+      proxyStatusDot.style.background = '#6b7280';
+      proxyPanelStatus.textContent = '⏹ 未启动';
+      proxyPanelStatus.style.color = 'var(--text-muted)';
+      btnProxyStop.style.display = 'none';
+      btnProxyStart.textContent = '▶ 启动代理';
     }
   }
 
-  btnV2rayApply.addEventListener('click', async () => {
-    const input = v2raySubInput.value.trim();
-    if (!input) return;
+  // 打开/关闭弹窗
+  btnProxyConfig.addEventListener('click', () => {
+    proxyOverlay.style.display = 'flex';
+    refreshProxyStatus();
+    renderProxyNodes();
+  });
+  btnProxyClose.addEventListener('click', () => { proxyOverlay.style.display = 'none'; });
+  proxyOverlay.addEventListener('click', (e) => { if (e.target === proxyOverlay) proxyOverlay.style.display = 'none'; });
 
-    btnV2rayApply.textContent = '处理中...';
-    btnV2rayApply.disabled = true;
-
-    try {
-      let nodes = [];
-
-      // 判断是订阅 URL 还是分享链接
-      if (input.startsWith('http://') || input.startsWith('https://')) {
-        // 订阅 URL
-        const result = await window.api.v2rayFetchSubscription(input);
-        if (!result.ok) throw new Error(result.error);
-        nodes = result.nodes;
+  // 协议标签切换
+  proxyInputTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      proxyInputTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const proto = tab.dataset.proto;
+      if (proto === 'sub') {
+        proxyInputField.placeholder = '粘贴订阅地址...';
       } else {
-        // 单个分享链接
-        const node = await window.api.v2rayParseLink(input);
-        if (!node) throw new Error('无法解析该链接');
-        nodes = [node];
+        proxyInputField.placeholder = `粘贴 ${proto}:// 链接...`;
       }
+    });
+  });
 
-      if (nodes.length === 0) throw new Error('未解析到有效节点');
+  // 渲染节点列表
+  function renderProxyNodes() {
+    proxyNodeList.innerHTML = '';
+    proxyNodeCount.textContent = `${proxyNodes.length} 个节点`;
 
-      // 显示解析到的节点信息
-      const nodeNames = nodes.map(n => n.remark || n.host).join(', ');
-      v2rayStatus.innerHTML = `📡 已解析: ${nodeNames}`;
-      v2rayStatus.style.color = '#fbbf24';
-
-      // 启动 v2ray
-      const startResult = await window.api.v2rayStart(nodes);
-      if (!startResult.ok) throw new Error(startResult.error);
-
-      await updateV2rayStatus();
-    } catch (e) {
-      alert('v2ray 启动失败: ' + e.message);
+    if (proxyNodes.length === 0) {
+      proxyNodeList.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;text-align:center;padding:20px 0;">请先输入订阅地址或分享链接</div>';
+      return;
     }
 
-    btnV2rayApply.textContent = '应用';
-    btnV2rayApply.disabled = false;
+    let selectedIdx = -1;
+    proxyNodes.forEach((node, i) => {
+      const div = document.createElement('div');
+      div.className = 'proxy-node-item';
+      const proto = node.protocol || '?';
+      const name = node.remark || node.host || `节点 ${i+1}`;
+      div.innerHTML = `
+        <span style="font-weight:600;color:var(--color-primary);font-size:0.7rem;min-width:32px;">${proto}</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+        <span class="node-latency" id="nlat-${i}">—</span>
+      `;
+      div.addEventListener('click', async () => {
+        // 选中样式
+        document.querySelectorAll('.proxy-node-item').forEach(el => el.classList.remove('selected'));
+        div.classList.add('selected');
+        selectedIdx = i;
+        // 测试延迟
+        const latSpan = document.getElementById(`nlat-${i}`);
+        latSpan.textContent = '测试中...';
+        latSpan.className = 'node-latency testing';
+        try {
+          const start = Date.now();
+          // 用单个节点启动 xray 测速
+          await window.api.v2rayStart([node]);
+          const latency = Date.now() - start;
+          await window.api.v2rayStop();
+          latSpan.textContent = `${latency}ms`;
+          latSpan.className = `node-latency ${latency < 500 ? 'good' : 'bad'}`;
+        } catch (e) {
+          latSpan.textContent = '超时';
+          latSpan.className = 'node-latency bad';
+        }
+      });
+      proxyNodeList.appendChild(div);
+    });
+  }
+
+  // 解析按钮
+  btnProxyParse.addEventListener('click', async () => {
+    const input = proxyInputField.value.trim();
+    if (!input) return;
+
+    btnProxyParse.textContent = '解析中...';
+    btnProxyParse.disabled = true;
+
+    try {
+      // 判断当前激活的协议标签
+      const activeTab = document.querySelector('.proxy-input-tab.active');
+      const proto = activeTab ? activeTab.dataset.proto : 'sub';
+
+      if (proto === 'sub' || input.startsWith('http://') || input.startsWith('https://')) {
+        // 订阅地址
+        const result = await window.api.v2rayFetchSubscription(input);
+        if (!result.ok) throw new Error(result.error);
+        proxyNodes = result.nodes;
+      } else {
+        // 分享链接
+        const node = await window.api.v2rayParseLink(input);
+        if (!node) throw new Error('无法解析该链接');
+        proxyNodes = [node];
+      }
+
+      renderProxyNodes();
+    } catch (e) {
+      alert('解析失败: ' + e.message);
+    }
+
+    btnProxyParse.textContent = '解析';
+    btnProxyParse.disabled = false;
   });
 
-  btnV2rayStop.addEventListener('click', async () => {
+  // 启动代理
+  btnProxyStart.addEventListener('click', async () => {
+    if (proxyNodes.length === 0) { alert('请先解析节点'); return; }
+    // 获取选中的节点（如果有），否则用全部
+    const selected = document.querySelector('.proxy-node-item.selected');
+    const nodesToUse = selected ? [proxyNodes[Array.from(proxyNodeList.children).indexOf(selected)]] : proxyNodes;
+
+    btnProxyStart.textContent = '启动中...';
+    btnProxyStart.disabled = true;
+
+    try {
+      const result = await window.api.v2rayStart(nodesToUse);
+      if (!result.ok) throw new Error(result.error);
+      await refreshProxyStatus();
+    } catch (e) {
+      alert('启动失败: ' + e.message);
+    }
+
+    btnProxyStart.textContent = '▶ 重启代理';
+    btnProxyStart.disabled = false;
+  });
+
+  // 停止代理
+  btnProxyStop.addEventListener('click', async () => {
     await window.api.v2rayStop();
-    await updateV2rayStatus();
+    await refreshProxyStatus();
   });
 
-  // 初始化 v2ray 状态
-  setTimeout(updateV2rayStatus, 1000);
+  // 更新订阅
+  btnProxyUpdateSub.addEventListener('click', async () => {
+    const activeTab = document.querySelector('.proxy-input-tab.active');
+    const proto = activeTab ? activeTab.dataset.proto : 'sub';
+    if (proto !== 'sub') {
+      alert('请在订阅地址标签下使用此功能');
+      return;
+    }
+    const subUrl = proxyInputField.value.trim();
+    if (!subUrl.startsWith('http')) { alert('请输入有效的订阅地址'); return; }
+
+    btnProxyUpdateSub.textContent = '更新中...';
+    btnProxyUpdateSub.disabled = true;
+
+    try {
+      const result = await window.api.v2rayFetchSubscription(subUrl);
+      if (!result.ok) throw new Error(result.error);
+      proxyNodes = result.nodes;
+      renderProxyNodes();
+    } catch (e) {
+      alert('更新订阅失败: ' + e.message);
+    }
+
+    btnProxyUpdateSub.textContent = '🔄 更新订阅';
+    btnProxyUpdateSub.disabled = false;
+  });
+
+  // 初始化状态
+  setTimeout(refreshProxyStatus, 1000);
 
   // --- IPC Listeners (Download Events) ---
   window.api.onDownloadListUpdated((list) => {

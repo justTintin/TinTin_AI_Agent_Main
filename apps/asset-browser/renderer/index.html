@@ -70,17 +70,12 @@
 	        </div>
 	      </section>
 
-	      <!-- v2ray 代理 -->
+	      <!-- 代理入口 -->
 	      <section class="section">
-	        <h3 class="section-title">🌐 代理</h3>
-	        <div style="display:flex;flex-direction:column;gap:6px;padding:0 4px;">
-	          <input type="text" id="v2ray-sub-input" placeholder="订阅地址或 vless:// 链接" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;padding:5px 8px;color:var(--text-primary);font-size:0.75rem;outline:none;box-sizing:border-box;">
-	          <div style="display:flex;gap:6px;">
-	            <button class="path-btn" id="btn-v2ray-apply" style="flex:1;">应用</button>
-	            <button class="path-btn" id="btn-v2ray-stop" style="display:none;flex:1;">停止</button>
-	          </div>
-	          <span id="v2ray-status" style="font-size:0.7rem;color:var(--text-muted);">⏹ 未启动</span>
-	        </div>
+	        <button class="platform-btn mode-btn" id="btn-proxy-config" style="justify-content:center;">
+	          <span>🌐 配置代理</span>
+	          <span id="proxy-status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-left:6px;"></span>
+	        </button>
 	      </section>
 
 	    </aside>
@@ -360,6 +355,74 @@
     </aside>
   </div>
   
+  <!-- ════════════════════════════════════════════════
+       代理配置弹窗
+       ════════════════════════════════════════════════ -->
+  <div id="proxy-config-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;">
+    <div style="background:#1e1e2e;border:1px solid #444;border-radius:12px;width:90%;max-width:700px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,0.5);overflow:hidden;">
+
+      <!-- 标题栏 -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #333;">
+        <span style="font-weight:700;font-size:0.95rem;">🌐 代理配置</span>
+        <span id="btn-proxy-close" style="cursor:pointer;color:#888;font-size:1.2rem;line-height:1;">✕</span>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:14px;">
+
+        <!-- 输入区域 -->
+        <div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+            <button class="proxy-input-tab active" data-proto="sub">📡 订阅地址</button>
+            <button class="proxy-input-tab" data-proto="vless">vless</button>
+            <button class="proxy-input-tab" data-proto="vmess">vmess</button>
+            <button class="proxy-input-tab" data-proto="trojan">trojan</button>
+            <button class="proxy-input-tab" data-proto="ss">ss</button>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="proxy-input-field" placeholder="粘贴订阅地址或分享链接..." style="flex:1;background:#2a2a3e;border:1px solid #444;border-radius:6px;padding:8px 12px;color:var(--text-primary);font-size:0.8rem;outline:none;">
+            <button class="panel-btn primary" id="btn-proxy-parse" style="white-space:nowrap;">解析</button>
+          </div>
+        </div>
+
+        <!-- 节点列表 -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:0.8rem;font-weight:600;">节点列表</span>
+            <span id="proxy-node-count" style="font-size:0.7rem;color:var(--text-muted);">0 个节点</span>
+          </div>
+          <div id="proxy-node-list" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;min-height:60px;border:1px solid #333;border-radius:6px;padding:6px;background:#1a1a2a;">
+            <div style="color:var(--text-muted);font-size:0.75rem;text-align:center;padding:20px 0;">请先输入订阅地址或分享链接</div>
+          </div>
+        </div>
+
+        <!-- 运行模式 -->
+        <div>
+          <span style="font-size:0.8rem;font-weight:600;display:block;margin-bottom:6px;">运行模式</span>
+          <div style="display:flex;gap:8px;">
+            <label class="proxy-mode-radio">
+              <input type="radio" name="proxy-mode" value="bypass-cn" checked>
+              <span>🚀 绕过大陆</span>
+            </label>
+            <label class="proxy-mode-radio">
+              <input type="radio" name="proxy-mode" value="global">
+              <span>🌍 全局</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div style="display:flex;gap:8px;padding-top:6px;border-top:1px solid #333;">
+          <button class="panel-btn primary" id="btn-proxy-start" style="flex:1;padding:10px;">▶ 启动代理</button>
+          <button class="panel-btn secondary" id="btn-proxy-stop" style="flex:1;padding:10px;">⏹ 停止</button>
+          <button class="panel-btn secondary" id="btn-proxy-update-sub" style="flex:1;padding:10px;">🔄 更新订阅</button>
+        </div>
+
+        <!-- 状态 -->
+        <div id="proxy-panel-status" style="font-size:0.75rem;color:var(--text-muted);text-align:center;">⏹ 未启动</div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

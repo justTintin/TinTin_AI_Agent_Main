@@ -94,6 +94,9 @@ studio/bin/**/*ggml-cuda*
 
 # Bundled binaries
 apps/pw-browsers/
+apps/asset-browser/bin/v2rayN/
+apps/asset-browser/bin/node.exe
+apps/asset-browser/bin/ffmpeg.exe
 
 # Studio logs
 studio/logs/

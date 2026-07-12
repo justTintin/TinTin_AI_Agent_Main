@@ -883,10 +883,29 @@ function setupEventListeners() {
         }
       });
       proxyNodeList.appendChild(div);
-    });
-  }
+	    });
+	  }
 
-  // 解析按钮
+	  // 自动测试所有节点延迟（逐条，间隔 300ms 避免并发）
+	  async function testAllNodesLatency() {
+	    for (let i = 0; i < proxyNodes.length; i++) {
+	      const latSpan = document.getElementById(`nlat-${i}`);
+	      if (!latSpan) continue;
+	      latSpan.textContent = '测试中...';
+	      latSpan.className = 'node-latency testing';
+	      const result = await window.api.v2rayTestLatency(proxyNodes[i]);
+	      if (result.ok && result.latency >= 0) {
+	        latSpan.textContent = `${result.latency}ms`;
+	        latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
+	      } else {
+	        latSpan.textContent = '不通';
+	        latSpan.className = 'node-latency bad';
+	      }
+	      await new Promise(r => setTimeout(r, 300));
+	    }
+	  }
+
+	  // 解析按钮
   btnProxyParse.addEventListener('click', async () => {
     clearProxyError();
     const input = proxyInputField.value.trim();
@@ -916,6 +935,8 @@ function setupEventListeners() {
       // 保存到 sessionStorage，刷新页面后恢复
       try { sessionStorage.setItem('proxyNodes', JSON.stringify(proxyNodes)); } catch(e){}
       renderProxyNodes();
+      // 自动测试所有节点的延迟
+      testAllNodesLatency();
     } catch (e) {
       showProxyError('解析失败:\n' + e.message);
     }
@@ -987,6 +1008,7 @@ function setupEventListeners() {
       if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
       proxyNodes = result.nodes;
       renderProxyNodes();
+      testAllNodesLatency();
     } catch (e) {
       showProxyError('更新订阅失败:\n' + e.message);
     }

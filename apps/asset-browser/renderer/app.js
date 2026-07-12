@@ -48,6 +48,10 @@ const downloadPathDisplay = document.getElementById('download-path-display');
 const btnChangePath = document.getElementById('btn-change-path');
 const proxyUrlInput = document.getElementById('proxy-url-input');
 const btnSaveProxy = document.getElementById('btn-save-proxy');
+const v2raySubInput = document.getElementById('v2ray-sub-input');
+const btnV2rayApply = document.getElementById('btn-v2ray-apply');
+const btnV2rayStop = document.getElementById('btn-v2ray-stop');
+const v2rayStatus = document.getElementById('v2ray-status');
 
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
@@ -750,6 +754,71 @@ function setupEventListeners() {
     proxyUrlInput.style.borderColor = proxyUrl ? 'var(--color-primary)' : 'var(--border-color)';
     setTimeout(() => { proxyUrlInput.style.borderColor = 'var(--border-color)'; }, 1500);
   });
+
+  // ── v2ray 代理管理 ──
+  async function updateV2rayStatus() {
+    const st = await window.api.v2rayStatus();
+    if (st.running) {
+      v2rayStatus.innerHTML = `▶️ 运行中 (${st.proxyUrl})`;
+      v2rayStatus.style.color = '#34d399';
+      btnV2rayStop.style.display = '';
+      // 自动填入代理地址
+      if (!proxyUrlInput.value.trim()) {
+        proxyUrlInput.value = st.proxyUrl;
+        await window.api.saveSettings({ proxyUrl: st.proxyUrl });
+      }
+    } else {
+      v2rayStatus.textContent = '⏹ 未启动';
+      v2rayStatus.style.color = 'var(--text-muted)';
+      btnV2rayStop.style.display = 'none';
+    }
+  }
+
+  btnV2rayApply.addEventListener('click', async () => {
+    const input = v2raySubInput.value.trim();
+    if (!input) return;
+
+    btnV2rayApply.textContent = '处理中...';
+    btnV2rayApply.disabled = true;
+
+    try {
+      let nodes = [];
+
+      // 判断是订阅 URL 还是分享链接
+      if (input.startsWith('http://') || input.startsWith('https://')) {
+        // 订阅 URL
+        const result = await window.api.v2rayFetchSubscription(input);
+        if (!result.ok) throw new Error(result.error);
+        nodes = result.nodes;
+      } else {
+        // 单个分享链接
+        const node = await window.api.v2rayParseLink(input);
+        if (!node) throw new Error('无法解析该链接');
+        nodes = [node];
+      }
+
+      if (nodes.length === 0) throw new Error('未解析到有效节点');
+
+      // 启动 v2ray
+      const startResult = await window.api.v2rayStart(nodes);
+      if (!startResult.ok) throw new Error(startResult.error);
+
+      await updateV2rayStatus();
+    } catch (e) {
+      alert('v2ray 启动失败: ' + e.message);
+    }
+
+    btnV2rayApply.textContent = '应用';
+    btnV2rayApply.disabled = false;
+  });
+
+  btnV2rayStop.addEventListener('click', async () => {
+    await window.api.v2rayStop();
+    await updateV2rayStatus();
+  });
+
+  // 初始化 v2ray 状态
+  setTimeout(updateV2rayStatus, 1000);
 
   // --- IPC Listeners (Download Events) ---
   window.api.onDownloadListUpdated((list) => {

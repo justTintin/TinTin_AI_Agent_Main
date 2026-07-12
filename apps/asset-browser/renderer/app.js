@@ -863,24 +863,32 @@ function setupEventListeners() {
       return;
     }
 
-    let selectedIdx = -1;
+    // 找出当前启用的节点索引（从 localStorage 读取）
+    const activeIdx = (() => { try { return parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){ return -1; } })();
+
     proxyNodes.forEach((node, i) => {
       const div = document.createElement('div');
       div.className = 'proxy-node-item';
+      if (i === activeIdx) div.classList.add('selected');
       const proto = node.protocol || '?';
       const name = node.remark || node.host || `节点 ${i+1}`;
+      const activeBadge = i === activeIdx ? '<span style="color:#34d399;font-weight:700;font-size:0.65rem;margin-right:4px;">▶</span>' : '';
       div.innerHTML = `
         <span style="font-weight:600;color:var(--color-primary);font-size:0.7rem;min-width:32px;">${proto}</span>
+        ${activeBadge}
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
         <span class="node-latency" id="nlat-${i}">—</span>
       `;
       div.addEventListener('click', async () => {
-        // 选中样式
+        // 设为活动节点
         document.querySelectorAll('.proxy-node-item').forEach(el => el.classList.remove('selected'));
         div.classList.add('selected');
-        selectedIdx = i;
+        try { localStorage.setItem('tintin_active_node', String(i)); } catch(e){}
+        // 重新渲染以更新 ▶ 标记
+        renderProxyNodes();
         // TCP 测速（不启动 xray，不占端口）
         const latSpan = document.getElementById(`nlat-${i}`);
+        if (!latSpan) return;
         latSpan.textContent = '测试中...';
         latSpan.className = 'node-latency testing';
         const result = await window.api.v2rayTestLatency(node);
@@ -888,13 +896,15 @@ function setupEventListeners() {
           latSpan.textContent = `${result.latency}ms`;
           latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
         } else {
-          latSpan.textContent = '超时';
+          // TCP 直连超时不代表节点不能用（防火墙拦直连但 v2ray 协议加密后可通）
+          latSpan.textContent = '⚠ 直连超时';
           latSpan.className = 'node-latency bad';
+          latSpan.title = 'TCP 直连被拦，但通过 v2ray 协议仍可能正常使用';
         }
       });
       proxyNodeList.appendChild(div);
-	    });
-	  }
+    });
+  }
 
 	  // 自动测试所有节点延迟（逐条，间隔 300ms 避免并发）
 	  async function testAllNodesLatency() {
@@ -958,9 +968,13 @@ function setupEventListeners() {
   btnProxyStart.addEventListener('click', async () => {
     clearProxyError();
     if (proxyNodes.length === 0) { showProxyError('请先解析节点'); return; }
-    // 获取选中的节点（如果有），否则用全部
-    const selected = document.querySelector('.proxy-node-item.selected');
-    const nodesToUse = selected ? [proxyNodes[Array.from(proxyNodeList.children).indexOf(selected)]] : proxyNodes;
+    // 取活动节点（点击列表选中），没有则用第一个
+    let activeIdx = -1;
+    try { activeIdx = parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){}
+    if (activeIdx < 0 || activeIdx >= proxyNodes.length) activeIdx = 0;
+    // 保存活动节点
+    try { localStorage.setItem('tintin_active_node', String(activeIdx)); } catch(e){}
+    const nodesToUse = [proxyNodes[activeIdx]];
 
     btnProxyStart.textContent = '启动中...';
     btnProxyStart.disabled = true;

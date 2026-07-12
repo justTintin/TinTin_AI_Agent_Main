@@ -1195,6 +1195,11 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
         '--no-warnings',
         '--extractor-retries', '3',
         '--retries', '5',
+        // YouTube 防机器人检测：模拟安卓客户端 + 跳过网页检测
+        ...(urlToDownload.includes('youtube.com') ? [
+          '--extractor-args', 'youtube:player_client=android_android&skip=webpage',
+          '--user-agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
+        ] : []),
         '-f', fmt,
         '--merge-output-format', 'mp4',
         '-o', finalPath,
@@ -1509,12 +1514,16 @@ ipcMain.handle('resume-download', (event, id) => {
         if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
         updateTaskProgress(id, 5, `正在重新下载 (格式: ${fmt})...`, 0);
 
-        const allArgs = [
-          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
-          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
-          '-f', fmt, '--merge-output-format', 'mp4',
-          '-o', task.path, referer,
-        ];
+	        const allArgs = [
+	          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
+	          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
+	          ...(referer.includes('youtube.com') ? [
+	            '--extractor-args', 'youtube:player_client=android_android&skip=webpage',
+	            '--user-agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
+	          ] : []),
+	          '-f', fmt, '--merge-output-format', 'mp4',
+	          '-o', task.path, referer,
+	        ];
 
         const result = await new Promise((resolve) => {
           const child = spawn(ytdlpBin, allArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });

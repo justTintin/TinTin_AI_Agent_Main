@@ -1128,8 +1128,9 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
   saveDatabase(db);
   mainWindow.webContents.send('download-list-updated', db.downloads);
 
-  // 判断是否应该使用 yt-dlp 进行页面整包下载（若明确指定，或者 URL/referer 指向主要视频站视频详情页且非直接静态流链接）
-  const isVideoPage = useYtdlp || (referer && isValidVideoPageUrl(referer));
+  // 判断是否应该使用 yt-dlp
+  // useYtdlp=true 强制用，false 强制不用，undefined/null 按 referer 自动判断
+  const isVideoPage = useYtdlp === true || (useYtdlp !== false && referer && isValidVideoPageUrl(referer));
 
   if (isVideoPage) {
     updateTaskProgress(id, 5, '正在通过 yt-dlp 解析视频...', 0);

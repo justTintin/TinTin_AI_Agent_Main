@@ -1563,6 +1563,25 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '', log = '') {
 //  v2ray 代理 IPC
 // ═══════════════════════════════════════════════════════════════
 
+// 设置 Electron 浏览器 webview 的代理（让浏览器走 v2ray）
+async function setWebviewProxy(proxyUrl) {
+  try {
+    const sess = session.fromPartition('persist:tintin-browser');
+    if (proxyUrl) {
+      // 把 http://127.0.0.1:10809 转为 proxyRules 格式
+      const url = new URL(proxyUrl);
+      const rules = `http=${url.protocol}//${url.host};https=${url.protocol}//${url.host}`;
+      await sess.setProxy({ proxyRules: rules, proxyBypassRules: '<local>' });
+      console.log('webview 代理已设置为:', rules);
+    } else {
+      await sess.setProxy({ proxyRules: 'direct://' });
+      console.log('webview 代理已清除');
+    }
+  } catch (e) {
+    console.warn('设置 webview 代理失败:', e.message);
+  }
+}
+
 // 解析分享链接（用于 UI 预览）
 ipcMain.handle('v2ray-parse-link', (event, link) => {
   return v2rayManager.parseShareLink(link);
@@ -1583,11 +1602,12 @@ ipcMain.handle('v2ray-fetch-subscription', async (event, subUrl) => {
 ipcMain.handle('v2ray-start', async (event, nodes) => {
   try {
     const proxyUrl = await v2rayManager.start(nodes);
-    // 启动后自动设置代理
+    // 启动后自动设置代理（yt-dlp + webview）
     const db = getDatabase();
     db.settings = { ...db.settings, proxyUrl };
     saveDatabase(db);
     proxyManager.applyProxy(db.settings);
+    await setWebviewProxy(proxyUrl);  // webview 也走代理
     return { ok: true, proxyUrl };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -1595,15 +1615,16 @@ ipcMain.handle('v2ray-start', async (event, nodes) => {
 });
 
 // 停止 v2ray
-ipcMain.handle('v2ray-stop', () => {
+ipcMain.handle('v2ray-stop', async () => {
   const stopped = v2rayManager.stop();
   // 清除代理设置
   const db = getDatabase();
-  if (db.settings && db.settings.proxyUrl === v2rayManager.LOCAL_PROXY) {
+  if (db.settings && db.settings.proxyUrl && db.settings.proxyUrl.includes('127.0.0.1')) {
     delete db.settings.proxyUrl;
     saveDatabase(db);
     proxyManager.applyProxy(db.settings);
   }
+  await setWebviewProxy('');  // 清除 webview 代理
   return { ok: true, stopped };
 });
 

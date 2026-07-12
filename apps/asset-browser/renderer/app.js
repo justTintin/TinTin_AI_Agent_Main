@@ -46,6 +46,8 @@ const btnClearDownloads = document.getElementById('btn-clear-downloads');
 const btnOpenDir = document.getElementById('btn-open-dir');
 const downloadPathDisplay = document.getElementById('download-path-display');
 const btnChangePath = document.getElementById('btn-change-path');
+const proxyUrlInput = document.getElementById('proxy-url-input');
+const btnSaveProxy = document.getElementById('btn-save-proxy');
 
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
@@ -146,6 +148,9 @@ async function init() {
 async function loadSettings() {
   currentSettings = await window.api.getSettings();
   downloadPathDisplay.textContent = currentSettings.downloadPath || '未选择';
+  if (proxyUrlInput && currentSettings.proxyUrl) {
+    proxyUrlInput.value = currentSettings.proxyUrl;
+  }
 }
 
 // Load and render downloads
@@ -737,6 +742,13 @@ function setupEventListeners() {
       currentSettings = await window.api.saveSettings({ downloadPath: newPath });
       downloadPathDisplay.textContent = currentSettings.downloadPath;
     }
+  });
+
+  btnSaveProxy.addEventListener('click', async () => {
+    const proxyUrl = proxyUrlInput.value.trim();
+    currentSettings = await window.api.saveSettings({ proxyUrl });
+    proxyUrlInput.style.borderColor = proxyUrl ? 'var(--color-primary)' : 'var(--border-color)';
+    setTimeout(() => { proxyUrlInput.style.borderColor = 'var(--border-color)'; }, 1500);
   });
 
   // --- IPC Listeners (Download Events) ---

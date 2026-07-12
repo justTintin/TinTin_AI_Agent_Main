@@ -1135,8 +1135,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     // 获取 yt-dlp 启动参数（优先用内置 python_embeded）
     const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
     const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-    const proxyArgStr = proxyManager.getYtDlpProxyArg(db.settings);
-    const proxyArgArr = proxyArgStr ? proxyArgStr.split(' ') : [];
+    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
     // 尝试多种格式，依次降级
     const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
@@ -1443,8 +1442,7 @@ ipcMain.handle('resume-download', (event, id) => {
       const cookieTempPath = task.path + '.cookies.txt';
       if (cookieDomain) await exportCookiesForDomain(cookieDomain, cookieTempPath);
       const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-      const proxyArgStr = proxyManager.getYtDlpProxyArg(db.settings);
-      const proxyArgArr = proxyArgStr ? proxyArgStr.split(' ') : [];
+      const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
       let lastLog = '';
       for (const fmt of formatList) {

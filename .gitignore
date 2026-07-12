@@ -67,6 +67,7 @@ studio/config/erp_config.json
 # Node
 node_modules/
 *.exe
+!apps/asset-browser/bin/yt-dlp.exe
 *.dll
 *.so
 *.whl
@@ -93,7 +94,6 @@ studio/bin/**/*ggml-cuda*
 
 # Bundled binaries
 apps/pw-browsers/
-apps/asset-browser/bin/
 
 # Studio logs
 studio/logs/

@@ -107,57 +107,28 @@ function saveDatabase(db) {
 }
 
 
-// ── yt-dlp 二进制管理：校验完整性，损坏则自动下载 ──
-function getYtdlpPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'bin', 'yt-dlp.exe')
-    : path.join(__dirname, 'bin', 'yt-dlp.exe');
-}
-
-function validateYtdlp(filePath) {
-  // yt-dlp.exe 正常体积约 10-20MB，小于 1MB 肯定是损坏的
-  try {
-    if (fs.existsSync(filePath)) {
-      const stat = fs.statSync(filePath);
-      if (stat.size > 1 * 1024 * 1024) return true; // > 1MB，基本正常
-      console.warn(`yt-dlp 体积异常 (${(stat.size / 1024).toFixed(0)}KB)，尝试重新下载`);
-      fs.unlinkSync(filePath);
-    }
-  } catch (e) { /* 忽略 */ }
-  return false;
-}
-
-async function ensureYtdlp() {
-  const ytdlpPath = getYtdlpPath();
-  if (validateYtdlp(ytdlpPath)) return ytdlpPath; // 已有正常二进制
-
-  const dir = path.dirname(ytdlpPath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-  // 从 GitHub 下载最新版 yt-dlp.exe
-  const urls = [
-    'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
-    'https://github.com/yt-dlp/yt-dlp/releases/download/2025.04.28/yt-dlp.exe',
-  ];
-
-  for (const url of urls) {
-    try {
-      console.log(`正在下载 yt-dlp: ${url}`);
-      const response = await fetch(url, { redirect: 'follow' });
-      if (!response.ok) continue;
-      const buffer = await response.arrayBuffer();
-      fs.writeFileSync(ytdlpPath, Buffer.from(buffer));
-      if (validateYtdlp(ytdlpPath)) {
-        console.log(`yt-dlp 下载成功 (${(fs.statSync(ytdlpPath).size / 1024 / 1024).toFixed(1)}MB)`);
-        return ytdlpPath;
-      }
-    } catch (e) {
-      console.warn(`从 ${url} 下载 yt-dlp 失败:`, e.message);
-    }
-  }
-
-  console.warn('yt-dlp 下载失败，将使用系统命令（需自行安装 yt-dlp）');
+// ── yt-dlp 命令解析：优先使用内置 Python 环境 ──
+function getPythonEmbededPath() {
+  // apps/asset-browser/  ->  ../../python_embeded/
+  const candidate = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+  if (fs.existsSync(candidate)) return candidate;
   return null;
+}
+
+function getYtdlpCommand() {
+  // 1) 优先用内置 python_embeded 的 python -m yt_dlp
+  const pyPath = getPythonEmbededPath();
+  if (pyPath) {
+    console.log(`使用内置 Python 运行 yt-dlp: ${pyPath}`);
+    return `"${pyPath}" -m yt_dlp`;
+  }
+  // 2) 回退到 yt-dlp.exe（需在 PATH 中或 bin/ 目录下）
+  const localBin = path.join(__dirname, 'bin', 'yt-dlp.exe');
+  if (fs.existsSync(localBin)) {
+    return `"${localBin}"`;
+  }
+  // 3) 最后回退到系统命令
+  return 'yt-dlp';
 }
 
 // ── studio 集成：握手文件（选题关键词 → 搜索页 + 下载目录）──
@@ -328,11 +299,8 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   initDatabase();
 
-  // 启动时检查 yt-dlp 二进制完整性（损坏则自动从 GitHub 下载）
-  ensureYtdlp().then(path => {
-    if (path) console.log(`yt-dlp 就绪: ${path}`);
-    else console.warn('yt-dlp 未就绪，将使用系统命令（需自行安装 yt-dlp）');
-  }).catch(e => console.warn('yt-dlp 初始化检查失败:', e.message));
+  // 启动时检查 yt-dlp 环境
+  console.log('yt-dlp 命令:', getYtdlpCommand());
 
   // 启动时把数据库中已有的 kbItems 镜像到 studio 共享目录
   // 解决「旧数据存在 database.json 但 kb_items.json 从未写过」的问题
@@ -1170,9 +1138,8 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       await exportCookiesForDomain(cookieDomain, cookieTempPath);
     }
 
-    // 确保 yt-dlp 二进制可用（损坏则自动下载）
-    const localYtdlpPath = await ensureYtdlp();
-    const ytdlpBin = localYtdlpPath ? `"${localYtdlpPath}"` : 'yt-dlp';
+    // 获取 yt-dlp 命令（优先用内置 python_embeded 运行）
+    const ytdlpBin = getYtdlpCommand();
     const cookieArg = fs.existsSync(cookieTempPath) ? `--cookies "${cookieTempPath}"` : '';
     const proxyArg = proxyManager.getYtDlpProxyArg(db.settings);
 

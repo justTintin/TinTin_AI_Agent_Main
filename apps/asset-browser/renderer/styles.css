@@ -761,6 +761,15 @@ body {
   color: #6ee7b7;
 }
 
+.download-action-btn.log {
+  color: #fbbf24;
+}
+
+.download-action-btn.log:hover {
+  background-color: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
 /* Download context menu */
 #download-context-menu {
   font-family: var(--font-family);

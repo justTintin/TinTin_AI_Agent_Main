@@ -1140,7 +1140,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
 
     // 尝试多种格式，依次降级
     const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
-    let lastError = '';
+    let lastError = '', lastLog = '';
 
     for (const fmt of formatList) {
       if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
@@ -1168,19 +1168,23 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
           windowsHide: true,
         });
 
-        child.stdout.on('data', (data) => {
-          stdoutBuf += data.toString();
-          const str = data.toString();
-          const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+        const parseProgress = (text) => {
+          const match = text.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
           if (match) {
-            const progress = Math.round(parseFloat(match[1]));
-            const speed = match[3];
-            updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
+            updateTaskProgress(id, Math.round(parseFloat(match[1])), `下载中 ${match[3]}`, 0);
           }
+        };
+
+        child.stdout.on('data', (data) => {
+          const s = data.toString();
+          stdoutBuf += s;
+          parseProgress(s);
         });
 
         child.stderr.on('data', (data) => {
-          stderrBuf += data.toString();
+          const s = data.toString();
+          stderrBuf += s;
+          parseProgress(s); // yt-dlp 进度输出到 stderr
         });
 
         child.on('close', (code) => {
@@ -1199,11 +1203,12 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
               resolve({ success: true, size: fs.statSync(finalPath).size });
             } else {
               const errLines = (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
-              const fullOutput = (stderrBuf + '\n' + stdoutBuf).trim();
+              const fullOutput = (stderrBuf + '\n--- stdout ---\n' + stdoutBuf).trim();
               const errMsg = errLines.join('\n').trim() || `exit code ${code}`;
               lastError = errMsg;
+              lastLog = fullOutput;
               console.error(`yt-dlp 格式 ${fmt} 下载失败 (exit ${code}):`, fullOutput.slice(0, 1000));
-              resolve({ success: false, error: errMsg });
+              resolve({ success: false, error: errMsg, log: fullOutput });
             }
           }
         });
@@ -1227,7 +1232,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     // 所有格式均失败
     activeDownloads.delete(id);
     console.error('yt-dlp 所有格式尝试均失败:', lastError);
-    updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + lastError);
+    updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + lastError, lastLog);
     return { success: false, error: lastError };
   }
 
@@ -1441,6 +1446,7 @@ ipcMain.handle('resume-download', (event, id) => {
       const proxyArgStr = proxyManager.getYtDlpProxyArg(db.settings);
       const proxyArgArr = proxyArgStr ? proxyArgStr.split(' ') : [];
 
+      let lastLog = '';
       for (const fmt of formatList) {
         if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
         updateTaskProgress(id, 5, `正在重新下载 (格式: ${fmt})...`, 0);
@@ -1454,13 +1460,13 @@ ipcMain.handle('resume-download', (event, id) => {
 
         const result = await new Promise((resolve) => {
           const child = spawn(ytdlpBin, allArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-          let stderrBuf = '';
-          child.stdout.on('data', (d) => {
-            const str = d.toString();
-            const m = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+          let stderrBuf = '', stdoutBuf = '';
+          const parseProgress = (text) => {
+            const m = text.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
             if (m) updateTaskProgress(id, Math.round(parseFloat(m[1])), `下载中 ${m[3]}`, 0);
-          });
-          child.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+          };
+          child.stdout.on('data', (d) => { const s = d.toString(); stdoutBuf += s; parseProgress(s); });
+          child.stderr.on('data', (d) => { const s = d.toString(); stderrBuf += s; parseProgress(s); });
           child.on('close', (code) => {
             try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch{}
             if (code === 0) {
@@ -1469,7 +1475,11 @@ ipcMain.handle('resume-download', (event, id) => {
             } else {
               let created = false; try { created = fs.existsSync(task.path) && fs.statSync(task.path).size > 0; } catch{}
               if (created) { resolve({ success: true, size: fs.statSync(task.path).size }); }
-              else { resolve({ success: false, error: (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:')).join('\n').trim() || `exit ${code}` }); }
+              else {
+                const fullLog = (stderrBuf + '\n--- stdout ---\n' + stdoutBuf).trim();
+                lastLog = fullLog;
+                resolve({ success: false, error: (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:')).join('\n').trim() || `exit ${code}`, log: fullLog });
+              }
             }
           });
           child.on('error', (e) => resolve({ success: false, error: e.message }));
@@ -1484,7 +1494,7 @@ ipcMain.handle('resume-download', (event, id) => {
         }
       }
       activeDownloads.delete(id);
-      updateTaskStatus(id, 'failed', 0, 0, '重新下载失败');
+      updateTaskStatus(id, 'failed', 0, 0, '重新下载失败', lastLog);
     })();
     return true;
   } else {
@@ -1533,7 +1543,7 @@ function updateTaskProgress(id, progress, speed, receivedBytes) {
   }
 }
 
-function updateTaskStatus(id, status, progress, size, errorMsg = '') {
+function updateTaskStatus(id, status, progress, size, errorMsg = '', log = '') {
   const db = getDatabase();
   const task = db.downloads.find(t => t.id === id);
   if (task) {
@@ -1541,6 +1551,7 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '') {
     task.progress = progress;
     if (size > 0) task.size = size;
     if (errorMsg) task.error = errorMsg;
+    if (log) task.log = log;
     saveDatabase(db);
     if (mainWindow) {
       mainWindow.webContents.send('download-list-updated', db.downloads);

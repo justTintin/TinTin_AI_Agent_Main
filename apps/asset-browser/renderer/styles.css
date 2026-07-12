@@ -690,6 +690,11 @@ body {
   color: #fca5a5;
 }
 
+.download-status-badge.paused {
+  background-color: rgba(251, 191, 36, 0.15);
+  color: #fcd34d;
+}
+
 .progress-track {
   width: 100%;
   height: 5px;
@@ -736,6 +741,32 @@ body {
 .download-action-btn.cancel:hover {
   background-color: rgba(239, 68, 68, 0.1);
   color: #fda4af;
+}
+
+.download-action-btn.pause {
+  color: #fcd34d;
+}
+
+.download-action-btn.pause:hover {
+  background-color: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
+.download-action-btn.resume {
+  color: #34d399;
+}
+
+.download-action-btn.resume:hover {
+  background-color: rgba(52, 211, 153, 0.1);
+  color: #6ee7b7;
+}
+
+/* Download context menu */
+#download-context-menu {
+  font-family: var(--font-family);
+}
+#download-context-menu div:hover {
+  background: #333 !important;
 }
 
 /* Path Settings bottom panel */

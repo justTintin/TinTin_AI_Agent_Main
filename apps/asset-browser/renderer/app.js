@@ -165,9 +165,6 @@ function renderDownloads() {
   downloadsEmpty.style.display = 'none';
   downloadList.style.display = 'flex';
   
-  // Save DOM structures of items currently being drawn
-  const activeIds = new Set(Array.from(document.querySelectorAll('.download-card')).map(el => el.dataset.id));
-  
   downloadList.innerHTML = '';
   downloadTasks.forEach(task => {
     const card = document.createElement('div');
@@ -181,14 +178,26 @@ function renderDownloads() {
     let progressVal = task.progress || 0;
     
     if (task.status === 'completed') {
-      statusText = '已完';
+      statusText = '已完成';
       badgeClass = 'completed';
       progressVal = 100;
     } else if (task.status === 'failed') {
       statusText = task.error || '失败';
       badgeClass = 'failed';
     } else if (task.status === 'downloading') {
-      statusText = `下载'(${progressVal}%)`;
+      statusText = `下载中(${progressVal}%)`;
+    } else if (task.status === 'paused') {
+      statusText = '已暂停';
+      badgeClass = 'paused';
+    }
+    
+    let actionHtml = '';
+    if (task.status === 'downloading') {
+      actionHtml = `<button class="download-action-btn pause" onclick="pauseDownload('${task.id}')">⏸ 暂停</button>`;
+    } else if (task.status === 'paused') {
+      actionHtml = `<button class="download-action-btn resume" onclick="resumeDownload('${task.id}')">↻ 重新下载</button>`;
+    } else {
+      actionHtml = `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件</button>`;
     }
     
     card.innerHTML = `
@@ -204,17 +213,79 @@ function renderDownloads() {
           ${task.status === 'downloading' ? '<span id="dl-speed-' + task.id + '">0 KB/s</span>' : sizeText}
         </span>
         <div class="download-actions" id="dl-actions-${task.id}">
-          ${task.status === 'downloading' 
-            ? `<button class="download-action-btn cancel" onclick="cancelDownload('${task.id}')">取消</button>`
-            : `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件'/button>`
-
-          }
+          ${actionHtml}
         </div>
       </div>
     `;
     
+    // 右键菜单：取消任务
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showDownloadContextMenu(e.clientX, e.clientY, task);
+    });
+    
     downloadList.appendChild(card);
   });
+}
+
+// 右键下载项上下文菜单
+function showDownloadContextMenu(x, y, task) {
+  // 移除已有菜单
+  const old = document.getElementById('download-context-menu');
+  if (old) old.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'download-context-menu';
+  menu.style.cssText = `
+    position: fixed; left: ${x}px; top: ${y}px; z-index: 9999;
+    background: #2a2a2a; border: 1px solid #444; border-radius: 6px;
+    padding: 4px 0; min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  `;
+
+  const cancelItem = document.createElement('div');
+  cancelItem.textContent = '🗑 取消下载';
+  cancelItem.style.cssText = `
+    padding: 8px 16px; cursor: pointer; color: #ef4444; font-size: 0.8rem;
+    display: flex; align-items: center; gap: 6px;
+  `;
+  cancelItem.addEventListener('mouseenter', () => { cancelItem.style.background = '#333'; });
+  cancelItem.addEventListener('mouseleave', () => { cancelItem.style.background = 'transparent'; });
+  cancelItem.addEventListener('click', () => {
+    cancelDownloadItem(task.id);
+    menu.remove();
+  });
+  menu.appendChild(cancelItem);
+
+  document.body.appendChild(menu);
+
+  // 点击其他地方关闭菜单
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+      document.removeEventListener('contextmenu', closeMenu);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('contextmenu', closeMenu);
+  }, 0);
+}
+
+// 暂停下载
+async function pauseDownload(id) {
+  await window.api.pauseDownload(id);
+}
+
+// 重新下载
+async function resumeDownload(id) {
+  await window.api.resumeDownload(id);
+}
+
+// 取消并删除任务
+async function cancelDownloadItem(id) {
+  await window.api.cancelDownloadItem(id);
 }
 
 function updateActiveDownloadCount() {

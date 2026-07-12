@@ -170,7 +170,10 @@ ipcMain.handle('append-hotspot-manifest', (event, items) => {
 ipcMain.handle('save-kb-items', (event, items) => {
   try {
     const db = getDatabase();
-    db.kbItems = Array.isArray(items) ? items : [];
+    // 按 URL 去重后保存，防止累积重复
+    const arr = Array.isArray(items) ? items : [];
+    const uniqueItems = Array.from(new Map(arr.map(i => [i.url, i])).values());
+    db.kbItems = uniqueItems;
     saveDatabase(db);
     // 同步镜像到 studio 可读的共享目录，供「导入收藏记录」功能使用
     try {
@@ -1113,60 +1116,78 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       : path.join(__dirname, 'bin', 'yt-dlp.exe');
       
     const ytdlpBin = fs.existsSync(localYtdlpPath) ? `"${localYtdlpPath}"` : 'yt-dlp';
-
     const cookieArg = fs.existsSync(cookieTempPath) ? `--cookies "${cookieTempPath}"` : '';
     const proxyArg = proxyManager.getYtDlpProxyArg(db.settings);
 
-    // 调用 yt-dlp，指定合并格式为 mp4 并指定保存文件名路径
-    const cmd = `${ytdlpBin} ${cookieArg} ${proxyArg} --no-warnings -f "bv+ba/b" --merge-output-format mp4 -o "${finalPath}" "${urlToDownload}"`;
+    // 尝试多种格式，依次降级
+    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
+    let lastError = '';
 
-    const child = exec(cmd, (err, stdout, stderr) => {
-      // 销毁时清理 Cookie 临时文件
-      try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch(e){}
-      activeDownloads.delete(id);
+    for (const fmt of formatList) {
+      if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
+      updateTaskProgress(id, 5, `正在通过 yt-dlp 下载 (格式: ${fmt})...`, 0);
 
-      if (err) {
-        // 即使 exit code 非零，若文件已成功生成则视为成功（yt-dlp 警告信息可能触发非零退出）
-        let fileCreated = false;
-        try { fileCreated = fs.existsSync(finalPath) && fs.statSync(finalPath).size > 0; } catch(e) {}
-        if (fileCreated) {
-          const finalSize = fs.statSync(finalPath).size;
-          updateTaskSize(id, finalSize);
-          updateTaskStatus(id, 'completed', 100, finalSize);
-        } else {
-          console.error('yt-dlp 下载失败:', err, stderr);
-          const errLines = (stderr || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
-          const errMsg = errLines.join('\n').trim() || err.message;
-          updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + errMsg);
-        }
-      } else {
-        let finalSize = 0;
-        try {
-          if (fs.existsSync(finalPath)) {
-            finalSize = fs.statSync(finalPath).size;
+      const cmd = `${ytdlpBin} ${cookieArg} ${proxyArg} --no-warnings --extractor-retries 3 --retries 5 -f "${fmt}" --merge-output-format mp4 -o "${finalPath}" "${urlToDownload}"`;
+
+      const result = await new Promise((resolve) => {
+        const child = exec(cmd, (err, stdout, stderr) => {
+          // 清理 Cookie 临时文件
+          try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch(e){}
+
+          if (err) {
+            // 即使 exit code 非零，若文件已成功生成则视为成功
+            let fileCreated = false;
+            try { fileCreated = fs.existsSync(finalPath) && fs.statSync(finalPath).size > 0; } catch(e) {}
+            if (fileCreated) {
+              resolve({ success: true, size: fs.statSync(finalPath).size });
+            } else {
+              const errLines = (stderr || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
+              const errMsg = errLines.join('\n').trim() || err.message;
+              lastError = errMsg;
+              console.error(`yt-dlp 格式 ${fmt} 下载失败:`, errMsg);
+              resolve({ success: false, error: errMsg });
+            }
+          } else {
+            let finalSize = 0;
+            try { if (fs.existsSync(finalPath)) finalSize = fs.statSync(finalPath).size; } catch(e) {}
+            resolve({ success: true, size: finalSize });
           }
-        } catch (e) {}
-        updateTaskSize(id, finalSize);
-        updateTaskStatus(id, 'completed', 100, finalSize);
-      }
-    });
+        });
 
-    // 解析 stdout 得到进度和速度
-    if (child.stdout) {
-      child.stdout.on('data', (data) => {
-        const str = data.toString();
-        // 匹配进度: [download]  12.5% of  15.20MiB at  2.11MiB/s ETA 00:06
-        const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
-        if (match) {
-          const progress = Math.round(parseFloat(match[1]));
-          const speed = match[3];
-          updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
+        // 解析 stdout 得到进度和速度
+        if (child.stdout) {
+          child.stdout.on('data', (data) => {
+            const str = data.toString();
+            const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+            if (match) {
+              const progress = Math.round(parseFloat(match[1]));
+              const speed = match[3];
+              updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
+            }
+          });
         }
+
+        child.on('error', (e) => {
+          lastError = e.message;
+          resolve({ success: false, error: e.message });
+        });
+
+        activeDownloads.set(id, child);
       });
+
+      if (result.success) {
+        activeDownloads.delete(id);
+        updateTaskSize(id, result.size);
+        updateTaskStatus(id, 'completed', 100, result.size);
+        return { success: true };
+      }
     }
 
-    activeDownloads.set(id, child);
-    return { success: true };
+    // 所有格式均失败
+    activeDownloads.delete(id);
+    console.error('yt-dlp 所有格式尝试均失败:', lastError);
+    updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + lastError);
+    return { success: false, error: lastError };
   }
 
   // 清理 URL 的 range 和分段请求参数，下载完整流数据

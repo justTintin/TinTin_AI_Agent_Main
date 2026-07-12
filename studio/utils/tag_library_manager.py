@@ -141,10 +141,19 @@ class TagLibraryManager:
 
     # ── 增删改 ──────────────────────────────────────────────────────────────
     def add_tag(self, name, brand="", tag_type="", category="",
-                aliases=None, color="") -> dict:
+                aliases=None, color="") -> dict | None:
+        name = name.strip()
+        if not name:
+            return None
+        # 检查同名标签已存在
+        existing = next((t for t in self.data.get("tags", [])
+                        if t.get("name") == name), None)
+        if existing:
+            log.info(f"TagLibraryManager: 标签 '{name}' 已存在，跳过创建")
+            return existing
         entry = {
             "id": uuid.uuid4().hex[:12],
-            "name": name.strip(),
+            "name": name,
             "aliases": [a.strip() for a in (aliases or []) if a.strip()],
             "brand": brand.strip(),
             "type": tag_type.strip(),

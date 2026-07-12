@@ -67,10 +67,23 @@
             <span class="platform-badge jimeng">即</span>
             <span>即梦AI</span>
           </button>
-        </div>
-      </section>
+	        </div>
+	      </section>
 
-    </aside>
+	      <!-- v2ray 代理 -->
+	      <section class="section">
+	        <h3 class="section-title">🌐 代理</h3>
+	        <div style="display:flex;flex-direction:column;gap:6px;padding:0 4px;">
+	          <input type="text" id="v2ray-sub-input" placeholder="订阅地址或 vless:// 链接" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;padding:5px 8px;color:var(--text-primary);font-size:0.75rem;outline:none;box-sizing:border-box;">
+	          <div style="display:flex;gap:6px;">
+	            <button class="path-btn" id="btn-v2ray-apply" style="flex:1;">应用</button>
+	            <button class="path-btn" id="btn-v2ray-stop" style="display:none;flex:1;">停止</button>
+	          </div>
+	          <span id="v2ray-status" style="font-size:0.7rem;color:var(--text-muted);">⏹ 未启动</span>
+	        </div>
+	      </section>
+
+	    </aside>
 
     <!-- 中间：浏览器视图 -->
     <main class="main-browser" id="browser-view">
@@ -340,18 +353,6 @@
             <div class="path-input-group">
               <input type="text" id="proxy-url-input" placeholder="http://127.0.0.1:7890" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;color:var(--text-primary);font-size:0.75rem;outline:none;">
               <button class="path-btn" id="btn-save-proxy">保存</button>
-            </div>
-          </div>
-          <!-- v2ray 代理 -->
-          <div class="path-settings" style="border-top: 1px solid var(--border-color); flex-direction: column; gap: 6px;">
-            <div style="display:flex;align-items:center;gap:8px;width:100%;">
-              <span class="path-label" style="white-space:nowrap;">🌐 v2ray 订阅：</span>
-              <input type="text" id="v2ray-sub-input" placeholder="订阅地址或 vless:// 链接" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;color:var(--text-primary);font-size:0.75rem;outline:none;">
-              <button class="path-btn" id="btn-v2ray-apply">应用</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;font-size:0.7rem;color:var(--text-muted);">
-              <span id="v2ray-status" style="color:var(--text-muted);">⏹ 未启动</span>
-              <button class="path-btn" id="btn-v2ray-stop" style="display:none;">停止</button>
             </div>
           </div>
         </div>

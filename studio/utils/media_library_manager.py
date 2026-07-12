@@ -153,7 +153,7 @@ class MediaLibraryManager:
         if group is not None:
             m["group"] = group.strip()
         if tags is not None:
-            m["tags"] = list(tags)
+            m["tags"] = list(dict.fromkeys(tags))  # 去重，保留顺序
         self.save()
         return True, "已保存。", m
 

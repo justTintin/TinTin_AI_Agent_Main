@@ -802,7 +802,9 @@ function _ingestKbCollect(payload) {
     }
   });
   if (addedCount > 0) {
-    console.log(`从拦截中同步'${addedCount} 条新收藏样本`);
+    // 全局 URL 去重，防止跨批次/跨平台标签页带来的重复
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
+    console.log(`从拦截中同步'${addedCount} 条新收藏样本（去重后共 ${allKnowledgeItems.length} 条）`);
     renderKnowledgeBaseTable();
     try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   }
@@ -1534,6 +1536,8 @@ async function syncKnowledgeBase() {
 
   try {
     await captureFavorites((m) => { kbLoadingText.textContent = m; });
+    // 保存前去重
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
     try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   } catch (e) { console.error('captureFavorites failed', e); }
 
@@ -1557,6 +1561,8 @@ async function syncKnowledgeBase() {
         </div>
       `;
     }
+    // 再次去重后保存（保险）
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
     try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   }, 500);
 }

@@ -864,19 +864,15 @@ function setupEventListeners() {
         document.querySelectorAll('.proxy-node-item').forEach(el => el.classList.remove('selected'));
         div.classList.add('selected');
         selectedIdx = i;
-        // 测试延迟
+        // TCP 测速（不启动 xray，不占端口）
         const latSpan = document.getElementById(`nlat-${i}`);
         latSpan.textContent = '测试中...';
         latSpan.className = 'node-latency testing';
-        try {
-          const start = Date.now();
-          // 用单个节点启动 xray 测速
-          await window.api.v2rayStart([node]);
-          const latency = Date.now() - start;
-          await window.api.v2rayStop();
-          latSpan.textContent = `${latency}ms`;
-          latSpan.className = `node-latency ${latency < 500 ? 'good' : 'bad'}`;
-        } catch (e) {
+        const result = await window.api.v2rayTestLatency(node);
+        if (result.ok && result.latency >= 0) {
+          latSpan.textContent = `${result.latency}ms`;
+          latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
+        } else {
           latSpan.textContent = '超时';
           latSpan.className = 'node-latency bad';
         }

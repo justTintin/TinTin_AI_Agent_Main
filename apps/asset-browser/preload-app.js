@@ -76,5 +76,6 @@ contextBridge.exposeInMainWorld('api', {
   v2rayStart: (nodes) => ipcRenderer.invoke('v2ray-start', nodes),
   v2rayStop: () => ipcRenderer.invoke('v2ray-stop'),
   v2rayStatus: () => ipcRenderer.invoke('v2ray-status'),
+  v2rayTestLatency: (node) => ipcRenderer.invoke('v2ray-test-latency', node),
 
 });

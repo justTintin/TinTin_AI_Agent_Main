@@ -1,14 +1,18 @@
-# DingDaGuai E-commerce Agent Matrix (GUI / Web)
+# DingDaGuai E-commerce Agent Matrix (Client-Server)
 
 This project is for learning and internal use only.
 
-The repository currently contains:
-- **GUI Desktop App (recommended, Windows)**: PySide6-based app (Douyin parsing & download queue, downloader manager, AI tools).
-- **Web Backend (optional / legacy)**: Flask-based pages and APIs (requires `config.ini` and database setup).
+The system uses a **client-server architecture**:
+- **GUI Client (Windows)**: PySide6 desktop app — handles UI, media preprocessing (ffmpeg), and orchestrates AI tasks via remote APIs.
+- **Compute Server (remote)**: Unified AI inference server — provides Whisper (ASR), VoxCPM (TTS), Ollama (vision LLM), and CLIP (vector embedding) services.
+- **ComfyUI Server (remote)**: AI image generation.
+- **DeepSeek API (cloud)**: Text generation / copywriting.
 
-## 1. GUI Desktop App (Windows)
+> **Note**: The old Flask web backend has been removed. All AI inference now goes through the remote compute server.
 
-### 1.1 Launch (updated)
+## 1. GUI Client (Windows)
+
+### 1.1 Launch
 
 Run:
 - `run_gui_integrated.bat`
@@ -16,7 +20,7 @@ Run:
 Or:
 
 ```powershell
-.\python_embeded\python.exe gui_main.py
+.\python_embeded\python.exe studio\gui_main.py
 ```
 
 ### 1.2 First-time setup
@@ -28,26 +32,36 @@ Install Playwright browser binaries:
 ```
 
 AI config (local, do not commit):
-- Example: `config/ai_config.example.json`
-- Actual config: `config/ai_config.json`
+- Example: `studio/config/ai_config.json.example`
+- Actual config: `studio/config/ai_config.json`
 
 ```powershell
-copy .\config\ai_config.example.json .\config\ai_config.json
+copy .\studio\config\ai_config.json.example .\studio\config\ai_config.json
+```
+
+Configure the **compute server URL** in `ai_config.json`:
+```json
+{
+  "compute_server_url": "http://<your-server-ip>:8000",
+  "comfyui_addr": "http://<your-comfyui-ip>:8188",
+  "llm_api_key": "sk-xxx"
+}
 ```
 
 Logs & temp:
-- `.runtime/logs/app.log`
-- `.runtime/tmp/`
+- `studio/.runtime/logs/app.log`
+- `studio/.runtime/tmp/`
 
-## 2. Web Backend (optional / legacy)
+## 2. AI Services Architecture
 
-Use a separate virtual environment (recommended):
+| Service | Role | Protocol | Config Field |
+|---------|------|----------|--------------|
+| **Compute Server** | Whisper ASR + VoxCPM TTS + Ollama Vision + CLIP Embedding | HTTP REST | `compute_server_url` |
+| **ComfyUI** | AI Image Generation | HTTP | `comfyui_addr` |
+| **DeepSeek API** | LLM Copywriting | HTTP | `llm_api_url` |
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run_server.py test
-```
-
-Default URL:
-- http://127.0.0.1:5050/video_list
+### Local Processing (still runs on client)
+- **VSR** (video subtitle removal)
+- **rembg** (background removal)
+- **PaddleOCR** (text recognition)
+- **ffmpeg** (media extraction and processing)

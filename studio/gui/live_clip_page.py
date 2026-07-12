@@ -1849,9 +1849,8 @@ class LiveClipPage(BasePage):
         self.btn_clip = mdi_button("开始切片", "cut")
         self.btn_clip.setObjectName("action_button")
         self.btn_clip.setFixedHeight(40)
-        self.btn_clip.setFixedWidth(120)
         self.btn_clip.clicked.connect(self._start_clip_pipeline)
-        btn_layout.addWidget(self.btn_clip)
+        btn_layout.addWidget(self.btn_clip, 1)
 
         self.btn_export = mdi_button("确认封面并导出最终视频", "rocket")
         self.btn_export.setObjectName("action_button")

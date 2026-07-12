@@ -878,10 +878,22 @@ function downloadStream(id, url, destPath, referer, onProgress) {
             return;
           }
 
-          // YouTube 使用 range=0-99999999999 时，服务器会返回 206 Partial Content
+          // 检查状态码
           if (res.statusCode !== 200 && res.statusCode !== 206) {
-            reject(new Error(`HTTP 状态码错误: ${res.statusCode}`));
+            // 收集错误响应内容以便调试
+            let errBody = '';
+            res.on('data', (chunk) => { errBody += chunk.toString().slice(0, 500); });
+            res.on('end', () => {
+              reject(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 200)}`));
+            });
             return;
+          }
+
+          // 检查 Content-Type 是否为视频/音频
+          const ct = (res.headers['content-type'] || '').toLowerCase();
+          if (ct && !ct.includes('video') && !ct.includes('audio') && !ct.includes('octet-stream') && !ct.includes('mp4')) {
+            // 可能是 CDN 返回了错误页面，仍继续下载但记日志
+            console.warn(`[下载] 非视频响应 Content-Type: ${ct} url: ${(url||'').slice(0,80)}`);
           }
 
           // 仅在 HTTP 请求成功且返回 200/206 时，才创建文件流，避免重定向过程中对流进行关闭 and 重建报错
@@ -1132,6 +1144,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
   // useYtdlp=true 强制用，false 强制不用，undefined/null 按 referer 自动判断
   const isVideoPage = useYtdlp === true || (useYtdlp !== false && referer && isValidVideoPageUrl(referer));
 
+  console.log(`[下载] useYtdlp=${useYtdlp} isVideoPage=${isVideoPage} url=${(fileUrl||'').slice(0,80)}`);
   if (isVideoPage) {
     updateTaskProgress(id, 5, '正在通过 yt-dlp 解析视频...', 0);
 

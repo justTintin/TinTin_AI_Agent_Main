@@ -61,6 +61,7 @@ const proxyNodeCount = document.getElementById('proxy-node-count');
 const btnProxyStart = document.getElementById('btn-proxy-start');
 const btnProxyStop = document.getElementById('btn-proxy-stop');
 const btnProxyUpdateSub = document.getElementById('btn-proxy-update-sub');
+const btnProxyCopyLog = document.getElementById('btn-proxy-copy-log');
 const proxyPanelStatus = document.getElementById('proxy-panel-status');
 const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
 
@@ -946,17 +947,29 @@ function setupEventListeners() {
     await refreshProxyStatus();
   });
 
+  // 复制日志到剪贴板
+  btnProxyCopyLog.addEventListener('click', () => {
+    const box = document.getElementById('proxy-error-box');
+    const status = document.getElementById('proxy-panel-status');
+    const text = [
+      status ? status.textContent : '',
+      box && box.style.display !== 'none' ? '\n' + box.textContent : '',
+      '\n节点列表:',
+      ...proxyNodes.map(n => `  ${n.protocol}://${n.host}:${n.port}  # ${n.remark || ''}`),
+    ].join('\n').trim();
+    if (text) {
+      navigator.clipboard.writeText(text).then(() => {
+        btnProxyCopyLog.textContent = '✅ 已复制';
+        setTimeout(() => { btnProxyCopyLog.textContent = '📋 复制日志'; }, 2000);
+      });
+    }
+  });
+
   // 更新订阅
   btnProxyUpdateSub.addEventListener('click', async () => {
     clearProxyError();
-    const activeTab = document.querySelector('.proxy-input-tab.active');
-    const proto = activeTab ? activeTab.dataset.proto : 'sub';
-    if (proto !== 'sub') {
-      showProxyError('请在「订阅地址」标签下使用此功能');
-      return;
-    }
     const subUrl = proxyInputField.value.trim();
-    if (!subUrl.startsWith('http')) { showProxyError('请输入有效的订阅地址'); return; }
+    if (!subUrl.startsWith('http')) { showProxyError('请在输入框中粘贴有效的订阅地址'); return; }
 
     btnProxyUpdateSub.textContent = '更新中...';
     btnProxyUpdateSub.disabled = true;

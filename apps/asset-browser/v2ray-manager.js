@@ -378,15 +378,24 @@ async function start(nodes) {
         if (!started) { child.kill(); reject(new Error(`启动超时\n${stderrLog.slice(-500)}`)); }
       }, 15000);
 
-      child.stderr.on('data', (d) => {
-        stderrLog += d.toString();
-        if (d.toString().includes('started')) {
+      const checkStarted = (text) => {
+        if (text.toLowerCase().includes('started')) {
           started = true;
           clearTimeout(timeout);
           setTimeout(() => resolve(proxyUrl), 300);
         }
+      };
+
+      child.stderr.on('data', (d) => {
+        const s = d.toString();
+        stderrLog += s;
+        checkStarted(stderrLog);  // 用累积日志检查，防止跨 chunk 断词
       });
-      child.stdout.on('data', (d) => { stderrLog += d.toString(); });
+      child.stdout.on('data', (d) => {
+        const s = d.toString();
+        stderrLog += s;
+        checkStarted(stderrLog);
+      });
       child.on('close', (code) => {
         clearTimeout(timeout);
         xrayProcess = null;

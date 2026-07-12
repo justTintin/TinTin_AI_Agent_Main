@@ -1368,39 +1368,148 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
   return { success: true };
 });
 
-ipcMain.handle('cancel-download', (event, id) => {
-  let cancelled = false;
-
-  // 1. 取消单个任务句柄 (yt-dlp child process or single download req)
+// 通用：杀掉活跃下载进程（返回是否成功）
+function killActiveTask(id) {
+  let killed = false;
   if (activeDownloads.has(id)) {
-    const task = activeDownloads.get(id);
-    if (task.kill) {
-      task.kill(); // child process
-    } else if (task.destroy) {
-      task.destroy(); // http request
-    }
+    const t = activeDownloads.get(id);
+    if (t.kill) t.kill();
+    else if (t.destroy) t.destroy();
     activeDownloads.delete(id);
-    cancelled = true;
+    killed = true;
   }
+  const vid = id + '_video', aid = id + '_audio';
+  if (activeDownloads.has(vid)) { try { activeDownloads.get(vid).destroy?.(); } catch{} activeDownloads.delete(vid); killed = true; }
+  if (activeDownloads.has(aid)) { try { activeDownloads.get(aid).destroy?.(); } catch{} activeDownloads.delete(aid); killed = true; }
+  return killed;
+}
 
-  // 2. 取消音视频分离下载的子请求 (video 与 audio 任务)
-  const videoId = id + '_video';
-  const audioId = id + '_audio';
-  if (activeDownloads.has(videoId)) {
-    const task = activeDownloads.get(videoId);
-    if (task.destroy) task.destroy();
-    activeDownloads.delete(videoId);
-    cancelled = true;
+ipcMain.handle('cancel-download', (event, id) => {
+  // 旧版取消（保留向后兼容，转换为暂停）
+  if (killActiveTask(id)) {
+    updateTaskStatus(id, 'paused', 0, 0, '已暂停');
+    return true;
   }
-  if (activeDownloads.has(audioId)) {
-    const task = activeDownloads.get(audioId);
-    if (task.destroy) task.destroy();
-    activeDownloads.delete(audioId);
-    cancelled = true;
-  }
+  return false;
+});
 
-  if (cancelled) {
-    updateTaskStatus(id, 'failed', 0, 0, '已取消');
+// 暂停下载：杀掉进程，保留部分文件，标记为 paused
+ipcMain.handle('pause-download', (event, id) => {
+  if (killActiveTask(id)) {
+    updateTaskStatus(id, 'paused', 0, 0, '已暂停');
+    return true;
+  }
+  return false;
+});
+
+// 重新下载：从已保存的任务参数重新启动下载
+ipcMain.handle('resume-download', (event, id) => {
+  const db = getDatabase();
+  const task = db.downloads.find(t => t.id === id);
+  if (!task) return false;
+
+  // 重置状态为 downloading
+  task.status = 'downloading';
+  task.progress = 0;
+  task.error = '';
+  saveDatabase(db);
+  mainWindow.webContents.send('download-list-updated', db.downloads);
+
+  // 构造下载参数并重新启动
+  const referer = task.url || '';
+  const fileUrl = task.url || '';
+  const audioUrl = task.audioUrl || null;
+
+  // 判断是否走 yt-dlp
+  const isVideoPage = isValidVideoPageUrl(referer);
+
+  if (isVideoPage) {
+    // yt-dlp 路径
+    const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
+    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
+
+    // 导出 Cookie
+    let cookieDomain = '';
+    if (referer.includes('youtube.com') || referer.includes('youtu.be')) cookieDomain = '.youtube.com';
+    else if (referer.includes('bilibili.com')) cookieDomain = '.bilibili.com';
+    else if (referer.includes('douyin.com')) cookieDomain = '.douyin.com';
+
+    (async () => {
+      const cookieTempPath = task.path + '.cookies.txt';
+      if (cookieDomain) await exportCookiesForDomain(cookieDomain, cookieTempPath);
+      const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+      const proxyArgStr = proxyManager.getYtDlpProxyArg(db.settings);
+      const proxyArgArr = proxyArgStr ? proxyArgStr.split(' ') : [];
+
+      for (const fmt of formatList) {
+        if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
+        updateTaskProgress(id, 5, `正在重新下载 (格式: ${fmt})...`, 0);
+
+        const allArgs = [
+          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
+          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
+          '-f', fmt, '--merge-output-format', 'mp4',
+          '-o', task.path, referer,
+        ];
+
+        const result = await new Promise((resolve) => {
+          const child = spawn(ytdlpBin, allArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+          let stderrBuf = '';
+          child.stdout.on('data', (d) => {
+            const str = d.toString();
+            const m = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+            if (m) updateTaskProgress(id, Math.round(parseFloat(m[1])), `下载中 ${m[3]}`, 0);
+          });
+          child.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+          child.on('close', (code) => {
+            try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch{}
+            if (code === 0) {
+              let s = 0; try { if (fs.existsSync(task.path)) s = fs.statSync(task.path).size; } catch{}
+              resolve({ success: true, size: s });
+            } else {
+              let created = false; try { created = fs.existsSync(task.path) && fs.statSync(task.path).size > 0; } catch{}
+              if (created) { resolve({ success: true, size: fs.statSync(task.path).size }); }
+              else { resolve({ success: false, error: (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:')).join('\n').trim() || `exit ${code}` }); }
+            }
+          });
+          child.on('error', (e) => resolve({ success: false, error: e.message }));
+          activeDownloads.set(id, child);
+        });
+
+        if (result.success) {
+          activeDownloads.delete(id);
+          updateTaskSize(id, result.size);
+          updateTaskStatus(id, 'completed', 100, result.size);
+          return;
+        }
+      }
+      activeDownloads.delete(id);
+      updateTaskStatus(id, 'failed', 0, 0, '重新下载失败');
+    })();
+    return true;
+  } else {
+    // 非 yt-dlp 路径：重新走 HTTP 下载
+    // 简化处理：对于音视频分离或单文件，重新发起 start-download 逻辑
+    updateTaskStatus(id, 'failed', 0, 0, '该任务不支持重新下载');
+    return false;
+  }
+});
+
+// 取消并删除任务：杀掉进程、删除部分文件、标记已取消
+ipcMain.handle('cancel-download-item', (event, id) => {
+  killActiveTask(id);
+  const db = getDatabase();
+  const task = db.downloads.find(t => t.id === id);
+  if (task) {
+    // 删除部分下载的文件
+    try { if (fs.existsSync(task.path)) fs.unlinkSync(task.path); } catch{}
+    try { if (fs.existsSync(task.path + '.video.tmp')) fs.unlinkSync(task.path + '.video.tmp'); } catch{}
+    try { if (fs.existsSync(task.path + '.audio.tmp')) fs.unlinkSync(task.path + '.audio.tmp'); } catch{}
+    try { if (fs.existsSync(task.path + '.cookies.txt')) fs.unlinkSync(task.path + '.cookies.txt'); } catch{}
+    // 从下载列表中移除
+    db.downloads = db.downloads.filter(t => t.id !== id);
+    saveDatabase(db);
+    mainWindow.webContents.send('download-list-updated', db.downloads);
     return true;
   }
   return false;

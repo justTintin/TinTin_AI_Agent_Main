@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('api', {
   // Downloading
   startDownload: (downloadInfo) => ipcRenderer.invoke('start-download', downloadInfo),
   cancelDownload: (id) => ipcRenderer.invoke('cancel-download', id),
+  pauseDownload: (id) => ipcRenderer.invoke('pause-download', id),
+  resumeDownload: (id) => ipcRenderer.invoke('resume-download', id),
+  cancelDownloadItem: (id) => ipcRenderer.invoke('cancel-download-item', id),
   saveTextFile: (data) => ipcRenderer.invoke('save-text-file', data),
   checkLoginStatus: () => ipcRenderer.invoke('check-login-status'),
   getDailyAssets: () => ipcRenderer.invoke('get-daily-assets'),

@@ -965,11 +965,15 @@ function cleanMediaUrlForDownload(urlStr) {
   }
 }
 
-// 辅助函数：导出指定域名的 Cookie 给 yt-dlp 使用
+// 辅助函数：导出指定域名的 Cookie 给 yt-dlp 使用（追加模式，可多次调用）
 async function exportCookiesForDomain(domain, destPath) {
   try {
     const cookies = await session.fromPartition('persist:tintin-browser').cookies.get({ domain });
-    let cookieText = "# Netscape HTTP Cookie File\n";
+    if (cookies.length === 0) return false;
+    // 文件不存在时写头，存在时追加
+    const isNew = !fs.existsSync(destPath);
+    const header = isNew ? "# Netscape HTTP Cookie File\n" : "\n";
+    let cookieText = header;
     for (const c of cookies) {
       const d = c.domain;
       const flag = d.startsWith('.') ? 'TRUE' : 'FALSE';
@@ -978,10 +982,11 @@ async function exportCookiesForDomain(domain, destPath) {
       const expiration = c.expirationDate ? Math.round(c.expirationDate) : Math.round(Date.now() / 1000 + 86400 * 30);
       cookieText += `${d}\t${flag}\t${path}\t${secure}\t${expiration}\t${c.name}\t${c.value}\n`;
     }
-    fs.writeFileSync(destPath, cookieText, 'utf-8');
+    fs.writeFileSync(destPath, cookieText, { flag: 'a', encoding: 'utf-8' });
+    console.log(`导出 ${cookies.length} 条 ${domain} Cookie -> ${destPath}`);
     return true;
   } catch (err) {
-    console.warn(`导出域名 ${domain} 的 Cookie 失败:`, err);
+    console.warn(`导出域名 ${domain} 的 Cookie 失败:`, err.message);
     return false;
   }
 }
@@ -1117,29 +1122,43 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     const urlToDownload = isVideoPage ? (referer || fileUrl) : fileUrl;
     
     // 根据域名判断需要导出的 Cookie，实现登录视频下载
-    let cookieDomain = '';
-    if (urlToDownload.includes('youtube.com') || urlToDownload.includes('youtu.be')) {
-      cookieDomain = '.youtube.com';
-    } else if (urlToDownload.includes('bilibili.com')) {
-      cookieDomain = '.bilibili.com';
-    } else if (urlToDownload.includes('douyin.com')) {
-      cookieDomain = '.douyin.com';
-    } else if (urlToDownload.includes('zhihu.com')) {
-      cookieDomain = '.zhihu.com';
-    }
+	    let cookieDomains = [];
+	    if (urlToDownload.includes('youtube.com') || urlToDownload.includes('youtu.be')) {
+	      cookieDomains = ['.youtube.com', '.google.com', 'accounts.google.com'];
+	    } else if (urlToDownload.includes('bilibili.com')) {
+	      cookieDomains = ['.bilibili.com'];
+	    } else if (urlToDownload.includes('douyin.com')) {
+	      cookieDomains = ['.douyin.com'];
+	    } else if (urlToDownload.includes('zhihu.com')) {
+	      cookieDomains = ['.zhihu.com'];
+	    }
 
-    const cookieTempPath = finalPath + '.cookies.txt';
-    if (cookieDomain) {
-      await exportCookiesForDomain(cookieDomain, cookieTempPath);
-    }
+	    const cookieTempPath = finalPath + '.cookies.txt';
+	    if (cookieDomains.length > 0) {
+	      for (const d of cookieDomains) {
+	        await exportCookiesForDomain(d, cookieTempPath);
+	      }
+	    }
+	    // 对于 YouTube，再尝试从浏览器读取 cookies（chrome/edge）
+	    const useBrowserCookies = urlToDownload.includes('youtube.com') && !fs.existsSync(cookieTempPath);
 
     // 获取 yt-dlp 启动参数（优先用内置 python_embeded）
     const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
-    const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
+	    // cookie 参数：优先 cookie 文件，YouTube 兜底用浏览器 cookies
+	    let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+	    if (cookieArg.length === 0 && useBrowserCookies) {
+	      // 尝试从系统 Chrome/Edge 读取 cookies
+	      if (process.env.LOCALAPPDATA) {
+	        const chromePath = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Cookies');
+	        const edgePath = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies');
+	        if (fs.existsSync(chromePath)) cookieArg = ['--cookies-from-browser', 'chrome'];
+	        else if (fs.existsSync(edgePath)) cookieArg = ['--cookies-from-browser', 'edge'];
+	      }
+	    }
+	    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
-    // 尝试多种格式，依次降级
-    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
+	    // 尝试多种格式，依次降级
+	    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
     let lastError = '', lastLog = '';
 
     for (const fmt of formatList) {
@@ -1434,15 +1453,23 @@ ipcMain.handle('resume-download', (event, id) => {
     const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
 
     // 导出 Cookie
-    let cookieDomain = '';
-    if (referer.includes('youtube.com') || referer.includes('youtu.be')) cookieDomain = '.youtube.com';
-    else if (referer.includes('bilibili.com')) cookieDomain = '.bilibili.com';
-    else if (referer.includes('douyin.com')) cookieDomain = '.douyin.com';
+    let cookieDomains = [];
+    if (referer.includes('youtube.com') || referer.includes('youtu.be')) cookieDomains = ['.youtube.com', '.google.com', 'accounts.google.com'];
+    else if (referer.includes('bilibili.com')) cookieDomains = ['.bilibili.com'];
+    else if (referer.includes('douyin.com')) cookieDomains = ['.douyin.com'];
 
     (async () => {
       const cookieTempPath = task.path + '.cookies.txt';
-      if (cookieDomain) await exportCookiesForDomain(cookieDomain, cookieTempPath);
-      const cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+      for (const d of cookieDomains) await exportCookiesForDomain(d, cookieTempPath);
+      let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+      if (cookieArg.length === 0 && referer.includes('youtube.com')) {
+        if (process.env.LOCALAPPDATA) {
+          const cp = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Cookies');
+          const ep = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies');
+          if (fs.existsSync(cp)) cookieArg = ['--cookies-from-browser', 'chrome'];
+          else if (fs.existsSync(ep)) cookieArg = ['--cookies-from-browser', 'edge'];
+        }
+      }
       const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
       let lastLog = '';

@@ -2412,58 +2412,107 @@ async function downloadKnowledgeBaseItem(item, subDir) {
 	}
 }
 
-// ── 抖音收藏项下载：用隐藏 webview 嗅探直链，不走 yt-dlp ──
+// ── 抖音收藏项下载：用隐藏 webview 提取页面内嵌直链 ──
 async function downloadDouyinKbItem(item, filePrefix, subDir) {
-  // 1. 导航到抖音视频页，让预加载脚本嗅探直链
+  console.log(`[抖音下载] 开始: ${item.url}`);
+
+  // 1. 导航到抖音视频页
   try {
     scraperWebview.src = item.url;
     await new Promise(resolve => {
       let done = false;
-      const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 3500); } };
+      const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 5000); } };
       scraperWebview.addEventListener('did-stop-loading', onStop);
-      setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 10000);
+      setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 15000);
     });
-  } catch (e) { console.warn('抖音嗅探导航失败:', e); }
+    console.log('[抖音下载] 页面加载完成');
+  } catch (e) { console.warn('[抖音下载] 导航失败:', e); }
 
-  // 2. 尝试从页面 JavaScript 中提取直链（优先于嗅探）
+  // 2. 尝试从页面提取直链
   let videoUrl = '', audioUrl = '';
   try {
-    // 抖音页面数据在 window.__RENDER_DATA__ 或 __NUXT__ 或 __INITIAL_STATE__ 中
+    // 先等页面完全渲染
+    await new Promise(r => setTimeout(r, 2000));
+
     const result = await scraperWebview.executeJavaScript(`(() => {
+      const out = {method:'', url:'', debug:[]};
+
+      // 方法1: 找 <video> 元素
       try {
-        const data = JSON.parse(decodeURIComponent(window.__RENDER_DATA__ || '{}'));
-        const store = data?.app?.videoInfoRes?.item_list?.[0] || data?.__DEFAULT_SCOPE__?.videoInfoRes?.item_list?.[0];
-        if (store?.video?.play_addr?.url_list?.[0]) return store.video.play_addr.url_list[0];
-        if (store?.video?.bit_rate?.[0]?.play_addr?.url_list?.[0]) return store.video.bit_rate[0].play_addr.url_list[0];
-      } catch(e) {}
-      try {
-        const scripts = document.querySelectorAll('script');
-        for (const s of scripts) {
-          const t = s.textContent || '';
-          if (t.includes('play_addr') && t.includes('url_list')) {
-            const m = t.match(/"play_addr":\{"url_list":\["([^"]+)/);
-            if (m) return m[1].replace(/\\\\u002F/g, '/').replace(/\\u002F/g, '/');
-          }
+        const v = document.querySelector('video');
+        if (v) {
+          out.debug.push('video标签存在 src=' + (v.src || '无'));
+          if (v.src && v.src.startsWith('http')) { out.method='video_tag'; out.url=v.src; return JSON.stringify(out); }
         }
       } catch(e) {}
-      return '';
-    })()`);
-    if (result && typeof result === 'string' && result.startsWith('http')) {
-      videoUrl = result;
-      console.log('抖音 JS 提取直链:', videoUrl.slice(0, 100));
-    }
-  } catch(e) { console.warn('抖音 JS 提取失败:', e.message); }
 
-  // 3. 如果 JS 没找到，回退到嗅探缓存
+      // 方法2: 找 video 的 source 子元素
+      try {
+        const s = document.querySelector('video source');
+        if (s && s.src && s.src.startsWith('http')) { out.method='video_source'; out.url=s.src; return JSON.stringify(out); }
+      } catch(e) {}
+
+      // 方法3: window.__INITIAL_STATE__
+      try {
+        const s = window.__INITIAL_STATE__;
+        if (s) {
+          out.debug.push('__INITIAL_STATE__ 存在');
+          const v = s?.videoInfoRes?.item_list?.[0]?.video || s?.videoInfoRes?.video_list?.[0]?.video;
+          const url = v?.play_addr?.url_list?.[0] || v?.bit_rate?.[0]?.play_addr?.url_list?.[0];
+          if (url) { out.method='initial_state'; out.url=url.replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
+        }
+      } catch(e) {}
+
+      // 方法4: window.__NEXT_DATA__
+      try {
+        const s = window.__NEXT_DATA__;
+        if (s) {
+          out.debug.push('__NEXT_DATA__ 存在');
+          const v = s?.props?.pageProps?.videoData?.video;
+          const url = v?.playAddr?.[0] || v?.bitRate?.[0]?.playAddr?.[0];
+          if (url) { out.method='next_data'; out.url=url; return JSON.stringify(out); }
+        }
+      } catch(e) {}
+
+      // 方法5: window.__NUXT__
+      try {
+        const s = window.__NUXT__;
+        if (s) {
+          out.debug.push('__NUXT__ 存在');
+        }
+      } catch(e) {}
+
+      // 方法6: 页面标题
+      out.debug.push('title=' + document.title);
+      out.debug.push('scripts=' + document.querySelectorAll('script').length);
+
+      return JSON.stringify(out);
+    })()`);
+    const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+    console.log('[抖音下载] JS返回:', parsed);
+    if (parsed.url && parsed.url.startsWith('http')) {
+      videoUrl = parsed.url;
+      console.log('[抖音下载] 直链获取成功, 方法=' + parsed.method);
+    } else {
+      console.warn('[抖音下载] 提取直链失败:', (parsed.debug||[]).join(' | '));
+      // 没有直链时直接回退到 yt-dlp
+    }
+  } catch(e) { console.warn('[抖音下载] JS执行失败:', e.message); }
+
+  // 3. JS未找到则尝试嗅探缓存
   if (!videoUrl) {
+    console.log('[抖音下载] 尝试嗅探缓存...');
     const allCandidates = [...lastSniffedAssetsFallback, ...sniffedAssets];
+    console.log('[抖音下载] 嗅探候选数:', allCandidates.length, 'lastSniffed:', lastSniffedAssetsFallback.length, 'sniffed:', sniffedAssets.length);
     for (const c of allCandidates) {
       const u = (c.url || '').toLowerCase();
+      console.log('[抖音下载] 嗅探项:', c.type, u.slice(0, 80));
       if (!u.includes('douyinvod') && !u.includes('video/tos') && !u.includes('sns-video') && !u.includes('v3-dy') && !u.includes('.mp4')) continue;
       if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break; }
       if (c.type === 'video' && !videoUrl) { videoUrl = c.url; continue; }
       if (c.type === 'audio' && !audioUrl) { audioUrl = c.url; }
     }
+    console.log('[抖音下载] 嗅探结果 videoUrl:', videoUrl ? videoUrl.slice(0,80) : '无');
   }
 
   if (!videoUrl) {

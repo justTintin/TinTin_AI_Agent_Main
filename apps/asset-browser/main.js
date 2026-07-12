@@ -969,7 +969,10 @@ function cleanMediaUrlForDownload(urlStr) {
 async function exportCookiesForDomain(domain, destPath) {
   try {
     const cookies = await session.fromPartition('persist:tintin-browser').cookies.get({ domain });
-    if (cookies.length === 0) return false;
+    if (cookies.length === 0) {
+      // 没有 cookies 时确保不创建空文件
+      return false;
+    }
     // 文件不存在时写头，存在时追加
     const isNew = !fs.existsSync(destPath);
     const header = isNew ? "# Netscape HTTP Cookie File\n" : "\n";
@@ -1133,28 +1136,35 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
 	      cookieDomains = ['.zhihu.com'];
 	    }
 
-	    const cookieTempPath = finalPath + '.cookies.txt';
-	    if (cookieDomains.length > 0) {
-	      for (const d of cookieDomains) {
-	        await exportCookiesForDomain(d, cookieTempPath);
-	      }
-	    }
-	    // 对于 YouTube，再尝试从浏览器读取 cookies（chrome/edge）
-	    const useBrowserCookies = urlToDownload.includes('youtube.com') && !fs.existsSync(cookieTempPath);
+    const cookieTempPath = finalPath + '.cookies.txt';
+    if (cookieDomains.length > 0) {
+      for (const d of cookieDomains) {
+        await exportCookiesForDomain(d, cookieTempPath);
+      }
+      // 如果 cookie 文件只有头没有实际数据，删掉让它走浏览器兜底
+      if (fs.existsSync(cookieTempPath)) {
+        const content = fs.readFileSync(cookieTempPath, 'utf-8');
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        if (lines.length === 0) fs.unlinkSync(cookieTempPath);
+      }
+    }
+    const useBrowserCookies = urlToDownload.includes('youtube.com') && !fs.existsSync(cookieTempPath);
 
-    // 获取 yt-dlp 启动参数（优先用内置 python_embeded）
+    // 获取 yt-dlp 启动参数
     const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
-	    // cookie 参数：优先 cookie 文件，YouTube 兜底用浏览器 cookies
-	    let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-	    if (cookieArg.length === 0 && useBrowserCookies) {
-	      // 尝试从系统 Chrome/Edge 读取 cookies
-	      if (process.env.LOCALAPPDATA) {
-	        const chromePath = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Cookies');
-	        const edgePath = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies');
-	        if (fs.existsSync(chromePath)) cookieArg = ['--cookies-from-browser', 'chrome'];
-	        else if (fs.existsSync(edgePath)) cookieArg = ['--cookies-from-browser', 'edge'];
-	      }
-	    }
+    // cookie 参数：优先 cookie 文件，YouTube 兜底用浏览器 cookies
+    let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+    if (cookieArg.length === 0 && useBrowserCookies) {
+      cookieArg = ['--cookies-from-browser', 'chrome'];
+      // 如果 Chrome 不可用，试 Edge
+      if (process.env.LOCALAPPDATA) {
+        const chromeCookie = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies');
+        const edgeCookie = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies');
+        if (!fs.existsSync(chromeCookie) && fs.existsSync(edgeCookie)) {
+          cookieArg = ['--cookies-from-browser', 'edge'];
+        }
+      }
+    }
 	    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
 	    // 尝试多种格式，依次降级
@@ -1461,13 +1471,18 @@ ipcMain.handle('resume-download', (event, id) => {
     (async () => {
       const cookieTempPath = task.path + '.cookies.txt';
       for (const d of cookieDomains) await exportCookiesForDomain(d, cookieTempPath);
+      // 空 cookie 文件不传给 yt-dlp
+      if (fs.existsSync(cookieTempPath)) {
+        const c = fs.readFileSync(cookieTempPath, 'utf-8');
+        if (c.split('\n').filter(l => l.trim() && !l.startsWith('#')).length === 0) fs.unlinkSync(cookieTempPath);
+      }
       let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
       if (cookieArg.length === 0 && referer.includes('youtube.com')) {
+        cookieArg = ['--cookies-from-browser', 'chrome'];
         if (process.env.LOCALAPPDATA) {
-          const cp = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Cookies');
-          const ep = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Cookies');
-          if (fs.existsSync(cp)) cookieArg = ['--cookies-from-browser', 'chrome'];
-          else if (fs.existsSync(ep)) cookieArg = ['--cookies-from-browser', 'edge'];
+          const cc = path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data', 'Default', 'Network', 'Cookies');
+          const ec = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data', 'Default', 'Network', 'Cookies');
+          if (!fs.existsSync(cc) && fs.existsSync(ec)) cookieArg = ['--cookies-from-browser', 'edge'];
         }
       }
       const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);

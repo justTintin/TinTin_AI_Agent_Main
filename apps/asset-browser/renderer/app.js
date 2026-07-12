@@ -2425,23 +2425,44 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
     });
   } catch (e) { console.warn('抖音嗅探导航失败:', e); }
 
-  // 2. 从嗅探缓存中找抖音视频直链
-  // lastSniffedAssetsFallback 是嗅探器维护的全局缓存（见 updateActiveSnifferDisplay）
-  const candidates = lastSniffedAssetsFallback.filter(a => a.pageUrl === item.url || a.url.includes('douyin'));
+  // 2. 尝试从页面 JavaScript 中提取直链（优先于嗅探）
   let videoUrl = '', audioUrl = '';
-  for (const c of candidates) {
-    if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break; }
-    if (c.type === 'video' && !videoUrl) videoUrl = c.url;
-    if (c.type === 'audio' && !audioUrl) audioUrl = c.url;
-  }
-  // 如果没从缓存中找到，再从全局 sniffedAssets 找
+  try {
+    // 抖音页面数据在 window.__RENDER_DATA__ 或 __NUXT__ 或 __INITIAL_STATE__ 中
+    const result = await scraperWebview.executeJavaScript(`(() => {
+      try {
+        const data = JSON.parse(decodeURIComponent(window.__RENDER_DATA__ || '{}'));
+        const store = data?.app?.videoInfoRes?.item_list?.[0] || data?.__DEFAULT_SCOPE__?.videoInfoRes?.item_list?.[0];
+        if (store?.video?.play_addr?.url_list?.[0]) return store.video.play_addr.url_list[0];
+        if (store?.video?.bit_rate?.[0]?.play_addr?.url_list?.[0]) return store.video.bit_rate[0].play_addr.url_list[0];
+      } catch(e) {}
+      try {
+        const scripts = document.querySelectorAll('script');
+        for (const s of scripts) {
+          const t = s.textContent || '';
+          if (t.includes('play_addr') && t.includes('url_list')) {
+            const m = t.match(/"play_addr":\{"url_list":\["([^"]+)/);
+            if (m) return m[1].replace(/\\\\u002F/g, '/').replace(/\\u002F/g, '/');
+          }
+        }
+      } catch(e) {}
+      return '';
+    })()`);
+    if (result && typeof result === 'string' && result.startsWith('http')) {
+      videoUrl = result;
+      console.log('抖音 JS 提取直链:', videoUrl.slice(0, 100));
+    }
+  } catch(e) { console.warn('抖音 JS 提取失败:', e.message); }
+
+  // 3. 如果 JS 没找到，回退到嗅探缓存
   if (!videoUrl) {
-    for (const c of sniffedAssets) {
-      if (c.type === 'combined' && (c.pageUrl === item.url || c.url.includes('douyin'))) {
-        videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break;
-      }
-      if (c.type === 'video' && !videoUrl) videoUrl = c.url;
-      if (c.type === 'audio' && !audioUrl) audioUrl = c.url;
+    const allCandidates = [...lastSniffedAssetsFallback, ...sniffedAssets];
+    for (const c of allCandidates) {
+      const u = (c.url || '').toLowerCase();
+      if (!u.includes('douyinvod') && !u.includes('video/tos') && !u.includes('sns-video') && !u.includes('v3-dy') && !u.includes('.mp4')) continue;
+      if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break; }
+      if (c.type === 'video' && !videoUrl) { videoUrl = c.url; continue; }
+      if (c.type === 'audio' && !audioUrl) { audioUrl = c.url; }
     }
   }
 

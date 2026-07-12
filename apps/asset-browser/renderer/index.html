@@ -70,6 +70,13 @@
 	        </div>
 	      </section>
 
+	      <!-- 代理入口（左侧底部） -->
+	      <div style="margin-top:auto;border-top:1px solid var(--border-color);padding:8px 12px;">
+	        <button class="statusbar-btn" id="btn-proxy-config" style="width:100%;justify-content:center;padding:6px;">
+	          <span id="proxy-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#6b7280;"></span>
+	          <span>代理</span>
+	        </button>
+	      </div>
 	    </aside>
 
     <!-- 中间：浏览器视图 -->
@@ -114,14 +121,6 @@
           partition="persist:tintin-browser"
           allowpopups
         ></webview>
-      </div>
-      <!-- 底部状态栏 -->
-      <div class="browser-statusbar">
-        <button class="statusbar-btn" id="btn-proxy-config" title="配置代理">
-          <span id="proxy-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#6b7280;"></span>
-          <span>代理</span>
-        </button>
-        <span style="color:var(--text-muted);font-size:0.65rem;margin-left:auto;" id="statusbar-info"></span>
       </div>
     </main>
 

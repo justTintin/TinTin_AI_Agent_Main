@@ -196,9 +196,9 @@ function generateXrayConfig(nodes) {
       };
       if (node.security === 'tls' || node.security === 'reality') {
         outbound.streamSettings.security = node.security;
-        outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: true };
+        if (node.sni) outbound.streamSettings.tlsSettings = { serverName: node.sni };
         if (node.flow && node.flow.startsWith('xtls-rprx-')) {
-          outbound.streamSettings.tlsSettings = { serverName: node.sni, allowInsecure: true, flow: node.flow };
+          outbound.streamSettings.tlsSettings = { serverName: node.sni, flow: node.flow };
         }
       }
       // 传输层
@@ -218,7 +218,7 @@ function generateXrayConfig(nodes) {
       };
       outbound.streamSettings.security = node.tls === 'tls' ? 'tls' : 'none';
       if (node.tls === 'tls') {
-        outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host, allowInsecure: true };
+        outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host };
       }
       if (node.type === 'ws') {
         outbound.streamSettings.wsSettings = { path: node.path || '/', headers: { Host: node.sni || node.host } };
@@ -232,7 +232,7 @@ function generateXrayConfig(nodes) {
         servers: [{ address: node.host, port: node.port, password: node.password }],
       };
       outbound.streamSettings.security = 'tls';
-      outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host, allowInsecure: false };
+      outbound.streamSettings.tlsSettings = { serverName: node.sni || node.host };
       if (node.type === 'ws') {
         outbound.streamSettings.wsSettings = { path: node.path || '/', headers: { Host: node.sni || node.host } };
       } else if (node.type === 'grpc') {

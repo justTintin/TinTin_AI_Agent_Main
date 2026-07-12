@@ -1173,9 +1173,10 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       }
     }
 
-    // 获取 yt-dlp 启动参数（YouTube 强制用 pip 版，支持解密 Chrome cookie）
+    // 获取 yt-dlp 启动参数（YouTube/抖音 强制用 pip 版，支持解密 Chrome cookie）
+    const needsPip = urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com');
     let ytdlpBin, ytdlpBaseArgs;
-    if (urlToDownload.includes('youtube.com')) {
+    if (needsPip) {
       const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
       if (fs.existsSync(pipPy)) {
         ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp'];
@@ -1185,9 +1186,9 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     } else {
       const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
     }
-    // cookie 参数：有文件就传，YouTube 兜底用浏览器 cookie
+    // cookie 参数：有文件就传，YouTube/抖音 兜底用浏览器 cookie
     let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-    if (cookieArg.length === 0 && urlToDownload.includes('youtube.com')) {
+    if (cookieArg.length === 0 && (urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com'))) {
       cookieArg = ['--cookies-from-browser', 'chrome'];
     }
     const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
@@ -1489,9 +1490,10 @@ ipcMain.handle('resume-download', (event, id) => {
   const isVideoPage = isValidVideoPageUrl(referer);
 
   if (isVideoPage) {
-    // yt-dlp 路径（YouTube 强制用 pip 版以支持 Chrome cookie 解密）
+    // yt-dlp 路径（YouTube/抖音 强制用 pip 版以支持 Chrome cookie 解密）
+    const needsPip = referer.includes('youtube.com') || referer.includes('douyin.com');
     let ytdlpBin, ytdlpBaseArgs;
-    if (referer.includes('youtube.com')) {
+    if (needsPip) {
       const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
       if (fs.existsSync(pipPy)) { ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp']; }
       else { const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args; }
@@ -1528,7 +1530,7 @@ ipcMain.handle('resume-download', (event, id) => {
         if (c.split('\n').filter(l => l.trim() && !l.startsWith('#')).length === 0) fs.unlinkSync(cookieTempPath);
       }
       let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-      if (cookieArg.length === 0 && referer.includes('youtube.com')) {
+      if (cookieArg.length === 0 && (referer.includes('youtube.com') || referer.includes('douyin.com'))) {
         cookieArg = ['--cookies-from-browser', 'chrome'];
       }
       const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);

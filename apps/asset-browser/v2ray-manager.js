@@ -105,25 +105,33 @@ function parseTrojan(url) {
 }
 
 function parseSS(url) {
-  // ss:// 格式: ss://base64(method:password)@host:port#remark
-  // 或 ss://base64(method:password@host:port)#remark
+  // ss:// 格式（三种变体）:
+  //   1. ss://base64(method:password)@host:port#remark  标准格式
+  //   2. ss://base64(method:password@host:port)#remark  全 base64
+  //   3. ss://host:port#remark                          裸 host:port（无认证）
   const params = Object.fromEntries(url.searchParams.entries());
-  const raw = url.username ? `${url.username}:${url.password}@${url.hostname}:${url.port}` : '';
   let method = '', password = '', host = '', port = 0, remark = '';
 
-  if (raw) {
+  // 判断格式：有 username 表示是标准格式（格式1）
+  if (url.username) {
+    const raw = `${url.username}:${url.password}@${url.hostname}:${url.port}`;
     const [mp, hp] = raw.split('@');
     method = mp.split(':')[0] || 'aes-256-gcm';
     password = mp.split(':').slice(1).join(':') || '';
     host = hp?.split(':')[0] || '';
     port = parseInt(hp?.split(':')[1], 10) || 443;
     remark = decodeURIComponent(url.hash.replace(/^#/, '')) || 'ss';
+  } else if (url.hostname) {
+    // 格式3: ss://host:port#remark
+    host = url.hostname;
+    port = parseInt(url.port, 10) || 443;
+    remark = decodeURIComponent(url.hash.replace(/^#/, '')) || 'ss';
+    method = 'aes-256-gcm'; // 默认加密方式，实际连接时由 xray 自动协商
   } else {
-    // 全 base64 格式: ss://base64(method:password@host:port)#remark
-    const b64 = link => { try { return Buffer.from(link, 'base64').toString('utf-8'); } catch(e) { return ''; } };
-    const rest = url.pathname.replace(/^\//, '');
-    const decoded = b64(rest);
-    if (decoded) {
+    // 格式2: ss://base64(method:password@host:port)#remark
+    const b64 = s => { try { return Buffer.from(s, 'base64').toString('utf-8'); } catch(e) { return ''; } };
+    const decoded = b64(url.pathname.replace(/^\//, ''));
+    if (decoded && decoded.includes('@')) {
       const [mp, hp] = decoded.split('@');
       method = mp.split(':')[0] || 'aes-256-gcm';
       password = mp.split(':').slice(1).join(':') || '';
@@ -132,7 +140,7 @@ function parseSS(url) {
       remark = decodeURIComponent(url.hash.replace(/^#/, '')) || 'ss';
     }
   }
-    return { protocol: 'shadowsocks', remark, method, password, host, port, path: params.plugin || '' };
+  return { protocol: 'shadowsocks', remark, method, password, host, port, path: params.plugin || '' };
 }
 
 // ── 订阅下载 ─────────────────────────────────────────────────

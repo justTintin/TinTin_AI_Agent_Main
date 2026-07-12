@@ -955,15 +955,13 @@ function cleanMediaUrlForDownload(urlStr) {
     const parsed = new URL(urlStr);
     if (parsed.hostname.includes('googlevideo.com') || parsed.hostname.includes('youtube.com')) {
       // YouTube 要求必须有 range 参数，否则直接返回 403。
-      // 我们将其设置为超大范围，从而实现一个链接下载完整音频/视频文件。
       parsed.searchParams.set('range', '0-99999999999');
-    } else {
-      parsed.searchParams.delete('range');
+      parsed.searchParams.delete('rn');
+      parsed.searchParams.delete('obuf');
+      parsed.searchParams.delete('start');
+      parsed.searchParams.delete('end');
     }
-    parsed.searchParams.delete('rn');
-    parsed.searchParams.delete('obuf');
-    parsed.searchParams.delete('start');
-    parsed.searchParams.delete('end');
+    // 其他 CDN（抖音、B站等）保留原始参数，range/start/end 是分段下载的关键参数
     return parsed.toString();
   } catch (e) {
     return urlStr;

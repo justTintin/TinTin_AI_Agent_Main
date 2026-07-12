@@ -2424,116 +2424,37 @@ async function saveDyLog() {
 async function downloadDouyinKbItem(item, filePrefix, subDir) {
   _dyLogs = [];
   _dyLog(`[抖音下载] 开始: ${item.url}`);
-
-  // 1. 导航到抖音视频页
-  let pageLoadedOk = false;
-  try {
-    scraperWebview.src = item.url;
-    await new Promise(resolve => {
-      let done = false;
-      const onStop = () => { if (!done) { done = true; pageLoadedOk = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 5000); } };
-      scraperWebview.addEventListener('did-stop-loading', onStop);
-      setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 15000);
-    });
-    _dyLog('页面加载完成, pageLoadedOk=' + pageLoadedOk);
-  } catch (e) { _dyLog('导航失败: ' + e.message); }
-
-  // 2. 尝试从页面提取直链
   let videoUrl = '', audioUrl = '';
-  try {
-    await new Promise(r => setTimeout(r, 2000));
-    const result = await scraperWebview.executeJavaScript(`(() => {
-      const out = {method:'', url:'', debug:[]};
 
-      // 方法1: 找 <video> 元素
-      try {
-        const v = document.querySelector('video');
-        if (v) {
-          out.debug.push('video标签存在 src=' + (v.src || '无'));
-          if (v.src && v.src.startsWith('http')) { out.method='video_tag'; out.url=v.src; return JSON.stringify(out); }
+  const beforeCount = lastSniffedAssetsFallback.length + sniffedAssets.length;
+  scraperWebview.src = item.url;
+  _dyLog('等待嗅探器捕获直链...');
+  for (let wait = 0; wait < 20; wait++) {
+    await new Promise(r => setTimeout(r, 500));
+    const current = [...lastSniffedAssetsFallback, ...sniffedAssets];
+    if (current.length > beforeCount) {
+      for (const c of current) {
+        if ((c.type === 'combined' || c.type === 'video') && !videoUrl) {
+          videoUrl = c.videoUrl || c.url;
+          audioUrl = c.audioUrl || '';
         }
-      } catch(e) {}
-
-      // 方法2: 找 video 的 source 子元素
-      try {
-        const s = document.querySelector('video source');
-        if (s && s.src && s.src.startsWith('http')) { out.method='video_source'; out.url=s.src; return JSON.stringify(out); }
-      } catch(e) {}
-
-      // 方法3: window.__INITIAL_STATE__ / __RENDER_DATA__
-      try {
-        const raw = window.__RENDER_DATA__ || window.__INITIAL_STATE__;
-        if (raw) {
-          const data = typeof raw === 'string' ? JSON.parse(decodeURIComponent(raw)) : raw;
-          out.debug.push('__RENDER_DATA__ 存在');
-          const list = data?.app?.videoInfoRes?.item_list || data?.videoInfoRes?.item_list || [];
-          const v = list[0]?.video;
-          const url = v?.play_addr?.url_list?.[0] || v?.bit_rate?.[0]?.play_addr?.url_list?.[0];
-          if (url) { out.method='render_data'; out.url=url.replace(/\\\\\\\\u002F/g,'/').replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
-        }
-      } catch(e) { out.debug.push('render_data解析失败: '+e.message); }
-
-      // 方法4: 遍历 script 标签
-      try {
-        for (const s of document.querySelectorAll('script')) {
-          const t = s.textContent || '';
-          if (t.includes('play_addr') && t.includes('url_list')) {
-            out.debug.push('script含play_addr');
-            const m = t.match(/"play_addr":\{"url_list":\["([^"]+)/);
-            if (m) { out.method='script_regex'; out.url=m[1].replace(/\\\\\\\\u002F/g,'/').replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
-          }
-        }
-      } catch(e) {}
-
-      out.debug.push('title='+document.title);
-      out.debug.push('scripts='+document.querySelectorAll('script').length);
-      return JSON.stringify(out);
-    })()`);
-    const parsed = typeof result === 'string' ? JSON.parse(result) : result;
-    _dyLog('JS返回: ' + JSON.stringify(parsed));
-    if (parsed.url && parsed.url.startsWith('http')) {
-      videoUrl = parsed.url;
-      _dyLog('直链获取成功, 方法=' + parsed.method);
-    } else {
-      _dyLog('提取直链失败: ' + ((parsed.debug||[]).join(' | ')));
+      }
+      if (videoUrl) { _dyLog(`嗅探捕获: ${videoUrl.slice(0,80)}`); break; }
     }
-  } catch(e) { _dyLog('JS执行失败: ' + e.message); }
-
-  // 3. JS未找到则尝试嗅探缓存
-  if (!videoUrl) {
-    _dyLog('尝试嗅探缓存... lastSniffed=' + lastSniffedAssetsFallback.length + ' sniffed=' + sniffedAssets.length);
-    const allCandidates = [...lastSniffedAssetsFallback, ...sniffedAssets];
-    for (const c of allCandidates) {
-      const u = (c.url || '').toLowerCase();
-      if (!u.includes('douyinvod') && !u.includes('video/tos') && !u.includes('sns-video') && !u.includes('v3-dy') && !u.includes('.mp4')) continue;
-      if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; _dyLog('嗅探找到combined'); break; }
-      if (c.type === 'video' && !videoUrl) { videoUrl = c.url; _dyLog('嗅探找到video: '+u.slice(0,80)); continue; }
-      if (c.type === 'audio' && !audioUrl) { audioUrl = c.url; }
-    }
-    _dyLog('嗅探结果 videoUrl=' + (videoUrl ? videoUrl.slice(0,80) : '无'));
   }
-
   if (!videoUrl) {
-    _dyLog('无直链，回退 yt-dlp');
+    _dyLog('嗅探超时，回退 yt-dlp');
     await window.api.startDownload({
       id: 'dl-kb-fallback-'+Date.now(), url: item.url,
       filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: true
     });
   } else {
-    _dyLog('下载直链...');
-    // 用 Python 下载（更加稳定）
-    const dlPath = `${currentSettings?.downloadPath || ''}/${subDir}/${filePrefix}.mp4`.replace(/\\/g,'/');
-    const pyResult = await window.api.douyinDownload({ url: videoUrl, destPath: dlPath, referer: item.url });
-    _dyLog('结果: ' + JSON.stringify(pyResult));
-    if (!pyResult.ok) {
-      _dyLog('失败，回退 HTTP 下载');
-      await window.api.startDownload({
-        id: 'dl-kb-'+Date.now(), url: videoUrl, audioUrl: audioUrl||null,
-        filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: false
-      });
-    }
+    _dyLog('正在下载视频...');
+    await window.api.startDownload({
+      id: 'dl-kb-'+Date.now(), url: videoUrl, audioUrl: audioUrl||null,
+      filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: false
+    });
   }
-  
   // 3. 下载封面和元数据（同原逻辑）
   if (item.cover) {
     const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);

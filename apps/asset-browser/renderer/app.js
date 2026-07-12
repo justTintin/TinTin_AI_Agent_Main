@@ -820,6 +820,10 @@ function setupEventListeners() {
   btnProxyConfig.addEventListener('click', () => {
     proxyOverlay.style.display = 'flex';
     refreshProxyStatus();
+    // 从 sessionStorage 恢复节点（刷新页面后不丢失）
+    if (proxyNodes.length === 0) {
+      try { const saved = sessionStorage.getItem('proxyNodes'); if (saved) proxyNodes = JSON.parse(saved); } catch(e){}
+    }
     renderProxyNodes();
   });
   btnProxyClose.addEventListener('click', () => { proxyOverlay.style.display = 'none'; });
@@ -900,6 +904,7 @@ function setupEventListeners() {
         // 订阅地址
         const result = await window.api.v2rayFetchSubscription(input);
         if (!result.ok) throw new Error(result.error);
+        if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
         proxyNodes = result.nodes;
       } else {
         // 分享链接
@@ -908,6 +913,8 @@ function setupEventListeners() {
         proxyNodes = [node];
       }
 
+      // 保存到 sessionStorage，刷新页面后恢复
+      try { sessionStorage.setItem('proxyNodes', JSON.stringify(proxyNodes)); } catch(e){}
       renderProxyNodes();
     } catch (e) {
       showProxyError('解析失败:\n' + e.message);
@@ -977,6 +984,7 @@ function setupEventListeners() {
     try {
       const result = await window.api.v2rayFetchSubscription(subUrl);
       if (!result.ok) throw new Error(result.error);
+      if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
       proxyNodes = result.nodes;
       renderProxyNodes();
     } catch (e) {

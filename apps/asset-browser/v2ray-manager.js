@@ -132,7 +132,7 @@ function parseSS(url) {
       remark = decodeURIComponent(url.hash.replace(/^#/, '')) || 'ss';
     }
   }
-  return { protocol: 'ss', remark, method, password, host, port, path: params.plugin || '' };
+    return { protocol: 'shadowsocks', remark, method, password, host, port, path: params.plugin || '' };
 }
 
 // ── 订阅下载 ─────────────────────────────────────────────────
@@ -238,14 +238,11 @@ function generateXrayConfig(nodes) {
       } else if (node.type === 'grpc') {
         outbound.streamSettings.grpcSettings = { serviceName: node.path || '' };
       }
-    } else if (node.protocol === 'ss') {
+    } else if (node.protocol === 'shadowsocks') {
+      outbound.protocol = 'shadowsocks';
       outbound.settings = {
         servers: [{ address: node.host, port: node.port, method: node.method, password: node.password }],
       };
-      if (node.path) {
-        // plugin (e.g., obfs)
-        outbound.streamSettings.sockopt = { mark: 0 };
-      }
     }
 
     return outbound;

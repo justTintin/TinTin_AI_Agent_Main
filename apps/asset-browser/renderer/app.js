@@ -2413,27 +2413,35 @@ async function downloadKnowledgeBaseItem(item, subDir) {
 }
 
 // ── 抖音收藏项下载：用隐藏 webview 提取页面内嵌直链 ──
+let _dyLogs = [];
+function _dyLog(msg) {
+  _dyLogs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+  console.log(msg);
+}
+async function saveDyLog() {
+  try { await window.api.writeDebugLog('douyin_download_debug.txt', _dyLogs.join('\n')); } catch(e) {}
+}
 async function downloadDouyinKbItem(item, filePrefix, subDir) {
-  console.log(`[抖音下载] 开始: ${item.url}`);
+  _dyLogs = [];
+  _dyLog(`[抖音下载] 开始: ${item.url}`);
 
   // 1. 导航到抖音视频页
+  let pageLoadedOk = false;
   try {
     scraperWebview.src = item.url;
     await new Promise(resolve => {
       let done = false;
-      const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 5000); } };
+      const onStop = () => { if (!done) { done = true; pageLoadedOk = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 5000); } };
       scraperWebview.addEventListener('did-stop-loading', onStop);
       setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 15000);
     });
-    console.log('[抖音下载] 页面加载完成');
-  } catch (e) { console.warn('[抖音下载] 导航失败:', e); }
+    _dyLog('页面加载完成, pageLoadedOk=' + pageLoadedOk);
+  } catch (e) { _dyLog('导航失败: ' + e.message); }
 
   // 2. 尝试从页面提取直链
   let videoUrl = '', audioUrl = '';
   try {
-    // 先等页面完全渲染
     await new Promise(r => setTimeout(r, 2000));
-
     const result = await scraperWebview.executeJavaScript(`(() => {
       const out = {method:'', url:'', debug:[]};
 
@@ -2452,67 +2460,57 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
         if (s && s.src && s.src.startsWith('http')) { out.method='video_source'; out.url=s.src; return JSON.stringify(out); }
       } catch(e) {}
 
-      // 方法3: window.__INITIAL_STATE__
+      // 方法3: window.__INITIAL_STATE__ / __RENDER_DATA__
       try {
-        const s = window.__INITIAL_STATE__;
-        if (s) {
-          out.debug.push('__INITIAL_STATE__ 存在');
-          const v = s?.videoInfoRes?.item_list?.[0]?.video || s?.videoInfoRes?.video_list?.[0]?.video;
+        const raw = window.__RENDER_DATA__ || window.__INITIAL_STATE__;
+        if (raw) {
+          const data = typeof raw === 'string' ? JSON.parse(decodeURIComponent(raw)) : raw;
+          out.debug.push('__RENDER_DATA__ 存在');
+          const list = data?.app?.videoInfoRes?.item_list || data?.videoInfoRes?.item_list || [];
+          const v = list[0]?.video;
           const url = v?.play_addr?.url_list?.[0] || v?.bit_rate?.[0]?.play_addr?.url_list?.[0];
-          if (url) { out.method='initial_state'; out.url=url.replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
+          if (url) { out.method='render_data'; out.url=url.replace(/\\\\\\\\u002F/g,'/').replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
         }
-      } catch(e) {}
+      } catch(e) { out.debug.push('render_data解析失败: '+e.message); }
 
-      // 方法4: window.__NEXT_DATA__
+      // 方法4: 遍历 script 标签
       try {
-        const s = window.__NEXT_DATA__;
-        if (s) {
-          out.debug.push('__NEXT_DATA__ 存在');
-          const v = s?.props?.pageProps?.videoData?.video;
-          const url = v?.playAddr?.[0] || v?.bitRate?.[0]?.playAddr?.[0];
-          if (url) { out.method='next_data'; out.url=url; return JSON.stringify(out); }
+        for (const s of document.querySelectorAll('script')) {
+          const t = s.textContent || '';
+          if (t.includes('play_addr') && t.includes('url_list')) {
+            out.debug.push('script含play_addr');
+            const m = t.match(/"play_addr":\{"url_list":\["([^"]+)/);
+            if (m) { out.method='script_regex'; out.url=m[1].replace(/\\\\\\\\u002F/g,'/').replace(/\\\\u002F/g,'/').replace(/\\u002F/g,'/'); return JSON.stringify(out); }
+          }
         }
       } catch(e) {}
 
-      // 方法5: window.__NUXT__
-      try {
-        const s = window.__NUXT__;
-        if (s) {
-          out.debug.push('__NUXT__ 存在');
-        }
-      } catch(e) {}
-
-      // 方法6: 页面标题
-      out.debug.push('title=' + document.title);
-      out.debug.push('scripts=' + document.querySelectorAll('script').length);
-
+      out.debug.push('title='+document.title);
+      out.debug.push('scripts='+document.querySelectorAll('script').length);
       return JSON.stringify(out);
     })()`);
     const parsed = typeof result === 'string' ? JSON.parse(result) : result;
-    console.log('[抖音下载] JS返回:', parsed);
+    _dyLog('JS返回: ' + JSON.stringify(parsed));
     if (parsed.url && parsed.url.startsWith('http')) {
       videoUrl = parsed.url;
-      console.log('[抖音下载] 直链获取成功, 方法=' + parsed.method);
+      _dyLog('直链获取成功, 方法=' + parsed.method);
     } else {
-      console.warn('[抖音下载] 提取直链失败:', (parsed.debug||[]).join(' | '));
-      // 没有直链时直接回退到 yt-dlp
+      _dyLog('提取直链失败: ' + ((parsed.debug||[]).join(' | ')));
     }
-  } catch(e) { console.warn('[抖音下载] JS执行失败:', e.message); }
+  } catch(e) { _dyLog('JS执行失败: ' + e.message); }
 
   // 3. JS未找到则尝试嗅探缓存
   if (!videoUrl) {
-    console.log('[抖音下载] 尝试嗅探缓存...');
+    _dyLog('尝试嗅探缓存... lastSniffed=' + lastSniffedAssetsFallback.length + ' sniffed=' + sniffedAssets.length);
     const allCandidates = [...lastSniffedAssetsFallback, ...sniffedAssets];
-    console.log('[抖音下载] 嗅探候选数:', allCandidates.length, 'lastSniffed:', lastSniffedAssetsFallback.length, 'sniffed:', sniffedAssets.length);
     for (const c of allCandidates) {
       const u = (c.url || '').toLowerCase();
-      console.log('[抖音下载] 嗅探项:', c.type, u.slice(0, 80));
       if (!u.includes('douyinvod') && !u.includes('video/tos') && !u.includes('sns-video') && !u.includes('v3-dy') && !u.includes('.mp4')) continue;
-      if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break; }
-      if (c.type === 'video' && !videoUrl) { videoUrl = c.url; continue; }
+      if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; _dyLog('嗅探找到combined'); break; }
+      if (c.type === 'video' && !videoUrl) { videoUrl = c.url; _dyLog('嗅探找到video: '+u.slice(0,80)); continue; }
       if (c.type === 'audio' && !audioUrl) { audioUrl = c.url; }
     }
-    console.log('[抖音下载] 嗅探结果 videoUrl:', videoUrl ? videoUrl.slice(0,80) : '无');
+    _dyLog('嗅探结果 videoUrl=' + (videoUrl ? videoUrl.slice(0,80) : '无'));
   }
 
   if (!videoUrl) {
@@ -2554,8 +2552,9 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
       mediaPath: base ? `${base}/${subDir}/${filePrefix}.mp4` : '',
       isCollected: !!item.isCollected, isLiked: !!item.isLiked
     });
-  } catch (e) { console.error('appendKbManifest failed', e); }
-}
+	  } catch (e) { console.error('appendKbManifest failed', e); }
+	  await saveDyLog();
+	}
 
 // ----------------------------------------------------
 // 以下为本地素材浏览器相关核心功能与逻辑

@@ -1687,3 +1687,38 @@ ipcMain.handle('v2ray-test-latency', async (event, node) => {
     return { ok: false, error: e.message };
   }
 });
+
+// 检查各平台 cookie 状态 + 强制同步
+ipcMain.handle('check-cookie-status', async () => {
+  const domains = {
+    youtube: '.youtube.com',
+    bilibili: '.bilibili.com',
+    douyin: '.douyin.com',
+  };
+  const result = {};
+  for (const [name, domain] of Object.entries(domains)) {
+    try {
+      const cookies = await session.fromPartition('persist:tintin-browser').cookies.get({ domain });
+      result[name] = { count: cookies.length, names: cookies.map(c => c.name).slice(0, 10) };
+    } catch (e) {
+      result[name] = { count: 0, error: e.message };
+    }
+  }
+  return result;
+});
+
+// 强制导出指定域名 cookie 到文件（供调试/手动同步）
+ipcMain.handle('export-cookies-file', async (event, platform) => {
+  const domainMap = {
+    youtube: ['.youtube.com', '.google.com', 'accounts.google.com'],
+    bilibili: ['.bilibili.com'],
+    douyin: ['.douyin.com'],
+  };
+  const domains = domainMap[platform] || [];
+  if (domains.length === 0) return { ok: false, error: '未知平台' };
+  const destPath = path.join(app.getPath('desktop'), `cookies_${platform}.txt`);
+  for (const d of domains) {
+    await exportCookiesForDomain(d, destPath);
+  }
+  return { ok: true, path: destPath };
+});

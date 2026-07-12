@@ -842,6 +842,7 @@ function setupEventListeners() {
   btnProxyConfig.addEventListener('click', () => {
     proxyOverlay.style.display = 'flex';
     refreshProxyStatus();
+    refreshCookieStatus();
     // 从 localStorage 恢复节点（重启也不丢失）
     if (proxyNodes.length === 0) loadProxyNodes();
     renderProxyNodes();
@@ -1050,6 +1051,23 @@ function setupEventListeners() {
     btnProxyUpdateSub.textContent = '🔄 更新订阅';
     btnProxyUpdateSub.disabled = false;
   });
+
+  // Cookie 状态刷新
+  async function refreshCookieStatus() {
+    const display = document.getElementById('cookie-status-display');
+    if (!display) return;
+    try {
+      const st = await window.api.checkCookieStatus();
+      display.innerHTML = Object.entries(st).map(([name, info]) => {
+        const color = info.count > 0 ? '#34d399' : '#f87171';
+        const detail = info.count > 0 ? `${info.count}条` : '未登录';
+        return `<span style="color:${color}">${name}: ${detail}</span>`;
+      }).join('');
+    } catch (e) {
+      display.textContent = '获取失败';
+    }
+  }
+  document.getElementById('btn-sync-cookies')?.addEventListener('click', refreshCookieStatus);
 
   // 初始化状态 + 恢复节点
   loadProxyNodes();

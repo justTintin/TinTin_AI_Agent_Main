@@ -1140,7 +1140,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
 	    } else if (urlToDownload.includes('bilibili.com')) {
 	      cookieDomains = ['.bilibili.com'];
 	    } else if (urlToDownload.includes('douyin.com')) {
-	      cookieDomains = ['.douyin.com'];
+	      cookieDomains = ['.douyin.com', 'www.douyin.com'];
 	    } else if (urlToDownload.includes('zhihu.com')) {
 	      cookieDomains = ['.zhihu.com'];
 	    }
@@ -1150,7 +1150,7 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       for (const d of cookieDomains) {
         await exportCookiesForDomain(d, cookieTempPath);
       }
-      // YouTube 额外用完整 URL 再查一次（某些 cookie 绑定具体路径）
+      // 用完整 URL 再查一次（某些 cookie 绑定具体路径）
       if (urlToDownload.includes('youtube.com')) {
         try {
           const sess = session.fromPartition('persist:tintin-browser');
@@ -1162,6 +1162,21 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
             fs.writeFileSync(cookieTempPath,
               "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
             console.log(`[cookie] YouTube URL 查询到 ${urlCookies.length} 条 cookie`);
+          }
+        } catch(e) { console.warn('[cookie] URL 查询失败:', e.message); }
+      }
+      // 抖音也查完整 URL
+      if (urlToDownload.includes('douyin.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.douyin.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+            console.log(`[cookie] 抖音 URL 查询到 ${urlCookies.length} 条 cookie`);
           }
         } catch(e) { console.warn('[cookie] URL 查询失败:', e.message); }
       }
@@ -1506,16 +1521,29 @@ ipcMain.handle('resume-download', (event, id) => {
     let cookieDomains = [];
     if (referer.includes('youtube.com') || referer.includes('youtu.be')) cookieDomains = ['.youtube.com', '.google.com', 'accounts.google.com'];
     else if (referer.includes('bilibili.com')) cookieDomains = ['.bilibili.com'];
-    else if (referer.includes('douyin.com')) cookieDomains = ['.douyin.com'];
+    else if (referer.includes('douyin.com')) cookieDomains = ['.douyin.com', 'www.douyin.com'];
 
     (async () => {
       const cookieTempPath = task.path + '.cookies.txt';
       for (const d of cookieDomains) await exportCookiesForDomain(d, cookieTempPath);
-      // YouTube 额外用 URL 查 cookie
+      // 用完整 URL 查 cookie
       if (referer.includes('youtube.com')) {
         try {
           const sess = session.fromPartition('persist:tintin-browser');
           const urlCookies = await sess.cookies.get({ url: 'https://www.youtube.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+          }
+        } catch(e) {}
+      }
+      if (referer.includes('douyin.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.douyin.com' });
           if (urlCookies.length > 0) {
             const ctext = urlCookies.map(c =>
               `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
@@ -1746,7 +1774,7 @@ ipcMain.handle('check-cookie-status', async () => {
   const checks = {
     youtube: { domains: ['.youtube.com', '.google.com'], urls: ['https://www.youtube.com'] },
     bilibili: { domains: ['.bilibili.com'], urls: [] },
-    douyin: { domains: ['.douyin.com'], urls: [] },
+    douyin: { domains: ['.douyin.com', 'www.douyin.com'], urls: ['https://www.douyin.com'] },
   };
   const result = {};
   const sess = session.fromPartition('persist:tintin-browser');

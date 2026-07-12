@@ -2219,16 +2219,22 @@ async function downloadKnowledgeBaseItem(item, subDir) {
   
   // 1. 视频类型：下载视频 + 封面图片 + 详情元数据
   // 知乎平台始终使用图文归档方式（知乎主要为图文/文章内容）
-  if (item.type === 'video' && item.platform !== 'zhihu') {
-    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-    await window.api.startDownload({
-      id: dlId,
-      url: item.url,
-      filename: `${filePrefix}.mp4`,
-      referer: item.url,
-      subDir: subDir,
-      useYtdlp: true
-    });
+	  if (item.type === 'video' && item.platform !== 'zhihu') {
+	    // 抖音不用 yt-dlp（cookie 不稳定），改为用隐藏 webview 嗅探直链
+	    if (item.platform === 'douyin') {
+	      await downloadDouyinKbItem(item, filePrefix, subDir);
+	      return;
+	    }
+
+	    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+	    await window.api.startDownload({
+	      id: dlId,
+	      url: item.url,
+	      filename: `${filePrefix}.mp4`,
+	      referer: item.url,
+	      subDir: subDir,
+	      useYtdlp: true
+	    });
     
     if (item.cover) {
       const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
@@ -2403,7 +2409,82 @@ async function downloadKnowledgeBaseItem(item, subDir) {
     } catch (scrapeErr) {
       console.error(`归档详情提取遇到问题 ${item.url}:`, scrapeErr);
     }
+	}
+}
+
+// ── 抖音收藏项下载：用隐藏 webview 嗅探直链，不走 yt-dlp ──
+async function downloadDouyinKbItem(item, filePrefix, subDir) {
+  // 1. 导航到抖音视频页，让预加载脚本嗅探直链
+  try {
+    scraperWebview.src = item.url;
+    await new Promise(resolve => {
+      let done = false;
+      const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); setTimeout(resolve, 3500); } };
+      scraperWebview.addEventListener('did-stop-loading', onStop);
+      setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 10000);
+    });
+  } catch (e) { console.warn('抖音嗅探导航失败:', e); }
+
+  // 2. 从嗅探缓存中找抖音视频直链
+  // lastSniffedAssetsFallback 是嗅探器维护的全局缓存（见 updateActiveSnifferDisplay）
+  const candidates = lastSniffedAssetsFallback.filter(a => a.pageUrl === item.url || a.url.includes('douyin'));
+  let videoUrl = '', audioUrl = '';
+  for (const c of candidates) {
+    if (c.type === 'combined') { videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break; }
+    if (c.type === 'video' && !videoUrl) videoUrl = c.url;
+    if (c.type === 'audio' && !audioUrl) audioUrl = c.url;
   }
+  // 如果没从缓存中找到，再从全局 sniffedAssets 找
+  if (!videoUrl) {
+    for (const c of sniffedAssets) {
+      if (c.type === 'combined' && (c.pageUrl === item.url || c.url.includes('douyin'))) {
+        videoUrl = c.videoUrl || c.url; audioUrl = c.audioUrl || ''; break;
+      }
+      if (c.type === 'video' && !videoUrl) videoUrl = c.url;
+      if (c.type === 'audio' && !audioUrl) audioUrl = c.url;
+    }
+  }
+
+  if (!videoUrl) {
+    console.warn('抖音嗅探未找到直链，回退 yt-dlp');
+    // 回退到原来的 yt-dlp 方式
+    const dlId = 'dl-kb-fallback-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    await window.api.startDownload({
+      id: dlId, url: item.url, filename: `${filePrefix}.mp4`,
+      referer: item.url, subDir: subDir, useYtdlp: true
+    });
+  } else {
+    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    await window.api.startDownload({
+      id: dlId, url: videoUrl, audioUrl: audioUrl || null,
+      filename: `${filePrefix}.mp4`,
+      referer: item.url, subDir: subDir,
+      useYtdlp: false
+    });
+  }
+  
+  // 3. 下载封面和元数据（同原逻辑）
+  if (item.cover) {
+    const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    await window.api.startDownload({
+      id: coverId, url: item.cover,
+      filename: `${filePrefix}_cover.jpg`,
+      referer: item.url, subDir: subDir
+    });
+  }
+  const metaText = `标题: ${item.title}\n创作者: ${item.creatorName}\n平台: 抖音\n链接: ${item.url}\n发布时间: ${item.date}\n数据热度: ${item.heat || ''}\n下载时间: ${new Date().toLocaleString()}\n`;
+  await window.api.saveTextFile({ filename: `${filePrefix}_info.txt`, content: metaText, subDir });
+  try {
+    const base = currentSettings?.downloadPath || '';
+    await window.api.appendKbManifest({
+      platform: 'douyin', platformName: '抖音',
+      creatorName: item.creatorName, title: item.title, caption: '',
+      url: item.url, date: item.date, heat: item.heat || '',
+      type: 'video',
+      mediaPath: base ? `${base}/${subDir}/${filePrefix}.mp4` : '',
+      isCollected: !!item.isCollected, isLiked: !!item.isLiked
+    });
+  } catch (e) { console.error('appendKbManifest failed', e); }
 }
 
 // ----------------------------------------------------

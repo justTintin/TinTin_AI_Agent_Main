@@ -1173,11 +1173,24 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       }
     }
 
-    // 获取 yt-dlp 启动参数
-    const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
-    // cookie 参数：有文件就传
+    // 获取 yt-dlp 启动参数（YouTube 强制用 pip 版，支持解密 Chrome cookie）
+    let ytdlpBin, ytdlpBaseArgs;
+    if (urlToDownload.includes('youtube.com')) {
+      const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+      if (fs.existsSync(pipPy)) {
+        ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp'];
+      } else {
+        const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+      }
+    } else {
+      const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+    }
+    // cookie 参数：有文件就传，YouTube 兜底用浏览器 cookie
     let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
-	    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
+    if (cookieArg.length === 0 && urlToDownload.includes('youtube.com')) {
+      cookieArg = ['--cookies-from-browser', 'chrome'];
+    }
+    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
 	    // 尝试多种格式，依次降级
 	    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
@@ -1195,10 +1208,11 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
         '--no-warnings',
         '--extractor-retries', '3',
         '--retries', '5',
-        // YouTube 防机器人检测：模拟安卓客户端 + 跳过网页检测
+        // YouTube 防机器人检测：模拟 TV 客户端（反爬最宽松）
         ...(urlToDownload.includes('youtube.com') ? [
-          '--extractor-args', 'youtube:player_client=android_android&skip=webpage',
-          '--user-agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
+          '--extractor-args', 'youtube:player_client=tv_embedded',
+          '--user-agent', 'Mozilla/5.0 (PlayStation; PlayStation 5/2.00) AppleWebKit/609.1 (KHTML, like Gecko) Version/16.0 Safari/609.1',
+          '--sleep-requests', '2',
         ] : []),
         '-f', fmt,
         '--merge-output-format', 'mp4',
@@ -1475,8 +1489,15 @@ ipcMain.handle('resume-download', (event, id) => {
   const isVideoPage = isValidVideoPageUrl(referer);
 
   if (isVideoPage) {
-    // yt-dlp 路径
-    const { cmd: ytdlpBin, args: ytdlpBaseArgs } = getYtdlpSpawnArgs();
+    // yt-dlp 路径（YouTube 强制用 pip 版以支持 Chrome cookie 解密）
+    let ytdlpBin, ytdlpBaseArgs;
+    if (referer.includes('youtube.com')) {
+      const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+      if (fs.existsSync(pipPy)) { ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp']; }
+      else { const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args; }
+    } else {
+      const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+    }
     const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
 
     // 导出 Cookie
@@ -1507,6 +1528,9 @@ ipcMain.handle('resume-download', (event, id) => {
         if (c.split('\n').filter(l => l.trim() && !l.startsWith('#')).length === 0) fs.unlinkSync(cookieTempPath);
       }
       let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+      if (cookieArg.length === 0 && referer.includes('youtube.com')) {
+        cookieArg = ['--cookies-from-browser', 'chrome'];
+      }
       const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
       let lastLog = '';
@@ -1517,10 +1541,11 @@ ipcMain.handle('resume-download', (event, id) => {
 	        const allArgs = [
 	          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
 	          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
-	          ...(referer.includes('youtube.com') ? [
-	            '--extractor-args', 'youtube:player_client=android_android&skip=webpage',
-	            '--user-agent', 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36',
-	          ] : []),
+          ...(referer.includes('youtube.com') ? [
+            '--extractor-args', 'youtube:player_client=tv_embedded',
+            '--user-agent', 'Mozilla/5.0 (PlayStation; PlayStation 5/2.00) AppleWebKit/609.1 (KHTML, like Gecko) Version/16.0 Safari/609.1',
+            '--sleep-requests', '2',
+          ] : []),
 	          '-f', fmt, '--merge-output-format', 'mp4',
 	          '-o', task.path, referer,
 	        ];
@@ -1716,16 +1741,27 @@ ipcMain.handle('v2ray-test-latency', async (event, node) => {
 
 // 检查各平台 cookie 状态 + 强制同步
 ipcMain.handle('check-cookie-status', async () => {
-  const domains = {
-    youtube: '.youtube.com',
-    bilibili: '.bilibili.com',
-    douyin: '.douyin.com',
+  const checks = {
+    youtube: { domains: ['.youtube.com', '.google.com'], urls: ['https://www.youtube.com'] },
+    bilibili: { domains: ['.bilibili.com'], urls: [] },
+    douyin: { domains: ['.douyin.com'], urls: [] },
   };
   const result = {};
-  for (const [name, domain] of Object.entries(domains)) {
+  const sess = session.fromPartition('persist:tintin-browser');
+  for (const [name, cfg] of Object.entries(checks)) {
     try {
-      const cookies = await session.fromPartition('persist:tintin-browser').cookies.get({ domain });
-      result[name] = { count: cookies.length, names: cookies.map(c => c.name).slice(0, 10) };
+      let allCookies = [];
+      for (const d of cfg.domains) {
+        const c = await sess.cookies.get({ domain: d });
+        allCookies = allCookies.concat(c);
+      }
+      for (const u of cfg.urls) {
+        const c = await sess.cookies.get({ url: u });
+        allCookies = allCookies.concat(c);
+      }
+      // 去重
+      const unique = Array.from(new Map(allCookies.map(c => [c.name, c])).values());
+      result[name] = { count: unique.length, names: unique.map(c => c.name).slice(0, 15) };
     } catch (e) {
       result[name] = { count: 0, error: e.message };
     }

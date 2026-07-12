@@ -1458,7 +1458,7 @@ const FAV_PAGES = {
 // 滚动到底加载全部分页（非交互版，供采集用
 async function _loadAllByScroll(maxRounds = 30, stepMs = 1200, wv = webview) {
   let lastH = 0, stable = 0, i = 0;
-  while (i < maxRounds && stable < 3) {
+  while (i < maxRounds && stable < 3 && !_kbSyncCancelled) {
     let h = 0;
     try {
       h = await wv.executeJavaScript(`(() => {
@@ -1497,17 +1497,18 @@ async function captureFavorites(onPhase) {
     } catch (e) { console.error('resolve bilibili mid failed', e); }
   }
   for (const [plat, urls] of Object.entries(pages)) {
-    if (!activeLoginStatus[plat]) continue;
+    if (!activeLoginStatus[plat] || _kbSyncCancelled) continue;
     for (const u of urls) {
+      if (_kbSyncCancelled) break;
       if (onPhase) onPhase(`正在采集 ${plat} 收藏/点赞（滚动加载全部）…`);
       wv.src = u;
       await wait();
-      await scrollAll();   // 滚动到底，加载全部分
+      await scrollAll();
     }
   }
 
-  // 知乎：收藏是「收藏夹 '夹内条目」两层。先取自己的 token '打开收藏夹列''  // 逐个进入收藏夹页（其 contents 接口会被嗅探拦截）
-  if (activeLoginStatus.zhihu) {
+  // 知乎
+  if (activeLoginStatus.zhihu && !_kbSyncCancelled) {
     try {
       if (onPhase) onPhase('正在采集 知乎 收藏夹');
       wv.src = 'https://www.zhihu.com';
@@ -2012,28 +2013,60 @@ function renderLoginStatusBadges() {
   });
 }
 
+// ── 取消同步标志 ──
+let _kbSyncCancelled = false;
+
 // 知识库创作者更新同步主任务
 async function syncKnowledgeBase() {
+  _kbSyncCancelled = false;
   kbLoadingOverlay.style.display = 'flex';
-  kbEmptyState.style.display = 'none';
-  kbTable.style.display = 'none';
   kbSyncProgressBar.style.width = '0%';
   kbLoadingText.textContent = '正在检测已登录频道...';
-  
-	  
+
   await checkLoginStatus();
 
-  // 给采集任务加超时（最多 60 秒），防止卡死
+  // 取消按钮
+  const btnCancel = document.getElementById('btn-cancel-kb-sync');
+  const cancelHandler = () => { _kbSyncCancelled = true; };
+  btnCancel?.addEventListener('click', cancelHandler);
+
+  // 边采集边显示（先清空并显示空表）
+  kbEmptyState.style.display = 'none';
+  kbTable.style.display = 'table';
+  kbTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">正在采集，请稍候...</td></tr>';
+
   try {
+    // 每 3 秒刷新一次表格，让用户看到逐步增加的数据
+    const renderTimer = setInterval(() => {
+      if (allKnowledgeItems.length > 0) {
+        kbEmptyState.style.display = 'none';
+        renderKnowledgeBaseTable();
+      }
+    }, 3000);
+
     await Promise.race([
-      captureFavorites((m) => { kbLoadingText.textContent = m; }),
+      captureFavorites((m) => {
+        kbLoadingText.textContent = m;
+        // 更新进度：每采集一步刷新列表
+        if (allKnowledgeItems.length > 0) {
+          kbEmptyState.style.display = 'none';
+          renderKnowledgeBaseTable();
+        }
+      }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('采集超时')), 180000))
     ]);
+
+    clearInterval(renderTimer);
   } catch (e) { console.error('captureFavorites error:', e.message); }
 
+  // 去掉取消按钮监听
+  btnCancel?.removeEventListener('click', cancelHandler);
+
   // 去重保存
-  allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
-  try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
+  if (!_kbSyncCancelled) {
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
+    try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
+  }
 
   kbSyncProgressBar.style.width = '100%';
   setTimeout(() => {

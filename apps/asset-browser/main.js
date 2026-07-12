@@ -107,18 +107,18 @@ function saveDatabase(db) {
 }
 
 
-// ── yt-dlp 启动参数：优先使用内置 Python 环境 ──
+// ── yt-dlp 启动参数：优先使用独立版 exe（不依赖 Python）──
 function getYtdlpSpawnArgs() {
-  // 返回 { cmd, args } 供 spawn() 使用（避免 cmd.exe 引号转义问题）
-  // 1) 优先用内置 python_embeded 的 python -m yt_dlp
-  const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
-  if (fs.existsSync(pyPath)) {
-    return { cmd: pyPath, args: ['-m', 'yt_dlp'] };
-  }
-  // 2) 回退到 bin/yt-dlp.exe
+  // 返回 { cmd, args } 供 spawn() 使用
+  // 1) 优先用 bin/yt-dlp.exe（独立版，不依赖外部 Python）
   const localBin = path.join(__dirname, 'bin', 'yt-dlp.exe');
   if (fs.existsSync(localBin)) {
     return { cmd: localBin, args: [] };
+  }
+  // 2) 回退到 python_embeded 的 python -m yt_dlp
+  const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+  if (fs.existsSync(pyPath)) {
+    return { cmd: pyPath, args: ['-m', 'yt_dlp'] };
   }
   // 3) 最后回退到系统命令
   return { cmd: 'yt-dlp', args: [] };

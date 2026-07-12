@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('api', {
   checkCookieStatus: () => ipcRenderer.invoke('check-cookie-status'),
   exportCookiesFile: (platform) => ipcRenderer.invoke('export-cookies-file', platform),
   writeDebugLog: (filename, content) => ipcRenderer.invoke('write-debug-log', filename, content),
+  getKbItemsFallback: () => ipcRenderer.invoke('get-kb-items-fallback'),
   douyinDownload: (params) => ipcRenderer.invoke('douyin-download', params),
 
 });

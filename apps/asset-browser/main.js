@@ -327,6 +327,11 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // F12 打开开发者工具
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12') { mainWindow.webContents.toggleDevTools(); }
+  });
+
   // 应用初始代理设置
   const db = getDatabase();
   proxyManager.applyProxy(db.settings);
@@ -1797,6 +1802,18 @@ ipcMain.handle('check-cookie-status', async () => {
     }
   }
   return result;
+});
+
+// 写入调试日志到桌面（方便用户反馈问题）
+ipcMain.handle('write-debug-log', (event, filename, content) => {
+  try {
+    const desktop = path.join(require('os').homedir(), 'Desktop');
+    const filePath = path.join(desktop, filename);
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { ok: true, path: filePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // 强制导出指定域名 cookie 到文件（供调试/手动同步）

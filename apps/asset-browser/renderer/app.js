@@ -182,7 +182,7 @@ function renderDownloads() {
       badgeClass = 'completed';
       progressVal = 100;
     } else if (task.status === 'failed') {
-      statusText = task.error || '失败';
+      statusText = (task.error || '失败').slice(0, 20) + ((task.error || '').length > 20 ? '...' : '');
       badgeClass = 'failed';
     } else if (task.status === 'downloading') {
       statusText = `下载中(${progressVal}%)`;
@@ -197,7 +197,12 @@ function renderDownloads() {
     } else if (task.status === 'paused') {
       actionHtml = `<button class="download-action-btn resume" onclick="resumeDownload('${task.id}')">↻ 重新下载</button>`;
     } else {
-      actionHtml = `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件</button>`;
+      // 失败时显示日志按钮 + 打开文件
+      const openBtn = `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件</button>`;
+      const logBtn = task.status === 'failed' && task.log
+        ? `<button class="download-action-btn log" onclick="showDownloadLog('${task.id}')">📋 日志</button>`
+        : '';
+      actionHtml = logBtn + openBtn;
     }
     
     card.innerHTML = `
@@ -217,6 +222,12 @@ function renderDownloads() {
         </div>
       </div>
     `;
+    
+    // 双击失败项弹出详细日志
+    if (task.status === 'failed' && task.log) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('dblclick', () => showDownloadLog(task.id));
+    }
     
     // 右键菜单：取消任务
     card.addEventListener('contextmenu', (e) => {
@@ -271,6 +282,57 @@ function showDownloadContextMenu(x, y, task) {
     document.addEventListener('click', closeMenu);
     document.addEventListener('contextmenu', closeMenu);
   }, 0);
+}
+
+// 显示下载详情日志弹窗
+function showDownloadLog(id) {
+  const task = downloadTasks.find(t => t.id === id);
+  if (!task || !task.log) return;
+
+  // 移除已有弹窗
+  const old = document.getElementById('download-log-modal');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'download-log-modal';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+  `;
+
+  const panel = document.createElement('div');
+  panel.style.cssText = `
+    background: #1a1a2e; border: 1px solid #444; border-radius: 10px;
+    width: 80%; max-width: 800px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  `;
+
+  const header = document.createElement('div');
+  header.style.cssText = `
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid #333;
+  `;
+  header.innerHTML = `<span style="font-weight:700;color:#fca5a5;">📋 下载日志 - ${task.filename}</span>
+    <span style="cursor:pointer;color:#888;font-size:1.2rem;" id="dl-log-close">✕</span>`;
+
+  const body = document.createElement('pre');
+  body.style.cssText = `
+    margin: 0; padding: 16px 18px; overflow: auto; flex: 1;
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 0.75rem;
+    color: #d1d5db; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  `;
+  body.textContent = task.log;
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  header.querySelector('#dl-log-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 }
 
 // 暂停下载

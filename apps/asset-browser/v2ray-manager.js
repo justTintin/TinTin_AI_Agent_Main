@@ -283,10 +283,6 @@ function generateXrayConfig(nodes) {
       rules: [
         // 默认走第一个节点
         { type: 'field', inboundTag: ['socks-in', 'http-in'], outboundTag: 'proxy-0' },
-        // 内网直连
-        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-        { type: 'field', ip: ['geoip:cn'], outboundTag: 'direct' },
-        { type: 'field', domain: ['geosite:cn'], outboundTag: 'direct' },
       ],
     },
   };

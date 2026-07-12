@@ -1257,6 +1257,21 @@ function setupWebviewListeners() {
       _ingestKbCollect(payload);
     } else if (channel === 'hotspot-items-synced') {
       _ingestHotspot(payload);
+    } else if (channel === 'network-media-sniffed' || channel === 'dom-assets-scanned') {
+      if (payload) addSniffedAssets(Array.isArray(payload) ? payload : [payload]);
+    } else if (channel === 'mse-segment-appended') {
+      const { url, type, blobUrl } = payload;
+      if (!blobToMediaUrlsMap.has(blobUrl)) blobToMediaUrlsMap.set(blobUrl, { videoUrl: null, audioUrl: null, title: '' });
+      const entry = blobToMediaUrlsMap.get(blobUrl);
+      if (type === 'video') entry.videoUrl = url;
+      else if (type === 'audio') entry.audioUrl = url;
+      // 如果有 video+audio 对，加入嗅探列表
+      if (entry.videoUrl && entry.audioUrl) {
+        addSniffedAssets([{ url: entry.videoUrl, type: 'combined', videoUrl: entry.videoUrl, audioUrl: entry.audioUrl }]);
+      }
+    } else if (channel === 'video-active-changed') {
+      activeVideoSrc = payload.src || '';
+      activeVideoTitle = payload.title || '';
     }
   });
 }

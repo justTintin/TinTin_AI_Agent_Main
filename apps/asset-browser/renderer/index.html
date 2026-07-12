@@ -70,14 +70,6 @@
 	        </div>
 	      </section>
 
-	      <!-- 代理入口 -->
-	      <section class="section">
-	        <button class="platform-btn mode-btn" id="btn-proxy-config" style="justify-content:center;">
-	          <span>🌐 配置代理</span>
-	          <span id="proxy-status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-left:6px;"></span>
-	        </button>
-	      </section>
-
 	    </aside>
 
     <!-- 中间：浏览器视图 -->
@@ -122,6 +114,14 @@
           partition="persist:tintin-browser"
           allowpopups
         ></webview>
+      </div>
+      <!-- 底部状态栏 -->
+      <div class="browser-statusbar">
+        <button class="statusbar-btn" id="btn-proxy-config" title="配置代理">
+          <span id="proxy-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#6b7280;"></span>
+          <span>代理</span>
+        </button>
+        <span style="color:var(--text-muted);font-size:0.65rem;margin-left:auto;" id="statusbar-info"></span>
       </div>
     </main>
 
@@ -417,6 +417,9 @@
           <button class="panel-btn secondary" id="btn-proxy-update-sub" style="flex:1;padding:10px;">🔄 更新订阅</button>
         </div>
 
+        <!-- 错误日志（可复制） -->
+        <div id="proxy-error-box" style="display:none;background:#2a1a1a;border:1px solid #5c1a1a;border-radius:6px;padding:8px 10px;font-size:0.7rem;font-family:Consolas,monospace;color:#fca5a5;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;user-select:text;cursor:text;">
+        </div>
         <!-- 状态 -->
         <div id="proxy-panel-status" style="font-size:0.75rem;color:var(--text-muted);text-align:center;">⏹ 未启动</div>
       </div>

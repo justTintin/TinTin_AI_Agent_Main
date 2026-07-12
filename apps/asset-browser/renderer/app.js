@@ -2218,21 +2218,9 @@ async function downloadKnowledgeBaseItem(item, subDir) {
   // 1. 视频类型：下载视频 + 封面图片 + 详情元数据
   // 知乎平台始终使用图文归档方式（知乎主要为图文/文章内容）
 	  if (item.type === 'video' && item.platform !== 'zhihu') {
-	    // 抖音不用 yt-dlp（cookie 不稳定），改为用隐藏 webview 嗅探直链
-	    if (item.platform === 'douyin') {
-	      await downloadDouyinKbItem(item, filePrefix, subDir);
-	      return;
-	    }
-
-	    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-	    await window.api.startDownload({
-	      id: dlId,
-	      url: item.url,
-	      filename: `${filePrefix}.mp4`,
-	      referer: item.url,
-	      subDir: subDir,
-	      useYtdlp: true
-	    });
+	    // 所有视频平台统一用嗅探器提取直链（比 yt-dlp 更稳定）
+	    await sniffAndDownloadVideo(item, filePrefix, subDir);
+	    return;
     
     if (item.cover) {
       const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
@@ -2419,12 +2407,12 @@ function _dyLog(msg) {
 async function saveDyLog() {
   try { await window.api.writeDebugLog('douyin_download_debug.txt', _dyLogs.join('\n')); } catch(e) {}
 }
-async function downloadDouyinKbItem(item, filePrefix, subDir) {
+async function sniffAndDownloadVideo(item, filePrefix, subDir) {
   _dyLogs = [];
-  _dyLog(`[抖音下载] 开始: ${item.url}`);
+  _dyLog(`[嗅探下载] ${item.platform}: ${item.url}`);
   let videoUrl = '', audioUrl = '';
 
-  // 导航到视频页，等加载完成
+  // 导航到视频页，让嗅探器捕获直链
   scraperWebview.src = item.url;
   await new Promise(resolve => {
     let done = false;
@@ -2445,7 +2433,7 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
     }
   }
   if (videoUrl) _dyLog(`直链: ${videoUrl.slice(0,80)}`);
-  else _dyLog('未找到直链');
+  else _dyLog('未找到直链，回退 yt-dlp');
 
   if (!videoUrl) {
     _dyLog('嗅探超时，回退 yt-dlp');
@@ -2469,21 +2457,22 @@ async function downloadDouyinKbItem(item, filePrefix, subDir) {
       referer: item.url, subDir: subDir
     });
   }
-  const metaText = `标题: ${item.title}\n创作者: ${item.creatorName}\n平台: 抖音\n链接: ${item.url}\n发布时间: ${item.date}\n数据热度: ${item.heat || ''}\n下载时间: ${new Date().toLocaleString()}\n`;
+  const pn = { douyin:'抖音', bilibili:'B站', youtube:'YouTube', xiaohongshu:'小红书', tiktok:'TikTok' }[item.platform] || item.platform;
+  const metaText = `标题: ${item.title}\n创作者: ${item.creatorName}\n平台: ${pn}\n链接: ${item.url}\n发布时间: ${item.date}\n数据热度: ${item.heat || ''}\n下载时间: ${new Date().toLocaleString()}\n`;
   await window.api.saveTextFile({ filename: `${filePrefix}_info.txt`, content: metaText, subDir });
   try {
     const base = currentSettings?.downloadPath || '';
     await window.api.appendKbManifest({
-      platform: 'douyin', platformName: '抖音',
+      platform: item.platform, platformName: pn,
       creatorName: item.creatorName, title: item.title, caption: '',
       url: item.url, date: item.date, heat: item.heat || '',
       type: 'video',
       mediaPath: base ? `${base}/${subDir}/${filePrefix}.mp4` : '',
       isCollected: !!item.isCollected, isLiked: !!item.isLiked
     });
-	  } catch (e) { console.error('appendKbManifest failed', e); }
-	  await saveDyLog();
-	}
+  } catch (e) { console.error('appendKbManifest failed', e); }
+  await saveDyLog();
+}
 
 // ----------------------------------------------------
 // 以下为本地素材浏览器相关核心功能与逻辑

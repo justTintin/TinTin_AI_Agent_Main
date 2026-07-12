@@ -1486,16 +1486,12 @@ async function checkLoginStatus() {
 function renderLoginStatusBadges() {
   loginStatusContainer.innerHTML = '';
   const platforms = [
-    { id: 'bilibili', name: 'B' },
-    { id: 'xiaohongshu', name: '小红' },
-    { id: 'douyin', name: '抖音' },
-    { id: 'bilibili', name: 'B 站' },
+    { id: 'bilibili', name: 'B站' },
     { id: 'xiaohongshu', name: '小红书' },
     { id: 'douyin', name: '抖音' },
-    // { id: 'youtube', name: 'YouTube' },    # 暂时隐藏
+    { id: 'youtube', name: 'YouTube' },
     // { id: 'zhihu', name: '知乎' },          # 暂时隐藏
     { id: 'tiktok', name: 'TikTok' },
-    { id: 'tiktok', name: 'TikTok' }
   ];
   
   platforms.forEach(p => {

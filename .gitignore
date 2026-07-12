@@ -104,6 +104,7 @@ apps/asset-browser/bin/v2rayN/bin/sing_box/
 apps/asset-browser/bin/v2rayN/bin/srss/
 apps/asset-browser/bin/v2rayN/bin/cache.db
 apps/asset-browser/bin/node.exe
+apps/asset-browser/bin/v2rayN/bin/xray/config_generated.json
 apps/asset-browser/bin/ffmpeg.exe
 
 # Studio logs

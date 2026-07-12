@@ -673,34 +673,32 @@ function setupEventListeners() {
 
   // Knowledge Base Download Selected
   btnKbDownloadSelected.addEventListener('click', async () => {
-    const checkedBoxes = document.querySelectorAll('.kb-item-check:checked');
+    // 获取勾选项目；如果没勾选，默认下载全部 visible 项目
+    let checkedBoxes = Array.from(document.querySelectorAll('.kb-item-check:checked'));
     if (checkedBoxes.length === 0) {
-      alert('请先勾选需要下载的收藏记录');
-      return;
+      // 没有勾选时，下载当前筛选/分页下的全部项目
+      checkedBoxes = Array.from(document.querySelectorAll('.kb-item-check'));
+      if (checkedBoxes.length === 0) { alert('没有可下载的项目'); return; }
     }
     
-    // Get daily subdirectory name YYYY-MM-DD
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const subDir = `${yyyy}-${mm}-${dd}`;
+    const subDir = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     
-    // Switch to Downloads tab to display progress
-    document.querySelector('.tab-btn[data-tab="tab-downloads"]').click();
-    
-    // Disable download button and show message
+    // 切换到下载管理标签
+    document.querySelector('.tab-btn[data-tab=”tab-downloads”]').click();
     btnKbDownloadSelected.disabled = true;
-    btnKbDownloadSelected.textContent = '下载..';
+    btnKbDownloadSelected.textContent = '下载中...';
     
     try {
+      let count = 0;
       for (const cb of checkedBoxes) {
         const item = cb._itemData;
         if (item) {
           await downloadKnowledgeBaseItem(item, subDir);
+          count++;
         }
       }
-      alert(`已开始在后台为您下载选中的项目，请切换到“下载管理”标签查看进度！\n所有资源与元数据都存入今日目录'{subDir}/`);
+      alert(`已完成 ${count} 项下载任务，请切换到”下载管理”标签查看进度！\n所有资源与元数据都存入 ${subDir}/ 目录`);
     } catch(err) {
       console.error(err);
       alert('批量下载执行中遇到了问题，详情查看控制台');

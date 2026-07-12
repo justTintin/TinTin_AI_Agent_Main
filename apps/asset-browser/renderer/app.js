@@ -160,11 +160,11 @@ async function init() {
     const saved = await window.api.loadKbItems();
     if (Array.isArray(saved) && saved.length) allKnowledgeItems = saved;
   } catch (e) {}
-  // 如果 IPC 没有数据，尝试从本地镜像文件恢复
+  // 如果 IPC 没有数据，从镜像文件恢复
   if (allKnowledgeItems.length === 0) {
     try {
-      const resp = await fetch('../../studio/outputs/materials/knowledge/kb_items.json');
-      if (resp.ok) { const arr = await resp.json(); if (Array.isArray(arr) && arr.length > 0) allKnowledgeItems = arr; }
+      const fallback = await window.api.getKbItemsFallback();
+      if (Array.isArray(fallback) && fallback.length > 0) allKnowledgeItems = fallback;
     } catch(e) {}
   }
 
@@ -2020,15 +2020,14 @@ async function syncKnowledgeBase() {
   kbSyncProgressBar.style.width = '0%';
   kbLoadingText.textContent = '正在检测已登录频道...';
   
-  // 只保留已有的收藏样本，清除之前同步到的创作者更新内'  allKnowledgeItems = allKnowledgeItems.filter(item => !!item.isCollected);
-  
+	  
   await checkLoginStatus();
 
   // 给采集任务加超时（最多 60 秒），防止卡死
   try {
     await Promise.race([
       captureFavorites((m) => { kbLoadingText.textContent = m; }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('采集超时')), 60000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('采集超时')), 180000))
     ]);
   } catch (e) { console.error('captureFavorites error:', e.message); }
 

@@ -1862,6 +1862,18 @@ except Exception as e:
   }
 });
 
+// 从镜像文件恢复收藏数据（当 database.json 中没有时）
+ipcMain.handle('get-kb-items-fallback', () => {
+  try {
+    const mirrorPath = path.join(KNOWLEDGE_DIR, 'kb_items.json');
+    if (fs.existsSync(mirrorPath)) {
+      const data = JSON.parse(fs.readFileSync(mirrorPath, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch(e) {}
+  return [];
+});
+
 // 写入调试日志到桌面（方便用户反馈问题）
 ipcMain.handle('write-debug-log', (event, filename, content) => {
   try {

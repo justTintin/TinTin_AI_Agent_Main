@@ -1146,6 +1146,7 @@ function setupWebviewListeners() {
   webview.addEventListener('did-stop-loading', () => {
     btnRefresh.classList.remove('loading');
     addressInput.value = webview.getURL();
+    // 切回浏览器模式（如果在知识库/素材模式则保持）
   });
 
   // Clear sniffed results of the previous screen when navigation starts or SPA navigation happens
@@ -1158,6 +1159,11 @@ function setupWebviewListeners() {
   });
 
   webview.addEventListener('did-navigate-in-page', () => {
+    // SPA 导航（如B站点击视频）更新地址栏
+    const currentUrl = webview.getURL();
+    if (currentUrl && currentUrl !== addressInput.value) {
+      addressInput.value = currentUrl;
+    }
     activeVideoSrc = null;
     activeVideoTitle = '';
     lastSniffedAssetsFallback = [];

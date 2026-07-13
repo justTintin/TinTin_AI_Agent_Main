@@ -185,11 +185,6 @@ from utils.gui_icons import mdi_button, mdi_icon
 from utils.account_manager import AccountManager
 from core.creator_browser_controller import CreatorBrowserController
 try:
-    from utils.runninghub_manager import RunningHubManager
-except ImportError as e:
-    log.error(f"Failed to import RunningHubManager: {e}")
-    RunningHubManager = None
-try:
     import psutil
 except ImportError:
     psutil = None
@@ -381,18 +376,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.ai_config_file = os.path.join(PROJECT_ROOT, "config", "ai_config.json")
         self.ai_config_legacy_file = os.path.join(PROJECT_ROOT, "ai_config.json")
         self.load_ai_config()
-        
+
         self._update_splash("正在配置独立浏览器 Profile...", 45)
         self.playwright_profile_path = os.path.join(PROJECT_ROOT, "playwright_profile")
         os.makedirs(self.playwright_profile_path, exist_ok=True)
-
-        if RunningHubManager:
-            self.runninghub = RunningHubManager(
-                api_key=self.ai_config.get("runninghub_api_key", ""),
-                base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")
-            )
-        else:
-            self.runninghub = None
 
         self.creator_pw_controller = None
         self.downloader_pw_controller = None

@@ -599,18 +599,7 @@ class PageSetupMixin:
         l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
 
-        # ── Tab 2: RunningHub ──
-        p2 = QWidget(); l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30)
-        _inp("API Key:", "rh_api_key_input", "从 runninghub.cn 获取的 API Key", l2, echo=QLineEdit.Password)
-        _inp("Base URL:", "rh_base_url_input", "https://www.runninghub.cn", l2)
-        self.rh_api_key_input.setText(self.ai_config.get("runninghub_api_key",""))
-        self.rh_base_url_input.setText(self.ai_config.get("runninghub_base_url","https://www.runninghub.cn"))
-        r2 = QHBoxLayout(); r2.addStretch()
-        b_save_rh = mdi_button("保存 RunningHub 配置", "save"); b_save_rh.setObjectName("primary_button"); b_save_rh.clicked.connect(self.save_ai_config); r2.addWidget(b_save_rh)
-        l2.addLayout(r2)
-        l2.addStretch(); tabs.addTab(p2, "🔗 RunningHub")
-
-        # ── Tab 3: 飞书 ──
+        # ── Tab 2: 飞书 ──
         p3 = QWidget(); l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30)
         _inp("App ID:", "edit_feishu_appid", "cli_xxxxxxxxxxxxxxx", l3)
         _inp("App Secret:", "edit_feishu_appsecret", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", l3, echo=QLineEdit.Password)
@@ -677,16 +666,15 @@ class PageSetupMixin:
             config_layout = QVBoxLayout(card)
             config_layout.setContentsMargins(30, 30, 30, 30)
         
-            # Backend Selection
-            config_layout.addWidget(QLabel("选择生成后端:"))
-            self.backend_selector = QComboBox()
-            self.backend_selector.addItems(["ComfyUI (本地/局域网)", "RunningHub (云端)"])
-            self.backend_selector.currentIndexChanged.connect(self.on_backend_changed)
-            config_layout.addWidget(self.backend_selector)
+	        # Backend Selection
+            config_layout.addWidget(QLabel("生成后端:"))
+            self.backend_label = QLabel("ComfyUI (本地/局域网)")
+            self.backend_label.setObjectName("muted_text")
+            config_layout.addWidget(self.backend_label)
         
             config_layout.addSpacing(15)
 
-            # --- ComfyUI Section (Local Inputs) ---
+            # --- ComfyUI Section ---
             self.comfy_section = QWidget()
             comfy_layout = QVBoxLayout(self.comfy_section)
             comfy_layout.setContentsMargins(0, 0, 0, 0)
@@ -728,23 +716,6 @@ class PageSetupMixin:
         
             config_layout.addWidget(self.comfy_section)
 
-            # --- RunningHub Section ---
-            self.rh_section = QWidget()
-            self.rh_section.setVisible(False)
-            rh_layout = QVBoxLayout(self.rh_section)
-            rh_layout.setContentsMargins(0, 0, 0, 0)
-        
-            rh_layout.addWidget(QLabel("说明: 云端应用请在内置浏览器中完成图片和语音的上传。"))
-            rh_layout.addSpacing(10)
-        
-            btn_open_web = QPushButton("🌐 打开 RunningHub 数字人应用 (网页版)")
-            btn_open_web.setObjectName("action_button")
-            btn_open_web.setFixedHeight(60)
-            btn_open_web.clicked.connect(self.open_rh_web_interface)
-            rh_layout.addWidget(btn_open_web)
-        
-            config_layout.addWidget(self.rh_section)
-        
             layout.addWidget(card)
             layout.addStretch()
         

@@ -791,6 +791,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         """Triggers data refresh or UI reset for specific pages"""
         if index == 9: # Task List
             self.refresh_server_tasks()
+            if hasattr(self, "_sync_server_tasks"):
+                self._sync_server_tasks()
             self.refresh_timer.start()
         else:
             self.refresh_timer.stop()

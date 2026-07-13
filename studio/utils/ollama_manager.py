@@ -10,9 +10,6 @@ from utils.logger_utils import log
 
 
 def _read_ai_config() -> dict:
-
-
-def _read_ai_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         import json
@@ -70,7 +67,6 @@ class OllamaManager:
         try:
             r = requests.get(f"{_read_ollama_api()}/ollama/models", timeout=5)
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
-            if r.status_code == 200:
             if r.status_code == 200:
                 data = r.json()
                 models = data.get("models") or data.get("data") or []

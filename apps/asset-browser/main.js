@@ -1223,9 +1223,11 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     if (cookieArg.length === 0 && (urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com'))) {
       cookieArg = ['--cookies-from-browser', 'chrome'];
     }
-    const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
+    // 代理：仅国外平台需要（YouTube、TikTok、Twitter 等）
+    const needsProxy = /(youtube\.com|youtu\.be|tiktok\.com|twitter\.com|x\.com|instagram\.com|facebook\.com)/.test(urlToDownload);
+    const proxyArgArr = needsProxy ? proxyManager.getYtDlpProxyArgv(db.settings) : [];
 
-	    // 尝试多种格式，依次降级
+    // 尝试多种格式，依次降级
 	    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
     let lastError = '', lastLog = '';
 

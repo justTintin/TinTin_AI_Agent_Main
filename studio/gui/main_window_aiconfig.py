@@ -114,8 +114,6 @@ class AIConfigMixin:
         default_config = {
             "comfyui_addr": "http://192.168.111.36:8188",
             "voice_clone_addr": "http://192.168.111.36:7860",
-            "runninghub_api_key": "",
-            "runninghub_base_url": "https://www.runninghub.cn",
             "llm_provider": "deepseek",
             "llm_api_key": "",
             "llm_api_url": "https://api.deepseek.com",
@@ -157,14 +155,6 @@ class AIConfigMixin:
     def save_ai_config(self):
         self.ai_config["comfyui_addr"] = self.comfyui_input.text().strip()
         self.ai_config["voice_clone_addr"] = self.voice_clone_input.text().strip()
-        self.ai_config["runninghub_api_key"] = self.rh_api_key_input.text().strip()
-        self.ai_config["runninghub_base_url"] = self.rh_base_url_input.text().strip()
-        
-        # Update runninghub manager instance
-        self.runninghub.update_config(
-            self.ai_config["runninghub_api_key"],
-            self.ai_config["runninghub_base_url"]
-        )
         
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
@@ -179,8 +169,6 @@ class AIConfigMixin:
     def test_ai_connections(self):
         comfyui_addr = self.comfyui_input.text().strip().rstrip("/")
         voice_addr = self.voice_clone_input.text().strip().rstrip("/")
-        rh_api_key = self.rh_api_key_input.text().strip()
-        rh_base_url = self.rh_base_url_input.text().strip().rstrip("/")
         
         results = []
         try:
@@ -207,22 +195,6 @@ class AIConfigMixin:
                 results.append(f"克隆声音: {'✅ 在线' if res.status_code == 200 else '❌ 异常 ('+str(res.status_code)+')'}")
             except:
                 results.append("克隆声音: ❌ 无法连接")
-            
-            # Test RunningHub
-            if rh_api_key:
-                try:
-                    url = f"{rh_base_url}/openapi/v1/workflow/list"
-                    headers = {"Authorization": f"Bearer {rh_api_key}"}
-                    res = requests.get(url, headers=headers, params={"page": 1, "size": 1}, timeout=5)
-                    if res.status_code == 200 and res.json().get("code") == 0:
-                        results.append("RunningHub: ✅ 认证成功")
-                    else:
-                        msg = res.json().get("msg", "认证失败")
-                        results.append(f"RunningHub: ❌ {msg} (HTTP {res.status_code})")
-                except Exception as e:
-                    results.append(f"RunningHub: ❌ 连接失败 ({str(e)})")
-            else:
-                results.append("RunningHub: ⚠️ 未配置 API Key")
             
             QMessageBox.information(self, "测试结果", "\n".join(results))
         except Exception as e:
@@ -458,16 +430,6 @@ class AIConfigMixin:
 
         import threading
         threading.Thread(target=_run, daemon=True).start()
-
-    def on_backend_changed(self, index):
-        is_rh = (index == 1)
-        # ComfyUI section now includes image/audio inputs
-        self.comfy_section.setVisible(not is_rh)
-        self.rh_section.setVisible(is_rh)
-        
-        # Update run button visibility and text
-        if not is_rh:
-            self.btn_run_local.setEnabled(self.current_workflow_data is not None)
 
     def load_feishu_config(self):
         config = configparser.ConfigParser()

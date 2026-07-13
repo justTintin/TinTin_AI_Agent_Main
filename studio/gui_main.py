@@ -449,18 +449,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.ai_status_collector.status_updated.connect(handle_ai_status)
         self.ai_status_collector.start()
 
-        # 启动后台文件夹变化实时监听服务
-        self.folder_watcher = None
-        def start_watcher():
-            try:
-                from utils.folder_watcher import FolderWatcherService
-                self.folder_watcher = FolderWatcherService()
-                self.folder_watcher.start()
-            except Exception as e:
-                log.error(f"启动文件夹实时监听服务失败: {e}")
-                
-        threading.Thread(target=start_watcher, daemon=True).start()
-
         self._update_splash("系统准备就绪，正在展现主界面...", 100)
 
     def _update_splash(self, text, value):
@@ -532,9 +520,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "ai_status_collector") and self.ai_status_collector:
                 self.ai_status_collector.running = False
                 self.ai_status_collector.wait()
-        except Exception:
-            pass
-        try:
         except Exception:
             pass
         try:

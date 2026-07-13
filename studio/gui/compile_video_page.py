@@ -63,7 +63,6 @@ class CompileVideoWorker(BaseWorker):
 class CompileVideoPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.media = MediaLibraryManager()
         self.worker = None
         self._last_out = ""
         self._self_check_data = None
@@ -154,9 +153,6 @@ class CompileVideoPage(BasePage):
         self.btn_open = QPushButton("打开成片"); self.btn_open.setObjectName("secondary_button")
         self.btn_open.clicked.connect(self._open); self.btn_open.setEnabled(False)
         res.addWidget(self.btn_open)
-        self.btn_to_media = QPushButton("加入素材管理"); self.btn_to_media.setObjectName("secondary_button")
-        self.btn_to_media.clicked.connect(self._to_media); self.btn_to_media.setEnabled(False)
-        res.addWidget(self.btn_to_media)
         root.addLayout(res)
         root.addStretch()
         self._populate_voices()
@@ -262,7 +258,7 @@ class CompileVideoPage(BasePage):
             return
         out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("final_%Y%m%d_%H%M%S.mp4"))
         self.btn_make.setEnabled(False); self.pbar.setVisible(True)
-        self.btn_open.setEnabled(False); self.btn_to_media.setEnabled(False)
+        self.btn_open.setEnabled(False)
         self.worker = CompileVideoWorker(
             folder, out, self.in_audio.text().strip(), self.in_cover.text().strip(),
             self.in_subtitle.toPlainText().strip(), self.combo_ratio.currentText(), self.spin_dur.value(),
@@ -275,7 +271,7 @@ class CompileVideoPage(BasePage):
     def _done(self, out):
         self._last_out = out
         self.btn_make.setEnabled(True); self.pbar.setVisible(False)
-        self.btn_open.setEnabled(True); self.btn_to_media.setEnabled(True)
+        self.btn_open.setEnabled(True)
         self.status.setText(f"✅ 成片完成：{out}")
         # 自动视频预测评价：按所选平台预测成片表现
         if self.chk_autocheck.isChecked():
@@ -328,7 +324,4 @@ class CompileVideoPage(BasePage):
         if self._last_out and os.path.isfile(self._last_out) and os.name == "nt":
             os.startfile(self._last_out)  # noqa
 
-    def _to_media(self):
-        if self._last_out and os.path.isfile(self._last_out):
-            self.media.add_mount(FINAL_OUTPUT_DIR, kind="项目", group="成片", tags=["成片", "一键成片"])
-            self.show_info("已把成片目录加入素材管理。")
+	

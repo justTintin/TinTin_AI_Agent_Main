@@ -41,17 +41,8 @@ class _VectorSearchWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        None
-        results, total = search_by_text(
-            self.query, top_k=self.top_k,
-            filter_brand=self.brand,
-            filter_category=self.category,
-            filter_hash=self.hash_prefix,
-            filter_path_prefix=self.path_prefix,
-            filter_color=self.color,
-            offset=self.offset,
-        )
-        self.finished.emit(results, total)
+        # 素材管理已移除，向量检索功能暂时不可用
+        self.finished.emit([], 0)
 
 
 class _TagSearchWorker(BaseWorker):
@@ -71,15 +62,8 @@ class _TagSearchWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        None
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.search_by_tags(
-                brand=self.brand, model=self.model,
-                category=self.category, ai_status=self.ai_status,
-                limit=self.limit, hash_prefix=self.hash_prefix,
-                offset=self.offset,
-            )
-        self.finished.emit(rows, total)
+        # 素材管理已移除，标签检索功能暂时不可用
+        self.finished.emit([], 0)
 
 
 class _DirQueryWorker(BaseWorker):
@@ -95,15 +79,8 @@ class _DirQueryWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        None
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.list_materials(
-                path_prefix=self.path_prefix,
-                limit=self.limit,
-                hash_prefix=self.hash_prefix,
-                offset=self.offset,
-            )
-        self.finished.emit(rows, total)
+        # 素材管理已移除，目录查询功能暂时不可用
+        self.finished.emit([], 0)
 
 
 class _KeywordSearchWorker(BaseWorker):
@@ -127,14 +104,8 @@ class _KeywordSearchWorker(BaseWorker):
         if not self.keyword:
             self.finished.emit([], 0)
             return
-        None
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.search_by_keyword(
-                self.keyword, self.limit,
-                file_type=self.file_type, brand=self.brand,
-                model=self.model, category=self.category,
-                ai_status=self.ai_status, offset=self.offset)
-        self.finished.emit(rows, total)
+        # 素材管理已移除，关键词搜索功能暂时不可用
+        self.finished.emit([], 0)
 
 
 # ── 主页面 ────────────────────────────────────────────────────────────────────
@@ -820,7 +791,6 @@ class VectorSearchPage(BasePage):
             QGuiApplication.clipboard().setText(full_path)
 
     def _load_tag_options(self):
-        None
         from utils.brand_normalizer import canonical_name
 
         curr_txt_brand = self.txt_brand.currentText()
@@ -832,22 +802,7 @@ class VectorSearchPage(BasePage):
         brands = set()
         models = set()
         categories = set()
-        try:
-            with MaterialClipIndexer() as idx:
-                idx._connect()
-                with idx._conn.cursor() as cur:
-                    cur.execute("SELECT DISTINCT brand FROM materials WHERE brand IS NOT NULL AND brand != '' ORDER BY brand")
-                    for r in cur.fetchall():
-                        b = canonical_name(r[0]) or r[0]
-                        if b:
-                            brands.add(b)
-                    cur.execute("SELECT DISTINCT model FROM materials WHERE model IS NOT NULL AND model != '' ORDER BY model")
-                    models.update(r[0] for r in cur.fetchall() if r[0])
-                    cur.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL AND category != '' ORDER BY category")
-                    categories.update(r[0] for r in cur.fetchall() if r[0])
-        except Exception as e:
-            print(f"加载标签选项失败: {e}")
-
+        # 素材管理已移除，标签选项暂无法从数据库加载
         brand_list = ["全部"] + sorted(brands)
         model_list = ["全部"] + sorted(models)
         cat_list = ["全部"] + sorted(categories)

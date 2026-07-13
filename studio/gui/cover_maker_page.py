@@ -192,7 +192,6 @@ class CoverLayoutAIWorker(BaseWorker):
 class CoverMakerPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.media = MediaLibraryManager()
         self.layers = []            # [{name, type, item, source, geom{ratio:{x,y,scale,font,visible}}}]
         self.current_video = ""
         self.template_path = ""
@@ -816,8 +815,6 @@ class CoverMakerPage(BasePage):
         out = os.path.join(COVER_OUTPUT_DIR, datetime.now().strftime("cover_%Y%m%d_%H%M%S.png"))
         if img.save(out, "PNG"):
             self.status.setText(f"已导出：{out}")
-            if self.confirm(f"封面已导出：\n{out}\n\n是否把输出目录加入素材管理？", "导出成功"):
-                self.media.add_mount(COVER_OUTPUT_DIR, kind="项目", group="封面", tags=["封面", "导出"])
         else:
             self.show_error("导出失败。")
 
@@ -854,7 +851,5 @@ class CoverMakerPage(BasePage):
         self._update_safe_rect()
         if outs:
             self.status.setText("已导出：" + "、".join(os.path.basename(o) for o in outs))
-            if self.confirm("已导出横/竖两版封面，是否把输出目录加入素材管理？", "导出成功"):
-                self.media.add_mount(COVER_OUTPUT_DIR, kind="项目", group="封面", tags=["封面", "导出"])
         else:
             self.show_error("导出失败。")

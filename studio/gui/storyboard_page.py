@@ -1329,8 +1329,6 @@ class StoryboardPage(BasePage):
             self.btn_gen_shots.setEnabled(True)
             self.pbar.setVisible(False)
             if files:
-                MediaLibraryManager().add_mount(out_dir, kind="项目", group="镜头素材",
-                                                tags=["即梦", "分镜"])
                 self.lbl_status.setText(f"✅ 已生成 {len(files)} 张镜头素材：{out_dir}")
             else:
                 self.lbl_status.setText("未生成任何素材（可能未登录或全部失败）。")

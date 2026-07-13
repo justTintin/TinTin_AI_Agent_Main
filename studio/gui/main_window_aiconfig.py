@@ -125,7 +125,6 @@ class AIConfigMixin:
             "compute_server_url": "http://192.168.111.18:8000",
             "whisper_api_url": "",
             "clip_api_url": "",
-            "material_api_url(removed)": "",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_source": "remote",
             "vox_mode": "api",
@@ -623,46 +622,3 @@ class AIConfigMixin:
         except Exception as e:
             print(f"加载 ERP 配置失败: {e}")
 
-    # ── 数据库配置 ──
-
-    def _save_material_server_cfg(self):
-        """保存素材服务地址到 ai_config.json。"""
-        url = self.material_api_url(removed)_input.text().strip()
-        self.ai_config["material_api_url(removed)"] = url
-        try:
-            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
-            self.lbl_material_server_status.setText("✅ 配置已保存")
-            self.lbl_material_server_status.setStyleSheet("color: #4ade80;")
-        except Exception as e:
-            self.lbl_material_server_status.setText(f"❌ 保存失败: {e}")
-            self.lbl_material_server_status.setStyleSheet("color: #f87171;")
-
-    def load_material_server_cfg(self):
-        """从 ai_config 加载素材服务地址。"""
-        url = self.ai_config.get("material_api_url(removed)", "")
-        self.material_api_url(removed)_input.setText(url)
-
-    def _test_material_server(self):
-        """测试素材服务端连通性。"""
-        import requests as _req
-        url = self.material_api_url(removed)_input.text().strip()
-        if not url:
-            self.lbl_material_server_status.setText("⚠️ 请填写服务地址")
-            self.lbl_material_server_status.setStyleSheet("color: #f39c12;")
-            return
-        self.lbl_material_server_status.setText("⏳ 测试中...")
-        self.lbl_material_server_status.setStyleSheet("color: #facc15;")
-        try:
-            r = _req.get(f"{url.rstrip('/')}/material/config", timeout=5)
-            if r.status_code == 200:
-                d = r.json()
-                self.lbl_material_server_status.setText(f"✅ 连接成功")
-                self.lbl_material_server_status.setStyleSheet("color: #4ade80;")
-            else:
-                self.lbl_material_server_status.setText(f"❌ HTTP {r.status_code}")
-                self.lbl_material_server_status.setStyleSheet("color: #f87171;")
-        except Exception as e:
-            self.lbl_material_server_status.setText(f"❌ 连接失败: {str(e)[:60]}")
-            self.lbl_material_server_status.setStyleSheet("color: #f87171;")

@@ -657,29 +657,11 @@ class PageSetupMixin:
         r5.addStretch(); l5.addLayout(r5)
         l5.addStretch(); tabs.addTab(p5, "🏪 旺店通")
 
-        # ── Tab 6: 算力服务 ──
-        p6 = QWidget(); l6 = QVBoxLayout(p6); l6.setContentsMargins(30,30,30,30)
-        l6.addWidget(QLabel("算力服务器统一地址（视觉/语音/向量/素材/克隆服务均由该服务器提供）。\n客户端所有 AI 任务通过此地址调度。"))
-        l6.addSpacing(10)
-        _inp("算力服务器地址:", "material_api_url_input", "http://192.168.111.18:8000", l6)
-        r6 = QHBoxLayout(); r6.addStretch()
-        b_test_db = mdi_button("测试连接", "link"); b_test_db.setObjectName("secondary_button")
-        b_test_db.clicked.connect(self._test_material_server)
-        r6.addWidget(b_test_db)
-        b_save_db = mdi_button("保存配置", "save"); b_save_db.setObjectName("primary_button")
-        b_save_db.clicked.connect(self._save_material_server_cfg)
-        r6.addWidget(b_save_db)
-        self.lbl_material_server_status = QLabel(""); self.lbl_material_server_status.setObjectName("muted_text"); r6.addWidget(self.lbl_material_server_status)
-        r6.addStretch(); l6.addLayout(r6)
-        l6.addStretch(); tabs.addTab(p6, "🌐 素材服务")
-
         layout.addWidget(tabs, 1)
         # Load feishu config
         self.load_feishu_config()
-        # Load ERP and DB config
+        # Load ERP config
         try: self.load_erp_platform_cfg()
-        except Exception: pass
-        try: self.load_material_server_cfg()
         except Exception: pass
 
     def setup_digital_human_page(self):

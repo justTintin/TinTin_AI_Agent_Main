@@ -111,7 +111,6 @@ class DreaminaPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.client = DreaminaClient()
-        self.media = MediaLibraryManager()
         self._login_info = None
         self._last_out_dir = None
 
@@ -207,9 +206,6 @@ class DreaminaPage(BasePage):
         top = QHBoxLayout()
         top.addWidget(QLabel("📦 生成结果"))
         top.addStretch()
-        self.btn_to_media = QPushButton("📥 加入素材管理"); self.btn_to_media.setObjectName("secondary_button")
-        self.btn_to_media.clicked.connect(self._add_to_media); self.btn_to_media.setEnabled(False)
-        top.addWidget(self.btn_to_media)
         self.btn_open_dir = QPushButton("打开输出目录"); self.btn_open_dir.setObjectName("secondary_button")
         self.btn_open_dir.clicked.connect(self._open_out_dir); self.btn_open_dir.setEnabled(False)
         top.addWidget(self.btn_open_dir)
@@ -287,7 +283,6 @@ class DreaminaPage(BasePage):
         self.btn_gen.setEnabled(False)
         self.gen_pbar.setVisible(True)
         self.result_list.clear()
-        self.btn_to_media.setEnabled(False)
         self.btn_open_dir.setEnabled(False)
         w = self.track_worker(Text2ImageWorker(
             prompt, self._combo_val(self.combo_ratio), self._combo_val(self.combo_model),
@@ -303,7 +298,6 @@ class DreaminaPage(BasePage):
         self.gen_status.setText(f"✅ 生成完成，{len(files)} 个文件（submit_id={submit_id[:12]}…）")
         for f in files:
             self.result_list.addItem(QListWidgetItem(f))
-        self.btn_to_media.setEnabled(bool(files))
         self.btn_open_dir.setEnabled(bool(files))
 
     def _on_gen_err(self, err):
@@ -312,13 +306,7 @@ class DreaminaPage(BasePage):
         self.gen_status.setText("生成失败。")
         self.show_error(err, "即梦生成失败")
 
-    def _add_to_media(self):
-        if not self._last_out_dir or not os.path.isdir(self._last_out_dir):
-            return
-        ok, msg, _ = self.media.add_mount(self._last_out_dir, kind="项目",
-                                          group="即梦生成", tags=["即梦", "AI生成"])
-        self.show_info(msg if ok else f"未添加：{msg}")
-
+    
     def _open_out_dir(self):
         if self._last_out_dir and os.path.isdir(self._last_out_dir) and os.name == "nt":
             os.startfile(self._last_out_dir)  # noqa

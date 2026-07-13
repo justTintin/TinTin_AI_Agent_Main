@@ -3097,11 +3097,11 @@ class VideoMontagePage(BasePage):
             
         split_row.addWidget(self.dep_status_widget)
 
-        # 仅保留批量分割入口（单条智能分割按钮隐藏，仅用于兼容旧逻辑）
+        # 单视频镜头分割
         self.btn_split = mdi_button("开始智能镜头分割", "cut")
         self.btn_split.setObjectName("action_button")
         self.btn_split.setFixedHeight(35)
-        self.btn_split.setVisible(False)
+        self.btn_split.clicked.connect(self._start_split)
 
         self.btn_split_all = mdi_button("批量分割镜头", "book")
         self.btn_split_all.setObjectName("action_button")
@@ -5016,6 +5016,80 @@ class VideoMontagePage(BasePage):
 
 
     # ==================== CONTROLLER RUN WORKERS ====================
+
+    # --- Step 1 single video split ---
+    def _start_split(self):
+        if self.worker and self.worker.isRunning():
+            return
+
+        selected_item = self.video_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self.parent_widget, "请选择视频", "请先在上方列表中选中一个视频文件。")
+            return
+
+        video_path = selected_item.text()
+        self.processing_video_path = video_path
+        base_dir = os.path.dirname(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        output_dir = os.path.join(base_dir, video_basename, "splits")
+
+        self.btn_split.setEnabled(False)
+        self.btn_split_all.setEnabled(False)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+
+        self.worker = PySceneDetectWorker(
+            video_path=video_path,
+            output_dir=output_dir,
+            threshold=self.threshold_spin.value(),
+            min_scene_len=int(self.min_len_spin.value())
+        )
+        self.worker.stage.connect(lambda t: self.stage_label.setText(t))
+        self.worker.progress.connect(lambda v: self.progress_bar.setValue(v))
+        self.worker.finished.connect(self._on_split_finished)
+        self.worker.error.connect(self._on_split_error)
+        self.worker.start()
+
+    def _on_split_finished(self, out_dir, count, scenes):
+        self.btn_split.setEnabled(True)
+        self.btn_split_all.setEnabled(True)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(True)
+        self.progress_bar.setValue(100)
+        self._check_split_clips_exist()
+
+        if count == 0:
+            cur_threshold = self.threshold_spin.value()
+            self.stage_label.setText("⚠ 未检测到镜头切点，请调低分割阈值后重试。")
+            QMessageBox.information(
+                self.parent_widget, "未检测到镜头切点",
+                f"该视频画面切换不明显，PySceneDetect 未能分出任何镜头。\n\n"
+                f"当前分割阈值为 {cur_threshold:.0f}（值越小越敏感）。\n"
+                f"建议把阈值调低（如 27 或更低）后重新分割。"
+            )
+            return
+
+        self.stage_label.setText(f"✅ 镜头分割完成！共切出 {count} 个镜头。")
+        self.temp_scenes = scenes
+        self.temp_out_dir = out_dir
+        self.temp_count = count
+
+        # Rename splits with timestamps
+        self._rename_all_splits_with_metadata(out_dir, scenes)
+
+    def _on_split_error(self, err):
+        self.btn_split.setEnabled(True)
+        self.btn_split_all.setEnabled(True)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(True)
+        self._check_split_clips_exist()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("❌ 运行失败")
+        QMessageBox.critical(self.parent_widget, "运行错误", f"处理过程中发生错误：\n{err}")
 
     # --- Step 1 batch splits (split + rename only, no transcribe/description) ---
     def _start_split_all(self):

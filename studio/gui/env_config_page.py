@@ -498,54 +498,54 @@ class EnvConfigPage(BasePage):
                 self.status_labels["python"].setText(py_status)
 
             if "gpu" in self.status_labels:
-            if info.get("cuda_available", False):
-                gpu_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('cuda_device', '无')})"
-            else:
-                from gui_main import HAS_NVML
-                if HAS_NVML:
-                    try:
-                        import pynvml
-                        pynvml.nvmlInit()
-                        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                        name = pynvml.nvmlDeviceGetName(handle)
-                        if isinstance(name, bytes):
-                            name = name.decode("utf-8")
-                        gpu_status = f"<font color='#d97706'><b>⚠️ 硬件已连接，但 PyTorch 未加载</b></font> ({name})"
-                    except Exception:
-                        gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
+                if info.get("cuda_available", False):
+                    gpu_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('cuda_device', '无')})"
                 else:
-                    gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
-            self.status_labels["gpu"].setText(gpu_status)
+                    from gui_main import HAS_NVML
+                    if HAS_NVML:
+                        try:
+                            import pynvml
+                            pynvml.nvmlInit()
+                            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                            name = pynvml.nvmlDeviceGetName(handle)
+                            if isinstance(name, bytes):
+                                name = name.decode("utf-8")
+                            gpu_status = f"<font color='#d97706'><b>⚠️ 硬件已连接，但 PyTorch 未加载</b></font> ({name})"
+                        except Exception:
+                            gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
+                    else:
+                        gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
+                self.status_labels["gpu"].setText(gpu_status)
 
-        if "cuda" in self.status_labels:
-            if info.get("cuda_available", False):
-                cuda_status = f"<font color='#16a34a'><b>✅ 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"
-            else:
-                cuda_status = f"<font color='#dc2626'><b>❌ 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"
-            self.status_labels["cuda"].setText(cuda_status)
+            if "cuda" in self.status_labels:
+                if info.get("cuda_available", False):
+                    cuda_status = f"<font color='#16a34a'><b>✅ 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"
+                else:
+                    cuda_status = f"<font color='#dc2626'><b>❌ 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"
+                self.status_labels["cuda"].setText(cuda_status)
 
-        if "ffmpeg" in self.status_labels:
-            if info.get("ffmpeg_ok", False):
-                ffmpeg_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"
-            else:
-                ffmpeg_status = f"<font color='#dc2626'><b>❌ {info.get('ffmpeg_path', '')}</b></font>"
-            self.status_labels["ffmpeg"].setText(ffmpeg_status)
+            if "ffmpeg" in self.status_labels:
+                if info.get("ffmpeg_ok", False):
+                    ffmpeg_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"
+                else:
+                    ffmpeg_status = f"<font color='#dc2626'><b>❌ {info.get('ffmpeg_path', '')}</b></font>"
+                self.status_labels["ffmpeg"].setText(ffmpeg_status)
 
-        if "vsr" in self.status_labels:
-            if info.get("vsr_ok", False):
-                vsr_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('vsr_status', '')})"
-            else:
-                vsr_status = f"<font color='#dc2626'><b>❌ 未就绪</b></font> ({info.get('vsr_status', '')})"
-            self.status_labels["vsr"].setText(vsr_status)
+            if "vsr" in self.status_labels:
+                if info.get("vsr_ok", False):
+                    vsr_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('vsr_status', '')})"
+                else:
+                    vsr_status = f"<font color='#dc2626'><b>❌ 未就绪</b></font> ({info.get('vsr_status', '')})"
+                self.status_labels["vsr"].setText(vsr_status)
 
-        if "os_ver" in self.status_labels:
-            self.status_labels["os_ver"].setText(info.get("os_ver", "未知"))
-        if "cpu_info" in self.status_labels:
-            self.status_labels["cpu_info"].setText(info.get("cpu_info", "未知"))
-        if "ram_info" in self.status_labels:
-            self.status_labels["ram_info"].setText(info.get("ram_info", "未知"))
-        if "gpu_info" in self.status_labels:
-            self.status_labels["gpu_info"].setText(info.get("gpu_info", "未知"))
+            if "os_ver" in self.status_labels:
+                self.status_labels["os_ver"].setText(info.get("os_ver", "未知"))
+            if "cpu_info" in self.status_labels:
+                self.status_labels["cpu_info"].setText(info.get("cpu_info", "未知"))
+            if "ram_info" in self.status_labels:
+                self.status_labels["ram_info"].setText(info.get("ram_info", "未知"))
+            if "gpu_info" in self.status_labels:
+                self.status_labels["gpu_info"].setText(info.get("gpu_info", "未知"))
         except RuntimeError:
             pass
 

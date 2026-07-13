@@ -54,6 +54,12 @@ def _is_proxy_alive(timeout: float = 3) -> bool:
     try:
         r = requests.get(f"{proxy}/comfyui/status", timeout=timeout)
         return r.status_code == 200 and r.json().get("online", False)
+    except requests.exceptions.ConnectionError:
+        log.warning(f"[ComfyUI] 服务端 {proxy} 连接失败")
+        return False
+    except requests.exceptions.Timeout:
+        log.warning(f"[ComfyUI] 服务端 {proxy} 响应超时")
+        return False
     except Exception:
         return False
 
@@ -233,11 +239,12 @@ def get_queue(ai_config):
     if _is_proxy_addr(addr):
         url = _proxy_url(addr, "queue")
     else:
-        return None  # 直连 ComfyUI 不支持 queue 查询，让调用方处理
+        return None
     try:
         resp = requests.get(url, timeout=10)
         return resp.json() if resp.status_code == 200 else None
-    except Exception:
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[ComfyUI] 获取队列失败: {e}")
         return None
 
 

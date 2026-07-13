@@ -1182,8 +1182,13 @@ function setupWebviewListeners() {
       return;
     }
     e.preventDefault();
-    webview.src = url;
-    addressInput.value = url;
+    // 加延迟避免与当前页面导航冲突导致 ERR_ABORTED（B站等 SPA 站点常见）
+    setTimeout(() => {
+      if (webview.src !== url) {
+        webview.src = url;
+        addressInput.value = url;
+      }
+    }, 300);
   });
 
 

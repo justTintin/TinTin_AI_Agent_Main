@@ -679,7 +679,8 @@ function setupEventListeners() {
   if (kbNextBtn) kbNextBtn.addEventListener('click', () => { kbPage++; renderKnowledgeBaseTable(); });
 
   // Knowledge Base Download Selected
-  btnKbDownloadSelected.addEventListener('click', async () => {
+  if (btnKbDownloadSelected) {
+    btnKbDownloadSelected.addEventListener('click', async () => {
     // 获取勾选项目；如果没勾选，默认下载全部 visible 项目
     let checkedBoxes = Array.from(document.querySelectorAll('.kb-item-check:checked'));
     if (checkedBoxes.length === 0) {
@@ -714,6 +715,7 @@ function setupEventListeners() {
       btnKbDownloadSelected.textContent = '批量下载';
     }
   });
+  }
 
   // Tab switching
   tabBtns.forEach(btn => {
@@ -2261,7 +2263,7 @@ function renderKnowledgeBaseTable() {
 // 更新已选计
 function updateKbSelectedCount() {
   const checked = document.querySelectorAll('.kb-item-check:checked').length;
-  kbSelectedCount.textContent = checked;
+  if (kbSelectedCount) kbSelectedCount.textContent = checked;
   
   const allCheckBoxes = document.querySelectorAll('.kb-item-check');
   if (allCheckBoxes.length > 0) {

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy)
 from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from utils.base_worker import BaseWorker
-from PySide6.QtGui import QImage, QPixmap, QIcon
+from PySide6.QtGui import QImage, QPixmap, QIcon, QPainter, QPen, QColor
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
@@ -338,7 +338,7 @@ class SubtitleRemovalPage(BasePage):
         main_layout.setSpacing(16)
 
         # Title
-        heading = QLabel("🎬 视频 AI 智能去字幕 (VSR)")
+        heading = QLabel("🎬 视频去字幕")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -717,22 +717,21 @@ class SubtitleRemovalPage(BasePage):
             self.preview_label.px_offset_x = (display_w - target_w) // 2
             self.preview_label.px_offset_y = (display_h - target_h) // 2
 
-            # PIL resize first (LANCZOS for high quality downscaling)
-            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            # PIL resize (BILINEAR faster than LANCZOS)
+            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.BILINEAR)
 
-            # Draw green rectangle bounds on the resized PIL image directly
-            draw = ImageDraw.Draw(resized_img)
+            # Convert to QPixmap and draw green rectangle with QPainter
+            qimg = QImage(resized_img.tobytes("raw", "RGB"), resized_img.width, resized_img.height, resized_img.width * 3, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+            painter = QPainter(pixmap)
             rx0 = int(x * target_w / w_img)
             ry0 = int(y * target_h / h_img)
             rx1 = int((x + w) * target_w / w_img)
             ry1 = int((y + h) * target_h / h_img)
-            draw.rectangle([rx0, ry0, rx1, ry1], outline="#00ff00", width=3)
-
-            # Convert PIL image to QImage - specifying bytesPerLine prevents shearing/skew/tilting deforms!
-            rgb_img = resized_img.convert("RGB")
-            data = rgb_img.tobytes("raw", "RGB")
-            qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)
-            self.preview_label.setPixmap(QPixmap.fromImage(qImg))
+            painter.setPen(QPen(QColor("#00ff00"), 3))
+            painter.drawRect(rx0, ry0, rx1 - rx0, ry1 - ry0)
+            painter.end()
+            self.preview_label.setPixmap(pixmap)
 
     def _on_label_bounds_changed(self, x, y, w, h):
         self.x_slider.blockSignals(True)

@@ -372,7 +372,7 @@ class SubtitleRemovalPage(BasePage):
         # --- Left Panel: Controls ---
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 10, 0)
+        left_layout.setContentsMargins(10, 0, 0, 0)
         left_layout.setSpacing(10)
 
         # Area Sliders
@@ -484,12 +484,10 @@ class SubtitleRemovalPage(BasePage):
         left_layout.addWidget(action_card)
         left_layout.addStretch()
 
-        splitter.addWidget(left_widget)
-
-        # --- Right Panel: Preview + Log ---
+        # --- Right Panel: Preview + Log (placed on left side) ---
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_layout.setContentsMargins(0, 0, 10, 0)
         right_layout.setSpacing(10)
 
         # Preview
@@ -541,8 +539,9 @@ class SubtitleRemovalPage(BasePage):
         right_layout.addWidget(log_card)
 
         splitter.addWidget(right_widget)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 5)
+        splitter.addWidget(left_widget)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 3)
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(

@@ -21,7 +21,6 @@ def _show_error(msg):
 
 # 定位项目根目录
 if getattr(sys, 'frozen', False):
-    # PyInstaller 打包后，EXE 就在项目根目录
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,9 +32,13 @@ if not os.path.isfile(entry):
     _show_error(f"错误：未找到 {entry}")
     sys.exit(1)
 
+# 找嵌入式 Python，不能用 sys.executable（它指向 EXE 自身，会死循环）
+python_exe = os.path.join(BASE_DIR, "python_embeded", "pythonw.exe")
+if not os.path.isfile(python_exe):
+    python_exe = os.path.join(BASE_DIR, "python_embeded", "python.exe")
+if not os.path.isfile(python_exe):
+    python_exe = "python"
+
 env = os.environ.copy()
 env.setdefault("PYTHONPATH", os.path.join(BASE_DIR, "studio"))
-
-# PyInstaller 打包后直接用当前解释器运行
-python_exe = sys.executable
 subprocess.run([python_exe, entry], env=env, cwd=BASE_DIR)

@@ -15,7 +15,6 @@ import base64
 import tempfile
 
 from utils.base_worker import BaseWorker
-from utils.video_index_manager import VideoIndexManager, compute_video_hash
 from utils.logger_utils import log
 from PySide6.QtCore import Signal
 
@@ -188,7 +187,7 @@ class VideoIndexWorker(BaseWorker):
         from utils.rustfs_manager import _build_client, _ensure_bucket, get_rustfs_config
 
         vpath = self.video_path
-        mgr = VideoIndexManager()
+        # mgr = VideoIndexManager()  # removed with material mgmt
 
         # ── 1. 哈希 ──────────────────────────────────────────────
         self._log(f"[1/5] 计算哈希：{os.path.basename(vpath)}")
@@ -309,7 +308,7 @@ class WhisperFillWorker(BaseWorker):
 
     def do_work(self):
         from config.paths import WHISPER_MODELS_DIR
-        mgr = VideoIndexManager()
+        # mgr = VideoIndexManager()  # removed with material mgmt
         entry = mgr.get_by_id(self.video_id)
         if not entry:
             raise RuntimeError(f"未找到 video_id={self.video_id}")

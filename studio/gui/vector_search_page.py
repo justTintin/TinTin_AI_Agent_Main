@@ -41,7 +41,7 @@ class _VectorSearchWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        from utils.material_clip_indexer import search_by_text
+        None
         results, total = search_by_text(
             self.query, top_k=self.top_k,
             filter_brand=self.brand,
@@ -71,7 +71,7 @@ class _TagSearchWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
+        None
         with MaterialClipIndexer() as idx:
             rows, total = idx.search_by_tags(
                 brand=self.brand, model=self.model,
@@ -95,7 +95,7 @@ class _DirQueryWorker(BaseWorker):
         self.offset      = offset
 
     def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
+        None
         with MaterialClipIndexer() as idx:
             rows, total = idx.list_materials(
                 path_prefix=self.path_prefix,
@@ -127,7 +127,7 @@ class _KeywordSearchWorker(BaseWorker):
         if not self.keyword:
             self.finished.emit([], 0)
             return
-        from utils.material_clip_indexer import MaterialClipIndexer
+        None
         with MaterialClipIndexer() as idx:
             rows, total = idx.search_by_keyword(
                 self.keyword, self.limit,
@@ -820,7 +820,7 @@ class VectorSearchPage(BasePage):
             QGuiApplication.clipboard().setText(full_path)
 
     def _load_tag_options(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
+        None
         from utils.brand_normalizer import canonical_name
 
         curr_txt_brand = self.txt_brand.currentText()

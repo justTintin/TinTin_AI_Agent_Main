@@ -18,7 +18,6 @@ from PySide6.QtCore import Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager
 from utils.remotion_client import TEMPLATES, install, render, is_installed, node_ok
 from config.paths import MG_OUTPUT_DIR
 

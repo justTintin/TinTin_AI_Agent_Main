@@ -256,8 +256,7 @@ def sync_directory_to_rustfs(local_dir: str, remote_prefix: str = "",
                 fp = os.path.join(root, fn)
                 files.append({"path": fp, "name": fn})
     else:
-        from utils.media_library_manager import scan_directory
-        files = scan_directory(local_dir, recursive=True)
+                files = scan_directory(local_dir, recursive=True)
 
     total = len(files)
     if total == 0:

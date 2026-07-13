@@ -23,7 +23,6 @@ from PySide6.QtCore import Signal, Qt
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.dreamina_client import DreaminaClient
-from utils.media_library_manager import MediaLibraryManager
 from config.paths import DREAMINA_OUTPUT_DIR
 
 RATIOS = ["(默认)", "9:16", "16:9", "1:1", "3:4", "4:3", "2:3", "3:2", "21:9"]

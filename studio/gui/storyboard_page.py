@@ -22,7 +22,6 @@ from PySide6.QtCore import Qt, Signal, QUrl
 
 from utils.logger_utils import log
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager, scan_directory
 from utils.my_knowledge_manager import MyKnowledgeManager, STYLIZATION_TYPE
 from utils.dreamina_client import DreaminaClient
 from config.paths import DREAMINA_OUTPUT_DIR, CONFIG_INI_FILE, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR
@@ -124,7 +123,7 @@ class _SimilarSearchWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        from utils.material_clip_indexer import search_by_text
+        None  # material_clip_indexer removed
         rows, _total = search_by_text(
             self.query,
             top_k=max(self.top_k * 3, self.top_k),   # 多取一些用于按文件去重
@@ -162,7 +161,7 @@ class _AutoBindShotsWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        from utils.material_clip_indexer import search_by_text
+        None  # material_clip_indexer removed
         result = {}
         total = len(self.shots)
         for n, (shot_idx, query) in enumerate(self.shots, 1):

@@ -1349,7 +1349,7 @@ class SceneCopyWorker(BaseWorker):
     finished = Signal(str)  # 生成的口播文案
 
     def __init__(self, api_url, api_key, model, scene_descriptions,
-                 brand="", product="", model_name="", extra=""):
+                 brand="", product="", model_name="", extra="", total_duration=0.0):
         super().__init__()
         self.api_url = api_url
         self.api_key = api_key
@@ -1359,6 +1359,7 @@ class SceneCopyWorker(BaseWorker):
         self.product = product
         self.model_name = model_name
         self.extra = extra
+        self.total_duration = total_duration
 
     def run(self):
         try:
@@ -1372,12 +1373,32 @@ class SceneCopyWorker(BaseWorker):
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
+
+            # 根据总时长估算每行文案的字数上限
+            # 正常语速约 3-4 字/秒，按 3.5 字/秒计算
+            # 每行文案对应的镜头时长 = 总时长 / n
+            if self.total_duration > 0 and n > 0:
+                sec_per_shot = self.total_duration / n
+                max_chars_per_line = int(sec_per_shot * 3.5)
+                # 保底 5 字，上限 40 字
+                max_chars_per_line = max(5, min(max_chars_per_line, 40))
+                duration_hint = (
+                    f"\n本条视频总时长约 {self.total_duration:.1f} 秒，共 {n} 个镜头，"
+                    f"平均每个镜头约 {sec_per_shot:.1f} 秒。"
+                    f"每行文案请控制在 {max_chars_per_line} 字以内，"
+                    f"确保能在对应镜头时长内以正常语速读完。"
+                )
+            else:
+                max_chars_per_line = 22
+                duration_hint = ""
+
             system_prompt = (
                 "你是资深电商短视频口播文案撰稿人。用户会给出一个产品的共同背景信息（品牌/品类/型号/卖点），"
                 "以及该条组合视频按顺序排列的每一个镜头画面描述。\n"
                 "请为这条视频撰写一段用于电商带货的口播文案（旁白），要求：\n"
                 f"1. 严格输出 {n} 行，第 i 行对应第 i 个镜头画面，顺序不可打乱。\n"
-                "2. 每行文案要贴合对应镜头画面的内容（如产品外观、特写、使用场景、价格对比等），口语化、有节奏、有卖点和号召力，每行约 10-22 字。\n"
+                f"2. 每行文案贴合对应镜头画面内容（如产品外观、特写、使用场景、价格对比等），"
+                f"口语化、有节奏、有卖点和号召力，每行约 5-{max_chars_per_line} 字。{duration_hint}\n"
                 "3. 所有行围绕同一款产品（同一型号）展开，整体文案在逻辑与情感上连贯、朗朗上口。\n"
                 "4. 若不确定具体参数，用准确的通用描述，切勿编造虚假数字。\n"
                 "5. 不要 markdown、不要标题、不要编号、不要解释说明，只输出文案本身，每句独占一行。"
@@ -1419,9 +1440,24 @@ class SceneCopyWorker(BaseWorker):
                     lines = lines[:-1]
                 content = "\n".join(lines).strip()
             # 去掉空行
-            content = "\n".join([ln.strip() for ln in content.splitlines() if ln.strip()])
+            lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+            content = "\n".join(lines)
             if not content:
                 raise RuntimeError("大模型未生成有效文案")
+
+            # 校验行数是否匹配镜头数
+            actual_lines = len(lines)
+            if actual_lines != n:
+                # 尝试用最后一个镜头"填充"或"合并"来修正行数差异
+                if actual_lines < n:
+                    # 行数少了：用最后一行补齐
+                    last_line = lines[-1] if lines else ""
+                    for _ in range(n - actual_lines):
+                        content += f"\n{last_line}"
+                else:
+                    # 行数多了：截断到 N 行
+                    content = "\n".join(lines[:n])
+
             self.finished.emit(content)
         except Exception as e:
             self.error.emit(str(e))
@@ -7589,8 +7625,11 @@ class VideoMontagePage(BasePage):
 
         api_url, api_key, model = self._batch_llm
         brand, product, model_name, extra = self._batch_product_info
+        # 获取合成视频总时长，用于文案字数限制
+        total_dur = get_media_duration(path) if os.path.isfile(path) else 0.0
         self._scene_copy_worker = SceneCopyWorker(
-            api_url, api_key, model, scenes, brand, product, model_name, extra)
+            api_url, api_key, model, scenes, brand, product, model_name, extra,
+            total_duration=total_dur)
 
         companion_txt = os.path.splitext(path)[0] + ".txt"
 

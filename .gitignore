@@ -69,6 +69,8 @@ node_modules/
 *.exe
 !apps/asset-browser/bin/yt-dlp.exe
 !apps/asset-browser/bin/v2rayN/bin/xray/xray.exe
+!studio/bin/win/dreamina.exe
+!studio/bin/win/ffmpeg.exe
 *.dll
 *.so
 *.whl

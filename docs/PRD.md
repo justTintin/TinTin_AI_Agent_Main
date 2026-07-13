@@ -1,10 +1,10 @@
-# 螺丝钉-电商智能体矩阵 商业化 PRD v1.0
+# 螺丝钉-电商智能体矩阵 商业化 PRD v2.0
 
 ## 一、产品定位
 
 面向电商带货商家的 AI 视频创作与运营平台。核心价值：AI 帮你策划→制作→复盘→涨粉，覆盖抖音到全平台。
 
-**商业模式**：软件 License + 素材订阅制。本地算力免费，云端只有轻量数据看板。
+**商业模式**：软件 License + 素材订阅制。本地负责轻量操作，重算力走私有服务端。
 
 ---
 
@@ -12,7 +12,7 @@
 
 ```
 基础版（付费）      直播切片 + 智能混剪 + 绑定1个抖音号
-  └─ 标准版（进阶）  + 素材管理 + AI分析 + 文案创作 + 一键成片 + 绑定3个平台账号
+  └─ 标准版（进阶）  + AI分析 + 文案创作 + 一键成片 + 绑定3个平台账号
        └─ 旗舰版（全功能）+ 数据看板 + 全平台分发 + 数字人 + 工具类 + 绑定无限账号
 ```
 
@@ -27,53 +27,58 @@
 | Flag | 版本 | 功能 |
 |---|---|---|
 | `clip` | 基础 | 直播切片、智能混剪 |
-| `material` | 标准 | 素材管理、向量检索、任务列表、素材浏览器、一键成片 |
 | `copywriting` | 标准 | 知识库、产品资料、产品文案、分镜脚本、飞书选题 |
 | `analytics` | 旗舰 | 数据看板、热点追踪、营销检测、视频预测 |
 | `distribute` | 旗舰 | 全平台自动发布、格式适配、定时发布 |
 | `digital_human` | 旗舰 | 数字人、声音克隆、视频修复、视频去字幕 |
 
-**通用模块（所有版本）**：封面制作、图像抠图、智能分层、视频转文字、OCR、LUT调色、系统设置。
+**通用模块（所有版本）**：封面制作、图像抠图、智能分层、视频转文字、OCR、LUT调色、系统设置、素材检索、任务队列。
+
+**注意**：素材管理（本地数据库+CLIP向量索引）已在 v2.0 中移除，改为服务端统一检索。
 
 ---
 
-## 三、技术架构：混合模式
+## 三、技术架构：混合模式（本地+服务端）
+
+### 算力分布
+
+```
+┌─────────────────────────────────────┐
+│  商家本地 PC（轻量）                 │
+│  ┌───────────────────────────────┐ │
+│  │  螺丝钉桌面端（PySide6）       │ │
+│  │  ├ UI 交互 + 页面管理          │ │
+│  │  ├ 素材浏览器（Electron）       │ │
+│  │  ├ 镜头分割（scenedetect）      │ │
+│  │  ├ ffmpeg 视频处理（分割/合成）  │ │
+│  │  │                             │ │
+│  │  └ 所有 AI 推理 → 服务端        │ │
+│  └───────────────────────────────┘ │
+│                    ↕ API            │
+└─────────────────────────────────────┘
+                     ↕ (HTTP API)
+┌─────────────────────────────────────┐
+│  私有计算服务器 192.168.111.18:8000  │
+│  ┌───────────────────────────────┐ │
+│  │  TinTin AI Service Platform   │ │
+│  │  ├ Ollama 视觉模型             │ │
+│  │  │  → 画面描述生成             │ │
+│  │  ├ Whisper 语音转写            │ │
+│  │  ├ VoxCPM 声音克隆/TTS        │ │
+│  │  ├ CLIP 向量检索              │ │
+│  │  │  → POST /material/search   │ │
+│  │  ├ VSR 视频去字幕             │ │
+│  │  ├ ComfyUI 工作流管理          │ │
+│  │  ├ 任务队列管理               │ │
+│  │  └ DeepSeek API（文案生成）     │ │
+│  └───────────────────────────────┘ │
+└─────────────────────────────────────┘
+```
 
 ### 存储支持
-- **本地素材**：支持本地磁盘目录直接扫描（D:\素材、E:\视频等）
-- **NAS 素材**：支持 SMB/CIFS 网络共享挂载扫描，不强制上传
-- 两种存储模式统一，AI 分析路径自动识别兼容
-
-```
-┌───────────────────────────────┐
-│  商家本地 PC（≥ RTX 3060 12G）  │
-│  ┌─────────────────────────┐ │
-│  │  螺丝钉智能体桌面端      │ │
-│  │  ├ Ollama (视觉识别)     │ │
-│  │  ├ CLIP (向量检索)       │ │
-│  │  ├ WhisperX (语音转写)   │ │
-│  │  └ DeepSeek API (文案)   │ │
-│  │                         │ │
-│  │  素材源                   │ │
-│  │  ├ 本地磁盘 D:\素材       │ │
-│  │  ├ NAS 192.168.x.x/素材   │ │
-│  │  └ 混合使用不冲突         │ │
-│  │                         │ │
-│  │  素材 → 本地AI分析       │ │
-│  │  视频不出本地 ✅         │ │
-│  └─────────────────────────┘ │
-│           ↓ (KB 级数据)        │
-└───────────────────────────────┘
-              ↓
-┌───────────────────────────────┐
-│  云端 SaaS                    │
-│  ├ 用户认证 + License 激活     │
-│  ├ 数据看板（播放/粉丝/转化）   │
-│  ├ 素材库（BGM/模板/特效）     │
-│  ├ 支付 + 订阅管理             │
-│  └ 自动更新 + 远程诊断         │
-└───────────────────────────────┘
-```
+- **本地素材**：支持本地磁盘目录直接扫描
+- **NAS 素材**：支持 SMB/CIFS 网络共享挂载扫描
+- 素材向量检索走服务端，客户端不存索引
 
 ---
 
@@ -95,70 +100,20 @@
 | 离线宽容 | P1 | 断网时 72 小时内不锁死 |
 | 防分享 | P2 | 机器码+使用频率异常检测 |
 
-### 试用白名单
+### 功能开关映射
 ```python
-# 组内试用期：仅白名单手机号可激活
-TRIAL_WHITELIST = {"138xxxxxxxx"}  # 大怪手机号
-
-def can_activate(phone: str) -> bool:
-    if TRIAL_WHITELIST and phone not in TRIAL_WHITELIST:
-        return False  # 不在白名单，拒绝激活
-    return True
-```
-- 试用结束后清空白名单，开放公测。
-
-### 实现方式
-```python
-# studio/utils/license.py 新增
 FEATURE_PAGE_MAP = {
     "clip": ["一键成片", "智能混剪", "直播切片"],
-    "material": ["素材管理", "向量检索", "素材浏览器"],
     "copywriting": ["知识库", "产品资料", "产品文案", "分镜脚本", "飞书选题"],
     "analytics": ["数据看板", "热点追踪", "营销检测", "视频预测"],
     "distribute": ["全平台发布", "定时发布"],
     "digital_human": ["数字人", "声音克隆", "视频修复", "视频去字幕"],
 }
-
-# 账号绑定限制
-ACCOUNT_LIMITS = {"basic": 1, "standard": 3, "pro": float("inf")}  # 旗舰版无限
-
-def get_active_features(license_info: LicenseInfo) -> set[str]:
-    """返回当前激活的功能集合"""
-    if license_info.features:
-        return set(license_info.features)
-    return {"clip"}  # 免费版默认
-
-def can_access_page(page_index: int, license_info: LicenseInfo) -> bool:
-    features = get_active_features(license_info)
-    for feat, pages in FEATURE_PAGE_MAP.items():
-        if page_index in pages:
-            return feat in features
-    return True  # 通用模块永远可访问
-```
-
-### 侧边栏修改
-```python
-# studio/gui/main_window_sidebar.py
-# 每个 nav_button 加 feature 检查:
-if self._can_access_page(target_index):
-    layout.addWidget(btn)
 ```
 
 ---
 
 ## 五、用户系统（P0）
-
-### 数据模型
-```
-users:
-  id, phone, password_hash, created_at, last_login
-  
-licenses:
-  id, user_id, machine_id, features[], issued_at, expires_at, status
-  
-subscriptions:
-  id, user_id, plan, started_at, ends_at, auto_renew
-```
 
 ### 接口
 ```
@@ -167,14 +122,9 @@ POST /api/auth/refresh        → 刷新 token
 GET  /api/license/activate    → 激活 License
 GET  /api/license/status      → 查询状态
 POST /api/license/renew       → 续费
-GET  /api/material/list       → 素材库列表
-GET  /api/analytics/dashboard → 数据看板
+GET  /api/material/search     → 素材检索（服务端）
+GET  /api/tasks               → 任务队列
 ```
-
-### 本地实现
-- 首次启动 → 登录页（手机号）
-- 登录成功 → 后台校验 License → 解锁对应功能
-- 断网 → 72 小时内使用缓存 License，超时锁死
 
 ---
 
@@ -184,7 +134,7 @@ GET  /api/analytics/dashboard → 数据看板
 - BGM（背景音乐，按风格/情绪/节奏）
 - 模板（片头/转场/片尾/封面）
 - 特效（粒子/光效/文字动画）
-- AI 模型（Ollama 模型 / Whisper 模型 / CLIP checkpoint）
+- AI 模型（Ollama 模型 / Whisper 模型）
 
 ### 功能
 - 本地缓存机制（下载后离线可用）
@@ -223,16 +173,52 @@ GET  /api/analytics/dashboard → 数据看板
 
 ## 九、渐进路线
 
-| 阶段 | 内容 | 预计工时 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| **Phase 1（当前）** | **稳定发布**: 素材浏览稳定、数据库可远程配置、ERP配置UI、Excel导入产品、分镜绑定素材、分包发布机制 | 2 周 |
-| Phase 2 | 界面全新设计 + 一键成片流程串联 | 2 周 |
-| Phase 3 | License 在线激活 + 功能开关 + 登录页 + 试用白名单 | 2 周 |
-| Phase 4 | 侧边栏版本过滤 + 账号绑定限制 + 支付接入 | 2 周 |
-| Phase 5 | 云数据看板 + 自动发布引擎 + 素材库后台 | 3 周 |
-| Phase 6 | 多平台分发 + SaaS 后台 | 3 周 |
-| Phase 7 | 数字人 + 工具类模块 | 4 周 |
-| **v3.0** | **多Agent架构重构**：6独立Agent+主控调度，进程隔离，跨机分布 | 6 周 |
+| **Phase 1** | 基础稳定版：素材浏览器、智能混剪流程打通、服务端部署 | ✅ 已完成 |
+| **Phase 2** | 混合架构迁移：素材检索/去字幕/ASR/TTS 迁移到服务端 | ✅ 已完成 |
+| **Phase 3** | License 在线激活 + 功能开关 + 登录页 + 试用白名单 | ⏳ 待开始 |
+| **Phase 4** | 侧边栏版本过滤 + 账号绑定限制 + 支付接入 | ⏳ 待开始 |
+| **Phase 5** | 云数据看板 + 自动发布引擎 + 素材库后台 | ⏳ 待开始 |
+| **Phase 6** | 多平台分发 + SaaS 后台 | ⏳ 待开始 |
+| **Phase 7** | 数字人 + 工具类模块 | ⏳ 待开始 |
+
+---
+
+## 十、技术约束
+
+- **Python 3.11+** / PySide6 6.6.3 / Qt6
+- **计算服务器**：TinTin AI Service Platform（192.168.111.18:8000）
+- **DeepSeek API** 文本生成（文案/改写/匹配）
+- **Ollama** 服务端视觉推理（qwen2.5vl 或更高）
+- **Whisper** 服务端语音转写
+- **VoxCPM** 服务端声音克隆
+- **ffmpeg + scenedetect** 本地视频处理
+- **Git + Gitea** 代码管理（jckunji.com:3000）
+- **Windows 专用**运行平台
+- 最低硬件：GTX 1060 6GB + 16GB RAM（本地只跑 ffmpeg+UI）
+
+---
+
+## 十一、AI 性能优化
+
+### 服务端负责
+| 任务 | 服务 | 说明 |
+|------|------|------|
+| 画面描述生成 | Ollama 视觉模型 | 多帧抽帧分析 |
+| 语音转文字 | Whisper | 支持多语言/说话人分离 |
+| 声音克隆 | VoxCPM | 文本→语音合成 |
+| 素材检索 | CLIP 向量引擎 | 文本/图片搜素材 |
+| 视频去字幕 | VSR | 上传→处理→下载 |
+| 文案生成 | DeepSeek API | 电商带货文案 |
+
+### 本地负责
+| 任务 | 工具 | 说明 |
+|------|------|------|
+| 镜头分割 | scenedetect + ffmpeg | 纯 CPU，轻量快速 |
+| 视频合成 | ffmpeg xfade | 6个以内视频，16GB 内存 |
+| UI 交互 | PySide6 | 用户界面 |
+| 素材浏览 | Electron | 独立进程 |
 
 ---
 
@@ -241,78 +227,9 @@ GET  /api/analytics/dashboard → 数据看板
 | 问题/需求 | 严重程度 | 说明 |
 |------|----------|------|
 | 素材浏览器功能不全 | 🔴 | 只能浏览，缺搜索/筛选/拖拽/批量操作 |
-| 素材分析速度慢 | 🔴 | 单线程串行，未用并发；视觉模型逐帧请求未批处理 |
-| 向量搜索不准 | 🔴 | CLIP 向量匹配返回无关结果，需加品牌/品类/颜色多维度过滤 |
-| **数据库可远程配置** | 🔴 | 目前数据库地址硬编码在配置文件中，需在环境配置页完善远程数据库连接配置 |
-| **ERP 配置 UI** | 🔴 | 旺店通的 appkey/secret/sid 只在 erp_config.json 里，需加到环境配置页 |
-| **Excel 导入产品** | 🟡 | 没有旺店通 ERP 时，必须支持导入表格；表格模板由当前数据格式自动生成 |
-| **打包排除客户数据** | 🟡 | pack_release.py 应该排除 product_library.json 等客户业务数据 |
-| 分镜脚本无法绑定素材 | 🟡 | 生成的脚本与素材库割裂，需支持按分镜文案**相似度自动搜索绑定**（非拖拽）+Hash关联 |
 | 一键成片流程断裂 | 🟡 | 选素材→生成脚本→合成 三步没有自动串联 |
-| 即梦素材下载未入库 | 🔴 | CLI 能下载但未自动导入素材管理，Windows CLI 需验证并接通管线 |
-| MG 动画未 AI 驱动 | 🔴 | 4个模板手动填参，需 AI 根据文案自动选模板+填参渲染出视频 |
-
-> 说明：**视觉 AI 未生成主要画面描述时，直接标记 `failed` 为预期行为**（无描述素材不入可用池），不做"降级为路径标签"回退，此项不属于技术债。
-
----
-
-## 十、技术约束
-
-- **Python 3.11+** / PySide6 GUI
-- **PostgreSQL** 本地素材库（15万+）
-- **Ollama** 本地推理（qwen2.5vl 7B+）
-- **CLIP ViT-B-16** 向量检索
-- **faster-whisper** 语音转写
-- **DeepSeek API** 文本生成
-- **Git + Gitea** 代码管理（jckunji.com:3000）
-- **Windows 专用**运行平台
-- 最低硬件：RTX 3060 12G + 16GB RAM + 500GB SSD
-
----
-
-## 十一、AI 性能优化（硬件自适应）
-
-### Ollama 视觉模型
-根据 GPU 显存自动选择模型和参数：
-
-| 显存 | 模型 | 并行数 | 帧数 | 上下文 |
-|------|------|--------|------|--------|
-| < 6GB | moondream:1.8b | 1 | 3 | 4K |
-| 6-12GB | qwen2.5vl:7b | 2 | 6 | 8K |
-| 12-16GB | qwen2.5vl:7b-16k | 4 | 8 | 16K |
-| ≥ 16GB | internvl2.5:26b | 4 | 12 | 32K |
-
-- 大上下文版本（16K/32K）用于高频画面+长视频分析
-- 默认用 16K context 的 `qwen2.5vl:7b-16k`
-
-### Whisper 模型
-| 显存 | 模型 | Batch |
-|------|------|-------|
-| < 6GB | tiny | 4 |
-| 6-12GB | medium | 8 |
-| ≥ 12GB | large-v3 | 16 |
-
-- 显存不足时自动 `device=cpu` 降级
-- 语音转写与视觉识别错峰运行
-
-### 一键环境部署
-商家安装 App 后自动完成环境搭建，无需手动操作：
-
-```
-启动检测 → 缺少 Ollama？→ 从 NAS/OSS 下载安装包
-         → 缺少模型？  → 从 NAS/OSS 下载 qwen2.5vl:7b-16k
-         → 缺少 Whisper？→ 自动下载 medium 模型
-         → 检测 CUDA？  → 自动配置 cuDNN/cuBLAS
-```
-
-**下载源优先级**：本地 NAS → 阿里云 OSS → HuggingFace 镜像
-
-| 组件 | 大小 | 来源 |
-|------|------|------|
-| Ollama 安装包 | ~800MB | NAS / OSS |
-| qwen2.5vl:7b-16k | ~14GB | NAS / OSS / Ollama 官方 |
-| Whisper medium | ~1.5GB | NAS / OSS / HuggingFace |
-| CLIP ViT-B-16 | ~600MB | NAS / OSS |
-
-- 支持断点续传 + 完整性校验（SHA256）
-- 进度条实时显示
+| 分镜脚本无法绑定素材 | 🟡 | 生成的脚本与素材库割裂 |
+| MG 动画未 AI 驱动 | 🔴 | 4个模板手动填参 |
+| 即梦素材下载未入库 | 🔴 | CLI 能下载但未自动导入素材管理 |
+| License 在线激活未实现 | 🔴 | 当前仅文件式验证 |
+| 打包排除客户数据 | 🟡 | pack_release.py 应排除客户业务数据 |

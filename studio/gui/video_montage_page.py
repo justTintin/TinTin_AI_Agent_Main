@@ -3102,6 +3102,7 @@ class VideoMontagePage(BasePage):
         self.btn_split.setObjectName("action_button")
         self.btn_split.setFixedHeight(35)
         self.btn_split.clicked.connect(self._start_split)
+        split_row.addWidget(self.btn_split)
 
         self.btn_split_all = mdi_button("批量分割镜头", "book")
         self.btn_split_all.setObjectName("action_button")

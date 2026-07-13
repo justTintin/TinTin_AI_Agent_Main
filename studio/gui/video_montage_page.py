@@ -3104,13 +3104,6 @@ class VideoMontagePage(BasePage):
         self.btn_split.clicked.connect(self._start_split)
         split_row.addWidget(self.btn_split)
 
-        self.btn_split_all = mdi_button("批量分割镜头", "book")
-        self.btn_split_all.setObjectName("action_button")
-        self.btn_split_all.setFixedHeight(35)
-        self.btn_split_all.setToolTip("对列表中所有视频依次进行镜头分割（不自动转写/描述）")
-        self.btn_split_all.clicked.connect(self._start_split_all)
-        split_row.addWidget(self.btn_split_all)
-
         split_row.addSpacing(12)
         split_row.addWidget(QLabel("精华时长:"))
         self.spin_highlight_sec = QDoubleSpinBox()
@@ -4003,7 +3996,7 @@ class VideoMontagePage(BasePage):
 
     def _kill_running_workers(self):
         """终止所有可能正在后台运行的 worker（镜头分割 / 批量分割 / 挑精华）。"""
-        for attr in ("worker", "batch_worker", "highlight_worker"):
+        for attr in ("worker", "highlight_worker"):
             w = getattr(self, attr, None)
             if w and w.isRunning():
                 try:
@@ -4020,7 +4013,7 @@ class VideoMontagePage(BasePage):
                     pass
                 setattr(self, attr, None)
         # 恢复按钮状态
-        for btn_attr in ("btn_split", "btn_split_all", "btn_pick_highlights", "btn_transcribe_raw"):
+        for btn_attr in ("btn_split", "btn_pick_highlights", "btn_transcribe_raw"):
             btn = getattr(self, btn_attr, None)
             if btn:
                 btn.setEnabled(True)
@@ -5035,7 +5028,6 @@ class VideoMontagePage(BasePage):
         output_dir = os.path.join(base_dir, video_basename, "splits")
 
         self.btn_split.setEnabled(False)
-        self.btn_split_all.setEnabled(False)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -5056,7 +5048,6 @@ class VideoMontagePage(BasePage):
 
     def _on_split_finished(self, out_dir, count, scenes):
         self.btn_split.setEnabled(True)
-        self.btn_split_all.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)
         self.progress_bar.setValue(100)
@@ -5083,7 +5074,6 @@ class VideoMontagePage(BasePage):
 
     def _on_split_error(self, err):
         self.btn_split.setEnabled(True)
-        self.btn_split_all.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)
         self._check_split_clips_exist()
@@ -5092,142 +5082,9 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("❌ 运行失败")
         QMessageBox.critical(self.parent_widget, "运行错误", f"处理过程中发生错误：\n{err}")
 
-    # --- Step 1 batch splits (split + rename only, no transcribe/description) ---
-    def _start_split_all(self):
-        if (self.worker and self.worker.isRunning()) or \
-           (getattr(self, "batch_worker", None) and self.batch_worker.isRunning()) or \
-           (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
-            QMessageBox.warning(self.parent_widget, "任务进行中",
-                                "上一个任务仍在运行中，请等待完成或先停止。")
-            return
-
-        paths = []
-        for i in range(self.video_list.count()):
-            txt = self.video_list.item(i).text().strip()
-            if txt:
-                paths.append(txt)
-        if not paths:
-            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可处理的视频。")
-            return
-
-        reply = QMessageBox.question(
-            self.parent_widget, "批量镜头分割",
-            f"将对列表中全部 {len(paths)} 个视频依次进行镜头分割。\n"
-            f"（系统会自动整理片段文件名，便于后续步骤识别时间戳）\n"
-            f"（不会自动转写字幕/生成画面描述）\n\n确认继续？",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        self._batch_queue = paths
-        self._batch_total = len(paths)
-        self._batch_done = 0
-        self._batch_ok = 0
-        self._batch_zero = 0
-        self._batch_fail = 0
-        self._batch_fail_msgs = []
-
-        self.btn_split.setEnabled(False)
-        self.btn_split_all.setEnabled(False)
-        if hasattr(self, "btn_transcribe_raw"):
-            self.btn_transcribe_raw.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-
-        self._batch_process_next()
-
-    def _batch_process_next(self):
-        if not self._batch_queue:
-            self._on_batch_all_finished()
-            return
-
-        video_path = self._batch_queue.pop(0)
-        idx = self._batch_done + 1
-        fname = os.path.basename(video_path)
-
-        if not os.path.exists(video_path):
-            self._batch_fail += 1
-            self._batch_fail_msgs.append(f"{fname}: 文件不存在")
-            self._batch_done += 1
-            self._batch_process_next()
-            return
-
-        base_dir = os.path.dirname(video_path)
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        output_dir = os.path.join(base_dir, video_basename, "splits")
-
-        self.stage_label.setText(f"批量分割 ({idx}/{self._batch_total})：{fname}")
-
-        self.batch_worker = PySceneDetectWorker(
-            video_path=video_path,
-            output_dir=output_dir,
-            threshold=self.threshold_spin.value(),
-            min_scene_len=int(self.min_len_spin.value())
-        )
-        self.batch_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
-        self.batch_worker.finished.connect(self._on_batch_split_finished)
-        self.batch_worker.error.connect(self._on_batch_split_error)
-        self.batch_worker.start()
-
-    def _on_batch_split_finished(self, out_dir, count, scenes):
-        if count > 0:
-            try:
-                self._rename_all_splits_with_metadata(out_dir, scenes)
-                self._batch_ok += 1
-                # Track last successful batch split for vision analysis
-                self._last_batch_splits_dir = out_dir
-                self._last_batch_scenes = scenes
-            except Exception as e:
-                self._batch_fail += 1
-                self._batch_fail_msgs.append(f"{os.path.basename(out_dir)}: 重命名失败 {e}")
-        else:
-            self._batch_zero += 1
-        self._batch_done += 1
-        self._batch_process_next()
-
-    def _on_batch_split_error(self, err):
-        self._batch_fail += 1
-        # err 是完整 traceback，取最后一行做摘要
-        last_line = (err or "").strip().splitlines()[-1] if err else "未知错误"
-        self._batch_fail_msgs.append(last_line[:120])
-        log.error(f"批量分割单条失败：{err}")
-        self._batch_done += 1
-        self._batch_process_next()
-
-    def _on_batch_all_finished(self):
-        self.btn_split.setEnabled(True)
-        self.btn_split_all.setEnabled(True)
-        if hasattr(self, "btn_transcribe_raw"):
-            self.btn_transcribe_raw.setEnabled(True)
-        self.progress_bar.setValue(100)
-        self._check_split_clips_exist()
-
-        msg = (f"批量分割完成：成功 {self._batch_ok} 个，"
-               f"未检测到切点 {self._batch_zero} 个，失败 {self._batch_fail} 个"
-               f"（共 {self._batch_total}）。")
-        self.stage_label.setText("✅ " + msg)
-        detail = msg
-        if self._batch_zero:
-            detail += "\n\n「未检测到切点」的视频画面切换不明显，可调低分割阈值后重试。"
-        if self._batch_fail_msgs:
-            detail += "\n\n失败明细：\n" + "\n".join(self._batch_fail_msgs[:8])
-
-        # Trigger vision analysis on the last batch-split video's splits
-        if self._batch_ok > 0 and hasattr(self, "_last_batch_splits_dir"):
-            self._trigger_vision_on_dir(
-                self._last_batch_splits_dir,
-                self._last_batch_scenes if hasattr(self, "_last_batch_scenes") else [],
-                "批量分割"
-            )
-
-        QMessageBox.information(self.parent_widget, "批量分割完成", detail)
-
     # --- Step 1 batch "pick best N seconds" highlights ---
     def _start_pick_highlights(self):
         if (self.worker and self.worker.isRunning()) or \
-           (getattr(self, "batch_worker", None) and self.batch_worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
             QMessageBox.warning(self.parent_widget, "任务进行中",
                                 "上一个任务仍在运行中，请等待完成或先停止。")
@@ -5291,7 +5148,6 @@ class VideoMontagePage(BasePage):
         self._hl_shot_index = 0
 
         self.btn_split.setEnabled(False)
-        self.btn_split_all.setEnabled(False)
         self.btn_pick_highlights.setEnabled(False)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(False)
@@ -5349,7 +5205,6 @@ class VideoMontagePage(BasePage):
 
     def _on_highlights_all_finished(self):
         self.btn_split.setEnabled(True)
-        self.btn_split_all.setEnabled(True)
         self.btn_pick_highlights.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)

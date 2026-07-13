@@ -467,10 +467,16 @@ class EnvConfigPage(BasePage):
         self.check_worker.start()
 
     def _on_check_finished(self, info):
-        if hasattr(self, "btn_refresh_py_gpu") and self.btn_refresh_py_gpu:
-            self.btn_refresh_py_gpu.setEnabled(True)
-        if hasattr(self, "btn_refresh_codecs") and self.btn_refresh_codecs:
-            self.btn_refresh_codecs.setEnabled(True)
+        try:
+            if hasattr(self, "btn_refresh_py_gpu") and self.btn_refresh_py_gpu:
+                self.btn_refresh_py_gpu.setEnabled(True)
+        except RuntimeError:
+            pass
+        try:
+            if hasattr(self, "btn_refresh_codecs") and self.btn_refresh_codecs:
+                self.btn_refresh_codecs.setEnabled(True)
+        except RuntimeError:
+            pass
             
         if not info:
             return

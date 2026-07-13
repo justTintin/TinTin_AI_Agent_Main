@@ -2973,9 +2973,15 @@ class VideoMontagePage(BasePage):
             lbl.style().polish(lbl)
 
     def _go_to_step(self, index):
-        # Stop background music playback if leaving Step 4 (index 3)
+        # Stop any ongoing media playback when switching steps
         if hasattr(self, "_bgm_player") and self._bgm_player:
             self._stop_bgm_play()
+        if hasattr(self, "preview_player") and self.preview_player:
+            self.preview_player.stop()
+        if hasattr(self, "final_preview_player") and self.final_preview_player:
+            self.final_preview_player.stop()
+        if hasattr(self, "_media_player") and self._media_player:
+            self._media_player.stop()
 
         self.stacked_widget.setCurrentIndex(index)
         self.update_step_indicator(index)

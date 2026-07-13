@@ -761,7 +761,7 @@ class PageSetupMixin:
             mon_card.setObjectName("card")
             mon_card.setFixedHeight(80)
             mon_layout = QHBoxLayout(mon_card)
-            mon_layout.addWidget(QLabel("📊 系统资源监控:"))
+            mon_layout.addWidget(QLabel("📊 系统资源:"))
             self.cpu_label = QLabel("CPU: --%")
             self.ram_label = QLabel("内存: --%")
             self.gpu_label = QLabel("显存: --")
@@ -771,30 +771,43 @@ class PageSetupMixin:
             mon_layout.addStretch()
             layout.addWidget(mon_card)
         
-            # --- Bottom: Task List ---
+            # --- Task List ---
             task_card = QFrame()
             task_card.setObjectName("card")
             task_layout = QVBoxLayout(task_card)
         
             header = QHBoxLayout()
-            header.addWidget(QLabel("📋 ComfyUI 任务列表"))
-            btn_refresh = mdi_button("同步服务器任务", "refresh")
-            btn_refresh.setFixedWidth(120)
-            btn_refresh.clicked.connect(self.refresh_server_tasks)
+            header.addWidget(QLabel("📋 任务队列"))
+            btn_clear = mdi_button("清除已完成", "close")
+            btn_clear.setFixedWidth(100)
+            btn_clear.clicked.connect(self._clear_done_tasks)
+            header.addWidget(btn_clear)
             header.addStretch()
-            header.addWidget(btn_refresh)
             task_layout.addLayout(header)
         
-            self.task_table = QTableWidget(0, 4)
-            self.task_table.setHorizontalHeaderLabels(["任务 ID", "状态", "进度", "操作"])
-            self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-            self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-            self.task_table.setColumnWidth(3, 150)
+            self.task_table = QTableWidget(0, 6)
+            self.task_table.setHorizontalHeaderLabels(["任务 ID", "任务类型", "来源", "状态", "进度", "操作"])
+            self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+            self.task_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+            self.task_table.setColumnWidth(0, 180)
+            self.task_table.setColumnWidth(1, 120)
+            self.task_table.setColumnWidth(3, 120)
+            self.task_table.setColumnWidth(5, 100)
+            self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             task_layout.addWidget(self.task_table)
         
             layout.addWidget(task_card, 1)
-        
-            self.task_outputs = {}
+    
+    def _clear_done_tasks(self):
+        """清除所有已完成/失败的任务行。"""
+        for row in range(self.task_table.rowCount() - 1, -1, -1):
+            status_text = self.task_table.item(row, 3).text() if self.task_table.item(row, 3) else ""
+            if "完成" in status_text or "失败" in status_text or "错误" in status_text:
+                self.task_table.removeRow(row)
 
     def setup_accounts_page(self):
             layout = QVBoxLayout(self.page_accounts)

@@ -136,7 +136,7 @@ class SidebarMixin:
             # ("🧺 即梦素材", 43),          # 暂时隐藏
             # ("🪄 MG 动画", 36),          # 暂时隐藏
             ("向量检索", 39, "search"),
-            # ("📋 任务列表", 9),           # 暂时隐藏
+            ("📋 任务队列", 9, None),
         ]
         for text, index, icon_name in media_menus:
             if icon_name:

@@ -1066,22 +1066,29 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存 Cookie 失败: {e}")
 
-    def add_task_to_list(self, prompt_id, status="正在运行"):
+    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端"):
         row = self.task_table.rowCount()
         self.task_table.insertRow(row)
-        self.task_table.setItem(row, 0, QTableWidgetItem(prompt_id[:8]))
+        self.task_table.setItem(row, 0, QTableWidgetItem(prompt_id[:12]))
+        self.task_table.setItem(row, 1, QTableWidgetItem(task_type))
+        source_item = QTableWidgetItem(source)
+        if source == "本地":
+            source_item.setForeground(QColor("#4ade80"))
+        else:
+            source_item.setForeground(QColor("#60a5fa"))
+        self.task_table.setItem(row, 2, source_item)
         
         status_item = QTableWidgetItem(status)
-        self.task_table.setItem(row, 1, status_item)
+        self.task_table.setItem(row, 3, status_item)
         self.task_status_items[prompt_id] = status_item
         
         p_bar = QProgressBar()
         p_bar.setValue(0)
         p_bar.setTextVisible(True)
-        self.task_table.setCellWidget(row, 2, p_bar)
+        self.task_table.setCellWidget(row, 4, p_bar)
         self.task_progress_bars[prompt_id] = p_bar
         
-        # Action column placeholders
+        # Action column
         actions_widget = QWidget()
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(5, 2, 5, 2)
@@ -1101,12 +1108,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         
         actions_layout.addWidget(btn_preview)
         actions_layout.addWidget(btn_download)
-        self.task_table.setCellWidget(row, 3, actions_widget)
+        self.task_table.setCellWidget(row, 5, actions_widget)
 
     def update_task_actions(self, prompt_id):
         for row in range(self.task_table.rowCount()):
-            if self.task_table.item(row, 0).text() == prompt_id[:8]:
-                w = self.task_table.cellWidget(row, 3)
+            if self.task_table.item(row, 0).text() == prompt_id[:12]:
+                w = self.task_table.cellWidget(row, 5)
                 if w:
                     for btn in w.findChildren(QPushButton):
                         btn.setEnabled(True)

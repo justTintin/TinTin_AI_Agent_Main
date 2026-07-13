@@ -491,6 +491,18 @@ class SubtitleRemovalPage(BasePage):
         btn_action_layout.addWidget(self.btn_stop)
         card_layout.addLayout(btn_action_layout)
 
+        # Server mode toggle
+        server_row = QHBoxLayout()
+        self.chk_server_mode = QCheckBox("使用服务端处理（上传到服务器去字幕）")
+        self.chk_server_mode.setObjectName("secondary_button")
+        self.chk_server_mode.setStyleSheet("padding: 4px 8px;")
+        server_row.addWidget(self.chk_server_mode)
+        self.lbl_server_status = QLabel("")
+        self.lbl_server_status.setObjectName("muted_text")
+        server_row.addWidget(self.lbl_server_status)
+        server_row.addStretch()
+        card_layout.addLayout(server_row)
+
         left_layout.addWidget(card)
         left_widget.setMaximumWidth(450)
         splitter.addWidget(left_widget)
@@ -745,11 +757,103 @@ class SubtitleRemovalPage(BasePage):
         
         self.update_preview()
 
+    def _start_remote_removal(self, video_path):
+        """使用服务端 API 去除字幕。"""
+        import requests as _req
+
+        # 根据 inpaint_mode 计算 inpaint_mode 参数
+        mode_map = {"STTN（默认）": "sttn_det", "STTN（精准）": "sttn", "ENODE": "enode", "SPADE": "spade"}
+        inpaint_mode = mode_map.get(self.mode_combo.currentText(), "sttn_det")
+
+        ymin = int(self.y_slider.value())
+        ymax = int(self.y_slider.value() + self.h_slider.value())
+        xmin = int(self.x_slider.value())
+        xmax = int(self.x_slider.value() + self.w_slider.value())
+
+        self.btn_start.setEnabled(False)
+        self.chk_server_mode.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.log_view.clear()
+        self.lbl_server_status.setText("⏳ 上传中...")
+
+        class _RemoteVSRWorker(BaseWorker):
+            finished = Signal(str)
+            error = Signal(str)
+
+            def __init__(self, path, mode, ymin, ymax, xmin, xmax):
+                super().__init__()
+                self.path = path
+                self.mode = mode
+                self.ymin = ymin
+                self.ymax = ymax
+                self.xmin = xmin
+                self.xmax = xmax
+
+            def do_work(self):
+                try:
+                    from config.paths import AI_CONFIG_FILE
+                    import json as _json
+                    base_url = "http://192.168.111.18:8000"
+                    if os.path.isfile(AI_CONFIG_FILE):
+                        with open(AI_CONFIG_FILE, "r") as f:
+                            cfg = _json.load(f)
+                        url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                        if url:
+                            base_url = url
+
+                    # 上传文件
+                    with open(self.path, "rb") as f:
+                        files = {"file": (os.path.basename(self.path), f, "video/mp4")}
+                        data = {
+                            "inpaint_mode": self.mode,
+                            "ymin": str(self.ymin), "ymax": str(self.ymax),
+                            "xmin": str(self.xmin), "xmax": str(self.xmax),
+                        }
+                        r = _req.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=600)
+                        if r.status_code != 200:
+                            raise RuntimeError(f"服务端返回 {r.status_code}: {r.text[:200]}")
+                    result = r.json()
+                    task_id = result.get("task_id", "")
+                    if not task_id:
+                        raise RuntimeError("服务端未返回任务 ID")
+                    self.finished.emit(f"{base_url}/vsr/download/{task_id}.mp4")
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        w = _RemoteVSRWorker(video_path, inpaint_mode, ymin, ymax, xmin, xmax)
+        w.finished.connect(lambda dl_url: self._on_remote_done(dl_url))
+        w.error.connect(lambda msg: self._on_remote_error(msg))
+        w.start()
+
+    def _on_remote_done(self, download_url):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.lbl_server_status.setText(f"✅ 处理完成")
+        self.btn_start.setEnabled(True)
+        self.chk_server_mode.setEnabled(True)
+        QMessageBox.information(self.parent_widget, "完成",
+            f"视频去字幕已完成！\n\n下载链接:\n{download_url}")
+
+    def _on_remote_error(self, msg):
+        self.progress_bar.setVisible(False)
+        self.lbl_server_status.setText(f"❌ 失败: {msg[:80]}")
+        self.btn_start.setEnabled(True)
+        self.chk_server_mode.setEnabled(True)
+        QMessageBox.critical(self.parent_widget, "错误", f"服务端处理失败:\n{msg}")
+
     def start_removal(self):
         video_path = self.video_path_input.text().strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.parent_widget, "参数错误", "请先选择有效的输入视频或图片！")
             return
+
+        # 服务端模式
+        if self.chk_server_mode.isChecked():
+            self._start_remote_removal(video_path)
+            return
+
+        # 本地模式（原逻辑）
 
         # Resolve paths to VSR local modules
         vsr_dir = VSR_DIR

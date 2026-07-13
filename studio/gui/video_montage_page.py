@@ -623,7 +623,7 @@ class PySceneDetectWorker(BaseWorker):
 
             os.makedirs(self.output_dir, exist_ok=True)
             video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
-            output_template = f"{video_basename}_shot_%d.mp4"
+            output_template = f"{video_basename}_shot_$SCENE_NUMBER.mp4"
 
             # 调用 PySceneDetect 进行分段视频导出
             split_video_ffmpeg(

@@ -469,13 +469,11 @@ class SubtitleRemovalPage(BasePage):
         self.progress_bar.setRange(0, 100)
         action_layout.addWidget(self.progress_bar)
         left_layout.addWidget(action_card)
-        left_layout.addStretch()
 
         # Log (inside right panel, below controls)
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(200)
         left_layout.addWidget(QLabel("📝 处理日志"))
         left_layout.addWidget(self.log_view, 1)
 

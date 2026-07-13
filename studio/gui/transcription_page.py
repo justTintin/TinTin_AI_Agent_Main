@@ -68,59 +68,211 @@ class TranscriptionToolPage(BasePage):
 
         self.multi_speaker_check = QCheckBox("👥 多人模式")
         row1.addWidget(self.multi_speaker_check)
-        row1.addStretch()
-        ctrl_lay.addLayout(row1)
-
-        layout.addWidget(ctrl_card, 0)
-
-        # ── 文件列表 ──
-        list_card = QFrame()
-        list_card.setObjectName("card")
-        list_lay = QVBoxLayout(list_card)
-        list_lay.setContentsMargins(24, 20, 24, 20)
-
-        list_lay.addWidget(QLabel("文件列表（双击预览列查看全文保存，或点操作列💾按钮）："))
-
-        self.file_table = QTableWidget(0, 5)
-        self.file_table.setHorizontalHeaderLabels(["文件名", "文件大小", "状态", "结果预览", "操作"])
-        self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.file_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self.file_table.setColumnWidth(0, 350)
-        self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.file_table.setAlternatingRowColors(True)
-        self.file_table.doubleClicked.connect(self._on_table_double_click)
-        self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.file_table.customContextMenuRequested.connect(self._on_context_menu)
-        list_lay.addWidget(self.file_table, 1)
-
-        self.stage_label = QLabel("就绪")
-        self.stage_label.setObjectName("muted_text")
-        list_lay.addWidget(self.stage_label)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        list_lay.addWidget(self.progress_bar)
 
         btn_process = mdi_button("开始处理", "play")
         btn_process.setObjectName("action_button")
-        btn_process.setFixedHeight(40)
+        btn_process.setFixedHeight(34)
         btn_process.clicked.connect(self._start_batch)
         self.btn_process = btn_process
-        list_lay.addWidget(btn_process)
+        row1.addWidget(btn_process)
 
-        layout.addWidget(list_card, 1)
+        row1.addStretch()
+        ctrl_lay.addLayout(row1)
 
-        # ── 播放器（隐藏） ──
-        self._player = QMediaPlayer()
+        # 第二行：进度
+        ctrl_row2 = QHBoxLayout()
+        self.stage_label = QLabel("就绪")
+        self.stage_label.setObjectName("muted_text")
+        ctrl_row2.addWidget(self.stage_label, 1)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setFixedWidth(200)
+        ctrl_row2.addWidget(self.progress_bar)
+        ctrl_lay.addLayout(ctrl_row2)
+
+        layout.addWidget(ctrl_card, 0)
+
+        # ── 主体区域：左（文件列表 + 字幕文本） / 右（视频播放器） ──
+        from PySide6.QtWidgets import QSplitter
+        splitter = QSplitter(Qt.Horizontal)
+
+        # 左侧面板：文件列表在上，字幕文本在下
+        left_panel = QWidget()
+        left_lay = QVBoxLayout(left_panel)
+        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay.setSpacing(6)
+
+        # 文件表格（紧凑显示）
+        self.file_table = QTableWidget(0, 4)
+        self.file_table.setHorizontalHeaderLabels(["文件名", "大小", "状态", "操作"])
+        self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.file_table.setAlternatingRowColors(True)
+        self.file_table.setMaximumHeight(200)
+        self.file_table.doubleClicked.connect(self._on_table_double_click)
+        self.file_table.itemSelectionChanged.connect(self._on_file_selection_changed)
+        self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_table.customContextMenuRequested.connect(self._on_context_menu)
+        left_lay.addWidget(self.file_table)
+
+        # 字幕文本编辑区（显示选中文件的全文字幕）
+        self.subtitle_editor = QTextEdit()
+        self.subtitle_editor.setReadOnly(False)
+        self.subtitle_editor.setPlaceholderText("选中已完成转写的文件，此处显示完整字幕内容，可直接编辑修改后保存…")
+        left_lay.addWidget(self.subtitle_editor, 1)
+
+        # 保存按钮行
+        save_row = QHBoxLayout()
+        self.btn_save_txt = QPushButton("💾 保存为 TXT（纯文本）")
+        self.btn_save_txt.setObjectName("secondary_button")
+        self.btn_save_txt.clicked.connect(lambda: self._save_current_subtitle("plain"))
+        save_row.addWidget(self.btn_save_txt)
+        self.btn_save_srt = QPushButton("💾 保存为 SRT（带时间戳）")
+        self.btn_save_srt.setObjectName("secondary_button")
+        self.btn_save_srt.clicked.connect(lambda: self._save_current_subtitle("srt"))
+        save_row.addWidget(self.btn_save_srt)
+        self.btn_save_txt_timestamp = QPushButton("💾 保存为 TXT（带时间戳）")
+        self.btn_save_txt_timestamp.setObjectName("secondary_button")
+        self.btn_save_txt_timestamp.clicked.connect(lambda: self._save_current_subtitle("txt"))
+        save_row.addWidget(self.btn_save_txt_timestamp)
+        save_row.addStretch()
+        left_lay.addLayout(save_row)
+
+        splitter.addWidget(left_panel)
+
+        # 右侧面板：视频播放器
+        right_panel = QWidget()
+        right_lay = QVBoxLayout(right_panel)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+
         self._video_widget = QVideoWidget()
-        self._video_widget.setWindowTitle("播放")
-        self._video_widget.resize(640, 480)
+        self._video_widget.setMinimumSize(320, 240)
+        self._video_widget.setStyleSheet("background: #000;")
+        right_lay.addWidget(self._video_widget, 1)
+
+        # 播放控件
+        play_row = QHBoxLayout()
+        self.btn_play_prev = QPushButton("⏮")
+        self.btn_play_prev.clicked.connect(self._play_prev_file)
+        play_row.addWidget(self.btn_play_prev)
+        self.btn_play_toggle = QPushButton("⏸")
+        self.btn_play_toggle.clicked.connect(self._toggle_play)
+        play_row.addWidget(self.btn_play_toggle)
+        self.btn_play_next = QPushButton("⏭")
+        self.btn_play_next.clicked.connect(self._play_next_file)
+        play_row.addWidget(self.btn_play_next)
+        play_row.addStretch()
+        self._player.positionChanged.connect(self._update_play_time)
+        self._play_time_label = QLabel("00:00 / 00:00")
+        play_row.addWidget(self._play_time_label)
+        right_lay.addLayout(play_row)
+
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(splitter, 1)
+
+        # ── 播放器 ──
+        self._player = QMediaPlayer()
+        self._player.setVideoOutput(self._video_widget)
+
+    # ══════════════════════════════════════════
+    #  右侧播放控制
+    # ══════════════════════════════════════════
+
+    def _on_file_selection_changed(self):
+        """选中表格行时，更新左侧字幕文本和右侧视频。"""
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            return
+        row = rows[0].row()
+        if row < 0 or row >= len(self.files):
+            return
+        f = self.files[row]
+        # 更新字幕编辑器
+        if f["srt_text"]:
+            self.subtitle_editor.setPlainText(
+                self._convert_format(f["srt_text"], "srt"))
+        else:
+            self.subtitle_editor.clear()
+        # 播放视频
+        self._play_file(f["path"])
+
+    def _save_current_subtitle(self, fmt):
+        """按指定格式保存当前选中的文件字幕。"""
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            QMessageBox.warning(self.parent_widget, "未选择", "请先在文件列表中选择一个文件。")
+            return
+        row = rows[0].row()
+        if row < 0 or row >= len(self.files):
+            return
+        f = self.files[row]
+        if not f["srt_text"]:
+            QMessageBox.warning(self.parent_widget, "无字幕", "该文件还没有生成字幕。")
+            return
+        base = os.path.splitext(f["path"])[0]
+        ext = "txt" if fmt in ("txt", "plain") else fmt
+        full_text = self._convert_format(f["srt_text"], fmt)
+        default_path = f"{base}.{ext}"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self.parent_widget, "保存字幕", default_path,
+            f"{ext.upper()} Files (*.{ext});;All Files (*)")
+        if save_path:
+            try:
+                with open(save_path, "w", encoding="utf-8") as fp:
+                    fp.write(full_text)
+                QMessageBox.information(self.parent_widget, "已保存", f"字幕已保存:\n{save_path}")
+            except Exception as e:
+                QMessageBox.critical(self.parent_widget, "保存失败", str(e))
+
+    def _play_file(self, path):
+        if not os.path.isfile(path):
+            return
+        self._player.stop()
+        self._player.setSource(QUrl.fromLocalFile(path))
+        self._player.setVideoOutput(self._video_widget)
+        self._player.play()
+        self.btn_play_toggle.setText("⏸")
+
+    def _toggle_play(self):
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._player.pause()
+            self.btn_play_toggle.setText("▶")
+        else:
+            self._player.play()
+            self.btn_play_toggle.setText("⏸")
+
+    def _play_prev_file(self):
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            return
+        row = rows[0].row() - 1
+        if row < 0:
+            row = len(self.files) - 1
+        self.file_table.selectRow(row)
+
+    def _play_next_file(self):
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            return
+        row = rows[0].row() + 1
+        if row >= len(self.files):
+            row = 0
+        self.file_table.selectRow(row)
+
+    def _update_play_time(self, pos):
+        dur = self._player.duration()
+        if dur > 0:
+            pos_str = f"{pos // 60000:02d}:{(pos % 60000) // 1000:02d}"
+            dur_str = f"{dur // 60000:02d}:{(dur % 60000) // 1000:02d}"
+            self._play_time_label.setText(f"{pos_str} / {dur_str}")
 
     # ══════════════════════════════════════════
     #  文件管理
@@ -154,8 +306,7 @@ class TranscriptionToolPage(BasePage):
         size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
         self.file_table.setItem(row, 1, QTableWidgetItem(size_text))
         self.file_table.setItem(row, 2, QTableWidgetItem(f["status"]))
-        self.file_table.setItem(row, 3, QTableWidgetItem(f["preview"]))
-        self._set_save_button(row, f)
+        self._set_action_buttons(row, f)
         self._apply_row_color(row, f["status"])
 
     def _refresh_file_row(self, idx):
@@ -165,23 +316,21 @@ class TranscriptionToolPage(BasePage):
         size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
         self.file_table.item(idx, 1).setText(size_text)
         self.file_table.item(idx, 2).setText(f["status"])
-        self.file_table.item(idx, 3).setText(f["preview"])
-        self._set_save_button(idx, f)
+        self._set_action_buttons(idx, f)
         self._apply_row_color(idx, f["status"])
 
-    def _set_save_button(self, row, f):
+    def _set_action_buttons(self, row, f):
         # 清除旧的按钮
-        old = self.file_table.cellWidget(row, 4)
+        old = self.file_table.cellWidget(row, 3)
         if old:
             old.deleteLater()
-            self.file_table.removeCellWidget(row, 4)
-        # 已完成才显示保存按钮
+            self.file_table.removeCellWidget(row, 3)
+        # 已完成才显示按钮
         if f["status"] == "✅ 完成" and f["srt_text"]:
-            btn = QPushButton("💾 保存")
-            btn.setObjectName("secondary_button")
-            btn.setStyleSheet("padding: 2px 8px; font-size: 12px;")
+            btn = QPushButton("💾 导出")
+            btn.setStyleSheet("padding: 4px 14px; font-size: 13px;")
             btn.clicked.connect(lambda r=row: self._show_save_dialog(r))
-            self.file_table.setCellWidget(row, 4, btn)
+            self.file_table.setCellWidget(row, 3, btn)
 
     def _apply_row_color(self, row, status):
         from PySide6.QtGui import QColor

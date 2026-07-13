@@ -778,6 +778,10 @@ class PageSetupMixin:
         
             header = QHBoxLayout()
             header.addWidget(QLabel("📋 任务队列"))
+            btn_sync = mdi_button("同步服务端", "refresh")
+            btn_sync.setFixedWidth(100)
+            btn_sync.clicked.connect(self._sync_server_tasks)
+            header.addWidget(btn_sync)
             btn_clear = mdi_button("清除已完成", "close")
             btn_clear.setFixedWidth(100)
             btn_clear.clicked.connect(self._clear_done_tasks)
@@ -801,6 +805,55 @@ class PageSetupMixin:
             task_layout.addWidget(self.task_table)
         
             layout.addWidget(task_card, 1)
+    
+    def _sync_server_tasks(self):
+        """从服务端 GET /tasks 拉取任务列表并入表格。"""
+        import requests as _req
+        try:
+            from config.paths import AI_CONFIG_FILE
+            import json as _json
+            base_url = "http://192.168.111.18:8000"
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, "r") as f:
+                    cfg = _json.load(f)
+                url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                if url:
+                    base_url = url
+            resp = _req.get(f"{base_url}/tasks", timeout=10)
+            if resp.status_code != 200:
+                return
+            tasks = resp.json()
+            if not isinstance(tasks, list):
+                return
+            # 已存在的任务 ID 集合
+            existing = set()
+            for row in range(self.task_table.rowCount()):
+                item = self.task_table.item(row, 0)
+                if item:
+                    existing.add(item.text())
+            for t in tasks:
+                tid = (t.get("id") or "")[:12]
+                if not tid or tid in existing:
+                    continue
+                row = self.task_table.rowCount()
+                self.task_table.insertRow(row)
+                self.task_table.setItem(row, 0, QTableWidgetItem(tid))
+                self.task_table.setItem(row, 1, QTableWidgetItem(t.get("type", "未知")))
+                source_item = QTableWidgetItem("服务端")
+                source_item.setForeground(QColor("#60a5fa"))
+                self.task_table.setItem(row, 2, source_item)
+                status = t.get("status", "unknown")
+                status_map = {"completed": "✅ 完成", "processing": "⏳ 处理中", "pending": "⏳ 排队中", "failed": "❌ 失败", "error": "❌ 错误"}
+                self.task_table.setItem(row, 3, QTableWidgetItem(status_map.get(status, status)))
+                p_bar = QProgressBar()
+                p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
+                p_bar.setTextVisible(True)
+                self.task_table.setCellWidget(row, 4, p_bar)
+                # 操作列留空（服务端任务不可本地操作）
+                self.task_table.setCellWidget(row, 5, QWidget())
+                existing.add(tid)
+        except Exception as e:
+            print(f"同步服务端任务失败: {e}")
     
     def _clear_done_tasks(self):
         """清除所有已完成/失败的任务行。"""

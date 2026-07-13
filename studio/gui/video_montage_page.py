@@ -3199,6 +3199,13 @@ class VideoMontagePage(BasePage):
         self.btn_open_splits_dir.setObjectName("secondary_button")
         self.btn_open_splits_dir.clicked.connect(self._open_splits_dir)
         nav_row.addWidget(self.btn_open_splits_dir)
+
+        self.btn_gen_split_descriptions = mdi_button("生成画面文案描述", "pencil")
+        self.btn_gen_split_descriptions.setObjectName("secondary_button")
+        self.btn_gen_split_descriptions.setToolTip(
+            "为每个分割镜头生成文案描述：有字幕的从字幕匹配，无字幕的用视觉AI分析画面")
+        self.btn_gen_split_descriptions.clicked.connect(self._gen_split_descriptions)
+        nav_row.addWidget(self.btn_gen_split_descriptions)
         
         nav_row.addStretch()
         self.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
@@ -5542,6 +5549,10 @@ class VideoMontagePage(BasePage):
             "生成字幕成功",
             f"字幕已成功生成{info_msg}！\n\n已保存至：\n{srt_path}"
         )
+        # 如果是从生成画面描述触发的转录，自动继续
+        if getattr(self, "_pending_gen_descriptions", False):
+            self._pending_gen_descriptions = False
+            self._gen_split_descriptions()
 
     def _on_transcribe_raw_error(self, err):
         self.btn_split.setEnabled(True)
@@ -6547,6 +6558,103 @@ class VideoMontagePage(BasePage):
             self.final_preview_player.setSource(QUrl.fromLocalFile(path))
             self.final_preview_player.play()
             self.final_preview_title.setText(f"🎥 {os.path.basename(path)}")
+
+    def _gen_split_descriptions(self):
+        """为当前选中视频的每个分割镜头生成文案描述。
+
+        流程：
+        1. 检查是否有字幕文件（.srt），有则按时间戳匹配到每个镜头
+        2. 没有字幕则先尝试转录音频生成字幕
+        3. 匹配不到的镜头用视觉AI分析画面生成描述
+        """
+        selected_item = self.video_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self.parent_widget, "请选择视频", "请先在上方列表中选中一个视频文件。")
+            return
+
+        video_path = selected_item.text()
+        if not os.path.exists(video_path):
+            QMessageBox.warning(self.parent_widget, "视频不存在", f"未找到该视频文件：\n{video_path}")
+            return
+
+        video_dir = os.path.dirname(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        splits_dir = os.path.join(video_dir, video_basename, "splits")
+        if not os.path.exists(splits_dir):
+            QMessageBox.warning(self.parent_widget, "未分割镜头", "请先对当前视频进行镜头分割。")
+            return
+
+        files = sorted([f for f in os.listdir(splits_dir) if f.lower().endswith((".mp4", ".m4v"))])
+        if not files:
+            QMessageBox.warning(self.parent_widget, "无镜头文件", "分割目录中没有镜头片段文件。")
+            return
+
+        # 检查是否有字幕文件
+        srt_path = os.path.join(video_dir, video_basename, f"{video_basename}.srt")
+        if not os.path.exists(srt_path):
+            srt_path = os.path.join(video_dir, f"{video_basename}.srt")
+
+        has_srt = os.path.exists(srt_path) and os.path.getsize(srt_path) > 0
+
+        if not has_srt:
+            # 没有字幕，询问是否要先转录音频生成字幕
+            reply = QMessageBox.question(
+                self.parent_widget, "无字幕文件",
+                "该视频没有字幕文件。是否先转录音频生成字幕？\n\n"
+                "是 = 转录音频生成字幕后再匹配\n"
+                "否 = 直接用视觉AI分析画面生成描述",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                # 标记转录完成后自动继续生成描述
+                self._pending_gen_descriptions = True
+                self._start_transcribe_raw()
+                return
+            # 否则直接走视觉AI
+            self._trigger_vision_on_dir(splits_dir, self._get_split_scenes_times(splits_dir, files))
+            return
+
+        # 有字幕，按时间戳匹配到每个镜头
+        try:
+            with open(srt_path, "r", encoding="utf-8") as f:
+                srt_content = f.read()
+        except Exception as e:
+            QMessageBox.warning(self.parent_widget, "读取字幕失败", f"无法读取字幕文件：\n{e}")
+            return
+
+        parsed_texts = parse_srt_to_descriptions(srt_content)
+        if not parsed_texts:
+            QMessageBox.warning(self.parent_widget, "字幕解析失败", "无法从字幕文件中解析出文本内容。")
+            return
+
+        scenes = self._get_split_scenes_times(splits_dir, files)
+        updated_count = 0
+        missing_clips = []
+
+        for idx, f_name in enumerate(files):
+            p_clip = os.path.join(splits_dir, f_name)
+            norm_p = os.path.abspath(p_clip)
+
+            if idx < len(parsed_texts) and parsed_texts[idx].strip():
+                self.split_descriptions[norm_p] = parsed_texts[idx].strip()
+                # 同步到缓存
+                if norm_p in getattr(self, "split_clips_cache", {}):
+                    self.split_clips_cache[norm_p]["desc"] = parsed_texts[idx].strip()
+                updated_count += 1
+            else:
+                missing_clips.append(norm_p)
+
+        # 刷新显示
+        self._check_split_clips_exist()
+
+        if missing_clips:
+            # 有匹配不到的镜头，用视觉AI补充
+            self.stage_label.setText(f"字幕匹配完成，{len(missing_clips)} 个镜头未匹配到字幕，正在用视觉AI分析...")
+            self._trigger_vision_on_dir(splits_dir, scenes)
+        else:
+            self.stage_label.setText(f"✅ 已为全部 {len(files)} 个镜头匹配字幕文案描述")
+            QMessageBox.information(
+                self.parent_widget, "描述生成完成",
+                f"已从字幕匹配到 {updated_count} 个镜头的文案描述。")
 
     def _open_splits_dir(self):
         selected_item = self.video_list.currentItem()

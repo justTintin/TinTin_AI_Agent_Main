@@ -6,7 +6,7 @@ import sys
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame,
                                QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox,
-                               QWidget)
+                               QWidget, QTextEdit, QSplitter)
 from PySide6.QtCore import Signal, Qt, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices, QAction
 from PySide6.QtMultimedia import QMediaPlayer
@@ -94,7 +94,6 @@ class TranscriptionToolPage(BasePage):
         layout.addWidget(ctrl_card, 0)
 
         # ── 主体区域：左（文件列表 + 字幕文本） / 右（视频播放器） ──
-        from PySide6.QtWidgets import QSplitter
         splitter = QSplitter(Qt.Horizontal)
 
         # 左侧面板：文件列表在上，字幕文本在下
@@ -167,7 +166,6 @@ class TranscriptionToolPage(BasePage):
         self.btn_play_next.clicked.connect(self._play_next_file)
         play_row.addWidget(self.btn_play_next)
         play_row.addStretch()
-        self._player.positionChanged.connect(self._update_play_time)
         self._play_time_label = QLabel("00:00 / 00:00")
         play_row.addWidget(self._play_time_label)
         right_lay.addLayout(play_row)
@@ -181,6 +179,7 @@ class TranscriptionToolPage(BasePage):
         # ── 播放器 ──
         self._player = QMediaPlayer()
         self._player.setVideoOutput(self._video_widget)
+        self._player.positionChanged.connect(self._update_play_time)
 
     # ══════════════════════════════════════════
     #  右侧播放控制

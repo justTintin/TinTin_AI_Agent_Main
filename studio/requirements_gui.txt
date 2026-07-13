@@ -1,5 +1,5 @@
 # ===== GUI 主程序启动必需 =====
-PySide6>=6.5
+PySide6==6.6.3.1
 requests>=2.31
 loguru
 pyexecjs
@@ -10,7 +10,7 @@ faster-whisper
 
 # ===== 图像 / 视频处理（多页面核心依赖）=====
 Pillow>=10.0
-numpy>=1.24
+numpy==1.26.4
 opencv-python>=4.8      # cv2 —— 视频AI重命名/混剪/视频索引
 av>=12.0                # PyAV —— 字幕擦除/视频OCR（页面内延迟导入，缺失不阻断启动）
 

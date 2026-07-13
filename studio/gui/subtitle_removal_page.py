@@ -471,6 +471,14 @@ class SubtitleRemovalPage(BasePage):
         left_layout.addWidget(action_card)
         left_layout.addStretch()
 
+        # Log (inside right panel, below controls)
+        self.log_view = QTextEdit()
+        self.log_view.setObjectName("log_viewer")
+        self.log_view.setReadOnly(True)
+        self.log_view.setMaximumHeight(200)
+        left_layout.addWidget(QLabel("📝 处理日志"))
+        left_layout.addWidget(self.log_view, 1)
+
         # --- Right Panel: Preview + Log (placed on left side) ---
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
@@ -529,19 +537,6 @@ class SubtitleRemovalPage(BasePage):
         splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 3)
 
-        # Log (bottom, below splitter)
-        log_card = QFrame()
-        log_card.setObjectName("card")
-        log_layout = QVBoxLayout(log_card)
-        log_layout.setContentsMargins(12, 10, 12, 10)
-        log_layout.setSpacing(4)
-        log_layout.addWidget(QLabel("📝 处理日志"))
-        self.log_view = QTextEdit()
-        self.log_view.setObjectName("log_viewer")
-        self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(120)
-        log_layout.addWidget(self.log_view)
-        main_layout.addWidget(log_card)
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(

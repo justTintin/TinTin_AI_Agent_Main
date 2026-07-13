@@ -29,7 +29,6 @@ from PySide6.QtCore import Qt, Signal
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, mdi_icon
-from utils.media_library_manager import MediaLibraryManager
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
 
 CANVAS_SIZES = {"16:9（横版）": (1280, 720), "9:16（竖版）": (720, 1280), "1:1（方形）": (1080, 1080)}

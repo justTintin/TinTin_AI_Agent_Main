@@ -551,12 +551,11 @@ class EnvConfigPage(BasePage):
                 f"1. 本地 Ollama 并行数 (ollama_num_parallel) ➔ {res['ollama_num_parallel']} 并发\n"
                 f"2. 多线程视觉分析数 (vision_concurrency) ➔ {res['vision_concurrency']} 并发\n"
                 f"3. 向量编码批处理大小 (batch_size) ➔ {res['clip_batch_size']} 批处理\n\n"
-                f"配置已写入 ai_config.json 和 material_index_config.json。\n"
+                f"配置已写入 ai_config.json 和 material_index_config.json (已移除)。\n"
                 f"（注：若 Ollama 已经在运行，需要重启应用或重启 Ollama 才能使并发限制生效）"
             )
-            QMessageBox.information(self.parent_widget, "硬件自适应优化成功", msg)
-            self._load_matdb_config()
-        except Exception as e:
+	            QMessageBox.information(self.parent_widget, "硬件自适应优化成功", msg)
+	        except Exception as e:
             QMessageBox.critical(self.parent_widget, "优化失败", f"运行自适应优化失败：\n{e}")
 
     def refresh_python_gpu(self):
@@ -602,16 +601,4 @@ class EnvConfigPage(BasePage):
         icon = "✅" if ok else "❌"
         self.lbl_rustfs_status.setText(f"<font color='{color}'>{icon} {msg}</font>")
 
-    # ── 素材向量库数据库配置 ──
-    # 注：数据库配置 UI 已移至「平台接入」→「🗄️ 数据库」标签页，此处仅保留空实现避免外部调用报错。
-
-    def _load_matdb_config(self):
-        pass
-
-    def _save_matdb_config(self):
-        pass
-
     # ── 旺店通 ERP 配置 ──
-
-    def _test_matdb_connection(self):
-        pass

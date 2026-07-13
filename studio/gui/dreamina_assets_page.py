@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager
-from utils.material_clip_indexer import MaterialClipIndexer, IMAGE_EXTS, VIDEO_EXTS
 from config.paths import MATERIALS_DIR
 
 

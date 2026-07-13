@@ -125,7 +125,7 @@ class AIConfigMixin:
             "compute_server_url": "http://192.168.111.18:8000",
             "whisper_api_url": "",
             "clip_api_url": "",
-            "material_api_url": "",
+            "material_api_url(removed)": "",
             "vox_api_url": "http://127.0.0.1:7861/v1/tts",
             "vox_source": "remote",
             "vox_mode": "api",
@@ -627,8 +627,8 @@ class AIConfigMixin:
 
     def _save_material_server_cfg(self):
         """保存素材服务地址到 ai_config.json。"""
-        url = self.material_api_url_input.text().strip()
-        self.ai_config["material_api_url"] = url
+        url = self.material_api_url(removed)_input.text().strip()
+        self.ai_config["material_api_url(removed)"] = url
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -641,13 +641,13 @@ class AIConfigMixin:
 
     def load_material_server_cfg(self):
         """从 ai_config 加载素材服务地址。"""
-        url = self.ai_config.get("material_api_url", "")
-        self.material_api_url_input.setText(url)
+        url = self.ai_config.get("material_api_url(removed)", "")
+        self.material_api_url(removed)_input.setText(url)
 
     def _test_material_server(self):
         """测试素材服务端连通性。"""
         import requests as _req
-        url = self.material_api_url_input.text().strip()
+        url = self.material_api_url(removed)_input.text().strip()
         if not url:
             self.lbl_material_server_status.setText("⚠️ 请填写服务地址")
             self.lbl_material_server_status.setStyleSheet("color: #f39c12;")

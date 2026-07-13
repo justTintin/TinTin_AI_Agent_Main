@@ -535,8 +535,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception:
             pass
         try:
-            if hasattr(self, "folder_watcher") and self.folder_watcher:
-                self.folder_watcher.stop()
         except Exception:
             pass
         try:
@@ -798,43 +796,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_marketing_detect_page()
         self.content_stack.addWidget(self.page_marketing_detect)
 
-        # 42: Material Clip (素材管理) Page
-        self.page_material_clip = QWidget()
-        from gui.material_clip_page import MaterialClipPage
-        self.material_clip_tool = MaterialClipPage(self.page_material_clip, self)
-        self.material_clip_tool.setup()
-        self.content_stack.addWidget(self.page_material_clip)
-
         # 43: Dreamina Assets (即梦素材) Page
         self.page_dreamina_assets = QWidget()
         self.setup_dreamina_assets_page()
         self.content_stack.addWidget(self.page_dreamina_assets)
 
-
-    def _start_clip_preload(self):
-        """应用启动时在后台线程预热 CLIP 模型，避免首次搜索时卡顿。"""
-        import threading
-        import json
-        try:
-            cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-            if not os.path.isfile(cfg_path):
-                return
-            with open(cfg_path, encoding="utf-8") as f:
-                cfg = json.load(f)
-            model_dir = cfg.get("clip_model_dir") or ""
-            if not model_dir or not os.path.isdir(model_dir):
-                return  # 模型目录未配置或不存在，跳过
-        except Exception:
-            return
-
-        def _warm():
-            try:
-                from utils.material_clip_indexer import preload_encoder
-                preload_encoder()
-            except Exception:
-                pass
-
-        threading.Thread(target=_warm, daemon=True, name="clip-preload").start()
 
     def trigger_page_logic(self, index):
         """Triggers data refresh or UI reset for specific pages"""
@@ -873,10 +839,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 41: # Marketing Video Detection
             if hasattr(self, "marketing_detect_tool"):
                 self.marketing_detect_tool.update_vision_model_display()
-        elif index == 42: # 素材管理
-            if hasattr(self, "material_clip_tool"):
-                try: self.material_clip_tool._reload_dir_config()
-                except Exception as e: log.error(f"刷新素材目录失败: {e}")
         elif index == 43: # 即梦素材
             if hasattr(self, "dreamina_assets_tool"):
                 try:
@@ -889,9 +851,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 22: # 资源配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
-            if hasattr(self, "_res_load_configs"):
-                try: self._res_load_configs()
-                except Exception as e: log.error(f"加载资源配置失败: {e}")
 
 
 

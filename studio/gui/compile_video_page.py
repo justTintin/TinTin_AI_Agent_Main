@@ -20,7 +20,6 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
-from utils.media_library_manager import MediaLibraryManager
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager

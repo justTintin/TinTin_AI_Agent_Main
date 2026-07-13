@@ -3593,8 +3593,8 @@ class VideoMontagePage(BasePage):
 
         # 远程 TTS API 地址输入框（纯远程模式；保存时同步到 ai_config）
         self.api_url_input = QLineEdit()
-        self.api_url_input.setText("http://127.0.0.1:8000/v1/tts")
-        self.api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts")
+        self.api_url_input.setText("http://192.168.111.18:8000/voxcpm/tts")
+        self.api_url_input.setPlaceholderText("http://192.168.111.18:8000/voxcpm/tts")
 
         # 2a. Reference Voice Row
         row_voice = QHBoxLayout()

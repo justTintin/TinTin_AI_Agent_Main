@@ -602,6 +602,7 @@ class SubtitleRemovalPage(BasePage):
                 img = Image.open(path)
                 self.original_frame = img
                 self.frame_width, self.frame_height = img.size
+                self._preview_cache_key = None
                 
                 self.seek_slider.setEnabled(False)
                 self.seek_slider.setValue(0)
@@ -717,12 +718,16 @@ class SubtitleRemovalPage(BasePage):
             self.preview_label.px_offset_x = (display_w - target_w) // 2
             self.preview_label.px_offset_y = (display_h - target_h) // 2
 
-            # PIL resize (BILINEAR faster than LANCZOS)
-            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.BILINEAR)
+            # 缓存缩略图：只在分辨率变化时才重新缩放
+            cache_key = (target_w, target_h)
+            if getattr(self, "_preview_cache_key", None) != cache_key:
+                resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.BILINEAR)
+                qimg = QImage(resized_img.tobytes("raw", "RGB"), target_w, target_h, target_w * 3, QImage.Format_RGB888)
+                self._cached_pixmap = QPixmap.fromImage(qimg)
+                self._preview_cache_key = cache_key
 
-            # Convert to QPixmap and draw green rectangle with QPainter
-            qimg = QImage(resized_img.tobytes("raw", "RGB"), resized_img.width, resized_img.height, resized_img.width * 3, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qimg)
+            # Copy cached pixmap and draw green box
+            pixmap = QPixmap(self._cached_pixmap)
             painter = QPainter(pixmap)
             rx0 = int(x * target_w / w_img)
             ry0 = int(y * target_h / h_img)

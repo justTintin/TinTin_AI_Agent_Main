@@ -71,6 +71,7 @@ node_modules/
 !apps/asset-browser/bin/v2rayN/bin/xray/xray.exe
 !studio/bin/win/dreamina.exe
 !studio/bin/win/ffmpeg.exe
+!螺丝钉-电商智能体矩阵.exe
 *.dll
 *.so
 *.whl

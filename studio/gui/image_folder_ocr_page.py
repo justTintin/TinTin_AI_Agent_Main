@@ -360,6 +360,11 @@ class ImageFolderOcrPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_batch_ocr)
         btn_action_layout.addWidget(self.btn_stop)
+
+        self.chk_server_ocr = QCheckBox("使用服务端OCR")
+        self.chk_server_ocr.setToolTip("勾选后上传图片到服务端识别，无需本地 PaddleOCR")
+        btn_action_layout.addWidget(self.chk_server_ocr)
+        btn_action_layout.addStretch()
         bottom_container_layout.addLayout(btn_action_layout)
 
         self.btn_open_dir = QPushButton("📂 打开输出文件目录")
@@ -680,6 +685,61 @@ class ImageFolderOcrPage(BasePage):
             self._append_log(f"[ERROR] 选区 OCR 测试失败: {text_or_error}")
             QMessageBox.critical(self.parent_widget, "测试失败", f"选区测试失败，错误原因：\n{text_or_error}")
 
+    def _start_remote_batch_ocr(self, folder_path, key_text):
+        """服务端 OCR 批量处理。"""
+        from utils.ocr_client import ocr_image
+
+        # 收集所有图片文件
+        img_files = []
+        for root, _, files in os.walk(folder_path):
+            for f in sorted(files):
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                    img_files.append(os.path.join(root, f))
+
+        if not img_files:
+            QMessageBox.warning(self.parent_widget, "无图片", "文件夹中没有图片文件。")
+            return
+
+        self.log_view.clear()
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, len(img_files))
+        self.btn_start.setEnabled(False)
+        self.chk_server_ocr.setEnabled(False)
+
+        class _RemoteOcrWorker(BaseWorker):
+            finished = Signal(list)
+            def __init__(self, files, keyword):
+                super().__init__()
+                self.files = files
+                self.keyword = keyword
+            def do_work(self):
+                results = []
+                for i, fp in enumerate(self.files):
+                    try:
+                        text = ocr_image(fp)
+                        match = bool(self.keyword) and self.keyword in (text or "")
+                        results.append({"file": os.path.basename(fp), "text": text, "match": match})
+                    except Exception as e:
+                        results.append({"file": os.path.basename(fp), "text": f"[错误: {e}]", "match": False})
+                self.finished.emit(results)
+
+        w = _RemoteOcrWorker(img_files, key_text)
+        w.finished.connect(lambda results: self._on_remote_ocr_done(results))
+        w.error.connect(lambda e: QMessageBox.critical(self.parent_widget, "OCR错误", str(e)))
+        w.start()
+
+    def _on_remote_ocr_done(self, results):
+        self.progress_bar.setValue(self.progress_bar.maximum())
+        self.btn_start.setEnabled(True)
+        self.chk_server_ocr.setEnabled(True)
+
+        out_lines = ["文件\t识别文本\t匹配"]
+        for r in results:
+            out_lines.append(f"{r['file']}\t{r['text']}\t{'✅' if r['match'] else '❌'}")
+        self.log_view.setPlainText("\n".join(out_lines))
+        QMessageBox.information(self.parent_widget, "OCR完成",
+            f"共处理 {len(results)} 张图片，其中 {sum(1 for r in results if r['match'])} 张匹配关键词")
+
     def start_batch_ocr(self):
         folder_path = self.folder_path_input.text().strip()
         if not folder_path or not os.path.exists(folder_path):
@@ -687,6 +747,13 @@ class ImageFolderOcrPage(BasePage):
             return
 
         key_text = self.key_input.text().strip()
+
+        # 服务端模式
+        if self.chk_server_ocr.isChecked():
+            self._start_remote_batch_ocr(folder_path, key_text)
+            return
+
+        # 本地模式（原逻辑）
         if not key_text:
             QMessageBox.warning(self.parent_widget, "错误", "请填写定位关键词 (Key)。")
             return

@@ -456,6 +456,11 @@ class VideoOcrPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_ocr_scan)
         btn_action_layout.addWidget(self.btn_stop)
+
+        self.chk_server_ocr = QCheckBox("使用服务端OCR")
+        self.chk_server_ocr.setToolTip("勾选后上传图片到服务端识别")
+        btn_action_layout.addWidget(self.chk_server_ocr)
+        btn_action_layout.addStretch()
         bottom_container_layout.addLayout(btn_action_layout)
 
         card_layout.addWidget(bottom_container, 1)

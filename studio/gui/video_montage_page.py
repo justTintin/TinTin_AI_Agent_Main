@@ -6562,6 +6562,100 @@ class VideoMontagePage(BasePage):
             self.final_preview_player.play()
             self.final_preview_title.setText(f"🎥 {os.path.basename(path)}")
 
+    def _run_batch_vision_descriptions(self, splits_dir, split_files, missing_only=None):
+        """用 BatchGenerateDescriptionsWorker 对分割镜头做批量画面分析，生成描述。
+
+        与 _trigger_vision_on_dir 不同，此方法：
+        - 使用主 LLM 配置（llm_api_url），而非视觉模型
+        - 对每个镜头抽取多张关键帧
+        - 支持有/无字幕两种模式
+        """
+        cfg = getattr(self.main_window, "ai_config", {}) or {}
+        api_url = cfg.get("llm_api_url", "").strip()
+        api_key = cfg.get("llm_api_key", "").strip()
+        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
+        if not api_url or not api_key:
+            QMessageBox.warning(self.parent_widget, "未配置大模型",
+                                "请先在设置中配置 LLM 接口地址和密钥以使用画面描述生成。")
+            return
+
+        # 构建场景列表
+        scenes = []
+        clip_paths = []
+        for f_name in split_files:
+            p_clip = os.path.join(splits_dir, f_name)
+            norm_p = os.path.abspath(p_clip)
+            if missing_only and norm_p not in missing_only:
+                continue
+            parsed = self._parse_split_filename(f_name)
+            if parsed:
+                start_str, end_str = parsed[1], parsed[2]
+                try:
+                    start_sec = float(start_str.replace(",", "."))
+                    end_sec = float(end_str.replace(",", "."))
+                    scenes.append((start_sec, end_sec))
+                except Exception:
+                    scenes.append((0.0, 5.0))
+            else:
+                scenes.append((0.0, 5.0))
+            clip_paths.append(norm_p)
+
+        if not clip_paths:
+            return
+
+        # 尝试找字幕
+        raw_srt = ""
+        parent_dir = os.path.dirname(splits_dir)
+        if parent_dir:
+            for f_name in os.listdir(parent_dir):
+                if f_name.endswith(".srt"):
+                    try:
+                        with open(os.path.join(parent_dir, f_name), "r", encoding="utf-8") as sf:
+                            raw_srt = sf.read().strip()
+                        break
+                    except Exception:
+                        pass
+
+        self.stage_label.setText(f"正在批量分析 {len(clip_paths)} 个镜头画面...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+
+        self._batch_desc_worker = BatchGenerateDescriptionsWorker(
+            api_url, api_key, model, raw_srt, scenes, clip_paths)
+
+        def on_desc_ok(json_str):
+            import json as _json
+            try:
+                desc_dict = _json.loads(json_str)
+                for item in desc_dict:
+                    idx = item.get("index", 0) - 1
+                    desc = item.get("description", "").strip()
+                    if 0 <= idx < len(clip_paths) and desc:
+                        norm_p = os.path.abspath(clip_paths[idx])
+                        self.split_descriptions[norm_p] = desc
+                        if norm_p in getattr(self, "split_clips_cache", {}):
+                            self.split_clips_cache[norm_p]["desc"] = desc
+            except Exception as e:
+                log.warning(f"解析批量画面描述失败: {e}")
+            self.progress_bar.setValue(100)
+            self._check_split_clips_exist()
+            self.stage_label.setText("✅ 画面描述生成完成")
+            QMessageBox.information(
+                self.parent_widget, "描述生成完成",
+                f"已为 {len(clip_paths)} 个镜头生成画面描述。")
+
+        def on_desc_err(msg):
+            log.warning(f"批量画面描述生成失败: {msg}")
+            self.progress_bar.setValue(100)
+            self.stage_label.setText("❌ 画面描述生成失败")
+            QMessageBox.warning(self.parent_widget, "生成失败",
+                                f"画面描述生成失败：\n{msg}")
+
+        self._batch_desc_worker.finished.connect(on_desc_ok)
+        self._batch_desc_worker.error.connect(on_desc_err)
+        self._batch_desc_worker.start()
+
     def _gen_split_descriptions(self):
         """为当前选中视频的每个分割镜头生成文案描述。
 
@@ -6612,8 +6706,8 @@ class VideoMontagePage(BasePage):
                 self._pending_gen_descriptions = True
                 self._start_transcribe_raw()
                 return
-            # 否则直接走视觉AI
-            self._trigger_vision_on_dir(splits_dir, self._get_split_scenes_times(splits_dir, files))
+            # 否则用 BatchGenerateDescriptionsWorker 批量分析画面
+            self._run_batch_vision_descriptions(splits_dir, files)
             return
 
         # 有字幕，按时间戳匹配到每个镜头
@@ -6652,7 +6746,7 @@ class VideoMontagePage(BasePage):
         if missing_clips:
             # 有匹配不到的镜头，用视觉AI补充
             self.stage_label.setText(f"字幕匹配完成，{len(missing_clips)} 个镜头未匹配到字幕，正在用视觉AI分析...")
-            self._trigger_vision_on_dir(splits_dir, scenes)
+            self._run_batch_vision_descriptions(splits_dir, files, missing_clips)
         else:
             self.stage_label.setText(f"✅ 已为全部 {len(files)} 个镜头匹配字幕文案描述")
             QMessageBox.information(

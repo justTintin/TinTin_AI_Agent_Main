@@ -186,11 +186,20 @@ class InteractivePreviewLabel(QLabel):
         self.drag_start_pos = None
         self.drag_start_rect = None
 
-    def set_selection(self, x, y, w, h):
-        self.sel_x = x
-        self.sel_y = y
-        self.sel_w = w
-        self.sel_h = h
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        # Draw green selection rectangle on top
+        if self.frame_w > 0 and self.frame_h > 0 and self.target_w > 0 and self.target_h > 0:
+            painter = QPainter(self)
+            w_ratio = self.target_w / self.frame_w
+            h_ratio = self.target_h / self.frame_h
+            rx0 = self.px_offset_x + self.sel_x * w_ratio
+            ry0 = self.px_offset_y + self.sel_y * h_ratio
+            rx1 = self.px_offset_x + (self.sel_x + self.sel_w) * w_ratio
+            ry1 = self.px_offset_y + (self.sel_y + self.sel_h) * h_ratio
+            painter.setPen(QPen(QColor("#00ff00"), 3))
+            painter.drawRect(int(rx0), int(ry0), int(rx1 - rx0), int(ry1 - ry0))
+            painter.end()
 
     def get_handle_under_mouse(self, pos):
         if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0:
@@ -725,18 +734,10 @@ class SubtitleRemovalPage(BasePage):
                 qimg = QImage(resized_img.tobytes("raw", "RGB"), target_w, target_h, target_w * 3, QImage.Format_RGB888)
                 self._cached_pixmap = QPixmap.fromImage(qimg)
                 self._preview_cache_key = cache_key
+                self.preview_label.setPixmap(self._cached_pixmap)
 
-            # Copy cached pixmap and draw green box
-            pixmap = QPixmap(self._cached_pixmap)
-            painter = QPainter(pixmap)
-            rx0 = int(x * target_w / w_img)
-            ry0 = int(y * target_h / h_img)
-            rx1 = int((x + w) * target_w / w_img)
-            ry1 = int((y + h) * target_h / h_img)
-            painter.setPen(QPen(QColor("#00ff00"), 3))
-            painter.drawRect(rx0, ry0, rx1 - rx0, ry1 - ry0)
-            painter.end()
-            self.preview_label.setPixmap(pixmap)
+            # 只触发重绘，绿框由 paintEvent 负责
+            self.preview_label.update()
 
     def _on_label_bounds_changed(self, x, y, w, h):
         self.x_slider.blockSignals(True)

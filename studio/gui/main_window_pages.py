@@ -749,6 +749,9 @@ class PageSetupMixin:
         
             header = QHBoxLayout()
             header.addWidget(QLabel("📋 任务队列"))
+            self.lbl_task_status = QLabel("")
+            self.lbl_task_status.setObjectName("muted_text")
+            header.addWidget(self.lbl_task_status, 1)
             btn_sync = mdi_button("同步服务端", "refresh")
             btn_sync.setFixedWidth(100)
             btn_sync.clicked.connect(self._sync_server_tasks)
@@ -778,8 +781,9 @@ class PageSetupMixin:
             layout.addWidget(task_card, 1)
     
     def _sync_server_tasks(self):
-        """从服务端 GET /tasks 拉取任务列表并入表格。"""
+        """从服务端 GET /tasks 拉取本机任务列表并入表格。"""
         import requests as _req
+        import socket as _socket
         try:
             from config.paths import AI_CONFIG_FILE
             import json as _json
@@ -796,13 +800,33 @@ class PageSetupMixin:
             tasks = resp.json()
             if not isinstance(tasks, list):
                 return
+
+            # 获取本机 IP
+            local_ip = ""
+            try:
+                s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                s.connect((base_url.replace("http://","").replace("https://","").split(":")[0], 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                pass
+
             # 已存在的任务 ID 集合
             existing = set()
             for row in range(self.task_table.rowCount()):
                 item = self.task_table.item(row, 0)
                 if item:
                     existing.add(item.text())
+
+            added = 0
+            filtered = 0
             for t in tasks:
+                # 只显示本机 IP 的任务
+                task_ip = (t.get("client_ip") or "").strip()
+                if local_ip and task_ip and task_ip != local_ip:
+                    filtered += 1
+                    continue
+
                 tid = (t.get("id") or "")[:12]
                 if not tid or tid in existing:
                     continue
@@ -820,9 +844,14 @@ class PageSetupMixin:
                 p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
                 p_bar.setTextVisible(True)
                 self.task_table.setCellWidget(row, 4, p_bar)
-                # 操作列留空（服务端任务不可本地操作）
                 self.task_table.setCellWidget(row, 5, QWidget())
                 existing.add(tid)
+                added += 1
+
+            if added > 0:
+                self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
+            elif filtered > 0:
+                self.lbl_task_status.setText(f"💡 服务端有 {filtered} 条其他客户端的任务已过滤")
         except Exception as e:
             print(f"同步服务端任务失败: {e}")
     

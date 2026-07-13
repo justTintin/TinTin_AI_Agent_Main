@@ -219,11 +219,10 @@ class TranscriptionToolPage(BasePage):
         if not index.isValid():
             return
         row = index.row()
-        col = index.column()
         f = self.files[row]
 
-        # 已完成且在结果列(2-3) → 保存对话框
-        if f["status"] == "✅ 完成" and f["srt_text"] and col >= 2:
+        # 已完成且有关键结果 → 保存对话框（不管是点哪列）
+        if f["status"] == "✅ 完成" and f["srt_text"]:
             self._show_save_dialog(row)
             return
 

@@ -351,20 +351,7 @@ class SubtitleRemovalPage(BasePage):
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
-        # Video path picker (above splitter)
-        inp_row = QHBoxLayout()
-        inp_row.addWidget(QLabel("输入视频/图片:"))
-        self.video_path_input = QLineEdit()
-        self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
-        self.video_path_input.textChanged.connect(self._on_video_path_changed)
-        inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("选择文件")
-        btn_sel.setObjectName("secondary_button")
-        btn_sel.clicked.connect(self._select_video)
-        inp_row.addWidget(btn_sel)
-        main_layout.addLayout(inp_row)
-
-        # Splitter: left controls / right preview
+        # Splitter: left preview / right controls
         splitter = QSplitter(Qt.Horizontal)
         splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
         main_layout.addWidget(splitter, 1)
@@ -489,6 +476,19 @@ class SubtitleRemovalPage(BasePage):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 10, 0)
         right_layout.setSpacing(10)
+
+        # Video path picker
+        inp_row = QHBoxLayout()
+        inp_row.addWidget(QLabel("输入视频/图片:"))
+        self.video_path_input = QLineEdit()
+        self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
+        self.video_path_input.textChanged.connect(self._on_video_path_changed)
+        inp_row.addWidget(self.video_path_input)
+        btn_sel = QPushButton("选择文件")
+        btn_sel.setObjectName("secondary_button")
+        btn_sel.clicked.connect(self._select_video)
+        inp_row.addWidget(btn_sel)
+        right_layout.addLayout(inp_row)
 
         # Preview
         preview_card = QFrame()

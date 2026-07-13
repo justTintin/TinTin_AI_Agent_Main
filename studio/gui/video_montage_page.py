@@ -5480,7 +5480,8 @@ class VideoMontagePage(BasePage):
         output_srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
 
         self.btn_split.setEnabled(False)
-        self.btn_transcribe_raw.setEnabled(False)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -5538,7 +5539,8 @@ class VideoMontagePage(BasePage):
 
     def _finalize_transcribe_raw(self, srt_content, srt_path, info_msg=""):
         self.btn_split.setEnabled(True)
-        self.btn_transcribe_raw.setEnabled(True)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.stage_label.setText(f"✅ 字幕生成完成{info_msg}")
@@ -5556,7 +5558,8 @@ class VideoMontagePage(BasePage):
 
     def _on_transcribe_raw_error(self, err):
         self.btn_split.setEnabled(True)
-        self.btn_transcribe_raw.setEnabled(True)
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 字幕生成失败")

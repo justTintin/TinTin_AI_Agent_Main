@@ -9,36 +9,16 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
-from utils.base_worker import BaseWorker
 from config.paths import MATERIALS_DIR
 
-
-class _IndexAnalyzeWorker(BaseWorker):
-    log_line = Signal(str)
-    finished = Signal(dict)
-
-    def __init__(self, directory: str):
-        super().__init__()
-        self.directory = directory
-
-    def do_work(self):
-        result = {
-            "index_ok": 0,
-            "index_skip": 0,
-            "index_fail": 0,
-        }
-        with MaterialClipIndexer(progress_cb=self.log_line.emit) as idx:
-            ok, skip, fail = idx.index_directory_meta(self.directory, force=False)
-            result["index_ok"] = ok
-            result["index_skip"] = skip
-            result["index_fail"] = fail
-        self.finished.emit(result)
+# 常见媒体文件后缀
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
+VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv"}
 
 
 class DreaminaAssetsPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.media = MediaLibraryManager()
         self._current_dir = os.path.join(MATERIALS_DIR, "dreamina_assets")
         os.makedirs(self._current_dir, exist_ok=True)
 
@@ -89,11 +69,6 @@ class DreaminaAssetsPage(BasePage):
         self.btn_open_browser.clicked.connect(self._open_dreamina_browser)
         acts.addWidget(self.btn_open_browser)
 
-        self.btn_add_media = QPushButton("📥 加入素材管理")
-        self.btn_add_media.setObjectName("secondary_button")
-        self.btn_add_media.clicked.connect(self._add_to_media)
-        acts.addWidget(self.btn_add_media)
-
         self.btn_refresh = QPushButton("↺ 刷新文件列表")
         self.btn_refresh.setObjectName("secondary_button")
         self.btn_refresh.clicked.connect(self._scan_local_files)
@@ -110,14 +85,9 @@ class DreaminaAssetsPage(BasePage):
         lay.setSpacing(10)
 
         top = QHBoxLayout()
-        self.lbl_stat = QLabel("共 0 个可入库文件")
+        self.lbl_stat = QLabel("共 0 个文件")
         self.lbl_stat.setObjectName("muted_text")
         top.addWidget(self.lbl_stat, 1)
-
-        self.btn_index = QPushButton("⚡ 一键入库")
-        self.btn_index.setObjectName("primary_button")
-        self.btn_index.clicked.connect(self._start_index)
-        top.addWidget(self.btn_index)
 
         lay.addLayout(top)
 
@@ -185,43 +155,8 @@ class DreaminaAssetsPage(BasePage):
         for fp in files:
             rel = os.path.relpath(fp, d)
             self.file_list.addItem(QListWidgetItem(rel))
-        self.lbl_stat.setText(f"共 {len(files)} 个可入库文件")
-
-    def _add_to_media(self):
-        d = self._dir()
-        os.makedirs(d, exist_ok=True)
-        ok, msg, _ = self.media.add_mount(d, kind="项目", group="即梦素材", tags=["即梦", "下载素材"])
-        self.show_info(msg if ok else f"未添加：{msg}")
+        self.lbl_stat.setText(f"共 {len(files)} 个文件")
 
     def _set_busy(self, busy: bool):
-        self.btn_index.setEnabled(not busy)
-        self.btn_index_ai.setEnabled(not busy)
         self.btn_open_browser.setEnabled(not busy)
         self.btn_refresh.setEnabled(not busy)
-
-    def _start_index(self):
-        d = self._dir()
-        if not os.path.isdir(d):
-            self.show_warning("请先选择有效的下载目录。")
-            return
-
-        self._set_busy(True)
-        self.log_box.append(f"\n[{datetime.now().strftime('%H:%M:%S')}] 开始一键入库: {d}")
-
-        w = self.track_worker(_IndexAnalyzeWorker(d))
-        w.log_line.connect(self.log_box.append)
-        w.finished.connect(self._on_index_done)
-        w.error.connect(self._on_index_error)
-        w.start()
-
-    def _on_index_done(self, result: dict):
-        self._set_busy(False)
-        self.log_box.append(
-            f"\n✅ 入库完成  新增:{result.get('index_ok',0)}  跳过:{result.get('index_skip',0)}  失败:{result.get('index_fail',0)}"
-        )
-        self._scan_local_files()
-
-    def _on_index_error(self, msg: str):
-        self._set_busy(False)
-        self.log_box.append(f"\n❌ 操作失败: {msg}")
-        self.show_error(f"执行失败：\n{msg}")

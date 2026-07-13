@@ -554,8 +554,8 @@ class EnvConfigPage(BasePage):
                 f"配置已写入 ai_config.json 和 material_index_config.json (已移除)。\n"
                 f"（注：若 Ollama 已经在运行，需要重启应用或重启 Ollama 才能使并发限制生效）"
             )
-	            QMessageBox.information(self.parent_widget, "硬件自适应优化成功", msg)
-	        except Exception as e:
+            QMessageBox.information(self.parent_widget, "硬件自适应优化成功", msg)
+        except Exception as e:
             QMessageBox.critical(self.parent_widget, "优化失败", f"运行自适应优化失败：\n{e}")
 
     def refresh_python_gpu(self):

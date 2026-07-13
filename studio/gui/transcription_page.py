@@ -79,14 +79,15 @@ class TranscriptionToolPage(BasePage):
         list_lay = QVBoxLayout(list_card)
         list_lay.setContentsMargins(24, 20, 24, 20)
 
-        list_lay.addWidget(QLabel("文件列表（双击播放，右键移除）："))
+        list_lay.addWidget(QLabel("文件列表（双击预览列查看全文保存，或点操作列💾按钮）："))
 
-        self.file_table = QTableWidget(0, 4)
-        self.file_table.setHorizontalHeaderLabels(["文件名", "文件大小", "状态", "结果预览"])
+        self.file_table = QTableWidget(0, 5)
+        self.file_table.setHorizontalHeaderLabels(["文件名", "文件大小", "状态", "结果预览", "操作"])
         self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
         self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.file_table.setColumnWidth(0, 350)
         self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -154,6 +155,7 @@ class TranscriptionToolPage(BasePage):
         self.file_table.setItem(row, 1, QTableWidgetItem(size_text))
         self.file_table.setItem(row, 2, QTableWidgetItem(f["status"]))
         self.file_table.setItem(row, 3, QTableWidgetItem(f["preview"]))
+        self._set_save_button(row, f)
         self._apply_row_color(row, f["status"])
 
     def _refresh_file_row(self, idx):
@@ -164,7 +166,22 @@ class TranscriptionToolPage(BasePage):
         self.file_table.item(idx, 1).setText(size_text)
         self.file_table.item(idx, 2).setText(f["status"])
         self.file_table.item(idx, 3).setText(f["preview"])
+        self._set_save_button(idx, f)
         self._apply_row_color(idx, f["status"])
+
+    def _set_save_button(self, row, f):
+        # 清除旧的按钮
+        old = self.file_table.cellWidget(row, 4)
+        if old:
+            old.deleteLater()
+            self.file_table.removeCellWidget(row, 4)
+        # 已完成才显示保存按钮
+        if f["status"] == "✅ 完成" and f["srt_text"]:
+            btn = QPushButton("💾 保存")
+            btn.setObjectName("secondary_button")
+            btn.setStyleSheet("padding: 2px 8px; font-size: 12px;")
+            btn.clicked.connect(lambda r=row: self._show_save_dialog(r))
+            self.file_table.setCellWidget(row, 4, btn)
 
     def _apply_row_color(self, row, status):
         from PySide6.QtGui import QColor
@@ -258,7 +275,7 @@ class TranscriptionToolPage(BasePage):
 
         def _update_preview():
             text = self._convert_format(f["srt_text"], fmt_combo.currentData())
-            preview.setPlainText(text[:1000])
+            preview.setPlainText(text)
 
         fmt_combo.currentIndexChanged.connect(_update_preview)
         _update_preview()

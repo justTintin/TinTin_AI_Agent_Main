@@ -492,11 +492,12 @@ class EnvConfigPage(BasePage):
                 log.error(f"执行环境检测回调失败: {e}")
 
     def update_ui_with_info(self, info):
-        if "python" in self.status_labels:
-            py_status = f"<font color='#16a34a'><b>✅ 独立嵌入式环境</b></font> (位置: {info['python_path']})"
-            self.status_labels["python"].setText(py_status)
+        try:
+            if "python" in self.status_labels:
+                py_status = f"<font color='#16a34a'><b>✅ 独立嵌入式环境</b></font> (位置: {info['python_path']})"
+                self.status_labels["python"].setText(py_status)
 
-        if "gpu" in self.status_labels:
+            if "gpu" in self.status_labels:
             if info.get("cuda_available", False):
                 gpu_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('cuda_device', '无')})"
             else:
@@ -545,6 +546,8 @@ class EnvConfigPage(BasePage):
             self.status_labels["ram_info"].setText(info.get("ram_info", "未知"))
         if "gpu_info" in self.status_labels:
             self.status_labels["gpu_info"].setText(info.get("gpu_info", "未知"))
+        except RuntimeError:
+            pass
 
     def auto_optimize_hardware(self):
         try:

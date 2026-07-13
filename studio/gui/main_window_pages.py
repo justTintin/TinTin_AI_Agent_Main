@@ -763,18 +763,20 @@ class PageSetupMixin:
             header.addStretch()
             task_layout.addLayout(header)
         
-            self.task_table = QTableWidget(0, 6)
-            self.task_table.setHorizontalHeaderLabels(["任务 ID", "任务类型", "来源", "状态", "进度", "操作"])
+            self.task_table = QTableWidget(0, 7)
+            self.task_table.setHorizontalHeaderLabels(["任务 ID", "任务类型", "来源", "状态", "进度", "时间", "操作"])
             self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
             self.task_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
             self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
             self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
             self.task_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-            self.task_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+            self.task_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+            self.task_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
             self.task_table.setColumnWidth(0, 180)
             self.task_table.setColumnWidth(1, 120)
             self.task_table.setColumnWidth(3, 120)
-            self.task_table.setColumnWidth(5, 100)
+            self.task_table.setColumnWidth(5, 140)
+            self.task_table.setColumnWidth(6, 100)
             self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             task_layout.addWidget(self.task_table)
         
@@ -830,6 +832,13 @@ class PageSetupMixin:
                 tid = (t.get("id") or "")[:12]
                 if not tid or tid in existing:
                     continue
+                # 格式化时间
+                created_ts = t.get("created_at") or t.get("started_at") or 0
+                if created_ts:
+                    import datetime as _dt
+                    time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M")
+                else:
+                    time_str = ""
                 row = self.task_table.rowCount()
                 self.task_table.insertRow(row)
                 self.task_table.setItem(row, 0, QTableWidgetItem(tid))
@@ -844,7 +853,8 @@ class PageSetupMixin:
                 p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
                 p_bar.setTextVisible(True)
                 self.task_table.setCellWidget(row, 4, p_bar)
-                self.task_table.setCellWidget(row, 5, QWidget())
+                self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
+                self.task_table.setCellWidget(row, 6, QWidget())
                 existing.add(tid)
                 added += 1
 

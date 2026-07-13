@@ -1076,33 +1076,38 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         p_bar.setTextVisible(True)
         self.task_table.setCellWidget(row, 4, p_bar)
         self.task_progress_bars[prompt_id] = p_bar
-        
+
+        # 创建时间
+        from datetime import datetime
+        time_str = datetime.now().strftime("%m-%d %H:%M")
+        self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
+
         # Action column
         actions_widget = QWidget()
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(5, 2, 5, 2)
         actions_layout.setSpacing(5)
-        
+
         btn_preview = mdi_button("", "eye")
         btn_preview.setToolTip("预览")
         btn_preview.setFixedSize(30, 24)
         btn_preview.setEnabled(False)
         btn_preview.clicked.connect(lambda: self.preview_result(prompt_id))
-        
+
         btn_download = mdi_button("", "save")
         btn_download.setToolTip("下载")
         btn_download.setFixedSize(30, 24)
         btn_download.setEnabled(False)
         btn_download.clicked.connect(lambda: self.download_result(prompt_id))
-        
+
         actions_layout.addWidget(btn_preview)
         actions_layout.addWidget(btn_download)
-        self.task_table.setCellWidget(row, 5, actions_widget)
+        self.task_table.setCellWidget(row, 6, actions_widget)
 
     def update_task_actions(self, prompt_id):
         for row in range(self.task_table.rowCount()):
             if self.task_table.item(row, 0).text() == prompt_id[:12]:
-                w = self.task_table.cellWidget(row, 5)
+                w = self.task_table.cellWidget(row, 6)
                 if w:
                     for btn in w.findChildren(QPushButton):
                         btn.setEnabled(True)

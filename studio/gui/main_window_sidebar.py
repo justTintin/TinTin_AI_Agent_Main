@@ -233,8 +233,6 @@ class SidebarMixin:
             ("视频框选 OCR", 24, "search"),
             # ("🏷️ 视频智能重命名", 26),   # 暂时隐藏
             # ("🌈 批量 LUT 调色", 27),     # 暂时隐藏
-            ("📈 视频预测评价", 35, None),
-            ("📢 营销视频检测", 41, None),
         ]
         for text, index, icon_name in video_menus:
             if icon_name:
@@ -248,6 +246,34 @@ class SidebarMixin:
             video_layout.addWidget(btn)
             self.nav_buttons.append(btn)
         scroll_layout.addWidget(video_card)
+
+        # 7. 视频运营 Section
+        ops_card = QFrame()
+        ops_card.setProperty("section_type", "ai")
+        ops_layout = QVBoxLayout(ops_card)
+        ops_layout.setContentsMargins(6, 8, 6, 8)
+        ops_layout.setSpacing(2)
+
+        ops_header = QLabel("视频运营")
+        ops_header.setObjectName("section_header")
+        ops_layout.addWidget(ops_header)
+
+        ops_menus = [
+            ("📈 视频预测评价", 35, None),
+            ("📢 营销视频检测", 41, None),
+        ]
+        for text, index, icon_name in ops_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
+            btn.setObjectName("nav_button")
+            btn.setProperty("target_index", index)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
+            ops_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
+        scroll_layout.addWidget(ops_card)
 
         # 5. 系统配置 Section
         system_card = QFrame()

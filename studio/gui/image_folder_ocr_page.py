@@ -361,9 +361,6 @@ class ImageFolderOcrPage(BasePage):
         self.btn_stop.clicked.connect(self.stop_batch_ocr)
         btn_action_layout.addWidget(self.btn_stop)
 
-        self.chk_server_ocr = QCheckBox("使用服务端OCR")
-        self.chk_server_ocr.setToolTip("勾选后上传图片到服务端识别，无需本地 PaddleOCR")
-        btn_action_layout.addWidget(self.chk_server_ocr)
         btn_action_layout.addStretch()
         bottom_container_layout.addLayout(btn_action_layout)
 
@@ -731,7 +728,6 @@ class ImageFolderOcrPage(BasePage):
     def _on_remote_ocr_done(self, results):
         self.progress_bar.setValue(self.progress_bar.maximum())
         self.btn_start.setEnabled(True)
-        self.chk_server_ocr.setEnabled(True)
 
         out_lines = ["文件\t识别文本\t匹配"]
         for r in results:
@@ -745,46 +741,8 @@ class ImageFolderOcrPage(BasePage):
         if not folder_path or not os.path.exists(folder_path):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择有效的输入图片文件夹。")
             return
-
         key_text = self.key_input.text().strip()
-
-        # 服务端模式
-        if self.chk_server_ocr.isChecked():
-            self._start_remote_batch_ocr(folder_path, key_text)
-            return
-
-        # 本地模式（原逻辑）
-        if not key_text:
-            QMessageBox.warning(self.parent_widget, "错误", "请填写定位关键词 (Key)。")
-            return
-
-        out_path = self.output_path_input.text().strip()
-        if not out_path:
-            QMessageBox.warning(self.parent_widget, "错误", "请指定输出表格保存路径。")
-            return
-
-        vsr_python = PADDLEOCR_PYTHON
-        ocr_script = IMAGE_FOLDER_OCR_SCRIPT
-
-        if not os.path.exists(vsr_python) or not os.path.exists(ocr_script):
-            QMessageBox.warning(
-                self.parent_widget,
-                "环境未就绪",
-                "未检测到 PaddleOCR 专属运行环境，请先部署专属环境。"
-            )
-            return
-
-        self.log_view.clear()
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        self.btn_test_ocr.setEnabled(False)
-        self.folder_path_input.setEnabled(False)
-        self.output_path_input.setEnabled(False)
-        self.key_input.setEnabled(False)
-        self.format_combo.setEnabled(False)
+        self._start_remote_batch_ocr(folder_path, key_text)
         
         self.x_slider.setEnabled(False)
         self.w_slider.setEnabled(False)

@@ -1032,31 +1032,12 @@ class PageSetupMixin:
         l3.addWidget(brand_card)
 
         # Get machine code and license signature info
-        from utils.license import get_machine_id, check_trial_whitelist, load_activation_cache, verify_license
+        from utils.license import get_machine_id
         machine_id = get_machine_id()
         
-        license_status = "未激活 (Not Activated)"
-        licensee_name = "N/A"
-        expiry_date = "N/A"
-        
-        if check_trial_whitelist(machine_id):
-            license_status = "已激活 (开发者测试白名单)"
-            licensee_name = "开发者/测试员 (White-listed Trial)"
-            expiry_date = "永久试用 (Unlimited)"
-        else:
-            cached = load_activation_cache()
-            if cached is not None:
-                license_status = "已激活 (缓存签名)"
-                licensee_name = cached.licensee
-                expiry_date = cached.expires
-            else:
-                try:
-                    lic = verify_license()
-                    license_status = "已激活 (正式许可证签名)"
-                    licensee_name = lic.licensee
-                    expiry_date = lic.expires
-                except Exception:
-                    pass
+        license_status = "已激活 (客户端免激活)"
+        licensee_name = "服务端统一授权验证"
+        expiry_date = "自适应计算服务端授权状态"
 
         # License Info Card
         license_card = QFrame()

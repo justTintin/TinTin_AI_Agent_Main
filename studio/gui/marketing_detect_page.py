@@ -22,6 +22,7 @@ from PySide6.QtCore import Signal, Qt
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.video_compiler import _find, _probe_duration
+from utils.platform_utils import find_ffmpeg
 from config.paths import TMP_DIR
 
 
@@ -86,7 +87,7 @@ class MarketingDetectWorker(BaseWorker):
         os.makedirs(frames_dir, exist_ok=True)
         
         frames = []
-        ffmpeg = _find("ffmpeg.exe")
+        ffmpeg = find_ffmpeg()
         flags = 0x08000000 if os.name == "nt" else 0
         
         for i, t in enumerate(times):

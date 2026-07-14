@@ -259,8 +259,8 @@ class SidebarMixin:
         ops_layout.addWidget(ops_header)
 
         ops_menus = [
-            ("📈 视频预测评价", 35, None),
-            ("📢 营销视频检测", 41, None),
+            ("📈 视频评价预测", 35, None),
+            ("📢 视频营销检测", 41, None),
         ]
         for text, index, icon_name in ops_menus:
             if icon_name:

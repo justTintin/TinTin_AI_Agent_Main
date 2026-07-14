@@ -122,7 +122,7 @@ class CompileVideoPage(BasePage):
         opt.addWidget(QLabel("每张时长(无配音时)"))
         self.spin_dur = QDoubleSpinBox(); self.spin_dur.setRange(0.5, 30.0); self.spin_dur.setValue(3.0)
         self.spin_dur.setSuffix(" 秒"); opt.addWidget(self.spin_dur)
-        self.chk_autocheck = QCheckBox("成片后自动视频预测评价")
+        self.chk_autocheck = QCheckBox("成片后自动视频评价预测")
         self.chk_autocheck.setChecked(True)
         opt.addWidget(self.chk_autocheck)
         opt.addWidget(QLabel("平台"))
@@ -273,7 +273,7 @@ class CompileVideoPage(BasePage):
         self.btn_make.setEnabled(True); self.pbar.setVisible(False)
         self.btn_open.setEnabled(True)
         self.status.setText(f"✅ 成片完成：{out}")
-        # 自动视频预测评价：按所选平台预测成片表现
+        # 自动视频评价预测：按所选平台预测成片表现
         if self.chk_autocheck.isChecked():
             cfg = self.ai_config
             if cfg.get("llm_vision_api_url") and cfg.get("llm_vision_model"):
@@ -284,13 +284,13 @@ class CompileVideoPage(BasePage):
                     calib = VideoPredictionManager().calibration_text(platform=platform)
                 except Exception:
                     calib = ""
-                self.score_label.setText(f"⏳ 正在按「{platform}」做视频预测评价…")
+                self.score_label.setText(f"⏳ 正在按「{platform}」做视频评价预测…")
                 sw = HookScoreWorker(out, cfg, platform=platform, calibration=calib)
                 sw.finished.connect(self._on_self_check)
                 sw.error.connect(lambda e: self.score_label.setText(f"视频预测失败：{e}"))
                 self.track_worker(sw); sw.start()
             else:
-                self.score_label.setText("（未配置视觉模型，跳过视频预测评价。）")
+                self.score_label.setText("（未配置视觉模型，跳过视频评价预测。）")
 
     def _on_self_check(self, data):
         self._self_check_data = data

@@ -1297,26 +1297,9 @@ if __name__ == "__main__":
         verify_license, LicenseError,
         load_activation_cache,
     )
-    _access_granted = False
+    _access_granted = True
     _machine_id = get_machine_id()
-    # 1) 试用白名单
-    if check_trial_whitelist(_machine_id):
-        log.info(f"[License] 试用白名单放行: {_machine_id}")
-        _access_granted = True
-    # 2) 已激活缓存（之前输入的有效激活码）
-    if not _access_granted:
-        _cached = load_activation_cache()
-        if _cached is not None:
-            log.info(f"[License] 激活缓存有效: {_cached.licensee}")
-            _access_granted = True
-    # 3) license.dat 文件（正式 License）
-    if not _access_granted:
-        try:
-            _lic = verify_license()
-            log.info(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
-            _access_granted = True
-        except (LicenseError, ImportError):
-            pass
+    log.info("[License] 服务端采用激活机制，客户端免激活放行。")
 
     log.info("Application starting...")
     try:

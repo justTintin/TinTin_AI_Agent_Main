@@ -347,7 +347,7 @@ class SubtitleRemovalPage(BasePage):
         main_layout.setSpacing(12)
 
         # Title
-        heading = QLabel("🎬 视频去字幕")
+        heading = QLabel("视频去字幕")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -356,16 +356,156 @@ class SubtitleRemovalPage(BasePage):
         splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
         main_layout.addWidget(splitter, 1)
 
-        # --- Left Panel: Controls ---
+        # --- Left Panel: File Selection & Preview ---
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(10, 0, 0, 0)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(0, 0, 10, 0)
+        left_layout.setSpacing(14)
 
-        # Area Sliders
-        area_card = QFrame()
-        area_card.setObjectName("card")
-        area_layout = QVBoxLayout(area_card)
+        # Select file card (top part of left side)
+        select_card = QFrame()
+        select_card.setObjectName("card")
+        select_layout = QVBoxLayout(select_card)
+        select_layout.setContentsMargins(16, 16, 16, 16)
+        select_layout.setSpacing(10)
+
+        inp_row = QHBoxLayout()
+        inp_row.addWidget(QLabel("输入视频/图片:"))
+        self.video_path_input = QLineEdit()
+        self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
+        self.video_path_input.textChanged.connect(self._on_video_path_changed)
+        inp_row.addWidget(self.video_path_input)
+        btn_sel = QPushButton("选择文件")
+        btn_sel.setObjectName("secondary_button")
+        btn_sel.clicked.connect(self._select_video)
+        inp_row.addWidget(btn_sel)
+        select_layout.addLayout(inp_row)
+        left_layout.addWidget(select_card, 0)
+
+        # Video Preview card (bottom part of left side)
+        preview_card = QFrame()
+        preview_card.setObjectName("card")
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout = QVBoxLayout(preview_card)
+        p_layout.setContentsMargins(16, 16, 16, 16)
+        p_layout.setSpacing(10)
+
+        self.preview_label = InteractivePreviewLabel()
+        self.preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
+        self.preview_label.resized.connect(self.update_preview)
+        p_layout.addWidget(self.preview_label, 1)
+
+        seek_row = QHBoxLayout()
+        seek_row.setSpacing(8)
+        
+        button_style = """
+            QPushButton {
+                background-color: #1a1a24;
+                color: #a1a1aa;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2e2e38;
+                color: #ffffff;
+                border-color: #3b82f6;
+            }
+            QPushButton:disabled {
+                background-color: #13131a;
+                color: #4b5563;
+                border-color: #1f2937;
+            }
+        """
+
+        self.btn_prev_frame = mdi_button("", "left")
+        self.btn_prev_frame.setFixedSize(30, 24)
+        self.btn_prev_frame.setStyleSheet(button_style)
+        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
+        seek_row.addWidget(self.btn_prev_frame)
+        
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0, 1000)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3b82f6;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #3b82f6;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #3b82f6;
+                border: 2px solid #ffffff;
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
+        seek_row.addWidget(self.seek_slider)
+        
+        self.btn_next_frame = mdi_button("", "play")
+        self.btn_next_frame.setFixedSize(30, 24)
+        self.btn_next_frame.setStyleSheet(button_style)
+        self.btn_next_frame.clicked.connect(self._step_next_frame)
+        seek_row.addWidget(self.btn_next_frame)
+        
+        self.lbl_seek_time = QLabel("00:00 / 00:00")
+        self.lbl_seek_time.setFixedWidth(100)
+        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
+        self.lbl_seek_time.setStyleSheet("""
+            QLabel {
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                color: #3b82f6;
+                background-color: #16161e;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        """)
+        seek_row.addWidget(self.lbl_seek_time)
+        p_layout.addLayout(seek_row)
+        left_layout.addWidget(preview_card, 1)
+
+        left_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        splitter.addWidget(left_widget)
+
+        # --- Right Panel: Control Area & Processing Log ---
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_widget.setMinimumWidth(380)
+
+        # Control area card (top part of right side)
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(16, 14, 16, 14)
+        controls_layout.setSpacing(14)
+
+        # Area Sliders Group
+        area_group = QFrame()
+        area_group.setObjectName("area_group")
+        area_group.setStyleSheet("#area_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        area_layout = QVBoxLayout(area_group)
         area_layout.setContentsMargins(16, 14, 16, 14)
         area_layout.setSpacing(8)
 
@@ -373,7 +513,7 @@ class SubtitleRemovalPage(BasePage):
         area_title.setStyleSheet("font-weight: bold; color: #ffffff;")
         area_layout.addWidget(area_title)
 
-        hint_lbl = QLabel("💡 右侧预览画面上拖动绿框也可调选区")
+        hint_lbl = QLabel("💡 预览画面上拖动绿框也可调选区")
         hint_lbl.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         hint_lbl.setWordWrap(True)
         area_layout.addWidget(hint_lbl)
@@ -403,12 +543,13 @@ class SubtitleRemovalPage(BasePage):
         self.btn_reset_area.setObjectName("secondary_button")
         self.btn_reset_area.clicked.connect(self.reset_default_area)
         area_layout.addWidget(self.btn_reset_area)
-        left_layout.addWidget(area_card)
+        controls_layout.addWidget(area_group)
 
-        # Algorithm & Options
-        algo_card = QFrame()
-        algo_card.setObjectName("card")
-        algo_layout = QVBoxLayout(algo_card)
+        # Algorithm & Options Group
+        algo_group = QFrame()
+        algo_group.setObjectName("algo_group")
+        algo_group.setStyleSheet("#algo_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        algo_layout = QVBoxLayout(algo_group)
         algo_layout.setContentsMargins(16, 14, 16, 14)
         algo_layout.setSpacing(8)
 
@@ -421,7 +562,11 @@ class SubtitleRemovalPage(BasePage):
         algo_row.addWidget(self.mode_combo)
         algo_layout.addLayout(algo_row)
 
-        self.skip_detect_chk = QCheckBox("⏩ 跳过文字检测（仅STTN有效）")
+        self.skip_detect_chk = QCheckBox("⏩ 切换为去水印模式 (跳过检测，对框选全区强制覆盖重绘)")
+        self.skip_detect_chk.setToolTip(
+            "【去字幕模式】(未勾选)：使用精准文字检测，只涂抹字幕笔画本身，保护背景，适合动态字幕。\n"
+            "【去水印模式】(已勾选)：跳过文字检测直接重绘整个框选矩形区域，适合静态台标、LOGO水印。"
+        )
         self.skip_detect_chk.setChecked(True)
         algo_layout.addWidget(self.skip_detect_chk)
         self.lama_fast_chk = QCheckBox("⚡ LAMA极速模式")
@@ -430,12 +575,13 @@ class SubtitleRemovalPage(BasePage):
         self.h264_chk = QCheckBox("📱 使用 H.264 兼容编码")
         self.h264_chk.setChecked(True)
         algo_layout.addWidget(self.h264_chk)
-        left_layout.addWidget(algo_card)
+        controls_layout.addWidget(algo_group)
 
-        # Actions
-        action_card = QFrame()
-        action_card.setObjectName("card")
-        action_layout = QVBoxLayout(action_card)
+        # Action Buttons Group
+        action_group = QFrame()
+        action_group.setObjectName("action_group")
+        action_group.setStyleSheet("#action_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        action_layout = QVBoxLayout(action_group)
         action_layout.setContentsMargins(16, 14, 16, 14)
         action_layout.setSpacing(8)
 
@@ -467,72 +613,44 @@ class SubtitleRemovalPage(BasePage):
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #15151e;
+                text-align: center;
+                color: #ffffff;
+                font-weight: bold;
+                height: 16px;
+            }
+            QProgressBar::chunk {
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                border-radius: 5px;
+            }
+        """)
         action_layout.addWidget(self.progress_bar)
-        left_layout.addWidget(action_card)
+        controls_layout.addWidget(action_group)
 
-        # Log (inside right panel, below controls)
+        right_layout.addWidget(controls_card, 0)
+
+        # Log View Card (bottom part of right side)
+        log_card = QFrame()
+        log_card.setObjectName("card")
+        log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        log_layout = QVBoxLayout(log_card)
+        log_card.setContentsMargins(16, 12, 16, 12)
+        log_layout.setSpacing(6)
+
+        log_layout.addWidget(QLabel("📝 处理日志"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
-        left_layout.addWidget(QLabel("📝 处理日志"))
-        left_layout.addWidget(self.log_view, 1)
-
-        # --- Right Panel: Preview + Log (placed on left side) ---
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 10, 0)
-        right_layout.setSpacing(10)
-
-        # Video path picker
-        inp_row = QHBoxLayout()
-        inp_row.addWidget(QLabel("输入视频/图片:"))
-        self.video_path_input = QLineEdit()
-        self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
-        self.video_path_input.textChanged.connect(self._on_video_path_changed)
-        inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("选择文件")
-        btn_sel.setObjectName("secondary_button")
-        btn_sel.clicked.connect(self._select_video)
-        inp_row.addWidget(btn_sel)
-        right_layout.addLayout(inp_row)
-
-        # Preview
-        preview_card = QFrame()
-        preview_card.setObjectName("card")
-        p_layout = QVBoxLayout(preview_card)
-        p_layout.setContentsMargins(12, 12, 12, 12)
-
-        self.preview_label = InteractivePreviewLabel()
-        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
-        self.preview_label.resized.connect(self.update_preview)
-        p_layout.addWidget(self.preview_label)
-
-        seek_row = QHBoxLayout()
-        self.btn_prev_frame = mdi_button("", "left")
-        self.btn_prev_frame.setFixedSize(30, 24)
-        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
-        seek_row.addWidget(self.btn_prev_frame)
-        self.seek_slider = QSlider(Qt.Horizontal)
-        self.seek_slider.setRange(0, 1000)
-        self.seek_slider.setEnabled(False)
-        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
-        self.seek_slider.sliderReleased.connect(self._on_seek_released)
-        seek_row.addWidget(self.seek_slider)
-        self.btn_next_frame = mdi_button("", "play")
-        self.btn_next_frame.setFixedSize(30, 24)
-        self.btn_next_frame.clicked.connect(self._step_next_frame)
-        seek_row.addWidget(self.btn_next_frame)
-        self.lbl_seek_time = QLabel("00:00 / 00:00")
-        self.lbl_seek_time.setFixedWidth(100)
-        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
-        self.lbl_seek_time.setStyleSheet("color: #9ca3af; font-size: 11px;")
-        seek_row.addWidget(self.lbl_seek_time)
-        p_layout.addLayout(seek_row)
-        right_layout.addWidget(preview_card, 1)
+        self.log_view.setMinimumHeight(150)
+        log_layout.addWidget(self.log_view)
+        right_layout.addWidget(log_card, 1)
 
         splitter.addWidget(right_widget)
-        splitter.addWidget(left_widget)
-        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(0, 7)
         splitter.setStretchFactor(1, 3)
 
 
@@ -615,7 +733,15 @@ class SubtitleRemovalPage(BasePage):
             self.y_slider.blockSignals(False)
             self.h_slider.blockSignals(False)
 
+            # Force layout activation & events processing to quickly determine correct preview size
+            if self.parent_widget.layout():
+                self.parent_widget.layout().activate()
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
             self.update_preview()
+            
+            # Schedule a short deferred update as well
+            QTimer.singleShot(50, self.update_preview)
         except Exception as e:
             log.error(f"Failed to load video preview: {e}")
             self.original_frame = None
@@ -992,12 +1118,11 @@ class SubtitleRemovalPage(BasePage):
                 frame_found = True
                 break
                 
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
             
             if frame_found:
                 self.update_preview()
-                
-                total_sec = container.duration / 1000000.0 if container.duration else 0.0
                 curr_sec = ratio * total_sec
                 self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
                 

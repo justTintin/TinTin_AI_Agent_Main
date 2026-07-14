@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import os
 import shutil
 import subprocess
@@ -2902,6 +2902,11 @@ class VideoMontagePage(BasePage):
         self.preview_audio_output = QAudioOutput()
         self.preview_player.setAudioOutput(self.preview_audio_output)
 
+        # Final Preview Player dedicated setup
+        self.final_preview_player = QMediaPlayer()
+        self.final_preview_audio = QAudioOutput()
+        self.final_preview_player.setAudioOutput(self.final_preview_audio)
+
         # Split clips metadata cache
         self.split_clips_cache = {}
 
@@ -2969,11 +2974,43 @@ class VideoMontagePage(BasePage):
 
         layout.addWidget(self.scroll_area, 1)
 
-        # Build Wizard Pages
-        self._setup_page_split()     # Index 0
-        self._setup_page_concat()    # Index 1
-        self._setup_page_voice()     # Index 2
-        self._setup_page_final()     # Index 3
+        # Build Wizard Pages (Modularized split)
+        from gui.montage.step1_split_view import Step1SplitView
+        from gui.montage.step2_concat_view import Step2ConcatView
+        from gui.montage.step3_voice_view import Step3VoiceView
+        from gui.montage.step4_final_view import Step4FinalView
+
+        self.step1 = Step1SplitView(self)
+        self.stacked_widget.addWidget(self.step1)
+
+        self.step2 = Step2ConcatView(self)
+        self.sources_detail_widget = ReorderableClipsTable()
+        self.sources_detail_widget.setWordWrap(False)
+        self.sources_detail_widget.verticalHeader().setDefaultSectionSize(30)
+        self.sources_detail_widget.setColumnCount(4)
+        self.sources_detail_widget.setHorizontalHeaderLabels(["⠿", "分割文件名", "时间戳", "描述文案"])
+        self.sources_detail_widget.setFixedHeight(220)
+        self.sources_detail_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.sources_detail_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.sources_detail_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sources_detail_widget.customContextMenuRequested.connect(self._on_source_context_menu)
+        self.sources_detail_widget.order_changed.connect(self._on_source_order_changed)
+        
+        header = self.sources_detail_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        
+        self.step2.detail_layout.addWidget(self.sources_detail_widget)
+        self.stacked_widget.addWidget(self.step2)
+
+        self.step3 = Step3VoiceView(self)
+        self.stacked_widget.addWidget(self.step3)
+
+        self.step4 = Step4FinalView(self)
+        self.stacked_widget.addWidget(self.step4)
+
 
         # Progress bar & status display at the bottom (shared across pages)
         bottom_status = QFrame()
@@ -3061,7 +3098,7 @@ class VideoMontagePage(BasePage):
         self._populate_ref_audio_samples()
 
     # ==================== PAGE 0: SMART SPLIT ====================
-    def _setup_page_split(self):
+    def _setup_page_split_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3150,7 +3187,7 @@ class VideoMontagePage(BasePage):
         split_row.addWidget(QLabel("精华时长:"))
         self.spin_highlight_sec = QDoubleSpinBox()
         self.spin_highlight_sec.setRange(1.0, 30.0)
-        self.spin_highlight_sec.setValue(5.0)
+        self.spin_highlight_sec.setValue(3.0)
         self.spin_highlight_sec.setSingleStep(1.0)
         self.spin_highlight_sec.setSuffix(" 秒")
         self.spin_highlight_sec.setFixedWidth(80)
@@ -3218,7 +3255,7 @@ class VideoMontagePage(BasePage):
         self.stacked_widget.addWidget(page)
 
     # ==================== PAGE 1: CLIP ASSEMBLY ====================
-    def _setup_page_concat(self):
+    def _setup_page_concat_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3566,7 +3603,7 @@ class VideoMontagePage(BasePage):
         self.stacked_widget.addWidget(page)
         self._on_logic_combo_changed()
 
-    def _setup_page_voice(self):
+    def _setup_page_voice_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -3818,7 +3855,7 @@ class VideoMontagePage(BasePage):
         self.stacked_widget.addWidget(page)
 
     # ==================== PAGE 3: FINAL MIX ====================
-    def _setup_page_final(self):
+    def _setup_page_final_legacy(self):
         from PySide6.QtMultimediaWidgets import QVideoWidget
         from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
         page = QWidget()
@@ -6526,6 +6563,7 @@ class VideoMontagePage(BasePage):
     def _on_mix_finished(self, paths):
         self.btn_final_assemble.setEnabled(True)
         self.btn_open_final_dir.setEnabled(True)
+        self.btn_export_jianying.setEnabled(True)
         self.progress_bar.setValue(100)
         self.stage_label.setText("✅ 最终合成视频完成！")
         
@@ -6553,6 +6591,80 @@ class VideoMontagePage(BasePage):
                     os.startfile(p)
                 except Exception as e:
                     QMessageBox.warning(self.parent_widget, "打开失败", str(e))
+
+    def _export_to_jianying_draft(self):
+        """一键导出为剪映工程草稿"""
+        selected_item = self.final_video_list.currentItem()
+        if not selected_item:
+            # 默认取第一个
+            if self.final_video_list.count() > 0:
+                selected_item = self.final_video_list.item(0)
+        
+        if not selected_item:
+            QMessageBox.warning(self.parent_widget, "未选中视频", "请先在合成列表中选择一个视频！")
+            return
+            
+        video_path = selected_item.data(Qt.UserRole)
+        if not video_path or not os.path.exists(video_path):
+            QMessageBox.warning(self.parent_widget, "文件不存在", f"无法定位该视频的物理文件：\n{video_path}")
+            return
+
+        # 查找字幕：通常配音视频会在同级目录下生成同名 .srt 文件
+        video_dir = os.path.dirname(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        srt_path = os.path.join(video_dir, f"{video_basename}.srt")
+        
+        # 兼容处理：有些视频名为 dubbed_xxx.mp4，但是字幕名为 dubbed_xxx.srt，也可能叫 xxx.srt
+        if not os.path.exists(srt_path):
+            clean_name = video_basename
+            if clean_name.startswith("dubbed_"):
+                clean_name = clean_name[len("dubbed_"):]
+            elif clean_name.startswith("final_"):
+                clean_name = clean_name[len("final_"):]
+            
+            for folder in [video_dir, os.path.dirname(video_dir)]:
+                tmp_srt = os.path.join(folder, f"{clean_name}.srt")
+                if os.path.exists(tmp_srt):
+                    srt_path = tmp_srt
+                    break
+        
+        if not os.path.exists(srt_path):
+            srt_path = None
+            log.warning(f"[Jianying] 未找到视频 {video_basename} 的配套 .srt 字幕文件，导出将不含字幕轨道。")
+
+        # 获取 BGM 路径和音量
+        bgm_path = self.bgm_input.text().strip()
+        bgm_vol = self.bgm_volume_slider.value()
+
+        # 调用工具类进行导出
+        from utils.jianying_exporter import JianyingExporter
+        
+        draft_name = f"螺丝钉剪辑_{video_basename}"
+        success, result_path = JianyingExporter.export_to_draft(
+            video_path=video_path,
+            bgm_path=bgm_path,
+            bgm_volume=bgm_vol,
+            srt_path=srt_path,
+            draft_name=draft_name
+        )
+
+        if success:
+            QMessageBox.information(
+                self.parent_widget,
+                "草稿导出成功",
+                f"一键导出至剪映专业版成功！\n\n项目名称：{draft_name}\n\n请直接打开您的电脑「剪映专业版」客户端进行精修编辑。\n系统已为您在资源管理器中定位到该草稿文件夹。"
+            )
+            # 打开对应的草稿文件夹
+            try:
+                os.startfile(result_path)
+            except Exception:
+                pass
+        else:
+            QMessageBox.critical(
+                self.parent_widget,
+                "导出失败",
+                f"导出剪映草稿时发生错误：\n{result_path}"
+            )
 
     def _preview_final_video(self, item):
         path = item.data(Qt.UserRole)

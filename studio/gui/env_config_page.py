@@ -457,10 +457,16 @@ class EnvConfigPage(BasePage):
             for key, lbl in self.status_labels.items():
                 lbl.setText("正在检测...")
                 
-        if hasattr(self, "btn_refresh_py_gpu") and self.btn_refresh_py_gpu:
-            self.btn_refresh_py_gpu.setEnabled(False)
-        if hasattr(self, "btn_refresh_codecs") and self.btn_refresh_codecs:
-            self.btn_refresh_codecs.setEnabled(False)
+        try:
+            if hasattr(self, "btn_refresh_py_gpu") and self.btn_refresh_py_gpu:
+                self.btn_refresh_py_gpu.setEnabled(False)
+        except RuntimeError:
+            pass
+        try:
+            if hasattr(self, "btn_refresh_codecs") and self.btn_refresh_codecs:
+                self.btn_refresh_codecs.setEnabled(False)
+        except RuntimeError:
+            pass
             
         self.check_worker = EnvCheckWorker(self.check_environment)
         self.check_worker.finished.connect(self._on_check_finished)

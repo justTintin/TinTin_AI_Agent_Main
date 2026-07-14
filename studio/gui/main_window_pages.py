@@ -999,18 +999,206 @@ class PageSetupMixin:
         QTimer.singleShot(200, self._refresh_help_sysinfo)
         tabs.addTab(p2, "🖥️ 系统信息")
 
-        # Tab 3: 版本
+        # Tab 3: 关于与版本
         p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
-        l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30); l3.setSpacing(8)
+        l3 = QVBoxLayout(p3); l3.setContentsMargins(30, 20, 30, 20); l3.setSpacing(14)
+
+        # Brand / Developer Info Card
+        brand_card = QFrame()
+        brand_card.setObjectName("brand_card")
+        brand_card.setStyleSheet("""
+            #brand_card {
+                background-color: #1a1a24;
+                border: 1px solid #2e2e38;
+                border-radius: 12px;
+            }
+        """)
+        brand_layout = QVBoxLayout(brand_card)
+        brand_layout.setContentsMargins(20, 20, 20, 20)
+        brand_layout.setSpacing(10)
+
+        app_title = QLabel("🔩 螺丝钉-电商智能体矩阵")
+        app_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        brand_layout.addWidget(app_title)
+
+        dev_info = QLabel("此智能体由 <b>大怪工作室</b> 开发")
+        dev_info.setStyleSheet("font-size: 13px; color: #a1a1aa;")
+        brand_layout.addWidget(dev_info)
+
+        contact_info = QLabel("📞 联系电话：<span style='color: #3b82f6; font-weight: bold;'>17361907260</span>（微信同号）")
+        contact_info.setStyleSheet("font-size: 13px; color: #e4e4e7;")
+        brand_layout.addWidget(contact_info)
+        
+        l3.addWidget(brand_card)
+
+        # Get machine code and license signature info
+        from utils.license import get_machine_id, check_trial_whitelist, load_activation_cache, verify_license
+        machine_id = get_machine_id()
+        
+        license_status = "未激活 (Not Activated)"
+        licensee_name = "N/A"
+        expiry_date = "N/A"
+        
+        if check_trial_whitelist(machine_id):
+            license_status = "已激活 (开发者测试白名单)"
+            licensee_name = "开发者/测试员 (White-listed Trial)"
+            expiry_date = "永久试用 (Unlimited)"
+        else:
+            cached = load_activation_cache()
+            if cached is not None:
+                license_status = "已激活 (缓存签名)"
+                licensee_name = cached.licensee
+                expiry_date = cached.expires
+            else:
+                try:
+                    lic = verify_license()
+                    license_status = "已激活 (正式许可证签名)"
+                    licensee_name = lic.licensee
+                    expiry_date = lic.expires
+                except Exception:
+                    pass
+
+        # License Info Card
+        license_card = QFrame()
+        license_card.setObjectName("license_card")
+        license_card.setStyleSheet("""
+            #license_card {
+                background-color: #1a1a24;
+                border: 1px solid #2e2e38;
+                border-radius: 12px;
+            }
+        """)
+        license_layout = QVBoxLayout(license_card)
+        license_layout.setContentsMargins(20, 16, 20, 16)
+        license_layout.setSpacing(10)
+
+        license_title = QLabel("🔑 软件授权与激活")
+        license_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #10b981; margin-bottom: 4px;")
+        license_layout.addWidget(license_title)
+
+        # Machine ID Row with Copy button
+        mac_row = QHBoxLayout()
+        mac_row.setContentsMargins(0, 0, 0, 0)
+        mac_lbl = QLabel("本机机器码:")
+        mac_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        mac_val = QLineEdit(machine_id)
+        mac_val.setReadOnly(True)
+        mac_val.setStyleSheet("color: #3b82f6; font-size: 12px; font-family: monospace; background: #15151e; border: 1px solid #2e2e38; border-radius: 4px; padding: 2px 6px;")
+        
+        btn_copy = QPushButton("📋 复制机器码")
+        btn_copy.setFixedWidth(100)
+        btn_copy.setStyleSheet("""
+            QPushButton {
+                background-color: #27272a;
+                color: #ffffff;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 3px 6px;
+            }
+            QPushButton:hover {
+                background-color: #3f3f46;
+                border-color: #3b82f6;
+            }
+        """)
+        
+        def copy_mac():
+            QApplication.clipboard().setText(machine_id)
+            QMessageBox.information(self, "复制成功", "机器码已成功复制到剪贴板！")
+            
+        btn_copy.clicked.connect(copy_mac)
+        
+        mac_row.addWidget(mac_lbl)
+        mac_row.addWidget(mac_val, 1)
+        mac_row.addWidget(btn_copy)
+        license_layout.addLayout(mac_row)
+
+        # License status row
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_lbl = QLabel("授权状态:")
+        status_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        
+        status_val = QLabel(license_status)
+        if "已激活" in license_status:
+            status_val.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold;")
+        else:
+            status_val.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
+            
+        status_row.addWidget(status_lbl)
+        status_row.addWidget(status_val, 1)
+        license_layout.addLayout(status_row)
+
+        # Licensee row
+        licensee_row = QHBoxLayout()
+        licensee_row.setContentsMargins(0, 0, 0, 0)
+        licensee_lbl = QLabel("激活签名:")
+        licensee_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        licensee_val = QLabel(licensee_name)
+        licensee_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        licensee_row.addWidget(licensee_lbl)
+        licensee_row.addWidget(licensee_val, 1)
+        license_layout.addLayout(licensee_row)
+
+        # Expiration row
+        expire_row = QHBoxLayout()
+        expire_row.setContentsMargins(0, 0, 0, 0)
+        expire_lbl = QLabel("有效期至:")
+        expire_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        expire_val = QLabel(expiry_date)
+        expire_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        expire_row.addWidget(expire_lbl)
+        expire_row.addWidget(expire_val, 1)
+        license_layout.addLayout(expire_row)
+
+        l3.addWidget(license_card)
+
+        # System & Version Info Card
+        version_card = QFrame()
+        version_card.setObjectName("version_card")
+        version_card.setStyleSheet("""
+            #version_card {
+                background-color: #15151e;
+                border: 1px solid #26262e;
+                border-radius: 10px;
+            }
+        """)
+        version_layout = QVBoxLayout(version_card)
+        version_layout.setContentsMargins(20, 16, 20, 16)
+        version_layout.setSpacing(8)
+
+        version_title = QLabel("📋 系统与版本信息")
+        version_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #3b82f6; margin-bottom: 4px;")
+        version_layout.addWidget(version_title)
+
         import sys as _s, platform as _p
-        l3.addWidget(QLabel(f"应用版本: v2.0.0 RC"))
-        l3.addWidget(QLabel(f"Python: {_s.version}"))
-        l3.addWidget(QLabel(f"系统: {_p.system()} {_p.release()}"))
-        try: from PySide6 import __version__ as _v; l3.addWidget(QLabel(f"PySide6: {_v}"))
-        except Exception: pass
-        l3.addWidget(QLabel(f"工作目录: {WORKSPACE_ROOT}"))
+        def add_version_row(label, val):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(label)
+            lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+            v_val = QLabel(val)
+            v_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+            v_val.setWordWrap(True)
+            row.addWidget(lbl)
+            row.addWidget(v_val, 1)
+            version_layout.addLayout(row)
+
+        add_version_row("应用版本:", "v2.0.0 RC")
+        add_version_row("Python 版本:", _s.version)
+        add_version_row("运行系统:", f"{_p.system()} {_p.release()} ({_p.version()})")
+        
+        try:
+            from PySide6 import __version__ as _v
+            add_version_row("PySide6 版本:", _v)
+        except Exception:
+            pass
+            
+        add_version_row("工作目录:", WORKSPACE_ROOT)
+        
+        l3.addWidget(version_card)
         l3.addStretch()
-        tabs.addTab(p3, "📋 版本")
+        tabs.addTab(p3, "ℹ️ 关于")
 
         # Tab 4: 外观主题
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30, 30, 30, 30)

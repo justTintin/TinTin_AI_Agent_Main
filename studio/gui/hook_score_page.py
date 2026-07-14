@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📈 视频预测评价页（由「开头黄金3秒评分」升级而来）。
+📈 视频评价预测页（由「开头黄金3秒评分」升级而来）。
 
 选择投放平台 → 上传视频 → 抽取覆盖全片的关键帧 → 用视觉大模型按该平台的推荐逻辑
 预测这条视频的表现（综合分 + 预测量级 + 多维度评分 + 建议）。
@@ -263,13 +263,17 @@ class HookScorePage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(12)
 
-        heading = QLabel("📈 视频预测评价")
+        heading = QLabel("📈 视频评价预测")
         heading.setObjectName("heading")
         root.addWidget(heading)
         sub = QLabel("选投放平台 → 上传视频 → 视觉模型按该平台推荐逻辑预测表现（综合分 + 预测量级 + 多维评分）。"
                      "发布后回填真实播放量与平台评价，模型会据此自我校准。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
         root.addWidget(sub)
+
+        warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
+        warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
+        root.addWidget(warning_lbl)
 
         # 视觉模型状态
         self.model_status_card = QFrame(); self.model_status_card.setObjectName("card")

@@ -121,8 +121,16 @@ class ImageFolderOcrWorker(BaseWorker):
         self.is_aborted = True
         if self.process:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
+                # 异步运行 taskkill 防止 GUI 主线程卡死
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0 # SW_HIDE
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=startupinfo
+                )
             except Exception:
                 try:
                     self.process.kill()
@@ -204,7 +212,7 @@ class ImageFolderOcrPage(BasePage):
     def setup(self):
         # Main layout
         main_layout = QVBoxLayout(self.parent_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(16)
 
         # Header Title
@@ -216,23 +224,18 @@ class ImageFolderOcrPage(BasePage):
         splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
         main_layout.addWidget(splitter, 1)
 
-        # --- Left Panel ---
+        # ─── Left Panel (Folder Selection & Interactive Preview) ───
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 10, 0)
-        left_layout.setSpacing(14)
-        
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(0, 20, 0, 20)
-        card_layout.setSpacing(14)
+        left_layout.setSpacing(16)
 
-        # Folder Selector
-        folder_container = QWidget()
-        folder_container_layout = QVBoxLayout(folder_container)
-        folder_container_layout.setContentsMargins(24, 0, 24, 0)
-        folder_container_layout.setSpacing(14)
+        # Card 1: Folder Selection
+        folder_card = QFrame()
+        folder_card.setObjectName("card")
+        folder_layout = QVBoxLayout(folder_card)
+        folder_layout.setContentsMargins(16, 16, 16, 16)
+        folder_layout.setSpacing(10)
 
         folder_row = QHBoxLayout()
         folder_row.addWidget(QLabel("选择图片文件夹:"))
@@ -244,23 +247,54 @@ class ImageFolderOcrPage(BasePage):
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_folder)
         folder_row.addWidget(btn_sel)
-        folder_container_layout.addLayout(folder_row)
-        card_layout.addWidget(folder_container)
+        folder_layout.addLayout(folder_row)
+        left_layout.addWidget(folder_card, 0)
 
-        # Bounding Box Sliders
-        box_group = QFrame()
-        box_group.setObjectName("box_manage_group")
-        box_group.setStyleSheet("#box_manage_group { background-color: #26262a; border-top: 1px solid #2e2e32; border-bottom: 1px solid #2e2e32; border-radius: 0px; }")
+        # Card 2: Interactive Preview Card (Expanding to bottom)
+        preview_card = QFrame()
+        preview_card.setObjectName("card")
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout = QVBoxLayout(preview_card)
+        p_layout.setContentsMargins(16, 16, 16, 16)
+        p_layout.setSpacing(10)
+
+        p_title = QLabel("🖼️ 模板图片框选预览 (在画面上拖拽选择需要 OCR 的框):")
+        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        p_layout.addWidget(p_title, 0)
+
+        self.preview_label = InteractivePreviewLabelOCR()
+        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
+        self.preview_label.resized.connect(self.update_preview)
+        self.preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout.addWidget(self.preview_label, 1)
+        left_layout.addWidget(preview_card, 1)
+
+        splitter.addWidget(left_widget)
+
+        # ─── Right Panel (Controls Card & Processing Log) ───
+        right_widget = QWidget()
+        right_widget.setMinimumWidth(380)
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_layout.setSpacing(16)
+
+        # Card 1: Controls Card
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(0, 16, 0, 16)
+        controls_layout.setSpacing(14)
+
+        # Title
+        c_title = QLabel("📦 OCR 模板识别选区及设置")
+        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
+        controls_layout.addWidget(c_title)
+
+        # Bounding Box Sliders Group
+        box_group = QWidget()
         box_layout = QVBoxLayout(box_group)
-        box_layout.setContentsMargins(24, 16, 24, 16)
-        box_layout.setSpacing(14)
-
-        box_title = QLabel("📦 OCR 模板识别选区设置:")
-        box_title.setStyleSheet("font-weight: bold; color: #ffffff;")
-        box_layout.addWidget(box_title)
-
-        sliders_layout = QVBoxLayout()
-        sliders_layout.setSpacing(14)
+        box_layout.setContentsMargins(20, 0, 20, 0)
+        box_layout.setSpacing(12)
 
         def create_slider_row(label_text, slider, val_lbl):
             row = QHBoxLayout()
@@ -277,31 +311,37 @@ class ImageFolderOcrPage(BasePage):
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
+        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
 
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
 
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
+        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
 
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
 
-        box_layout.addLayout(sliders_layout)
-        card_layout.addWidget(box_group)
+        controls_layout.addWidget(box_group)
 
-        # Options Container
-        bottom_container = QWidget()
-        bottom_container_layout = QVBoxLayout(bottom_container)
-        bottom_container_layout.setContentsMargins(24, 0, 24, 0)
-        bottom_container_layout.setSpacing(14)
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        sep.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
+        controls_layout.addWidget(sep)
+
+        # Options layout
+        options_widget = QWidget()
+        options_layout = QVBoxLayout(options_widget)
+        options_layout.setContentsMargins(20, 0, 20, 0)
+        options_layout.setSpacing(12)
 
         # Key text matching input & Test button
         key_label_row = QHBoxLayout()
@@ -310,11 +350,12 @@ class ImageFolderOcrPage(BasePage):
         self.key_input.setPlaceholderText("例如: 订单编码")
         key_label_row.addWidget(self.key_input)
         
-        self.btn_test_ocr = QPushButton("🧪 测试识别选区")
+        self.btn_test_ocr = QPushButton("🧪 测试选区")
         self.btn_test_ocr.setObjectName("secondary_button")
+        self.btn_test_ocr.setFixedWidth(90)
         self.btn_test_ocr.clicked.connect(self.test_selection_ocr)
         key_label_row.addWidget(self.btn_test_ocr)
-        bottom_container_layout.addLayout(key_label_row)
+        options_layout.addLayout(key_label_row)
 
         # Save format configuration
         format_row = QHBoxLayout()
@@ -324,7 +365,7 @@ class ImageFolderOcrPage(BasePage):
         self.format_combo.addItem("TXT 纯文本 (*.txt)", "txt")
         self.format_combo.currentIndexChanged.connect(self._on_format_changed)
         format_row.addWidget(self.format_combo)
-        bottom_container_layout.addLayout(format_row)
+        options_layout.addLayout(format_row)
 
         # Output Path Input
         out_row = QHBoxLayout()
@@ -334,22 +375,38 @@ class ImageFolderOcrPage(BasePage):
         out_row.addWidget(self.output_path_input)
         btn_save_as = QPushButton("浏览")
         btn_save_as.setObjectName("secondary_button")
+        btn_save_as.setFixedWidth(60)
         btn_save_as.clicked.connect(self._select_output_path)
         out_row.addWidget(btn_save_as)
-        bottom_container_layout.addLayout(out_row)
+        options_layout.addLayout(out_row)
 
-        # Progress / Status
+        # Status & Progress
         self.status_lbl = QLabel("状态: 就绪")
         self.status_lbl.setObjectName("muted_text")
-        bottom_container_layout.addWidget(self.status_lbl)
+        options_layout.addWidget(self.status_lbl)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        bottom_container_layout.addWidget(self.progress_bar)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #15151e;
+                text-align: center;
+                color: #ffffff;
+                font-weight: bold;
+                height: 16px;
+            }
+            QProgressBar::chunk {
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                border-radius: 5px;
+            }
+        """)
+        options_layout.addWidget(self.progress_bar)
 
-        # Start / Stop Buttons
+        # Action Buttons Row
         btn_action_layout = QHBoxLayout()
         self.btn_start = QPushButton("🚀 开始批量 OCR")
         self.btn_start.setObjectName("primary_button")
@@ -360,74 +417,36 @@ class ImageFolderOcrPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_batch_ocr)
         btn_action_layout.addWidget(self.btn_stop)
+        options_layout.addLayout(btn_action_layout)
 
-        btn_action_layout.addStretch()
-        bottom_container_layout.addLayout(btn_action_layout)
-
+        # Open Out Dir Button
         self.btn_open_dir = QPushButton("📂 打开输出文件目录")
         self.btn_open_dir.setObjectName("secondary_button")
         self.btn_open_dir.clicked.connect(self.open_output_directory)
-        bottom_container_layout.addWidget(self.btn_open_dir)
+        options_layout.addWidget(self.btn_open_dir)
 
-        card_layout.addWidget(bottom_container, 1)
-        left_layout.addWidget(card)
-        left_widget.setMaximumWidth(480)
-        splitter.addWidget(left_widget)
+        controls_layout.addWidget(options_widget)
+        right_layout.addWidget(controls_card, 0)
 
-        # --- Right Panel ---
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(10, 0, 0, 0)
-        right_layout.setSpacing(14)
-
-        # Interactive selection preview label
-        preview_card = QFrame()
-        preview_card.setObjectName("card")
-        p_layout = QVBoxLayout(preview_card)
-        p_layout.setContentsMargins(16, 16, 16, 16)
-        
-        p_title = QLabel("🖼️ 模板图片框选预览 (在画面上拖拽选择需要 OCR 的框):")
-        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
-        p_layout.addWidget(p_title)
-
-        self.preview_label = InteractivePreviewLabelOCR()
-        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
-        self.preview_label.resized.connect(self.update_preview)
-        p_layout.addWidget(self.preview_label)
-        right_layout.addWidget(preview_card)
-
-        # Logs Viewer
+        # Card 2: Logs Viewer
         log_card = QFrame()
         log_card.setObjectName("card")
+        log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout = QVBoxLayout(log_card)
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
 
-        log_layout.addWidget(QLabel("📝 批量 OCR 推理引擎实时日志与匹配数据:"))
+        log_layout.addWidget(QLabel("📝 批量 OCR 实时日志与匹配数据:"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(200)
+        self.log_view.setMinimumHeight(150)
         log_layout.addWidget(self.log_view)
-        right_layout.addWidget(log_card)
-
-        # Tips Card
-        help_card = QFrame()
-        help_card.setObjectName("card")
-        help_layout = QVBoxLayout(help_card)
-        help_card.setContentsMargins(16, 12, 16, 12)
-        help_lbl = QLabel(
-            "💡 **图片批量 OCR 提取说明**:\n"
-            "1. **定位原理**：不同图片的字段排版可能会有微调偏移。系统首先在模板图片上通过框选进行 OCR，确定要找的定位关键词（如“订单编码”）。\n"
-            "2. **距离匹配**：在批量执行时，系统对每张图片做全局 OCR。定位到该关键词后，算法会自动计算空间距离，提取与其**右侧**或**下方**空间位置最邻近的文本块内容作为结果，防止错位提取。\n"
-            "3. 本功能使用本地 PaddleOCR 加密模型，完全离线运行，数据绝对安全。"
-        )
-        help_lbl.setWordWrap(True)
-        help_lbl.setStyleSheet("font-size: 11px; line-height: 16px; color: #a1a1aa;")
-        help_layout.addWidget(help_lbl)
-        right_layout.addWidget(help_card)
+        right_layout.addWidget(log_card, 1)
 
         splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 7)
+        splitter.setStretchFactor(1, 3)
 
     def _select_folder(self):
         path = QFileDialog.getExistingDirectory(
@@ -682,72 +701,35 @@ class ImageFolderOcrPage(BasePage):
             self._append_log(f"[ERROR] 选区 OCR 测试失败: {text_or_error}")
             QMessageBox.critical(self.parent_widget, "测试失败", f"选区测试失败，错误原因：\n{text_or_error}")
 
-    def _start_remote_batch_ocr(self, folder_path, key_text):
-        """服务端 OCR 批量处理。"""
-        from utils.ocr_client import ocr_image
-
-        # 收集所有图片文件
-        img_files = []
-        for root, _, files in os.walk(folder_path):
-            for f in sorted(files):
-                if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
-                    img_files.append(os.path.join(root, f))
-
-        if not img_files:
-            QMessageBox.warning(self.parent_widget, "无图片", "文件夹中没有图片文件。")
-            return
-
-        self.log_view.clear()
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, len(img_files))
-        self.btn_start.setEnabled(False)
-        self.chk_server_ocr.setEnabled(False)
-
-        class _RemoteOcrWorker(BaseWorker):
-            finished = Signal(list)
-            def __init__(self, files, keyword):
-                super().__init__()
-                self.files = files
-                self.keyword = keyword
-            def do_work(self):
-                results = []
-                for i, fp in enumerate(self.files):
-                    try:
-                        text = ocr_image(fp)
-                        match = bool(self.keyword) and self.keyword in (text or "")
-                        results.append({"file": os.path.basename(fp), "text": text, "match": match})
-                    except Exception as e:
-                        results.append({"file": os.path.basename(fp), "text": f"[错误: {e}]", "match": False})
-                self.finished.emit(results)
-
-        w = _RemoteOcrWorker(img_files, key_text)
-        w.finished.connect(lambda results: self._on_remote_ocr_done(results))
-        w.error.connect(lambda e: QMessageBox.critical(self.parent_widget, "OCR错误", str(e)))
-        w.start()
-
-    def _on_remote_ocr_done(self, results):
-        self.progress_bar.setValue(self.progress_bar.maximum())
-        self.btn_start.setEnabled(True)
-
-        out_lines = ["文件\t识别文本\t匹配"]
-        for r in results:
-            out_lines.append(f"{r['file']}\t{r['text']}\t{'✅' if r['match'] else '❌'}")
-        self.log_view.setPlainText("\n".join(out_lines))
-        QMessageBox.information(self.parent_widget, "OCR完成",
-            f"共处理 {len(results)} 张图片，其中 {sum(1 for r in results if r['match'])} 张匹配关键词")
-
     def start_batch_ocr(self):
         folder_path = self.folder_path_input.text().strip()
         if not folder_path or not os.path.exists(folder_path):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择有效的输入图片文件夹。")
             return
         key_text = self.key_input.text().strip()
-        self._start_remote_batch_ocr(folder_path, key_text)
+        
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.btn_test_ocr.setEnabled(False)
+        self.folder_path_input.setEnabled(False)
+        self.output_path_input.setEnabled(False)
+        self.key_input.setEnabled(False)
+        self.format_combo.setEnabled(False)
         
         self.x_slider.setEnabled(False)
         self.w_slider.setEnabled(False)
         self.y_slider.setEnabled(False)
         self.h_slider.setEnabled(False)
+
+        self.log_view.clear()
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.status_lbl.setText("状态: 正在初始化本地 OCR 批量任务...")
+
+        vsr_python = PADDLEOCR_PYTHON
+        ocr_script = IMAGE_FOLDER_OCR_SCRIPT
+        out_path = self.output_path_input.text().strip()
 
         # Spawn worker thread
         self.worker = ImageFolderOcrWorker(
@@ -766,11 +748,9 @@ class ImageFolderOcrPage(BasePage):
     def stop_batch_ocr(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.worker.wait()
-        self.btn_stop.setEnabled(False)
 
     def on_batch_finished(self, success, result):
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_test_ocr.setEnabled(True)
@@ -797,6 +777,9 @@ class ImageFolderOcrPage(BasePage):
             except Exception:
                 pass
         else:
+            if self.worker and getattr(self.worker, 'is_aborted', False):
+                self.status_lbl.setText("状态: 已被用户终止。")
+                return
             self.status_lbl.setText("状态: OCR 识别中断或出错。")
             QMessageBox.critical(self.parent_widget, "扫描失败", f"批量 OCR 扫描失败：\n{result}")
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📢 营销视频检测页。
+📢 视频营销检测页。
 
 通过对视频进行关键帧提取，使用配置的视觉大模型对关键帧内容进行综合研判，
 判断该视频是否为营销/广告视频，并分析推广的品类、提取营销特征线索，提供相关的改进建议。
@@ -198,7 +198,7 @@ class MarketingDetectPage(BasePage):
         root.setSpacing(12)
 
         # 1. 标题与说明
-        heading = QLabel("📢 营销视频检测")
+        heading = QLabel("📢 视频营销检测")
         heading.setObjectName("heading")
         root.addWidget(heading)
         
@@ -206,6 +206,10 @@ class MarketingDetectPage(BasePage):
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
         root.addWidget(sub)
+
+        warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
+        warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
+        root.addWidget(warning_lbl)
 
         # 2. 视觉模型状态卡片
         self.model_status_card = QFrame()
@@ -455,4 +459,4 @@ class MarketingDetectPage(BasePage):
         self.btn_run.setEnabled(True)
         self.pbar.setVisible(False)
         self.lbl_status.setText("检测失败。")
-        self.show_error(str(e), "营销视频检测失败")
+        self.show_error(str(e), "视频营销检测失败")

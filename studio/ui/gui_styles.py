@@ -10,6 +10,9 @@ from config.paths import BUNDLE_ICONS_DIR
 _CHECK_ICON = os.path.join(BUNDLE_ICONS_DIR, "check.svg")
 _CHECK_ICON_URL = _CHECK_ICON.replace(os.sep, '/')
 
+_ARROW_DOWN_ICON = os.path.join(BUNDLE_ICONS_DIR, "arrow_down.svg")
+_ARROW_DOWN_ICON_URL = _ARROW_DOWN_ICON.replace(os.sep, '/')
+
 STYLE_SHEET = """
 * {
     font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
@@ -228,6 +231,7 @@ QComboBox::drop-down {
 }
 
 QComboBox::down-arrow {
+    image: url("__ARROW_DOWN_ICON_URL__");
     width: 10px;
     height: 10px;
 }
@@ -893,4 +897,4 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #model_groupbox[section="ocr"]::title     { color: #f59e0b; }
 
 #comfyui_local_status { color: #666; font-size: 12px; }
-""".replace("__CHECK_ICON_URL__", _CHECK_ICON_URL)
+""".replace("__CHECK_ICON_URL__", _CHECK_ICON_URL).replace("__ARROW_DOWN_ICON_URL__", _ARROW_DOWN_ICON_URL)

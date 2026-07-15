@@ -8,6 +8,9 @@ from config.paths import BUNDLE_ICONS_DIR
 _CHECK_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "check_light.svg")
 _CHECK_LIGHT_URL = _CHECK_LIGHT_ICON.replace(_os.sep, '/')
 
+_ARROW_DOWN_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "arrow_down_light.svg")
+_ARROW_DOWN_LIGHT_URL = _ARROW_DOWN_LIGHT_ICON.replace(_os.sep, '/')
+
 LIGHT_STYLE_SHEET = """
 * {
     font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
@@ -158,6 +161,12 @@ QComboBox:focus { border: 1px solid #6366f1; }
 QComboBox:hover { border: 1px solid #b0b0b8; }
 
 QComboBox::drop-down { border: none; width: 28px; }
+
+QComboBox::down-arrow {
+    image: url("__ARROW_DOWN_LIGHT_URL__");
+    width: 10px;
+    height: 10px;
+}
 
 QComboBox QAbstractItemView {
     background-color: #ffffff;
@@ -634,4 +643,4 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #model_groupbox[section="ocr"]::title     { color: #d97706; }
 
 #comfyui_local_status { color: #86868b; font-size: 12px; }
-""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL)
+""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)

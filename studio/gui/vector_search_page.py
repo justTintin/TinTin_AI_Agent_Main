@@ -8,9 +8,10 @@ import os
 import requests
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSpinBox, QComboBox,
+    QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QSpinBox, QComboBox, QCompleter,
 )
-from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtCore import Qt, Signal, QUrl, QTimer
 from PySide6.QtGui import QGuiApplication, QDesktopServices
 
 from gui.base_page import BasePage
@@ -71,6 +72,23 @@ class _SearchWorker(BaseWorker):
             self.error.emit(str(e))
 
 
+class _BrandLoader(BaseWorker):
+    """异步获取品牌去重列表。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        try:
+            url = f"{_get_server_url()}/material/distinct?field=brand"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                self.finished.emit(data.get("values", []))
+                return
+        except Exception:
+            pass
+        self.finished.emit([])
+
+
 class VectorSearchPage(BasePage):
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
@@ -102,10 +120,13 @@ class VectorSearchPage(BasePage):
         # 筛选行
         filter_row = QHBoxLayout()
         filter_row.addWidget(QLabel("品牌:"))
-        self.filter_brand = QLineEdit()
+        self.filter_brand = QComboBox()
+        self.filter_brand.setEditable(True)
         self.filter_brand.setPlaceholderText("如 罗技")
-        self.filter_brand.setMaximumWidth(120)
+        self.filter_brand.setMaximumWidth(160)
+        self.filter_brand.setInsertPolicy(QComboBox.NoInsert)
         filter_row.addWidget(self.filter_brand)
+        QTimer.singleShot(100, self._load_brands)
         filter_row.addWidget(QLabel("分类:"))
         self.filter_category = QComboBox()
         self.filter_category.addItems(["全部", "鼠标", "鼠标垫", "键盘", "耳机", "摄像头"])
@@ -153,9 +174,24 @@ class VectorSearchPage(BasePage):
         self._results = []
         self._total = 0
 
+    def _load_brands(self):
+        w = self.track_worker(_BrandLoader())
+        w.finished.connect(self._on_brands_loaded)
+        w.start()
+
+    def _on_brands_loaded(self, brands):
+        if not brands:
+            return
+        self.filter_brand.clear()
+        self.filter_brand.addItems(brands)
+        c = self.filter_brand.completer()
+        if c:
+            c.setFilterMode(Qt.MatchContains)
+            c.setCaseSensitivity(Qt.CaseInsensitive)
+
     def _do_search(self):
         query = self.search_input.text().strip()
-        brand = self.filter_brand.text().strip()
+        brand = self.filter_brand.currentText().strip()
         category = self.filter_category.currentText()
         if category == "全部":
             category = ""

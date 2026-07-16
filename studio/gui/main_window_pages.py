@@ -784,6 +784,17 @@ class PageSetupMixin:
         
             layout.addWidget(task_card, 1)
     
+    def _sync_server_tasks_async(self):
+        """异步版本：把 HTTP 请求放到 Worker 线程，不阻塞界面。"""
+        from utils.thread_worker import TaskWorker as Worker
+
+        def _do_sync():
+            self._sync_server_tasks()
+            return None
+
+        w = Worker(_do_sync)
+        w.start()
+
     def _sync_server_tasks(self):
         """从服务端 GET /tasks 拉取本机任务列表并入表格。"""
         import requests as _req

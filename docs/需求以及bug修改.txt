@@ -6,8 +6,9 @@
 5.素材检索页面 关键词搜索和品牌的混合查询检查一下分开接口                    已检查：关键词+品牌是同一接口(/material/search)的混合查询，非分开接口
 6.模型配置页面 api地址做成统一配置 各接口在页面单独配置                    完成
    - 页面顶部添加统一服务端地址输入框(compute_server_url)
-   - PaddleOCR Tab 添加API地址输入(paddle_api_url)
+   - PaddleOCR 使用本地模型，移除了 API 地址输入框
    - 所有Tab的保存按钮(LLM/Ollama/Whisper/CLIP)均保存统一地址+各接口地址
    - 顶部「保存全部」按钮保存全部配置(含VoxCPM参数)
-   - 统一地址修改后联动更新 Whisper/CLIP/PaddleOCR（始终使用统一地址，无需手动维护）
+   - 统一地址修改后联动更新 Whisper/CLIP（始终使用统一地址，无需手动维护）
    - VoxCPM 的 API 地址保留手动维护（需手动加 /voxcpm/tts 后缀）
+   - 6个模型Tab合并为单个滚动页面，无需切换Tab

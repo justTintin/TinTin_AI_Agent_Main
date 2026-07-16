@@ -129,7 +129,7 @@ def find_ffprobe() -> str:
     exe = binary_name("ffprobe")
     ffmpeg = find_ffmpeg()
     if ffmpeg:
-        sibling = ffmpeg.replace("ffmpeg", "ffprobe")
+        sibling = os.path.join(os.path.dirname(ffmpeg), binary_name("ffprobe"))
         if os.path.isfile(sibling):
             return sibling
     found = shutil.which(exe)

@@ -12107,5 +12107,1245 @@
         ],
         "created_at": 1782042313,
         "updated_at": 1782042313
+    },
+    {
+        "id": "6728df5152e63742",
+        "name": "[抖音][老黄说车膜🚗] 不说脏话挑战 还得是我！#汽车贴膜 #搞笑",
+        "type": "风格参考样本",
+        "content": "不说脏话挑战 还得是我！#汽车贴膜 #搞笑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "老黄说车膜🚗",
+            "url": "https://www.douyin.com/video/7660095396727565210",
+            "media_path": "D:\\code_workspace\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-10/[抖音] [老黄说车膜🚗] 不说脏话挑战 还得是我！#汽车贴膜 #搞笑.mp4",
+            "date": "2026/7/8 18:02:22",
+            "heat": "16赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "eb26f5c431f57744",
+        "name": "[抖音][冲哥说数码] 内存显存缓存硬盘？ 这都什么跟什么啊#电脑 #电脑知识 #笔",
+        "type": "风格参考样本",
+        "content": "内存显存缓存硬盘？ 这都什么跟什么啊#电脑 #电脑知识 #笔记本电脑 #数码科技 #内存",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "冲哥说数码",
+            "url": "https://www.douyin.com/video/7659737855765351715",
+            "media_path": "D:\\code_workspace\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-10/[抖音] [冲哥说数码] 内存显存缓存硬盘？ 这都什么跟什么啊#电脑 #电脑知识 #笔记本电脑 #数码科技 #内存.mp4",
+            "date": "2026/7/7 18:55:03",
+            "heat": "60赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "aefec55e1dd9c1b6",
+        "name": "[抖音][HP惠普电脑组件旗舰店] 年底忙工作总结，效率提不上来？惠普星book15来帮你 #国",
+        "type": "风格参考样本",
+        "content": "年底忙工作总结，效率提不上来？惠普星book15来帮你 #国补#惠普星book15#酷睿ultra全能更强大#酷睿UltraAI更强谁不爱",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "HP惠普电脑组件旗舰店",
+            "url": "https://www.douyin.com/video/7592547289281858859",
+            "media_path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-13/[抖音] [HP惠普电脑组件旗舰店] 年底忙工作总结，效率提不上来？惠普星book15来帮你 #国补#惠普星book15#酷睿ultra全能更强大#酷睿UltraAI更强谁不爱.mp4",
+            "date": "2026/1/8 12:00:00",
+            "heat": "1赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "2aacc322734b365b",
+        "name": "[B][叫兽易小星] 丨妖怪澡堂丨正式开张，惊喜女宾一位！",
+        "type": "风格参考样本",
+        "content": "丨妖怪澡堂丨正式开张，惊喜女宾一位！",
+        "source": {
+            "platform": "bilibili",
+            "platformName": "B",
+            "creator": "叫兽易小星",
+            "url": "https://www.bilibili.com/video/BV11QTL6MEPA",
+            "media_path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-13/[B] [叫兽易小星] 丨妖怪澡堂丨正式开张，惊喜女宾一位！.mp4",
+            "date": "2026/7/2 18:05:22",
+            "heat": "213.5万播放",
+            "media_type": "video",
+            "is_collected": true,
+            "is_liked": false
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "00222fca223f1b89",
+        "name": "[抖音][懂点电脑的老怀] 【防坑指南】家长给学生买电脑必看！ #买电脑防坑指南 #大一",
+        "type": "风格参考样本",
+        "content": "【防坑指南】家长给学生买电脑必看！ #买电脑防坑指南 #大一新生买电脑 #开学季 #家长必看 #大学生选电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7658259731156405510",
+            "media_path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-13/[抖音] [懂点电脑的老怀] 【防坑指南】家长给学生买电脑必看！ #买电脑防坑指南 #大一新生买电脑 #开学季 #家长必看 #大学生选电脑.mp4",
+            "date": "2026/7/3 19:19:09",
+            "heat": "1133赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "2a3098007841561b",
+        "name": "[抖音][懂点电脑的老怀] 新机遇！新机会！得物入驻，如此简单！ #得物 #＃得物招商",
+        "type": "风格参考样本",
+        "content": "新机遇！新机会！得物入驻，如此简单！ #得物 #＃得物招商 #招商",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7656755274820242742",
+            "media_path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-13/[抖音] [懂点电脑的老怀] 新机遇！新机会！得物入驻，如此简单！ #得物 #＃得物招商 #招商.mp4",
+            "date": "2026/6/30 18:21:43",
+            "heat": "1086赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "b9c4a4a5b6053362",
+        "name": "[抖音][懂点电脑的老怀] 机械革命游戏本，翻车？？？ #机械革命 #机械革命蛟龙 #机",
+        "type": "风格参考样本",
+        "content": "机械革命游戏本，翻车？？？ #机械革命 #机械革命蛟龙 #机械革命极光X #游戏本 #机械革命翻车",
+        "source": {
+            "platform": "douyin",
+            "platformName": "抖音",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7657452417331563830",
+            "media_path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\outputs\\materials\\knowledge/2026-07-13/[抖音] [懂点电脑的老怀] 机械革命游戏本，翻车？？？ #机械革命 #机械革命蛟龙 #机械革命极光X #游戏本 #机械革命翻车.mp4",
+            "date": "2026/7/1 18:00:00",
+            "heat": "1813赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "44a356a12648e455",
+        "name": "[douyin][机惠数码] 鸿蒙OS7:实力不需等待#鸿蒙os #华为 #科技数码 #鸿",
+        "type": "风格参考样本",
+        "content": "鸿蒙OS7:实力不需等待#鸿蒙os #华为 #科技数码 #鸿蒙系统",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "机惠数码",
+            "url": "https://www.douyin.com/video/7660109011270213530",
+            "media_path": "",
+            "date": "2026/7/8 18:55:12",
+            "heat": "29赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "8b48d627e241a985",
+        "name": "[douyin][懂点电脑的老怀] 感恩有你！感谢支持！大家！端午安康！ #端午节 #618 #",
+        "type": "风格参考样本",
+        "content": "感恩有你！感谢支持！大家！端午安康！ #端午节 #618 #笔记本电脑 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7653058857279871110",
+            "media_path": "",
+            "date": "2026/6/19 18:57:00",
+            "heat": "1437赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "ff3cc7d1d3f07845",
+        "name": "[douyin][懂点电脑的老怀] 机械革命游戏本预售的，近期都会发货。 #机械革命 #笔记本电",
+        "type": "风格参考样本",
+        "content": "机械革命游戏本预售的，近期都会发货。 #机械革命 #笔记本电脑 #蛟龙16pro",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7655607846268572009",
+            "media_path": "",
+            "date": "2026/6/26 15:48:23",
+            "heat": "1192赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "03b4dc1df7c1b6cd",
+        "name": "[douyin][懂点电脑的老怀] 咱们最基本的常识得知道吧！全新笔记本电脑不可能有键盘膜！！",
+        "type": "风格参考样本",
+        "content": "咱们最基本的常识得知道吧！全新笔记本电脑不可能有键盘膜！！ #笔记本电脑翻车 #机械革命 #联想拯救者 #拯救者翻车",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7657858748572126515",
+            "media_path": "",
+            "date": "2026/7/2 17:23:07",
+            "heat": "1273赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "223bda5ac92a69c0",
+        "name": "[douyin][懂点电脑的老怀] 英特尔Wildcat Lake：它适合什么人？值得不值得？",
+        "type": "风格参考样本",
+        "content": "英特尔Wildcat Lake：它适合什么人？值得不值得？ #WildcatLake #英特尔 #英特尔处理器",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7654551525863197967",
+            "media_path": "",
+            "date": "2026/6/23 19:29:25",
+            "heat": "3083赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "e9c3fd3ea1d332d4",
+        "name": "[douyin][懂点电脑的老怀] 机械革命笔记本，真的不能买吗？ #机械革命 #笔记本电脑 #",
+        "type": "风格参考样本",
+        "content": "机械革命笔记本，真的不能买吗？ #机械革命 #笔记本电脑 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7654916318189161778",
+            "media_path": "",
+            "date": "2026/6/24 19:05:01",
+            "heat": "2389赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "4505249cb12f613c",
+        "name": "[douyin][大福小朋友] 抖音视频",
+        "type": "风格参考样本",
+        "content": "抖音视频",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "大福小朋友",
+            "url": "https://www.douyin.com/video/7650783112284867054",
+            "media_path": "",
+            "date": "2026/6/13 15:45:57",
+            "heat": "6.1万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "60ebc72cfcbdc9e1",
+        "name": "[douyin][懂点电脑的老怀] 真性价比游戏本｜雷神猎刃超竞版 618 必入！ #RTX50",
+        "type": "风格参考样本",
+        "content": "真性价比游戏本｜雷神猎刃超竞版 618 必入！ #RTX50系笔记本#英伟达#雷神游戏本#618笔记本推荐",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7651923201664011562",
+            "media_path": "",
+            "date": "2026/6/16 19:00:29",
+            "heat": "7771赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "017dcf19d2aecd9a",
+        "name": "[douyin][Ray] 鸡哥的品控谁能绷住 刚到直接就掉了哈哈哈 #机械革命 #机械",
+        "type": "风格参考样本",
+        "content": "鸡哥的品控谁能绷住 刚到直接就掉了哈哈哈 #机械革命 #机械革命售后",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "Ray",
+            "url": "https://www.douyin.com/video/7651518386380616915",
+            "media_path": "",
+            "date": "2026/6/15 15:19:11",
+            "heat": "2.0万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "623651a71089253e",
+        "name": "[douyin][懂点电脑的老怀] 618游戏本推荐！目前就这些还能买的了！ #游戏本 #华硕天",
+        "type": "风格参考样本",
+        "content": "618游戏本推荐！目前就这些还能买的了！ #游戏本 #华硕天选 #机械革命 #联想拯救者 #ROG",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7651179124463127858",
+            "media_path": "",
+            "date": "2026/6/14 17:22:48",
+            "heat": "8323赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "d24f06387501c1d7",
+        "name": "[douyin][懂点电脑的老怀] 入手笔记本电脑！最适合的时间！就是618了！ #超值天团 #",
+        "type": "风格参考样本",
+        "content": "入手笔记本电脑！最适合的时间！就是618了！ #超值天团 #游戏本 #性价比游戏本 #618",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7650750913841335552",
+            "media_path": "",
+            "date": "2026/6/13 13:41:08",
+            "heat": "4160赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "067d9fcd1cf78706",
+        "name": "[douyin][小七同学爱喝水] 花钱填志愿到底值不值？ 一条视频带你拆解机构填报逻辑，轻松填",
+        "type": "风格参考样本",
+        "content": "花钱填志愿到底值不值？ 一条视频带你拆解机构填报逻辑，轻松填志愿#高考志愿 #志愿填报 #高考 #家长必看 #高考后的第一条抖音",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "小七同学爱喝水",
+            "url": "https://www.douyin.com/video/7649355565902187782",
+            "media_path": "",
+            "date": "2026/6/9 19:26:28",
+            "heat": "15.2万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "d705086ec4e3b026",
+        "name": "[douyin][Kevin说电商] 一个电商老兵的故事#电商 #电商人 #电商创业 #电商运营",
+        "type": "风格参考样本",
+        "content": "一个电商老兵的故事#电商 #电商人 #电商创业 #电商运营",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "Kevin说电商",
+            "url": "https://www.douyin.com/video/7648997698004243315",
+            "media_path": "",
+            "date": "2026/6/8 20:17:37",
+            "heat": "20赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "939597e466e48eeb",
+        "name": "[douyin][懂点电脑的老怀] 芯机研究所！晚上不见不散！AMD YES！ @芯机研究所 #",
+        "type": "风格参考样本",
+        "content": "芯机研究所！晚上不见不散！AMD YES！ @芯机研究所 #AMD #笔记本电脑 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7645938440131808427",
+            "media_path": "",
+            "date": "2026/5/31 14:26:09",
+            "heat": "2536赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "e69db09daa927ed2",
+        "name": "[douyin][懂点电脑的老怀] 祝弟弟妹妹们！高考顺利！金榜题名！ #高考加油 #这也能开播",
+        "type": "风格参考样本",
+        "content": "祝弟弟妹妹们！高考顺利！金榜题名！ #高考加油 #这也能开播 #高考",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7647798507692248383",
+            "media_path": "",
+            "date": "2026/6/5 18:00:00",
+            "heat": "1675赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "5d8661454aebf939",
+        "name": "[douyin][懂点电脑的老怀] 七彩虹！旗舰游戏本。I Game M16.全金属模具! #七",
+        "type": "风格参考样本",
+        "content": "七彩虹！旗舰游戏本。I Game M16.全金属模具! #七彩虹 #七彩虹igame #笔记本电脑 #游戏本 #笔记本推荐",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7647019660587633920",
+            "media_path": "",
+            "date": "2026/6/3 12:21:58",
+            "heat": "5584赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "8795e1b9b344f036",
+        "name": "[douyin][懂点电脑的老怀] 游戏本，轻薄本！非刚需！别入手！ #笔记本电脑 #游戏本 #",
+        "type": "风格参考样本",
+        "content": "游戏本，轻薄本！非刚需！别入手！ #笔记本电脑 #游戏本 #拯救者 #华硕天选 #机械革命",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7621178263750102326",
+            "media_path": "",
+            "date": "2026/3/25 21:04:15",
+            "heat": "5953赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "c6fc9f794c043174",
+        "name": "[douyin][懂点电脑的老怀] 不要被背刺！如何低价买笔记本电脑 #笔记本电脑 #618 #",
+        "type": "风格参考样本",
+        "content": "不要被背刺！如何低价买笔记本电脑 #笔记本电脑 #618 #机械革命 #联想拯救者 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7649710896096349446",
+            "media_path": "",
+            "date": "2026/6/10 18:25:19",
+            "heat": "4009赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "794ab9c40d1be6b1",
+        "name": "[douyin][海报新闻] 618结束后，电脑或将全面涨价（来源：蓝鲸新闻 编辑 安安",
+        "type": "风格参考样本",
+        "content": "618结束后，电脑或将全面涨价（来源：蓝鲸新闻 编辑 安安 潘雯 张大彪）#2026跨国公司与中国",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "海报新闻",
+            "url": "https://www.douyin.com/video/7649632827771866420",
+            "media_path": "",
+            "date": "2026/6/10 13:22:20",
+            "heat": "5.5万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "00a8709a0128b4ec",
+        "name": "[douyin][懂点电脑的老怀] 拭目以待吧！新款各品牌新款游戏本首发价！惊喜VS惊吓？ #游",
+        "type": "风格参考样本",
+        "content": "拭目以待吧！新款各品牌新款游戏本首发价！惊喜VS惊吓？ #游戏本 #拯救者 #华硕天选 #惠普暗影精灵 #笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7622609159851521897",
+            "media_path": "",
+            "date": "2026/3/29 17:36:38",
+            "heat": "1480赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "83c61918d8d522a7",
+        "name": "[douyin][懂点电脑的老怀] 售价亲民！综合全面的轻薄本！惠普星Book 14! #惠普笔",
+        "type": "风格参考样本",
+        "content": "售价亲民！综合全面的轻薄本！惠普星Book 14! #惠普笔记本电脑#英特尔酷睿处理器#AIPC#轻薄本#笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7648603209228930310",
+            "media_path": "",
+            "date": "2026/6/8 17:54:13",
+            "heat": "5263赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "00eb030b3120cd43",
+        "name": "[douyin][懂点电脑的老怀] 5月15日 18点-22点！机械革命英特尔笔记本！破价专场！",
+        "type": "风格参考样本",
+        "content": "5月15日 18点-22点！机械革命英特尔笔记本！破价专场！ #机械革命 #英特尔 #工厂溯源 #游戏本 #笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7639306614712929578",
+            "media_path": "",
+            "date": "2026/5/13 17:31:23",
+            "heat": "1.1万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "4907cfd6124d64d8",
+        "name": "[douyin][懂点电脑的老怀] 性价比游戏本！618活动推荐！均是真实可买到的价格！ #61",
+        "type": "风格参考样本",
+        "content": "性价比游戏本！618活动推荐！均是真实可买到的价格！ #618 #游戏本  #联想拯救者 #华硕天选 #机械革命蛟龙",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7640455548613184822",
+            "media_path": "",
+            "date": "2026/5/16 19:49:58",
+            "heat": "2626赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "0235aa08a596af34",
+        "name": "[douyin][懂点电脑的老怀] 7400左右的ROG枪神！夯爆了？拉完了？您怎么看？ #枪神",
+        "type": "风格参考样本",
+        "content": "7400左右的ROG枪神！夯爆了？拉完了？您怎么看？ #枪神 #ROG #ROG枪神 #游戏本#超值天团",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7640785761427672356",
+            "media_path": "",
+            "date": "2026/5/17 17:11:19",
+            "heat": "1431赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "70fc21d50a6bb78c",
+        "name": "[douyin][懂点电脑的老怀] 当初骂机械革命割韭菜的黑子们？你们说话！！！ #机械革命 #",
+        "type": "风格参考样本",
+        "content": "当初骂机械革命割韭菜的黑子们？你们说话！！！ #机械革命 #游戏本 #5070TI #笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7642643643286686976",
+            "media_path": "",
+            "date": "2026/5/23 18:00:00",
+            "heat": "2110赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "d396f2359d65aa43",
+        "name": "[douyin][懂点电脑的老怀] 618性价比游戏本推荐 #性价比游戏本 #机械革命 #华硕天",
+        "type": "风格参考样本",
+        "content": "618性价比游戏本推荐 #性价比游戏本 #机械革命 #华硕天选 #拯救者 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7645755729202138409",
+            "media_path": "",
+            "date": "2026/5/31 08:00:00",
+            "heat": "1.4万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "2f596057ffb407dc",
+        "name": "[douyin][懂点电脑的老怀] 直男蜕变记！微星 神影16MAX 2026测评！大提升！！！",
+        "type": "风格参考样本",
+        "content": "直男蜕变记！微星 神影16MAX 2026测评！大提升！！！ #微星 #微星神影 #微星神影16MAX #游戏本 #笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7646427913289534783",
+            "media_path": "",
+            "date": "2026/6/2 10:00:19",
+            "heat": "8188赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "144a941bfa44e655",
+        "name": "[douyin][懂点电脑的老怀] 来酷Air14：轻薄如手机，一天不充电！ 30日晚上8点新品",
+        "type": "风格参考样本",
+        "content": "来酷Air14：轻薄如手机，一天不充电！ 30日晚上8点新品开售，直播间惊喜优惠！！#第三代酷睿 #来酷2026  #来酷NewAir14酷酷的  #来酷Air14超轻颜值本 #笔记本电脑",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7645601372510997798",
+            "media_path": "",
+            "date": "2026/5/30 16:38:14",
+            "heat": "2580赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "bfcf86cebfedd39e",
+        "name": "[douyin][懂点电脑的老怀] 英特尔GTC深度探馆，我看到了什么？ #第三代酷睿Ultra",
+        "type": "风格参考样本",
+        "content": "英特尔GTC深度探馆，我看到了什么？ #第三代酷睿Ultra #豹有AI全能真显好 #英特尔酷睿ultra #WildcatLake",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7644107663864827172",
+            "media_path": "",
+            "date": "2026/5/26 17:11:57",
+            "heat": "6440赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "94c1368d24421d0a",
+        "name": "[douyin][懂点电脑的老怀] 捡漏价！拯救者Y9000P冰魄白！？？？真捡漏？？？ #拯救",
+        "type": "风格参考样本",
+        "content": "捡漏价！拯救者Y9000P冰魄白！？？？真捡漏？？？ #拯救者y9000p #联想拯救者 #低价陷阱 #低价套路",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7644217924005170473",
+            "media_path": "",
+            "date": "2026/5/27 12:00:00",
+            "heat": "1339赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "bed6d65286276769",
+        "name": "[douyin][CC1314] #苏超冠军 #苏超 #苏超赛程表 #泰州队",
+        "type": "风格参考样本",
+        "content": "#苏超冠军 #苏超 #苏超赛程表 #泰州队",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "CC1314",
+            "url": "https://www.douyin.com/video/7615033143518572977",
+            "media_path": "",
+            "date": "2026/3/9 07:37:50",
+            "heat": "7赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "33a287ece41f348a",
+        "name": "[douyin][机惠数码] iPhon实用技巧，拒绝做老人机！ #iphone #iph",
+        "type": "风格参考样本",
+        "content": "iPhon实用技巧，拒绝做老人机！ #iphone #iphone原相机 #手机摄影 #手机使用技巧 #iphone小技巧",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "机惠数码",
+            "url": "https://www.douyin.com/video/7614062994040950031",
+            "media_path": "",
+            "date": "2026/3/6 18:55:00",
+            "heat": "101赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "6d61d801e6f2303b",
+        "name": "[douyin][南京汽仕车品官方旗舰店] 除夕守岁，给好运贴层“隔热膜”，留住温暖；给烦恼做个“改色”",
+        "type": "风格参考样本",
+        "content": "除夕守岁，给好运贴层“隔热膜”，留住温暖；给烦恼做个“改色”，统统清零！✨ \n【汽仕车品】祝您：\n2026马年，日子过得有“面子”，\n事业跑得有“里子”。\n新春大吉，万事顺意！🐴#新年快乐 #南京汽车贴膜 #南京汽仕车品 #新年祝福",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "南京汽仕车品官方旗舰店",
+            "url": "https://www.douyin.com/video/7607655372953819249",
+            "media_path": "",
+            "date": "2026/2/17 10:28:22",
+            "heat": "7赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "ba83fe8e9d20870e",
+        "name": "[douyin][戴尔官翻机懒米店] 新号开播福利炸炸炸！#戴尔官翻机 #官翻机 #电脑推荐",
+        "type": "风格参考样本",
+        "content": "新号开播福利炸炸炸！#戴尔官翻机 #官翻机 #电脑推荐",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "戴尔官翻机懒米店",
+            "url": "https://www.douyin.com/video/7605869939346904831",
+            "media_path": "",
+            "date": "2026/2/24 08:00:00",
+            "heat": "2赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "5e5c2669dfb8ef6d",
+        "name": "[douyin][薄荷草] 椰梦长廊的日落跌进大海，咸咸的海风裹着椰香。在三亚的日子，连",
+        "type": "风格参考样本",
+        "content": "椰梦长廊的日落跌进大海，咸咸的海风裹着椰香。在三亚的日子，连风都在说“慢慢来”。原来快乐很简单——是踩在沙滩上的脚印，是抬头就能看见的蓝。",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "薄荷草",
+            "url": "https://www.douyin.com/video/7609660439823470153",
+            "media_path": "",
+            "date": "2026/2/22 20:09:00",
+            "heat": "9赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "7d60780191242ad8",
+        "name": "[douyin][懂点电脑的老怀] 不好意思！这两天回复消息会比较慢！年后初八一定恢复！ #新年",
+        "type": "风格参考样本",
+        "content": "不好意思！这两天回复消息会比较慢！年后初八一定恢复！ #新年快乐#马年#笔记本电脑#电竞外设",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606752294465506575",
+            "media_path": "",
+            "date": "2026/2/19 19:00:24",
+            "heat": "8024赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "205805ee8ab120d4",
+        "name": "[douyin][懂点电脑的老怀] 最近别买笔记本！三月初会有开学季活动！会便宜几百块！ #游戏",
+        "type": "风格参考样本",
+        "content": "最近别买笔记本！三月初会有开学季活动！会便宜几百块！ #游戏本 #新年快乐#马年#笔记本电脑#电竞外设",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606755426931150114",
+            "media_path": "",
+            "date": "2026/2/20 19:00:11",
+            "heat": "9138赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "d264957ca181262e",
+        "name": "[douyin][懂点电脑的老怀] 迎财神了！感谢衣食父母们多年来对我们的支持和信任！谢谢！ #",
+        "type": "风格参考样本",
+        "content": "迎财神了！感谢衣食父母们多年来对我们的支持和信任！谢谢！ #迎财神 #迎财神财源滚滚 #衣食父母 #感谢大家",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606739456648826127",
+            "media_path": "",
+            "date": "2026/2/21 19:00:20",
+            "heat": "4043赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "70fbe2b629d44219",
+        "name": "[douyin][懂点电脑的老怀] 新年快乐！抱歉！朋友们！我停播了！年后每天都直播！到时候再见",
+        "type": "风格参考样本",
+        "content": "新年快乐！抱歉！朋友们！我停播了！年后每天都直播！到时候再见 #新年快乐#马年#笔记本电脑#电竞外设",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606725596759985448",
+            "media_path": "",
+            "date": "2026/2/17 19:00:52",
+            "heat": "7000赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "6fd0cc8a45567162",
+        "name": "[douyin][懂点电脑的老怀] 客服/验机/技术团队，已经放假！初八开始给大家服务！谢谢 #",
+        "type": "风格参考样本",
+        "content": "客服/验机/技术团队，已经放假！初八开始给大家服务！谢谢 #新年快乐#马年#笔记本电脑#电竞外设",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606758224947105059",
+            "media_path": "",
+            "date": "2026/2/18 19:00:37",
+            "heat": "1.1万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "aeb75897fdb18230",
+        "name": "[douyin][懂点电脑的老怀] 感恩有你！笔记本电脑我们会坚持做下去！明年会更加努力！ #新",
+        "type": "风格参考样本",
+        "content": "感恩有你！笔记本电脑我们会坚持做下去！明年会更加努力！ #新年快乐#马年#笔记本电脑#电竞外设",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7606708993859308834",
+            "media_path": "",
+            "date": "2026/2/16 19:00:47",
+            "heat": "9785赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "7d171ad526d41bc6",
+        "name": "[douyin][苏宁易购电竞] 8点锁定苏宁直播间 #华硕 #苏宁易购 #年货 #笔记本 #",
+        "type": "风格参考样本",
+        "content": "8点锁定苏宁直播间 #华硕 #苏宁易购 #年货 #笔记本 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "苏宁易购电竞",
+            "url": "https://www.douyin.com/video/7604063187894963502",
+            "media_path": "",
+            "date": "2026/2/7 18:09:19",
+            "heat": "5赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "a64c84c72f13467b",
+        "name": "[douyin][懂点电脑的老怀] 低价游戏本神车！明天年货节活动开始发车！ #性价比游戏本 #",
+        "type": "风格参考样本",
+        "content": "低价游戏本神车！明天年货节活动开始发车！ #性价比游戏本 #机械革命 #华硕 #联想 #惠普",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7595531313382258422",
+            "media_path": "",
+            "date": "2026/1/15 18:20:47",
+            "heat": "2030赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "d579daa7f9bf8c3e",
+        "name": "[douyin][懂点电脑的老怀] 高能静音！六边形战士！惠普 暗影精灵MAX 强势来袭！ #酷",
+        "type": "风格参考样本",
+        "content": "高能静音！六边形战士！惠普 暗影精灵MAX 强势来袭！ #酷睿UltraAI更强谁不爱  #惠普  #暗影精灵MAX  #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7583431679402970406",
+            "media_path": "",
+            "date": "2025/12/14 18:01:14",
+            "heat": "7354赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "b042e046e4cc3424",
+        "name": "[douyin][戴尔官翻机懒米店] 戴尔外星人官翻机来了 比全新机更有性价比 #年货节#戴尔笔记",
+        "type": "风格参考样本",
+        "content": "戴尔外星人官翻机来了 比全新机更有性价比 #年货节#戴尔笔记本 #笔记本电脑推荐 #外星人笔记本 #DELL",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "戴尔官翻机懒米店",
+            "url": "https://www.douyin.com/video/7603232686489277011",
+            "media_path": "",
+            "date": "2026/2/5 12:26:01",
+            "heat": "5赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "eb4b13fa2f874a50",
+        "name": "[douyin][懂点电脑的老怀] 感谢各位朋友的支持和信任！谢谢大家！没有你们就没有现在的我",
+        "type": "风格参考样本",
+        "content": "感谢各位朋友的支持和信任！谢谢大家！没有你们就没有现在的我 #获奖 #笔记本电脑 #游戏本",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "懂点电脑的老怀",
+            "url": "https://www.douyin.com/video/7601428989973990699",
+            "media_path": "",
+            "date": "2026/1/31 18:00:01",
+            "heat": "1378赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "b967828c134d8d3f",
+        "name": "[douyin][陈佩斯父与子] 《惊梦》巡演到南方，一路美食肠粉太难忘～ #陈佩斯父与子 @",
+        "type": "风格参考样本",
+        "content": "《惊梦》巡演到南方，一路美食肠粉太难忘～ #陈佩斯父与子 @陳大愚",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "陈佩斯父与子",
+            "url": "https://www.douyin.com/video/7047324787257003295",
+            "media_path": "",
+            "date": "2021/12/30 11:00:04",
+            "heat": "11.2万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "b682f9c73bb7d333",
+        "name": "[douyin][重庆攻略范范] 哇，重庆观音桥也有裸眼3D大屏了，可惜我没拍好，现场看更漂亮",
+        "type": "风格参考样本",
+        "content": "哇，重庆观音桥也有裸眼3D大屏了，可惜我没拍好，现场看更漂亮，厉害了大重庆👍🏼#重庆#观音桥",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "重庆攻略范范",
+            "url": "https://www.douyin.com/video/6887882665991654659",
+            "media_path": "",
+            "date": "2020/10/26 19:02:38",
+            "heat": "68.1万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "3cf25e1e3f7c23dc",
+        "name": "[douyin][美食的旅行] 冰淇淋🍦#美食vlog #冰淇淋",
+        "type": "风格参考样本",
+        "content": "冰淇淋🍦#美食vlog #冰淇淋",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "美食的旅行",
+            "url": "https://www.douyin.com/video/6871155336259128579",
+            "media_path": "",
+            "date": "2020/9/11 17:12:02",
+            "heat": "4.9万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "c767a7a218a12947",
+        "name": "[douyin][是青青呀] 和大叔第七个520，都以为我是个感情丰富的人，殊不知我刚进大",
+        "type": "风格参考样本",
+        "content": "和大叔第七个520，都以为我是个感情丰富的人，殊不知我刚进大学就遇到了你，你是第一个教会我爱的男人#情侣",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "是青青呀",
+            "url": "https://www.douyin.com/video/6828853560256613646",
+            "media_path": "",
+            "date": "2020/5/20 17:19:32",
+            "heat": "135.1万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "3e1d01a3cc856c50",
+        "name": "[douyin][亭序] 手扶拖拉机司机上线",
+        "type": "风格参考样本",
+        "content": "手扶拖拉机司机上线",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "亭序",
+            "url": "https://www.douyin.com/video/6821711877484088576",
+            "media_path": "",
+            "date": "2020/5/1 11:26:08",
+            "heat": "12赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "9d127a52d0625ce5",
+        "name": "[douyin][极目新闻] 大江呜咽！上午10点，#武汉 街头行人静立，为逝去的同胞默哀",
+        "type": "风格参考样本",
+        "content": "大江呜咽！上午10点，#武汉 街头行人静立，为逝去的同胞默哀🕯️",
+        "source": {
+            "platform": "douyin",
+            "platformName": "douyin",
+            "creator": "极目新闻",
+            "url": "https://www.douyin.com/video/6811678176197070093",
+            "media_path": "",
+            "date": "2020/4/4 10:30:18",
+            "heat": "1.6万赞",
+            "media_type": "video",
+            "is_collected": false,
+            "is_liked": true
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "67f464114f0cf604",
+        "name": "[bilibili][我是HYK] vivo原子工作台发展历程：做你最强的AI搭子？",
+        "type": "风格参考样本",
+        "content": "vivo原子工作台发展历程：做你最强的AI搭子？",
+        "source": {
+            "platform": "bilibili",
+            "platformName": "bilibili",
+            "creator": "我是HYK",
+            "url": "https://www.bilibili.com/video/BV1Ukjt6KEqy",
+            "media_path": "",
+            "date": "2026/6/21 17:24:53",
+            "heat": "6.5万播放",
+            "media_type": "video",
+            "is_collected": true,
+            "is_liked": false
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "8b7151b840417d88",
+        "name": "[bilibili][我是HYK] 方向错了！手机跟AI Agent到底该怎么结合？",
+        "type": "风格参考样本",
+        "content": "方向错了！手机跟AI Agent到底该怎么结合？",
+        "source": {
+            "platform": "bilibili",
+            "platformName": "bilibili",
+            "creator": "我是HYK",
+            "url": "https://www.bilibili.com/video/BV1YV7W6YEFU",
+            "media_path": "",
+            "date": "2026/6/28 00:00:42",
+            "heat": "6.2万播放",
+            "media_type": "video",
+            "is_collected": true,
+            "is_liked": false
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
+    },
+    {
+        "id": "3d6d84bc0e4d9a3c",
+        "name": "[bilibili][镜中旅人NOTES] 银翼买瓜-仿生人会梦见电子瓜，无数次循环后，卖瓜接待员「郝」",
+        "type": "风格参考样本",
+        "content": "银翼买瓜-仿生人会梦见电子瓜，无数次循环后，卖瓜接待员「郝」已觉醒",
+        "source": {
+            "platform": "bilibili",
+            "platformName": "bilibili",
+            "creator": "镜中旅人NOTES",
+            "url": "https://www.bilibili.com/video/BV1rPGJ6sEYw",
+            "media_path": "",
+            "date": "2026/5/24 20:00:46",
+            "heat": "31.9万播放",
+            "media_type": "video",
+            "is_collected": true,
+            "is_liked": false
+        },
+        "created_at": 1784095579,
+        "updated_at": 1784095579
     }
 ]

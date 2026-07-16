@@ -3,10 +3,10 @@
 我的知识库 - 以「风格化」为核心的三区布局：
 
 左上：风格化列表（按账号/内容类型/产品品类/行业垂类分组）
-左下：选中风格化的风格画像详情 + 知识背景列表
+左下：选中风格化的风格画像详情
 右侧：此风格化参考的原始素材列表，双击素材弹出详情（含播放/蒸馏内容）
 
-工具栏：同步/导入/提炼 + 知识背景管理入口
+工具栏：同步/导入/提炼
 """
 import json
 import os
@@ -244,129 +244,6 @@ class SampleDetailDialog(QDialog):
 
 
 # ══════════════════════════════════════════════════════
-#  知识背景管理弹窗
-# ══════════════════════════════════════════════════════
-
-class KnowledgeBgDialog(QDialog):
-    """管理手动知识背景条目（品牌调性/话术风格/禁用词等），不影响风格化。"""
-
-    def __init__(self, manager, parent=None):
-        super().__init__(parent)
-        self.manager = manager
-        self.setWindowTitle("知识背景管理")
-        self.resize(760, 500)
-        self.current_id = None
-        lay = QHBoxLayout(self)
-
-        # 左：列表
-        left = QFrame()
-        ll = QVBoxLayout(left)
-        ll.addWidget(QLabel("知识背景条目"))
-        self.kb_list = QListWidget()
-        self.kb_list.itemClicked.connect(self._on_click)
-        ll.addWidget(self.kb_list, 1)
-        btn_new = QPushButton("➕ 新建")
-        btn_new.clicked.connect(self._new_item)
-        ll.addWidget(btn_new)
-        lay.addWidget(left, 1)
-
-        # 右：编辑表单
-        right = QFrame()
-        rl = QVBoxLayout(right)
-        form = QFormLayout()
-        self.inp_name = QLineEdit()
-        self.inp_name.setPlaceholderText("如：品牌极简科技调性")
-        form.addRow("名称 *", self.inp_name)
-        self.inp_type = QComboBox()
-        self.inp_type.setEditable(True)
-        kb_types = [t for t in ENTRY_TYPES if t not in (STYLIZATION_TYPE, REFERENCE_TYPE)]
-        self.inp_type.addItems(kb_types)
-        self.inp_type.setCurrentText("")
-        form.addRow("类型", self.inp_type)
-        rl.addLayout(form)
-        rl.addWidget(QLabel("内容 *"))
-        self.inp_content = QTextEdit()
-        self.inp_content.setPlaceholderText(
-            "例如：\n- 语气：专业但不端着，像懂行的朋友安利\n- 禁用：夸大功效词")
-        rl.addWidget(self.inp_content, 1)
-        btn_row = QHBoxLayout()
-        self.btn_save = QPushButton("💾 保存")
-        self.btn_save.setObjectName("primary_button")
-        self.btn_save.clicked.connect(self._save)
-        btn_row.addWidget(self.btn_save)
-        btn_del = QPushButton("🗑️ 删除")
-        btn_del.setObjectName("secondary_button")
-        btn_del.clicked.connect(self._delete)
-        btn_row.addWidget(btn_del)
-        btn_row.addStretch()
-        self.status = QLabel("")
-        self.status.setObjectName("muted_text")
-        btn_row.addWidget(self.status)
-        rl.addLayout(btn_row)
-        lay.addWidget(right, 2)
-
-        self._refresh()
-
-    def _refresh(self):
-        self.kb_list.clear()
-        kb_items = [it for it in self.manager.all_items()
-                    if it.get("type") not in (STYLIZATION_TYPE, REFERENCE_TYPE)]
-        for it in kb_items:
-            t = it.get("type", "")
-            node = QListWidgetItem(f"[{t}] {it.get('name','')}")
-            node.setData(Qt.UserRole, it.get("id"))
-            self.kb_list.addItem(node)
-
-    def _on_click(self, item):
-        rid = item.data(Qt.UserRole)
-        record = self.manager.get(rid)
-        if not record:
-            return
-        self.current_id = rid
-        self.inp_name.setText(record.get("name", ""))
-        self.inp_type.setCurrentText(record.get("type", ""))
-        self.inp_content.setPlainText(record.get("content", ""))
-        self.btn_save.setText("💾 保存修改")
-
-    def _new_item(self):
-        self.current_id = None
-        self.inp_name.clear()
-        self.inp_type.setCurrentText("")
-        self.inp_content.clear()
-        self.btn_save.setText("💾 新建")
-
-    def _save(self):
-        name = self.inp_name.text().strip()
-        etype = self.inp_type.currentText().strip()
-        content = self.inp_content.toPlainText().strip()
-        if not name or not content:
-            self.status.setText("名称和内容不能为空。")
-            return
-        if self.current_id:
-            ok, msg, _ = self.manager.update_item(self.current_id, name, etype, content)
-        else:
-            ok, msg, item = self.manager.add_item(name, etype, content)
-            if ok:
-                self.current_id = item["id"]
-        self.status.setText(msg)
-        if ok:
-            self._refresh()
-            self.btn_save.setText("💾 保存修改")
-
-    def _delete(self):
-        if not self.current_id:
-            return
-        reply = QMessageBox.question(self, "确认删除", "确定删除该条目？",
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply != QMessageBox.Yes:
-            return
-        if self.manager.remove_item(self.current_id):
-            self.current_id = None
-            self._new_item()
-            self._refresh()
-
-
-# ══════════════════════════════════════════════════════
 #  批量视频转文字 Worker
 # ══════════════════════════════════════════════════════
 
@@ -427,8 +304,7 @@ class MyKnowledgePage(BasePage):
         root.addWidget(heading)
 
         subtitle = QLabel(
-            "收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整  |  "
-            "知识背景：品牌调性/禁用词等手动维护"
+            "收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整"
         )
         subtitle.setObjectName("muted_text")
         root.addWidget(subtitle)
@@ -461,12 +337,6 @@ class MyKnowledgePage(BasePage):
         )
         self.btn_distill.clicked.connect(self._distill)
         bar.addWidget(self.btn_distill)
-
-        btn_kb = QPushButton("📚 知识背景")
-        btn_kb.setObjectName("secondary_button")
-        btn_kb.setToolTip("管理手动维护的知识背景条目（品牌调性/话术风格/禁用词等）")
-        btn_kb.clicked.connect(self._open_kb_dialog)
-        bar.addWidget(btn_kb)
 
         self.distill_status = QLabel("")
         self.distill_status.setObjectName("muted_text")
@@ -538,6 +408,8 @@ class MyKnowledgePage(BasePage):
 
     def _refresh_stats(self):
         """读取知识库 + 浏览器文件，计算数量差异，设置示警颜色。"""
+        # 先同步下载路径：从 kb_sync.json 更新已下载但 media_path 为空的条目
+        self.manager.sync_media_paths()
         all_items = self.manager.all_items()
         stylizations = [it for it in all_items if it.get("type") == STYLIZATION_TYPE]
         samples      = [it for it in all_items if it.get("type") == REFERENCE_TYPE]
@@ -620,7 +492,7 @@ class MyKnowledgePage(BasePage):
     # ══════════════ 左侧面板 ══════════════
 
     def _build_left(self):
-        """左侧 = 上下垂直分割（风格化列表 / 详情+知识背景）+ 操作按钮"""
+        """左侧 = 上下垂直分割（风格化列表 / 详情）+ 操作按钮"""
         outer = QWidget()
         outer.setMinimumWidth(420)
         outer_lay = QVBoxLayout(outer)
@@ -690,17 +562,6 @@ class MyKnowledgePage(BasePage):
         self.detail_content.setReadOnly(True)
         self.detail_content.setPlaceholderText("← 从上方列表选择一个风格化条目")
         self.detail_layout.addWidget(self.detail_content, 1)
-
-        # 知识背景子区
-        self.kb_section_label = QLabel("知识背景")
-        self.kb_section_label.setObjectName("card_title")
-        self.kb_section_label.setVisible(False)
-        self.detail_layout.addWidget(self.kb_section_label)
-
-        self.kb_inline_list = QListWidget()
-        self.kb_inline_list.setMaximumHeight(100)
-        self.kb_inline_list.setVisible(False)
-        self.detail_layout.addWidget(self.kb_inline_list)
 
         scroll.setWidget(detail_container)
         bl.addWidget(scroll, 1)
@@ -800,7 +661,7 @@ class MyKnowledgePage(BasePage):
         self.samples_list.itemDoubleClicked.connect(self._on_sample_double_clicked)
         lay.addWidget(self.samples_list, 1)
 
-        legend = QLabel("✅=已下载/已转写  ⬜=未下载  📝=已转写  |  双击查看素材详情")
+        legend = QLabel("✅=已下载  ⬜=未下载  📝=已转写  — =未转写  |  双击查看素材详情")
         legend.setObjectName("muted_text")
         legend.setVisible(False)
         self.samples_legend = legend
@@ -1051,15 +912,6 @@ class MyKnowledgePage(BasePage):
         lay.addWidget(QDialogButtonBox(QDialogButtonBox.Close, parent=dlg))
         dlg.exec()
 
-    # ══════════════ 知识背景管理 ══════════════
-
-    def _open_kb_dialog(self):
-        dlg = KnowledgeBgDialog(self.manager, parent=self.parent_widget)
-        dlg.exec()
-        # 可能有更新，刷新详情区知识背景
-        if self.current_stylization:
-            self._fill_kb_inline()
-
     # ══════════════ 列表刷新 ══════════════
 
     def refresh_stylization_list(self):
@@ -1139,7 +991,6 @@ class MyKnowledgePage(BasePage):
 
         # 左下：填充风格画像
         self.detail_content.setPlainText(record.get("content",""))
-        self._fill_kb_inline()
 
         # 操作按钮激活
         self.btn_use_style.setEnabled(True)
@@ -1151,19 +1002,6 @@ class MyKnowledgePage(BasePage):
 
         # 右侧：填充参考素材
         self._fill_samples_panel(record)
-
-    def _fill_kb_inline(self):
-        """在左下显示所有知识背景条目（非风格化、非原始样本）。"""
-        kb_items = [it for it in self.manager.all_items()
-                    if it.get("type") not in (STYLIZATION_TYPE, REFERENCE_TYPE)]
-        self.kb_section_label.setVisible(bool(kb_items))
-        self.kb_inline_list.setVisible(bool(kb_items))
-        self.kb_inline_list.clear()
-        for it in kb_items:
-            t = it.get("type","")
-            node = QListWidgetItem(f"[{t}]  {it.get('name','')}")
-            node.setFlags(Qt.NoItemFlags)
-            self.kb_inline_list.addItem(node)
 
     def _fill_samples_panel(self, stylization):
         """右侧：列出此风格化使用的所有参考素材。"""
@@ -1236,8 +1074,6 @@ class MyKnowledgePage(BasePage):
 
     def _clear_detail(self):
         self.detail_content.clear()
-        self.kb_section_label.setVisible(False)
-        self.kb_inline_list.setVisible(False)
         self.btn_use_style.setEnabled(False)
         self.btn_regen.setEnabled(False)
         self.btn_del_style.setEnabled(False)

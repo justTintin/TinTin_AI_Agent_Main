@@ -148,10 +148,19 @@ class MyKnowledgeManager:
             (it.get("source") or {}).get("url")
             for it in self.items if (it.get("source") or {}).get("url")
         }
-        added = skipped = 0
+        added = skipped = updated = 0
         for e in all_entries.values():
             url = (e.get("url") or "").strip()
+            new_media = (e.get("mediaPath") or "").strip()
             if url and url in existing_urls:
+                # 已存在：若 sync 数据有 mediaPath 且当前为空，则补充更新
+                if new_media:
+                    for it in self.items:
+                        src = it.get("source") or {}
+                        if src.get("url") == url and not src.get("media_path"):
+                            src["media_path"] = new_media
+                            it["updated_at"] = int(time.time())
+                            updated += 1
                 skipped += 1
                 continue
             title = (e.get("title") or "").strip()
@@ -171,7 +180,7 @@ class MyKnowledgeManager:
                     "platformName": platform_name,
                     "creator": creator,
                     "url": url,
-                    "media_path": e.get("mediaPath", ""),
+                    "media_path": new_media,
                     "date": e.get("date", ""),
                     "heat": e.get("heat", ""),
                     "media_type": e.get("type", ""),
@@ -185,9 +194,48 @@ class MyKnowledgeManager:
             if url:
                 existing_urls.add(url)
             added += 1
-        if added:
+        if added or updated:
             self.save()
-        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在）。"
+        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在），更新 {updated} 条下载路径。"
+
+    def sync_media_paths(self, manifest_path=None):
+        """
+        从 kb_sync.json 读取已下载素材的 mediaPath，更新知识库中同 URL 条目的 media_path。
+        用于修正「先导入收藏记录、后下载」场景下 media_path 为空的问题。
+        返回更新条数。
+        """
+        sync_path = manifest_path or os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_sync.json")
+        if not os.path.exists(sync_path):
+            return 0
+        try:
+            with open(sync_path, "r", encoding="utf-8-sig") as f:
+                entries = json.load(f)
+        except Exception as e:
+            log.error(f"读取 kb_sync.json 失败: {e}")
+            return 0
+        if not isinstance(entries, list):
+            return 0
+        # 构建 url → mediaPath 映射
+        url_to_media = {}
+        for e in entries:
+            url = (e.get("url") or "").strip()
+            mp = (e.get("mediaPath") or "").strip()
+            if url and mp:
+                url_to_media[url] = mp
+        if not url_to_media:
+            return 0
+        updated = 0
+        for it in self.items:
+            src = it.get("source") or {}
+            url = (src.get("url") or "").strip()
+            if url in url_to_media and not src.get("media_path"):
+                src["media_path"] = url_to_media[url]
+                it["updated_at"] = int(time.time())
+                updated += 1
+        if updated:
+            self.save()
+            log.info(f"sync_media_paths: 更新了 {updated} 条素材的 media_path")
+        return updated
 
     def import_kb_items(self, items_path=None):
         """
@@ -212,6 +260,20 @@ class MyKnowledgeManager:
             (it.get("source") or {}).get("url")
             for it in self.items if (it.get("source") or {}).get("url")
         }
+        # 同步下载路径：若 kb_items.json 条目已有下载，补充 media_path
+        sync_path = os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_sync.json")
+        url_to_media = {}
+        if os.path.exists(sync_path):
+            try:
+                with open(sync_path, "r", encoding="utf-8-sig") as f:
+                    for se in json.load(f):
+                        s_url = (se.get("url") or "").strip()
+                        s_mp = (se.get("mediaPath") or "").strip()
+                        if s_url and s_mp:
+                            url_to_media[s_url] = s_mp
+            except Exception:
+                pass
+
         added = skipped = 0
         for e in entries:
             url = (e.get("url") or "").strip()
@@ -235,7 +297,7 @@ class MyKnowledgeManager:
                     "platformName": platform_name,
                     "creator": creator,
                     "url": url,
-                    "media_path": "",
+                    "media_path": url_to_media.get(url, ""),
                     "date": e.get("date", ""),
                     "heat": e.get("heat", ""),
                     "media_type": e.get("type", ""),

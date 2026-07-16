@@ -599,14 +599,15 @@ class PageSetupMixin:
         l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
 
-        # ── Tab 2: 飞书 ──
+        # ── Tab 2: 飞书（已隐藏，代码保留）──
         p3 = QWidget(); l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30)
-        _inp("App ID:", "edit_feishu_appid", "cli_xxxxxxxxxxxxxxx", l3)
-        _inp("App Secret:", "edit_feishu_appsecret", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", l3, echo=QLineEdit.Password)
-        _inp("多维表格 App Token:", "edit_feishu_apptoken", "bascnxxxxxxxxxxxxxxxxxxxxxx", l3)
+        l3.addWidget(QLabel("飞书配置（用于同步选题 / 脚本到飞书多维表格）:"))
+        _inp("App ID:", "edit_feishu_appid", "飞书开放平台自建应用的 App ID", l3)
+        _inp("App Secret:", "edit_feishu_appsecret", "App Secret", l3, echo=QLineEdit.Password)
+        _inp("App Token:", "edit_feishu_apptoken", "飞书多维表格的 app_token", l3)
         _inp("数据表 Table ID:", "edit_feishu_tableid", "tblxxxxxxxxxxxxxx", l3)
-        _inp("选题列名称:", "edit_feishu_topicfield", "默认: 选题", l3)
-        _inp("脚本列名称:", "edit_feishu_scriptfield", "默认: 脚本", l3)
+        _inp("选题字段名:", "edit_feishu_topicfield", "默认: 选题", l3)
+        _inp("脚本字段名:", "edit_feishu_scriptfield", "默认: 脚本", l3)
         _inp("文档保存文件夹 Token:", "edit_feishu_foldertoken", "fldcnxxxxxxxxxxxxxxxxxxxxxx (选填)", l3)
         self.edit_feishu_topicfield.setText("选题")
         self.edit_feishu_scriptfield.setText("脚本")
@@ -615,7 +616,8 @@ class PageSetupMixin:
         b4 = mdi_button("测试连接", "link"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._test_feishu); r3.addWidget(b4)
         l3.addLayout(r3)
         self.fs_test_status = QLabel(""); self.fs_test_status.setObjectName("muted_text"); l3.addWidget(self.fs_test_status)
-        l3.addStretch(); tabs.addTab(p3, "📝 飞书")
+        l3.addStretch()
+        # 注意：不调用 tabs.addTab(p3, ...) 以隐藏飞书Tab
 
         # ── Tab 4: 即梦 ──
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30,30,30,30)

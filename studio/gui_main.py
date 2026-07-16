@@ -1263,8 +1263,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         if btn_server and btn_server.isChecked():
             server_keys = ["[ASR]", "[_RemoteWorker]", "[RemoteTranscribeWorker]", "[VoxCPM]", "POST ", "HTTP "]
             if keyword:
-                keyword = f"({keyword})"
-            keyword = "|".join(server_keys)
+                keyword = f"({keyword})|{'|'.join(server_keys)}"
+            else:
+                keyword = "|".join(server_keys)
             keyword_filter.setText(f"[服务端] {keyword[:50]}")
 
         raw = get_last_logs(2000)

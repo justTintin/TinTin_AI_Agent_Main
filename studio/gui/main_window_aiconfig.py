@@ -431,71 +431,6 @@ class AIConfigMixin:
         import threading
         threading.Thread(target=_run, daemon=True).start()
 
-    def load_feishu_config(self):
-        config = configparser.ConfigParser()
-        appid = ""; appsecret = ""; apptoken = ""; tableid = ""
-        topicfield = "选题"; scriptfield = "脚本"; foldertoken = ""
-        try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding='utf-8')
-                if config.has_section('Feishu'):
-                    appid = config.get('Feishu', 'AppId', fallback="")
-                    appsecret = config.get('Feishu', 'AppSecret', fallback="")
-                    apptoken = config.get('Feishu', 'AppToken', fallback="")
-                    tableid = config.get('Feishu', 'TableId', fallback="")
-                    topicfield = config.get('Feishu', 'TopicField', fallback="选题")
-                    scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
-                    foldertoken = config.get('Feishu', 'FolderToken', fallback="")
-        except Exception as e:
-            log.error(f"加载飞书配置失败: {e}")
-        if hasattr(self, 'edit_feishu_appid'):
-            self.edit_feishu_appid.setText(appid)
-            self.edit_feishu_appsecret.setText(appsecret)
-            self.edit_feishu_apptoken.setText(apptoken)
-            self.edit_feishu_tableid.setText(tableid)
-            self.edit_feishu_topicfield.setText(topicfield)
-            self.edit_feishu_scriptfield.setText(scriptfield)
-            self.edit_feishu_foldertoken.setText(foldertoken)
-
-    def save_feishu_config(self):
-        config = configparser.ConfigParser()
-        try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding='utf-8')
-            if not config.has_section('Feishu'):
-                config.add_section('Feishu')
-            config.set('Feishu', 'AppId', self.edit_feishu_appid.text().strip())
-            config.set('Feishu', 'AppSecret', self.edit_feishu_appsecret.text().strip())
-            config.set('Feishu', 'AppToken', self.edit_feishu_apptoken.text().strip())
-            config.set('Feishu', 'TableId', self.edit_feishu_tableid.text().strip())
-            config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())
-            config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())
-            config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())
-            with open(CONFIG_INI_FILE, 'w', encoding='utf-8') as f:
-                config.write(f)
-            QMessageBox.information(self, "提示", "飞书配置参数保存成功！")
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")
-            log.error(f"保存飞书配置失败: {e}")
-
-    def _test_feishu(self):
-        self.fs_test_status.setText("⏳ 测试中…")
-        import requests as req
-        app_id = self.edit_feishu_appid.text().strip()
-        app_secret = self.edit_feishu_appsecret.text().strip()
-        if not app_id or not app_secret:
-            self.fs_test_status.setText("<font color='#dc2626'>❌ 请填入 App ID 和 Secret</font>")
-            return
-        try:
-            r = req.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
-            if r.status_code == 200 and r.json().get("tenant_access_token"):
-                self.fs_test_status.setText("<font color='#16a34a'>✅ 连接成功</font>")
-            else:
-                self.fs_test_status.setText(f"<font color='#dc2626'>❌ HTTP {r.status_code}</font>")
-        except Exception as e:
-            self.fs_test_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
-
     def _dreamina_login(self):
         self.dr_status.setText("⏳ 发起登录…")
         try:
@@ -583,4 +518,71 @@ class AIConfigMixin:
                 self.erp_sid_input.setText(cfg.get("sid", ""))
         except Exception as e:
             print(f"加载 ERP 配置失败: {e}")
+
+    # ── 飞书配置 ──
+
+    def load_feishu_config(self):
+        config = configparser.ConfigParser()
+        appid = ""; appsecret = ""; apptoken = ""; tableid = ""
+        topicfield = "选题"; scriptfield = "脚本"; foldertoken = ""
+        try:
+            if os.path.exists(CONFIG_INI_FILE):
+                config.read(CONFIG_INI_FILE, encoding='utf-8')
+                if config.has_section('Feishu'):
+                    appid = config.get('Feishu', 'AppId', fallback="")
+                    appsecret = config.get('Feishu', 'AppSecret', fallback="")
+                    apptoken = config.get('Feishu', 'AppToken', fallback="")
+                    tableid = config.get('Feishu', 'TableId', fallback="")
+                    topicfield = config.get('Feishu', 'TopicField', fallback="选题")
+                    scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
+                    foldertoken = config.get('Feishu', 'FolderToken', fallback="")
+        except Exception as e:
+            log.error(f"加载飞书配置失败: {e}")
+        if hasattr(self, 'edit_feishu_appid'):
+            self.edit_feishu_appid.setText(appid)
+            self.edit_feishu_appsecret.setText(appsecret)
+            self.edit_feishu_apptoken.setText(apptoken)
+            self.edit_feishu_tableid.setText(tableid)
+            self.edit_feishu_topicfield.setText(topicfield)
+            self.edit_feishu_scriptfield.setText(scriptfield)
+            self.edit_feishu_foldertoken.setText(foldertoken)
+
+    def save_feishu_config(self):
+        config = configparser.ConfigParser()
+        try:
+            if os.path.exists(CONFIG_INI_FILE):
+                config.read(CONFIG_INI_FILE, encoding='utf-8')
+            if not config.has_section('Feishu'):
+                config.add_section('Feishu')
+            config.set('Feishu', 'AppId', self.edit_feishu_appid.text().strip())
+            config.set('Feishu', 'AppSecret', self.edit_feishu_appsecret.text().strip())
+            config.set('Feishu', 'AppToken', self.edit_feishu_apptoken.text().strip())
+            config.set('Feishu', 'TableId', self.edit_feishu_tableid.text().strip())
+            config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())
+            config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())
+            config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())
+            with open(CONFIG_INI_FILE, 'w', encoding='utf-8') as f:
+                config.write(f)
+            QMessageBox.information(self, "提示", "飞书配置参数保存成功！")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")
+            log.error(f"保存飞书配置失败: {e}")
+
+    def _test_feishu(self):
+        self.fs_test_status.setText("⏳ 测试中…")
+        import requests as req
+        app_id = self.edit_feishu_appid.text().strip()
+        app_secret = self.edit_feishu_appsecret.text().strip()
+        if not app_id or not app_secret:
+            self.fs_test_status.setText("<font color='#dc2626'>❌ 请填入 App ID 和 Secret</font>")
+            return
+        try:
+            r = req.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
+            if r.status_code == 200 and r.json().get("tenant_access_token"):
+                self.fs_test_status.setText("<font color='#16a34a'>✅ 连接成功</font>")
+            else:
+                self.fs_test_status.setText(f"<font color='#dc2626'>❌ HTTP {r.status_code}</font>")
+        except Exception as e:
+            self.fs_test_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
 

@@ -423,6 +423,24 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         heading = QLabel("⚙️ 模型配置"); heading.setObjectName("heading")
         layout.addWidget(heading, 0)
+
+        # ── 统一服务端地址（各Tab独立API地址可基于此派生或单独填写）──
+        server_row = QHBoxLayout()
+        server_row.setSpacing(8)
+        server_lbl = QLabel("🌐 服务端地址（统一配置）:")
+        server_lbl.setObjectName("muted_text")
+        server_row.addWidget(server_lbl)
+        self.compute_server_input = QLineEdit()
+        self.compute_server_input.setPlaceholderText("http://192.168.111.18:8000（各服务默认基址）")
+        self.compute_server_input.textChanged.connect(self._on_server_url_changed)
+        server_row.addWidget(self.compute_server_input, 1)
+        self.btn_save_server = mdi_button("保存全部", "save")
+        self.btn_save_server.setObjectName("primary_button")
+        self.btn_save_server.setFixedWidth(100)
+        self.btn_save_server.clicked.connect(self._save_all_ai_config)
+        server_row.addWidget(self.btn_save_server)
+        layout.addLayout(server_row)
+
         tabs = QTabWidget()
         tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
@@ -564,10 +582,8 @@ class PageSetupMixin:
         self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
         self.load_voxcpm_config()
-        # Whisper ASR 地址初始化（纯远程模式）
-        self.whisper_api_url_input.setText(self.ai_config.get("whisper_api_url", ""))
-        # CLIP API 地址初始化（纯远程模式）
-        self.clip_api_url_input.setText(self.ai_config.get("clip_api_url", ""))
+        # 统一服务端地址初始化（会联动同步 Whisper/CLIP/PaddleOCR 的地址）
+        self.compute_server_input.setText(self.ai_config.get("compute_server_url", "http://192.168.111.18:8000"))
         self.refresh_llm_page_status()
 
     # ═══════════════════════════════════════════════════════════════

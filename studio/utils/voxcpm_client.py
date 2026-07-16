@@ -9,6 +9,7 @@ import os
 import json
 import base64
 import requests
+from utils.http_client import resilient_post
 
 from utils.logger_utils import log
 
@@ -67,7 +68,7 @@ def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
     log.info(f"[VoxCPM] 请求 TTS: {url} text_len={len(text)}")
 
     try:
-        r = requests.post(url, json=payload, timeout=timeout)
+        r = resilient_post(url, json=payload, timeout=timeout, service="voxcpm")
         log.info(f"[VoxCPM] 响应 HTTP {r.status_code} ({len(r.content)//1024}KB)")
     except requests.exceptions.RequestException:
         log.error(f"[VoxCPM] 连接失败: {url}")

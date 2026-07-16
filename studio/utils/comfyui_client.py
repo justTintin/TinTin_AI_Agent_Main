@@ -5,6 +5,7 @@ import threading
 import subprocess
 
 import requests
+from utils.http_client import resilient_get, resilient_post
 
 from config.paths import APPS_DIR, PYTHON_EMBEDED_DIR, LOG_DIR
 from utils.logger_utils import log
@@ -211,7 +212,7 @@ def upload_file(ai_config, file_path):
     else:
         url = f"{addr}/upload/image"
     with open(file_path, "rb") as f:
-        resp = requests.post(url, files={"image": f}, timeout=60)
+        resp = resilient_post(url, files={"image": f}, timeout=60, service="comfyui")
     resp.raise_for_status()
     return resp.json().get("name", os.path.basename(file_path))
 
@@ -226,7 +227,7 @@ def submit_prompt(ai_config, workflow_json):
     else:
         url = f"{addr}/prompt"
         payload = {"prompt": workflow_json}
-    resp = requests.post(url, json=payload, timeout=30)
+    resp = resilient_post(url, json=payload, timeout=30, service="comfyui")
     resp.raise_for_status()
     return resp.json().get("prompt_id")
 
@@ -241,7 +242,7 @@ def get_queue(ai_config):
     else:
         return None
     try:
-        resp = requests.get(url, timeout=10)
+        resp = resilient_get(url, timeout=10, service="comfyui", circuit_breaker=False)
         return resp.json() if resp.status_code == 200 else None
     except requests.exceptions.RequestException as e:
         log.warning(f"[ComfyUI] 获取队列失败: {e}")
@@ -267,7 +268,7 @@ def get_history(ai_config, prompt_id=None):
             url = f"{addr}/history/{prompt_id}"
         else:
             return None  # 直连 ComfyUI 不支持无参数查询全部历史
-    resp = requests.get(url, timeout=10)
+    resp = resilient_get(url, timeout=10, service="comfyui", circuit_breaker=False)
     if resp.status_code == 200:
         data = resp.json()
         if prompt_id:
@@ -292,7 +293,7 @@ def system_stats(ai_config):
             url = _proxy_url(addr, "status")
         else:
             url = f"{addr}/system_stats"
-        resp = requests.get(url, timeout=5)
+        resp = resilient_get(url, timeout=5, service="comfyui", circuit_breaker=False)
         return resp.json() if resp.status_code == 200 else {}
     except Exception:
         return {}

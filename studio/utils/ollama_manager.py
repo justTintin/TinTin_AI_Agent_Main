@@ -7,6 +7,7 @@
 import os
 import requests
 from utils.logger_utils import log
+from utils.http_client import resilient_get
 
 
 def _read_ai_config() -> dict:
@@ -53,7 +54,7 @@ class OllamaManager:
         """检测远程 Ollama 服务是否可达。"""
         url = f"{_read_ollama_api()}/ollama/status"
         try:
-            r = requests.get(url, timeout=5)
+            r = resilient_get(url, timeout=5, service="ollama", circuit_breaker=False)
             ok = r.status_code == 200
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
             return ok
@@ -65,7 +66,7 @@ class OllamaManager:
         """列出远程 Ollama 已加载的模型。"""
         url = f"{_read_ollama_api()}/ollama/models"
         try:
-            r = requests.get(f"{_read_ollama_api()}/ollama/models", timeout=5)
+            r = resilient_get(url, timeout=5, service="ollama", circuit_breaker=False)
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
             if r.status_code == 200:
                 data = r.json()

@@ -798,48 +798,56 @@ class PageSetupMixin:
             layout.addWidget(task_card, 1)
     
     def _sync_server_tasks_async(self):
-        """异步版本：把 HTTP 请求放到 Worker 线程，不阻塞界面。"""
+        """异步版本：HTTP 请求放 Worker 线程，UI 更新回主线程。"""
         from utils.thread_worker import TaskWorker as Worker
 
-        def _do_sync():
-            self._sync_server_tasks()
-            return None
-
-        w = Worker(_do_sync)
-        w.start()
-
-    def _sync_server_tasks(self):
-        """从服务端 GET /tasks 拉取本机任务列表并入表格。"""
-        import requests as _req
-        import socket as _socket
-        try:
-            from config.paths import AI_CONFIG_FILE
-            import json as _json
-            base_url = "http://192.168.111.18:8000"
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r") as f:
-                    cfg = _json.load(f)
-                url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-                if url:
-                    base_url = url
-            resp = _req.get(f"{base_url}/tasks", timeout=10)
-            if resp.status_code != 200:
-                return
-            tasks = resp.json()
-            if not isinstance(tasks, list):
-                return
-
-            # 获取本机 IP
-            local_ip = ""
+        def _fetch():
+            """仅做 HTTP 请求，返回数据，不碰 UI。"""
+            import requests as _req
+            import socket as _socket
             try:
-                s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-                s.connect((base_url.replace("http://","").replace("https://","").split(":")[0], 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                pass
+                from config.paths import AI_CONFIG_FILE
+                import json as _json
+                base_url = "http://192.168.111.18:8000"
+                if os.path.isfile(AI_CONFIG_FILE):
+                    with open(AI_CONFIG_FILE, "r") as f:
+                        cfg = _json.load(f)
+                    url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                    if url:
+                        base_url = url
+                resp = _req.get(f"{base_url}/tasks", timeout=10)
+                if resp.status_code != 200:
+                    return None
+                tasks = resp.json()
+                if not isinstance(tasks, list):
+                    return None
 
-            # 已存在的任务 ID 集合
+                # 获取本机 IP
+                local_ip = ""
+                try:
+                    s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                    s.connect((base_url.replace("http://", "").replace("https://", "").split(":")[0], 80))
+                    local_ip = s.getsockname()[0]
+                    s.close()
+                except Exception:
+                    pass
+
+                # 过滤本机任务
+                my_tasks = []
+                for t in tasks:
+                    task_ip = (t.get("client_ip") or "").strip()
+                    if local_ip and task_ip and task_ip != local_ip:
+                        continue
+                    my_tasks.append(t)
+                return my_tasks
+            except Exception as e:
+                print(f"同步服务端任务失败: {e}")
+                return None
+
+        def _on_done(tasks):
+            """主线程回调：更新 UI。"""
+            if not tasks:
+                return
             existing = set()
             for row in range(self.task_table.rowCount()):
                 item = self.task_table.item(row, 0)
@@ -847,24 +855,13 @@ class PageSetupMixin:
                     existing.add(item.text())
 
             added = 0
-            filtered = 0
+            import datetime as _dt
             for t in tasks:
-                # 只显示本机 IP 的任务
-                task_ip = (t.get("client_ip") or "").strip()
-                if local_ip and task_ip and task_ip != local_ip:
-                    filtered += 1
-                    continue
-
                 tid = (t.get("id") or "")[:12]
                 if not tid or tid in existing:
                     continue
-                # 格式化时间
                 created_ts = t.get("created_at") or t.get("started_at") or 0
-                if created_ts:
-                    import datetime as _dt
-                    time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M")
-                else:
-                    time_str = ""
+                time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M") if created_ts else ""
                 row = self.task_table.rowCount()
                 self.task_table.insertRow(row)
                 self.task_table.setItem(row, 0, QTableWidgetItem(tid))
@@ -886,10 +883,10 @@ class PageSetupMixin:
 
             if added > 0:
                 self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
-            elif filtered > 0:
-                self.lbl_task_status.setText(f"💡 服务端有 {filtered} 条其他客户端的任务已过滤")
-        except Exception as e:
-            print(f"同步服务端任务失败: {e}")
+
+        w = Worker(_fetch)
+        w.finished.connect(_on_done)
+        w.start()
     
     def _clear_done_tasks(self):
         """清除所有已完成/失败的任务行。"""

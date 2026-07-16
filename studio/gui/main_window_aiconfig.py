@@ -54,6 +54,10 @@ class AIConfigMixin:
         vision_model = self.llm_vision_model_input.currentText().strip()
         self.ai_config["llm_vision_api_url"] = vision_url
         self.ai_config["llm_vision_model"] = vision_model
+        # 统一服务端地址
+        server_url = getattr(self, "compute_server_input", None)
+        if server_url:
+            self.ai_config["compute_server_url"] = server_url.text().strip()
         # Whisper ASR 地址（纯远程模式）
         whisper_url = getattr(self, "whisper_api_url_input", None)
         self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
@@ -69,6 +73,65 @@ class AIConfigMixin:
         except Exception as e:
             log.error(f"保存大模型配置失败: {e}")
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
+
+    def _save_all_ai_config(self):
+        """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
+        # 收集所有配置（不弹消息框）
+        self.ai_config["llm_provider"] = self.llm_provider_combo.currentData()
+        self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
+        self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
+        self.ai_config["llm_model"] = self.llm_model_input.text().strip()
+        vision_url = self.llm_vision_api_url_input.text().strip()
+        vision_model = self.llm_vision_model_input.currentText().strip()
+        self.ai_config["llm_vision_api_url"] = vision_url
+        self.ai_config["llm_vision_model"] = vision_model
+        # 统一服务端地址
+        server_url = getattr(self, "compute_server_input", None)
+        if server_url:
+            self.ai_config["compute_server_url"] = server_url.text().strip()
+        # Whisper ASR 地址
+        whisper_url = getattr(self, "whisper_api_url_input", None)
+        self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
+        # CLIP embedding 服务地址
+        clip_url = getattr(self, "clip_api_url_input", None)
+        self.ai_config["clip_api_url"] = clip_url.text().strip() if clip_url else ""
+        # VoxCPM 配置
+        vox_url = getattr(self, "vox_api_url_input", None)
+        if vox_url:
+            self.ai_config["vox_api_url"] = vox_url.text().strip()
+        vox_timesteps = getattr(self, "vox_timesteps_spin", None)
+        vox_cfg = getattr(self, "vox_cfg_spin", None)
+        if vox_timesteps:
+            self.ai_config["vox_timesteps"] = vox_timesteps.value()
+        if vox_cfg:
+            self.ai_config["vox_cfg"] = vox_cfg.value()
+        self.ai_config["vox_source"] = "remote"
+        self.ai_config["vox_mode"] = "api"
+        try:
+            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
+            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "成功", "所有模型配置已保存。")
+            log.info("All AI configuration saved successfully.")
+        except Exception as e:
+            log.error(f"保存全部AI配置失败: {e}")
+            QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
+
+    def _on_server_url_changed(self, url):
+        """统一服务端地址变更时，联动更新各Tab的API地址。
+        Whisper/CLIP/PaddleOCR 直接使用统一地址，VoxCPM 需要手动加后缀不自动覆盖。"""
+        url = url.strip()
+        if not url:
+            return
+        # Whisper — 始终与统一地址同步
+        w = getattr(self, "whisper_api_url_input", None)
+        if w:
+            w.setText(url)
+        # CLIP — 始终与统一地址同步
+        c = getattr(self, "clip_api_url_input", None)
+        if c:
+            c.setText(url)
+        # VoxCPM — 不自动填充，保留手动维护（需加 /voxcpm/tts 后缀）
 
     def refresh_llm_page_status(self):
         if not hasattr(self, "env_config_tool"):

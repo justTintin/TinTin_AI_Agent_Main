@@ -106,6 +106,7 @@ class AIStatusCheckThread(QThread):
         import os
         import json
         import requests as req
+        from utils.http_client import resilient_get, resilient_post
 
         while self.running:
             status = {
@@ -126,10 +127,10 @@ class AIStatusCheckThread(QThread):
                     
                     if api_url:
                         try:
-                            res = req.get(
+                            res = resilient_get(
                                 f"{api_url.rstrip('/')}/v1/models",
                                 headers={"Authorization": f"Bearer {api_key}"},
-                                timeout=2,
+                                timeout=2, service="ollama", circuit_breaker=False,
                             )
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
@@ -161,7 +162,7 @@ class AIStatusCheckThread(QThread):
                     vox_url = cfg.get("vox_api_url", "").strip()
                     if vox_url:
                         base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
-                        r = req.get(f"{base}/voxcpm/health", timeout=3)
+                        r = resilient_get(f"{base}/voxcpm/health", timeout=3, service="voxcpm", circuit_breaker=False)
                         if r.status_code == 200:
                             status["clone_ok"] = True
             except Exception:
@@ -176,7 +177,7 @@ class AIStatusCheckThread(QThread):
                     whisper_url = cfg.get("whisper_api_url", "").strip()
                     if whisper_url:
                         base = whisper_url.rstrip("/")
-                        r = req.get(f"{base}/whisper/health", timeout=3)
+                        r = resilient_get(f"{base}/whisper/health", timeout=3, service="whisper", circuit_breaker=False)
                         if r.status_code == 200:
                             status["whisper_ok"] = True
             except Exception:
@@ -191,7 +192,7 @@ class AIStatusCheckThread(QThread):
                     clip_url = cfg.get("clip_api_url", "").strip()
                     if clip_url:
                         base = clip_url.rstrip("/")
-                        r = req.get(f"{base}/clip/health", timeout=3)
+                        r = resilient_get(f"{base}/clip/health", timeout=3, service="clip", circuit_breaker=False)
                         if r.status_code == 200:
                             status["clip_ok"] = True
             except Exception:

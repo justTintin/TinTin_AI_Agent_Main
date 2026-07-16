@@ -1220,8 +1220,18 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
 
+    # ── 并发控制：最多同时运行 3 个 AI 任务 ──
+    MAX_CONCURRENT_WORKERS = 3
+
     def start_worker(self, func, on_finished=None, on_error=None):
-        """Helper to start a worker thread and keep it alive until finished"""
+        """Helper to start a worker thread and keep it alive until finished.
+        同时最多 3 个并发，超出的自动排队等待。"""
+        active_count = len([w for w in self.active_workers if w.isRunning()])
+        if active_count >= self.MAX_CONCURRENT_WORKERS:
+            QTimer.singleShot(500, lambda: self.start_worker(func, on_finished, on_error))
+            log.info(f"[并发控制] 当前 {active_count} 个任务运行中，排队等待...")
+            return None
+
         worker = Worker(func)
         self.active_workers.append(worker)
         

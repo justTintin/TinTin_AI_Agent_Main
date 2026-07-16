@@ -182,14 +182,14 @@ def transcribe_remote(
         log.info(f"[ASR] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")
 
         # 2. 确保模型已加载
-        import requests
+        from utils.http_client import resilient_post
         base = asr_url.rstrip("/")
         if progress_cb:
             progress_cb("正在加载 Whisper 模型...")
         try:
             ensure_url = f"{base}/models/ensure/whisper"
             log.info(f"[ASR] 确保模型加载: {ensure_url}")
-            er = requests.post(ensure_url, timeout=60)
+            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)
             log.info(f"[ASR] 模型加载状态: HTTP {er.status_code}")
         except Exception as e:
             log.warning(f"[ASR] 确保模型加载失败(继续尝试转写): {e}")
@@ -213,7 +213,7 @@ def transcribe_remote(
             log.info(f"[ASR] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")
             if progress_cb:
                 progress_cb("正在等待服务端处理...")
-            resp = requests.post(url, files=files, data=data, timeout=timeout)
+            resp = resilient_post(url, files=files, data=data, timeout=timeout, service="whisper")
             log.info(f"[ASR] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")
 
         if resp.status_code != 200:

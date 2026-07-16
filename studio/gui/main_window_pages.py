@@ -441,17 +441,19 @@ class PageSetupMixin:
         server_row.addWidget(self.btn_save_server)
         layout.addLayout(server_row)
 
-        tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(16)
 
-        def _page(): w = QWidget(); w.setStyleSheet("QWidget { background: transparent; }"); return w
-        def _lr(p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch()
-        def _row(w): r = QHBoxLayout(); w(r); return r
-        # ───── Tab 1: LLM ─────
-        p1 = _page(); l1 = QVBoxLayout(p1); l1.setContentsMargins(16,20,16,16); l1.setSpacing(10)
-        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         def _rl(l, p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch(); l.addLayout(r)
+        def _row(w): r = QHBoxLayout(); w(r); return r
         def _inp(l, p, a, ph): e = QLineEdit(); e.setPlaceholderText(ph); setattr(self,a,e); _rl(l, p, lambda r: r.addWidget(e))
+        # ───── LLM ─────
+        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         _rl(lg1, "提供商:", lambda r: (setattr(self,'llm_provider_combo',QComboBox()), self.llm_provider_combo.setView(QListView()),
             self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"), self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
             self.llm_provider_combo.addItem("自定义","custom"), self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
@@ -497,10 +499,9 @@ class PageSetupMixin:
         b2 = mdi_button("保存", "save"); b2.setObjectName("primary_button"); b2.setFixedWidth(90); b2.clicked.connect(self.save_llm_config); rr1.addWidget(b2)
         lg1.addLayout(rr1)
         self.llm_status_lbl = QLabel(""); lg1.addWidget(self.llm_status_lbl)
-        l1.addWidget(g1); l1.addStretch(); tabs.addTab(p1, "🤖 LLM")
+        scroll_layout.addWidget(g1)
 
-        # ───── Tab 2: VoxCPM ─────
-        p3 = _page(); l3 = QVBoxLayout(p3); l3.setContentsMargins(16,20,16,16); l3.setSpacing(10)
+        # ───── VoxCPM ─────
         g3 = QGroupBox("🗣️ 声音克隆 VoxCPM（远程）"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
         _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         lg3.addLayout(_row(lambda r: (r.addWidget(QLabel("推理步数:")), setattr(self,'vox_timesteps_spin',QSpinBox()), self.vox_timesteps_spin.setRange(5,100), self.vox_timesteps_spin.setValue(20), self.vox_timesteps_spin.setFixedWidth(70), r.addWidget(self.vox_timesteps_spin), r.addSpacing(20),
@@ -510,10 +511,9 @@ class PageSetupMixin:
         b3_test = mdi_button("测试连接", "search"); b3_test.setObjectName("secondary_button"); b3_test.setFixedWidth(110); b3_test.clicked.connect(self._test_vox_connection); rr3.addWidget(b3_test)
         b3 = mdi_button("保存", "save"); b3.setObjectName("secondary_button"); b3.setFixedWidth(80); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
         lg3.addLayout(rr3)
-        l3.addWidget(g3); l3.addStretch(); tabs.addTab(p3, "🗣️ VoxCPM")
+        scroll_layout.addWidget(g3)
 
-        # ───── Tab 4: Ollama ─────
-        p4 = _page(); l4 = QVBoxLayout(p4); l4.setContentsMargins(16,20,16,16); l4.setSpacing(10)
+        # ───── Ollama ─────
         g4 = QGroupBox("🖥️ Ollama 远程视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
@@ -521,7 +521,7 @@ class PageSetupMixin:
             setattr(self,'btn_ollama_refresh',mdi_button("刷新", "refresh")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
             r.addWidget(self.btn_ollama_refresh), r.addStretch())))
 
-        # ── 视觉模型配置（Ollama 托管的视觉模型，合并到此 Tab）──
+        # ── 视觉模型配置（Ollama 托管的视觉模型）──
         g_vm = QGroupBox("👁️ 当前视觉模型（由 Ollama 提供）"); g_vm.setObjectName("model_groupbox"); g_vm.setProperty("section", "vision"); lg_vm = QVBoxLayout(g_vm); lg_vm.setSpacing(10)
         _inp(lg_vm, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
         _rl(lg_vm, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
@@ -532,13 +532,10 @@ class PageSetupMixin:
         b_vm_save = mdi_button("保存", "save"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
         lg_vm.addLayout(rr_vm)
         self.vision_status_lbl = QLabel(""); lg_vm.addWidget(self.vision_status_lbl)
-        l4.addWidget(g4)
-        l4.addWidget(g_vm)
+        scroll_layout.addWidget(g4)
+        scroll_layout.addWidget(g_vm)
 
-        l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
-
-        # ───── Tab 5: Whisper（纯远程 ASR 服务）─────
-        p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
+        # ───── Whisper ─────
         g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
         whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
@@ -546,10 +543,9 @@ class PageSetupMixin:
             r.addWidget(self.btn_test_whisper),
             setattr(self,'btn_save_whisper',mdi_button("保存", "save")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper), r.addStretch())))
         self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
-        l5.addWidget(g5); l5.addStretch(); tabs.addTab(p5, "🎙️ Whisper")
+        scroll_layout.addWidget(g5)
 
-        # ───── Tab 6: PaddleOCR ─────
-        p6 = _page(); l6 = QVBoxLayout(p6); l6.setContentsMargins(16,20,16,16); l6.setSpacing(10)
+        # ───── PaddleOCR ─────
         g6 = QGroupBox("🔍 PaddleOCR 文本识别"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
         _rl(lg6, "环境:", lambda r: (setattr(self,'llm_paddle_status_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_status_val)))
         _rl(lg6, "模型:", lambda r: (setattr(self,'llm_paddle_models_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_models_val)))
@@ -559,10 +555,9 @@ class PageSetupMixin:
             setattr(self,'btn_install_paddle',mdi_button("一键部署/修复", "rocket")), self.btn_install_paddle.setObjectName("primary_button"), self.btn_install_paddle.clicked.connect(self.start_paddle_repair),
             r.addWidget(self.btn_refresh_paddle), r.addWidget(self.btn_install_paddle), r.addStretch())))
         setattr(self,'paddle_log_view',QTextEdit()); self.paddle_log_view.setObjectName("log_viewer"); self.paddle_log_view.setReadOnly(True); self.paddle_log_view.setFixedHeight(100); self.paddle_log_view.setPlaceholderText("部署日志..."); lg6.addWidget(self.paddle_log_view)
-        l6.addWidget(g6); l6.addStretch(); tabs.addTab(p6, "🔍 PaddleOCR")
+        scroll_layout.addWidget(g6)
 
-        # ───── Tab 7: CLIP（远程 embedding 服务）─────
-        p7 = _page(); l7 = QVBoxLayout(p7); l7.setContentsMargins(16,20,16,16); l7.setSpacing(10)
+        # ───── CLIP ─────
         g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
         clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
         _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
@@ -570,9 +565,11 @@ class PageSetupMixin:
             r.addWidget(self.btn_test_clip),
             setattr(self,'btn_save_clip',mdi_button("保存", "save")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip), r.addStretch())))
         self.clip_status_lbl = QLabel(""); self.clip_status_lbl.setObjectName("muted_text"); lg7.addWidget(self.clip_status_lbl)
-        l7.addWidget(g7); l7.addStretch(); tabs.addTab(p7, "🖼️ CLIP")
+        scroll_layout.addWidget(g7)
 
-        layout.addWidget(tabs, 1)
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
         # Load data
         prov = self.ai_config.get("llm_provider","deepseek"); idx = self.llm_provider_combo.findData(prov)
         if idx>=0: self.llm_provider_combo.setCurrentIndex(idx)

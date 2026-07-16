@@ -15,6 +15,7 @@ import configparser
 from utils.logger_utils import log
 from config.paths import (WORKSPACE_ROOT, APPS_DIR,
                            VSR_DIR, KNOWLEDGE_MATERIALS_DIR,
+                           KNOWLEDGE_MEDIA_DIR,
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
 
@@ -190,6 +191,42 @@ class EnvConfigPage(BasePage):
         
         scroll_layout.addWidget(group_other)
 
+        # Group 5: 素材存储目录配置
+        group_mat = QGroupBox("📁 素材存储目录配置")
+        group_mat.setStyleSheet("""
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #10b981; }
+        """)
+        layout_mat = QVBoxLayout(group_mat)
+        layout_mat.setContentsMargins(16, 20, 16, 16)
+        layout_mat.setSpacing(10)
+
+        mat_desc = QLabel(
+            "素材浏览器下载的视频/图片等媒体文件存储至此目录。\n"
+            "可指定外置盘或网络映射盘，JSON 元数据始终保留在项目内部。"
+        )
+        mat_desc.setObjectName("muted_text")
+        mat_desc.setWordWrap(True)
+        layout_mat.addWidget(mat_desc)
+
+        mat_row = QHBoxLayout()
+        mat_row.addWidget(QLabel("媒体存储目录："))
+        self.edit_mat_dir = QLineEdit()
+        self.edit_mat_dir.setText(KNOWLEDGE_MEDIA_DIR)
+        self.edit_mat_dir.setReadOnly(True)
+        mat_row.addWidget(self.edit_mat_dir, 1)
+        btn_choose_mat = QPushButton("📂 选择目录")
+        btn_choose_mat.setObjectName("secondary_button")
+        btn_choose_mat.clicked.connect(self._choose_materials_dir)
+        mat_row.addWidget(btn_choose_mat)
+        btn_reset_mat = QPushButton("🔄 恢复默认")
+        btn_reset_mat.setObjectName("secondary_button")
+        btn_reset_mat.clicked.connect(self._reset_materials_dir)
+        mat_row.addWidget(btn_reset_mat)
+        layout_mat.addLayout(mat_row)
+
+        scroll_layout.addWidget(group_mat)
+
         # Group 7: RustFS 对象存储配置
         group_rustfs = QGroupBox("🗄️ RustFS 对象存储配置")
         group_rustfs.setStyleSheet("""
@@ -278,7 +315,7 @@ class EnvConfigPage(BasePage):
     def _choose_materials_dir(self):
         new_dir = QFileDialog.getExistingDirectory(
             self.parent_widget,
-            "选择素材存储目录（可以是外置盘或映射盘）",
+            "选择素材媒体存储目录（可以是外置盘或映射盘）",
             self.edit_mat_dir.text()
         )
         if not new_dir:
@@ -287,15 +324,15 @@ class EnvConfigPage(BasePage):
         cfg_path = os.path.join(DATA_DIR, "knowledge_dir.json")
         try:
             with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump({"materials_dir": new_dir}, f, ensure_ascii=False, indent=2)
+                _json.dump({"media_dir": new_dir}, f, ensure_ascii=False, indent=2)
             self.edit_mat_dir.setText(new_dir)
             QMessageBox.information(
-                self.parent_widget, "素材目录已设置",
-                f"素材存储目录已设置为：\n{new_dir}\n\n请重启应用以完全生效。\n"
-                "（浏览器下载、视频转写字幕文件均将写入此目录）"
+                self.parent_widget, "媒体存储目录已设置",
+                f"媒体存储目录已设置为:\n{new_dir}\n\n请重启应用以完全生效。\n"
+                "（浏览器下载的视频/图片将写入此目录，JSON 元数据仍保留在项目内）"
             )
         except Exception as e:
-            QMessageBox.critical(self.parent_widget, "保存失败", f"写入配置失败：{e}")
+            QMessageBox.critical(self.parent_widget, "保存失败", f"写入配置失败: {e}")
 
     def _reset_materials_dir(self):
         import json as _json
@@ -309,7 +346,7 @@ class EnvConfigPage(BasePage):
         self.edit_mat_dir.setText(default)
         QMessageBox.information(
             self.parent_widget, "已恢复默认",
-            f"已恢复为默认素材目录：\n{default}\n\n请重启应用以完全生效。"
+            f"已恢复为默认媒体存储目录:\n{default}\n\n请重启应用以完全生效。"
         )
 
     def check_environment(self):

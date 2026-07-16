@@ -85,7 +85,11 @@ QWEN_IMAGE_LAYERED_DIR = os.path.join(APPS_DIR, "Qwen-Image-Layered")
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 ASSET_BROWSER_DIR = os.path.join(APPS_DIR, "asset-browser")
 MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
+# JSON 元数据目录（固定项目内部，kb_items.json / kb_sync.json 存放于此）
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")
+# 媒体文件存储目录（用户可配置，视频/图片等下载至此）
+# 默认与 JSON 目录相同；可通过 data/knowledge_dir.json 的 media_dir 覆盖
+KNOWLEDGE_MEDIA_DIR = os.path.join(MATERIALS_DIR, "knowledge")
 
 # 素材目录平台默认值
 MATERIALS_PLATFORM_DEFAULTS = [os.path.join(MATERIALS_DIR, "knowledge")]
@@ -134,16 +138,17 @@ init_bin_paths()
 # Legacy compat aliases (prefer get_bin() for new code)
 DREAMINA_EXE_LEGACY = DREAMINA_EXE
 
-# knowledge_dir mapping override
+# knowledge_dir mapping override：仅覆盖媒体文件目录，JSON 元数据始终留在项目内
 _kb_dir_cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
 if os.path.exists(_kb_dir_cfg):
     try:
         import json as _j
         with open(_kb_dir_cfg, encoding="utf-8") as _kf:
             _kd = _j.load(_kf)
-        _custom = (_kd.get("materials_dir") or "").strip()
+        # 兼容旧字段名 materials_dir 和新字段名 media_dir
+        _custom = (_kd.get("media_dir") or _kd.get("materials_dir") or "").strip()
         if _custom and os.path.isdir(_custom):
-            KNOWLEDGE_MATERIALS_DIR = _custom
+            KNOWLEDGE_MEDIA_DIR = _custom
     except Exception:
         pass
 

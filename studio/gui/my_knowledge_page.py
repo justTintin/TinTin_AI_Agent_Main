@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QColor, QFont, QDesktopServices
 
-from config.paths import KNOWLEDGE_MATERIALS_DIR
+from config.paths import KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from utils.my_knowledge_manager import (
     MyKnowledgeManager, ENTRY_TYPES, REFERENCE_TYPE, STYLIZATION_TYPE, STYLE_DIMS,
 )
@@ -443,8 +443,13 @@ class MyKnowledgePage(BasePage):
         # ── 浏览器数据文件 ──
         browser_items = 0
         browser_sync  = 0
+        # 兼容旧版自定义目录：优先项目内部，回退到用户可配置目录
         kb_items_path = os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_items.json")
+        if not os.path.exists(kb_items_path):
+            kb_items_path = os.path.join(KNOWLEDGE_MEDIA_DIR, "kb_items.json")
         kb_sync_path  = os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_sync.json")
+        if not os.path.exists(kb_sync_path):
+            kb_sync_path = os.path.join(KNOWLEDGE_MEDIA_DIR, "kb_sync.json")
         if os.path.exists(kb_items_path):
             try:
                 with open(kb_items_path, encoding="utf-8-sig") as f:

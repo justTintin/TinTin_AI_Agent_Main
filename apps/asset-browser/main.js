@@ -25,15 +25,20 @@ function formatBytes(bytes, decimals = 2) {
 let mainWindow;
 const dbPath = path.join(app.getPath('userData'), 'database.json');
 
-// ── 素材目录：支持用户通过 knowledge_dir.json 映射到外置盘/网络盘 ──
+// ── 素材目录分离：JSON 元数据存项目内，媒体文件用户可配置 ──
 const _STUDIO_ROOT = path.join(__dirname, '..', '..', 'studio');
 const _KB_DIR_CFG = path.join(_STUDIO_ROOT, 'data', 'knowledge_dir.json');
-let KNOWLEDGE_DIR = path.join(_STUDIO_ROOT, 'outputs', 'materials', 'knowledge');
+// JSON 元数据目录（固定项目内，存放 kb_items.json / kb_sync.json）
+const KNOWLEDGE_DIR = path.join(_STUDIO_ROOT, 'outputs', 'materials', 'knowledge');
+// 媒体文件存储目录（用户可配置，视频/图片下载至此）
+let MEDIA_DOWNLOAD_DIR = KNOWLEDGE_DIR; // 默认与 JSON 目录相同
 try {
   if (fs.existsSync(_KB_DIR_CFG)) {
     const _kd = JSON.parse(fs.readFileSync(_KB_DIR_CFG, 'utf-8'));
-    if (_kd && _kd.materials_dir && fs.existsSync(_kd.materials_dir)) {
-      KNOWLEDGE_DIR = _kd.materials_dir;
+    // 兼容旧字段名 materials_dir 和新字段名 media_dir
+    const _custom = (_kd && (_kd.media_dir || _kd.materials_dir)) || '';
+    if (_custom && fs.existsSync(_custom)) {
+      MEDIA_DOWNLOAD_DIR = _custom;
     }
   }
 } catch (e) { console.warn('knowledge_dir.json read failed', e); }
@@ -41,7 +46,7 @@ try {
 // Initialize database
 function initDatabase() {
   const defaultSettings = {
-    downloadPath: KNOWLEDGE_DIR,
+    downloadPath: MEDIA_DOWNLOAD_DIR,
   };
 
   if (!fs.existsSync(dbPath)) {
@@ -62,8 +67,8 @@ function initDatabase() {
       const db = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
       let modified = false;
       if (!db.settings) { db.settings = defaultSettings; modified = true; }
-      // 始终与 Studio 配置的素材目录同步（knowledge_dir.json 优先）
-      if (db.settings.downloadPath !== KNOWLEDGE_DIR) { db.settings.downloadPath = KNOWLEDGE_DIR; modified = true; }
+      // 始终与 Studio 配置的媒体目录同步（knowledge_dir.json 优先）
+      if (db.settings.downloadPath !== MEDIA_DOWNLOAD_DIR) { db.settings.downloadPath = MEDIA_DOWNLOAD_DIR; modified = true; }
       if (!db.creators) { db.creators = []; modified = true; }
       if (!db.downloads) { db.downloads = []; modified = true; }
       if (!Array.isArray(db.downloadDirs)) {

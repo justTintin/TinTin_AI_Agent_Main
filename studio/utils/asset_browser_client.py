@@ -18,7 +18,7 @@ import time
 import shutil
 import subprocess
 
-from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR
+from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from utils.logger_utils import log
 from utils.platform_utils import create_no_window_flag
 
@@ -114,8 +114,8 @@ def safe_name(name: str) -> str:
 
 def topic_dir(topic: str) -> str:
     """返回某选题的素材落地目录（绝对路径，已建好）。
-    使用用户配置的素材根目录（与浏览器下载目录对齐）。"""
-    d = os.path.join(KNOWLEDGE_MATERIALS_DIR, safe_name(topic))
+    使用用户配置的媒体存储目录（与浏览器下载目录对齐）。"""
+    d = os.path.join(KNOWLEDGE_MEDIA_DIR, safe_name(topic))
     os.makedirs(d, exist_ok=True)
     return d
 

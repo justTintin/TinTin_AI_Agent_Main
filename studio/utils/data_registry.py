@@ -19,12 +19,17 @@ from config.paths import (
     PROJECT_ROOT, AI_CONFIG_FILE, ERP_CONFIG_FILE, CONFIG_INI_FILE,
     PRODUCT_LIBRARY_FILE, MY_KNOWLEDGE_FILE, MEDIA_LIBRARY_FILE,
     ACCOUNTS_DIR, VOICE_SAMPLES_DIR, OUTPUTS_DIR,
+    VIDEO_CONFIG_FILE, CONFIG_DIR,
 )
 
 DATA_ITEMS = [
     # ---- 配置（含密钥）----
     {"key": "ai_config", "label": "AI/大模型配置", "path": AI_CONFIG_FILE,
      "category": "config", "sensitive": True, "kind": "file"},
+    {"key": "video_config", "label": "视频配置(LUT映射)", "path": VIDEO_CONFIG_FILE,
+     "category": "config", "sensitive": False, "kind": "file"},
+    {"key": "local_config", "label": "本地配置(缓存目录)", "path": os.path.join(CONFIG_DIR, "local_config.json"),
+     "category": "config", "sensitive": False, "kind": "file"},
     {"key": "erp_config", "label": "旺店通ERP配置", "path": ERP_CONFIG_FILE,
      "category": "config", "sensitive": True, "kind": "file"},
     {"key": "config_ini", "label": "VoxCPM等设置(config.ini)", "path": CONFIG_INI_FILE,

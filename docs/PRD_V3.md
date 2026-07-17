@@ -140,6 +140,62 @@ ffmpeg 滤镜链：
 | `POST /montage/match` | 根据模板匹配素材 |
 | `POST /montage/compile` | 一键编译成片 |
 
+### 3.6 导入 PR / 剪映模板
+
+**目标**：支持导入 Premiere Pro (PR) 和剪映的工程文件作为模板，AI 自动解析结构并适配到素材库。
+
+#### 支持格式
+
+| 来源 | 文件格式 | 解析内容 |
+|------|---------|---------|
+| 剪映 (CapCut) | `.drt` (Draft JSON) | 时间轴、片段长度、转场、滤镜、文本、音频轨道 |
+| Premiere Pro | `.xml` (FCP XML) | 序列结构、剪辑片段、转场、标记 |
+| After Effects | `.aep` → `.xml` | 合成结构（间接） |
+| 自定义 JSON | `.tpl.json` | 本系统原生格式 |
+
+#### 导入流程
+
+```
+用户上传 PR .xml / 剪映 .drt
+  → 服务端解析工程结构：
+      提取 片段时长、转场类型、BGM、文本模板、层级
+  → 转换为内部模板 JSON（3.2 格式）
+      每段标注 tag（自动识别或手动标注）
+  → 模板存入模板库（可分享、售卖）
+  → 使用时自动匹配素材库素材
+```
+
+#### 技术方案
+
+**剪映 DRT 解析**（已有 `utils/jianying_exporter.py` 基础，扩展读取方向）：
+- DRT 文件本质是 JSON，包含 `tracks`、`segments`、`transitions`
+- 提取轨道结构 → 映射到内部模板 slot
+- 提取转场类型 → 映射到 ffmpeg xfade 参数
+- 提取文本模板 → 作为 overlay 模板
+
+**Premiere Pro XML 解析**：
+- FCP XML 标准格式，包含 `<sequence>`、`<clip>`、`<transition>`
+- 解析 clip 时长、顺序
+- 提取 transition 类型 → 映射
+
+#### 模板分享
+
+| 功能 | 说明 |
+|------|------|
+| 导出模板 | 内部模板 JSON 可导出为 `.tpl.json` |
+| 导入模板 | 支持 `.tpl.json` / `.drt` / `.xml` |
+| 模板市场 | 服务端模板库，用户可上传/下载 |
+| 模板版本 | 模板可升级，兼容旧版素材 |
+
+### 3.7 接口（新增）
+
+| API | 描述 |
+|-----|------|
+| `POST /template/import` | 上传 PR/剪映 工程文件，解析为模板 |
+| `GET /template/export/{id}` | 导出模板为 .tpl.json |
+| `POST /template/upload` | 上传模板到模板市场 |
+| `GET /template/market` | 模板市场列表 |
+
 ---
 
 ## 四、MG 动画整合
@@ -204,20 +260,27 @@ ffmpeg 滤镜链：
 - 自动生成字幕 + 标注
 - 字幕高亮关键词
 
-### 5.3 通用模板引擎
+### 5.3 通用模板引擎 + 导入
 
-所有垂类模板统一用 JSON 描述结构，引擎可扩展：
+所有垂类模板统一用 JSON 描述结构，引擎可扩展。**支持从剪映/PR 导入模板**（参见 3.6 导入流程）：
 
 ```json
 {
   "category": "movie_review",
   "name": "电影解说-3min",
   "duration": 180,
+  "source": "built-in",       // built-in | imported | market
+  "source_file": "",           // 原始导入文件名
   "segments": [...],
   "voice_profile": "解说_男声",
   "bgm_profile": "悬疑_紧张"
 }
 ```
+
+**模板来源**：
+- `built-in`：系统预置
+- `imported`：从剪映 .drt / PR .xml 导入
+- `market`：从模板市场下载
 
 ### 5.4 接口
 
@@ -313,13 +376,14 @@ ffmpeg 滤镜链：
 
 | 优先级 | 功能 | 依赖 | 预估 |
 |--------|------|------|------|
-| P0 | 一键成片模板 + 素材匹配 | CLIP 向量检索已有 | 2 周 |
+| P0 | 一键成片模板 + 素材匹配 + 模板导入(PR/剪映) | CLIP + jianying_exporter 已有 | 3 周 |
 | P1 | 剪映导出增强 + 审美判断 | jianying_exporter 基础已有 | 3 周 |
 | P1 | 电影解说模板 | LLM + TTS + 素材匹配 | 2 周 |
 | P1 | 即梦定时任务 | dreamina.exe 已有 | 1 周 |
 | P2 | 希区柯克 & 特效镜头 | ffmpeg 滤镜 | 1 周 |
 | P2 | 知识科普模板 | 同上 | 1 周 |
 | P2 | MG 动画整合 | Remotion 已有 | 1 周 |
+| P2 | 模板市场 | 模板导入完成后 | 2 周 |
 
 ---
 
@@ -328,12 +392,16 @@ ffmpeg 滤镜链：
 ```
 POST  /template/generate        一键成片
 POST  /template/list            模板列表
+POST  /template/import          导入 PR/剪映 工程 → 模板
+GET   /template/export/{id}     导出模板为 .tpl.json
+POST  /template/upload          上传到模板市场
+GET   /template/market          模板市场列表
 POST  /montage/export/jianying  导出剪映工程
+POST  /montage/match            素材匹配
+POST  /montage/compile          编译成片
 POST  /evaluate/aesthetics      审美评价
 POST  /evaluate/rhythm          节奏/卡点分析
 POST  /mg/generate              MG动画渲染
-POST  /montage/match            素材匹配
-POST  /montage/compile          编译成片
 POST  /schedule/tasks           定时任务队列管理
 GET   /schedule/status          定时任务状态
 POST  /schedule/execute         手动触发定时任务

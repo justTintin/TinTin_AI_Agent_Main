@@ -769,7 +769,7 @@ class PageSetupMixin:
             header.addWidget(self.lbl_task_status, 1)
             btn_sync = mdi_button("同步服务端", "refresh")
             btn_sync.setFixedWidth(100)
-            btn_sync.clicked.connect(self._sync_server_tasks)
+            btn_sync.clicked.connect(self._sync_server_tasks_async)
             header.addWidget(btn_sync)
             btn_clear = mdi_button("清除已完成", "close")
             btn_clear.setFixedWidth(100)
@@ -884,9 +884,9 @@ class PageSetupMixin:
             if added > 0:
                 self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
 
-        w = Worker(_fetch)
-        w.finished.connect(_on_done)
-        w.start()
+        self._sync_worker = Worker(_fetch)
+        self._sync_worker.finished.connect(_on_done)
+        self._sync_worker.start()
     
     def _clear_done_tasks(self):
         """清除所有已完成/失败的任务行。"""

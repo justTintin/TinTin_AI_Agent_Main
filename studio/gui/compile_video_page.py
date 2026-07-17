@@ -357,6 +357,11 @@ class CompileVideoPage(BasePage):
         self.btn_open_out.setFixedHeight(36)
         self.btn_open_out.clicked.connect(self._open_output_dir)
         row2.addWidget(self.btn_open_out)
+        self.btn_add_task = QPushButton("📌 添加为定时任务")
+        self.btn_add_task.setFixedHeight(36)
+        self.btn_add_task.setToolTip("把当前配置提交给服务端，由服务端定时执行（可在「定时任务」页监控状态）")
+        self.btn_add_task.clicked.connect(self._add_scheduled_task)
+        row2.addWidget(self.btn_add_task)
         s_lay.addLayout(row2)
         root.addWidget(setting_group)
 
@@ -534,22 +539,149 @@ class CompileVideoPage(BasePage):
     # ════════════════════════════════════════════════════════════════════════
     #  开始执行
     # ════════════════════════════════════════════════════════════════════════
+    #  提交服务端执行（开始执行 = 立即；添加为定时任务 = 定时）
+    # ════════════════════════════════════════════════════════════════════════
+    def _collect_params(self):
+        """收集当前界面完整参数为 dict（提交给服务端，服务端按需取用）。"""
+        product = self._current_product() or {}
+        return {
+            # 服务端 video_montage 执行器识别的参数
+            "products": [{
+                "brand": product.get("brand", ""),
+                "model": product.get("model", ""),
+                "features": self._split_md_lines(product.get("features", "")),
+                "selling_points": self._split_md_lines(product.get("selling_points", "")),
+                "category": product.get("category", ""),
+                "goods_no": product.get("goods_no", ""),
+            }],
+            "script_hint": self.in_subtitle.toPlainText().strip() or
+                            (product.get("selling_points", "") or "")[:120],
+            "max_duration": int(self.spin_total_dur.value()) if self.spin_total_dur.value() > 0 else 30,
+            # 客户端完整参数（服务端按自身实现取用）
+            "product_id": product.get("id", ""),
+            "product_label": self.combo_product.currentText(),
+            "folder": self.in_folder.text().strip(),
+            "audio": self.in_audio.text().strip(),
+            "cover": self.in_cover.text().strip(),
+            "subtitle": self.in_subtitle.toPlainText().strip(),
+            "ratio": self.combo_ratio.currentText(),
+            "per_dur": self.spin_dur.value(),
+            "count": self.spin_count.value(),
+            "total_dur": self.spin_total_dur.value(),
+            "intro": self.in_intro.text().strip(),
+            "predict_platform": self.combo_predict_platform.currentText(),
+            "autocheck": self.chk_autocheck.isChecked(),
+        }
+
+    @staticmethod
+    def _split_md_lines(md_text):
+        """把 Markdown 列表文本拆成要点列表（服务端 products.features 期望 list）。"""
+        if not md_text:
+            return []
+        out = []
+        for line in str(md_text).splitlines():
+            s = line.strip().lstrip("-").lstrip("*").strip()
+            if s:
+                out.append(s)
+        return out
+
     def _make(self):
-        # 1. 必选产品校验
+        """开始执行 = 提交服务端立即执行（task_type=video_montage）。"""
         product = self._current_product()
         if not product:
             self.show_warning("请先选择产品（产品是一键成片的起点）。")
             return
+        self._submit_to_server(schedule=None, immediate=True)
 
-        folder = self.in_folder.text().strip()
+    def _add_scheduled_task(self):
+        """添加为定时任务 = 提交服务端定时执行。弹窗输入任务名 + 调度配置。"""
+        product = self._current_product()
+        if not product:
+            self.show_warning("请先选择产品（产品是一键成片的起点）。")
+            return
+        from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QSpinBox, QTimeEdit, QComboBox, QLineEdit
+        from datetime import datetime as _dt
 
-        # 2. 素材目录：空则远程匹配
-        if not folder or not os.path.isdir(folder):
-            self._log(f"📦 未指定素材目录，按产品「{product.get('model','')}」远程匹配…")
-            self._match_material_then_make(product)
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle("添加为定时任务（提交服务端）")
+        form = QFormLayout(dlg)
+        name_edit = QLineEdit()
+        name_edit.setText(f"{product.get('model','') or product.get('brand','')}-成片")
+        form.addRow("任务名称", name_edit)
+        combo_mode = QComboBox()
+        combo_mode.addItems({"daily": "每天（按时刻）", "once": "单次（指定日期时间）",
+                             "weekly": "每周（指定星期）", "interval": "间隔（每 N 小时）"}.values())
+        form.addRow("调度方式", combo_mode)
+        time_edit = QTimeEdit()
+        time_edit.setTime(_dt.now().time().replace(second=0, microsecond=0))
+        time_edit.setDisplayFormat("HH:mm")
+        form.addRow("执行时刻", time_edit)
+        date_edit = QLineEdit(_dt.now().strftime("%Y-%m-%d"))
+        date_edit.setPlaceholderText("YYYY-MM-DD（单次模式用）")
+        form.addRow("执行日期", date_edit)
+        interval_spin = QSpinBox(); interval_spin.setRange(1, 168); interval_spin.setValue(24)
+        form.addRow("间隔小时", interval_spin)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        if dlg.exec() != QDialog.Accepted:
             return
 
-        self._do_make(folder)
+        mode_map = {0: "daily", 1: "once", 2: "weekly", 3: "interval"}
+        mode = mode_map[combo_mode.currentIndex()]
+        hhmm = time_edit.time().toString("HH:mm")
+        schedule = {"mode": mode, "time": hhmm}
+        if mode == "once":
+            schedule["date"] = date_edit.text().strip()
+        elif mode == "weekly":
+            schedule["weekdays"] = [0, 1, 2, 3, 4]
+        elif mode == "interval":
+            schedule["interval_hours"] = interval_spin.value()
+
+        self._submit_to_server(schedule=schedule, immediate=False,
+                               title=name_edit.text().strip())
+
+    def _submit_to_server(self, schedule, immediate, title=""):
+        """提交任务到服务端 /scheduled/tasks。immediate=True 立即执行；False 按 schedule 定时。"""
+        from utils import scheduled_task_client as stc
+        product = self._current_product() or {}
+        params = self._collect_params()
+        task_title = title or f"{product.get('model','') or product.get('brand','')}-成片"
+
+        self.btn_make.setEnabled(False)
+        self.btn_add_task.setEnabled(False)
+        self.stage_label.setText("正在提交到服务端…")
+        self._log(f"📤 提交任务到服务端：{task_title}（{'立即执行' if immediate else '定时执行'}）")
+
+        # 用 TaskWorker 异步提交（避免阻塞 UI）
+        from utils.thread_worker import TaskWorker as Worker
+        def _do_submit():
+            tid = stc.create_task("video_montage", task_title, params, schedule=schedule)
+            return tid
+
+        worker = Worker(_do_submit)
+        def _on_done(tid):
+            self.btn_make.setEnabled(True); self.btn_add_task.setEnabled(True)
+            if tid:
+                self.stage_label.setText(f"✅ 已提交服务端，任务 ID={tid}")
+                self._log(f"✅ 服务端已接收，任务 ID={tid}。可在「定时任务」页监控状态。")
+                self.show_info(f"任务已提交服务端（ID={tid}）。\n\n"
+                               + ("服务端正在执行，可在「定时任务」页查看进度。"
+                                  if immediate else
+                                  "服务端将按计划定时执行，可在「定时任务」页监控。"))
+            else:
+                self.stage_label.setText("⚠ 提交失败")
+                self._log("❌ 服务端提交失败，请检查服务端连接")
+                self.show_warning("提交服务端失败，请确认服务端在线后重试。")
+        def _on_err(e):
+            self.btn_make.setEnabled(True); self.btn_add_task.setEnabled(True)
+            self.stage_label.setText("⚠ 提交失败")
+            self._log(f"❌ 提交异常: {e}")
+            self.show_error(f"提交异常：{e}", "错误")
+
+        worker.finished.connect(_on_done)
+        worker.error.connect(_on_err)
+        self.track_worker(worker); worker.start()
 
     def _match_material_then_make(self, product):
         """异步远程匹配素材目录，成功后继续 _do_make。"""

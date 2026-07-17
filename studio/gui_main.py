@@ -773,6 +773,17 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_dreamina_assets_page()
         self.content_stack.addWidget(self.page_dreamina_assets)
 
+        # 44: Scheduled Tasks (定时任务) Page —— 监控服务端定时任务
+        self.page_scheduled_tasks = QWidget()
+        self.setup_scheduled_tasks_page()
+        self.content_stack.addWidget(self.page_scheduled_tasks)
+
+        # 进入定时任务页时刷新（拉取最新服务端状态）
+        def _on_page_change(idx):
+            if idx == 44 and hasattr(self, "scheduled_tasks_tool"):
+                self.scheduled_tasks_tool.refresh()
+        self.content_stack.currentChanged.connect(_on_page_change)
+
 
     def trigger_page_logic(self, index):
         """Triggers data refresh or UI reset for specific pages"""

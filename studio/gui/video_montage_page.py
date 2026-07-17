@@ -1798,6 +1798,129 @@ class VideoMontagePage(BasePage):
             self.btn_assemble_video.setEnabled(False)
 
         self.btn_next_to_step_2.setEnabled(True)
+    # [3·分割]  _rate_clips
+    def _rate_clips(self):
+        """对第 2 步「拼接镜头表」(concat_clips_list_widget) 中的所有镜头重新评分。
+
+        复用已有的 ScoreClipsWorker（OpenCV 启发式 0~10 分，已并行化）。
+        评分结果写入第 3 列（评分列）并更新 split_clips_cache 缓存；
+        进度/状态显示在 lbl_rate_status。
+        注：按钮 tooltip 提及「调用大模型」属后续增强项，当前先用启发式评分保证可用。
+        """
+        tbl = getattr(self, "concat_clips_list_widget", None)
+        if tbl is None or tbl.rowCount() == 0:
+            if hasattr(self, "lbl_rate_status"):
+                self.lbl_rate_status.setText("⚠ 请先扫描镜头目录")
+            return
+
+        # 收集每行对应的镜头路径（存在 col 0 的 UserRole）
+        clip_paths = []
+        row_paths = []  # row_idx -> norm_path（与 ScoreClipsWorker 的 idx 对齐）
+        for r in range(tbl.rowCount()):
+            file_item = tbl.item(r, 0)
+            if file_item is None:
+                row_paths.append("")
+                continue
+            norm_path = file_item.data(Qt.UserRole) or ""
+            row_paths.append(norm_path)
+            if norm_path and os.path.isfile(norm_path):
+                clip_paths.append((r, norm_path))
+
+        if not clip_paths:
+            if hasattr(self, "lbl_rate_status"):
+                self.lbl_rate_status.setText("⚠ 未找到可评分的视频文件")
+            return
+
+        # 停掉上一次未完成的评分（如有）
+        if hasattr(self, "_rate_worker") and self._rate_worker and self._rate_worker.isRunning():
+            self._rate_worker.stop()
+            self._rate_worker.wait(1000)
+
+        # 清掉这些镜头的旧评分缓存，强制重算
+        for _, p in clip_paths:
+            if p in self.split_clips_cache:
+                self.split_clips_cache[p]["score"] = None
+
+        # 记录 idx→表格行的映射，供回调定位（ScoreClipsWorker 的 idx 是 clip_paths 的下标）
+        self._rate_rows = clip_paths  # [(row, path), ...]
+        if hasattr(self, "lbl_rate_status"):
+            self.lbl_rate_status.setText(f"🤖 正在评分 {len(clip_paths)} 个镜头…")
+        self.btn_rate_clips.setEnabled(False)
+
+        worker = ScoreClipsWorker(self, [p for _, p in clip_paths])
+        worker.score_ready.connect(self._on_rate_ready)
+        worker.all_done.connect(self._on_rate_all_done)
+        self._rate_worker = worker
+        worker.start()
+
+    def _on_rate_ready(self, idx, score):
+        """_rate_clips 后台评分完成一行的回调：更新 concat 表第 3 列 + 缓存。"""
+        if not hasattr(self, "_rate_rows") or idx < 0 or idx >= len(self._rate_rows):
+            return
+        row, norm_path = self._rate_rows[idx]
+        # 更新缓存
+        if norm_path in self.split_clips_cache:
+            self.split_clips_cache[norm_path]["score"] = score
+        # 更新表格第 3 列（评分列）
+        tbl = self.concat_clips_list_widget
+        item = tbl.item(row, 3)
+        if item:
+            item.setText(f"{score:.1f}" if score >= 0 else "—")
+            if score >= 8.0:
+                item.setForeground(QColor("#2ecc71"))
+            elif score >= 6.0:
+                item.setForeground(QColor("#f1c40f"))
+            elif score >= 0:
+                item.setForeground(QColor("#e74c3c"))
+
+    def _on_rate_all_done(self):
+        """_rate_clips 全部评分完成。"""
+        n = len(getattr(self, "_rate_rows", []))
+        log.info(f"[评分] Step2 镜头评分完成，共 {n} 个")
+        self._rate_rows = []
+        if hasattr(self, "lbl_rate_status"):
+            self.lbl_rate_status.setText(f"✅ 已完成 {n} 个镜头评分")
+        if hasattr(self, "btn_rate_clips"):
+            self.btn_rate_clips.setEnabled(True)
+
+    # [3·分割]  _apply_score_filter
+    def _apply_score_filter(self):
+        """按 score_filter_combo 的阈值，取消勾选评分过低的镜头。
+        选择「不过滤」(阈值 0) 时恢复全部勾选。"""
+        tbl = getattr(self, "concat_clips_list_widget", None)
+        if tbl is None:
+            return
+        threshold = self.score_filter_combo.currentData() or 0.0
+        tbl.blockSignals(True)
+        try:
+            for r in range(tbl.rowCount()):
+                file_item = tbl.item(r, 0)
+                if file_item is None:
+                    continue
+                score_item = tbl.item(r, 3)
+                # 解析评分；未评分（—）视为 0
+                score = -1.0
+                if score_item:
+                    txt = score_item.text().strip()
+                    if txt and txt != "—":
+                        try:
+                            score = float(txt)
+                        except ValueError:
+                            score = -1.0
+                if threshold <= 0.0:
+                    # 不过滤：恢复勾选（保留未评分/高分；低分维持原状由用户决定，这里统一勾选）
+                    file_item.setCheckState(Qt.Checked)
+                else:
+                    # 评分缺失或低于阈值 → 取消勾选；达到阈值 → 勾选
+                    if score >= threshold:
+                        file_item.setCheckState(Qt.Checked)
+                    else:
+                        file_item.setCheckState(Qt.Unchecked)
+        finally:
+            tbl.blockSignals(False)
+        # 触发一次已勾选数量刷新
+        if hasattr(self, "_update_concat_count_lbl"):
+            self._update_concat_count_lbl()
     # [7·混音导出]  _select_bgm
     def _select_bgm(self):
         path, _ = QFileDialog.getOpenFileName(

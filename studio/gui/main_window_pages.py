@@ -455,44 +455,17 @@ class PageSetupMixin:
         # ───── LLM ─────
         g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         _rl(lg1, "提供商:", lambda r: (setattr(self,'llm_provider_combo',QComboBox()), self.llm_provider_combo.setView(QListView()),
-            self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"), self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
-            self.llm_provider_combo.addItem("自定义","custom"), self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
+            self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"),
+            self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
+            self.llm_provider_combo.addItem("Ollama 本地","ollama"),
+            self.llm_provider_combo.addItem("阿里云 DashScope","dashscope"),
+            self.llm_provider_combo.addItem("智谱 GLM","zhipu"),
+            self.llm_provider_combo.addItem("Moonshot (Kimi)","moonshot"),
+            self.llm_provider_combo.addItem("自定义","custom"),
+            self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
         _inp(lg1, "API 地址:", "llm_api_url_input", "https://api.deepseek.com")
-        _inp(lg1, "API Key:", "llm_api_key_input", "sk-xxxxxxxxxxxxxxxx")
-        
-        # Configure API Key EchoMode and show/hide action
-        self.llm_api_key_input.setEchoMode(QLineEdit.Password)
-        self._llm_key_visible = False
-        
-        from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
-        from PySide6.QtCore import Qt
-        def make_eye_icon(visible):
-            pix = QPixmap(16, 16)
-            pix.fill(Qt.transparent)
-            painter = QPainter(pix)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(QPen(QColor(160, 160, 160), 1.5))
-            # Eye outline
-            painter.drawArc(1, 3, 14, 10, 45 * 16, 90 * 16)
-            painter.drawArc(1, 3, 14, 10, 225 * 16, 90 * 16)
-            # Pupil
-            painter.setBrush(QColor(160, 160, 160))
-            painter.drawEllipse(6, 6, 4, 4)
-            if not visible:
-                # Crossed out slash
-                painter.drawLine(3, 3, 13, 13)
-            painter.end()
-            return QIcon(pix)
-            
-        self._llm_key_action = self.llm_api_key_input.addAction(make_eye_icon(False), QLineEdit.TrailingPosition)
-        
-        def toggle_key_visibility():
-            self._llm_key_visible = not self._llm_key_visible
-            self.llm_api_key_input.setEchoMode(QLineEdit.Normal if self._llm_key_visible else QLineEdit.Password)
-            self._llm_key_action.setIcon(make_eye_icon(self._llm_key_visible))
-            
-        self._llm_key_action.triggered.connect(toggle_key_visibility)
-
+        # API Key 已隐藏，保留属性避免保存/测试代码崩溃
+        self.llm_api_key_input = QLineEdit(); self.llm_api_key_input.setVisible(False)
         _inp(lg1, "文本模型:", "llm_model_input", "deepseek-v4-flash")
         rr1 = QHBoxLayout(); rr1.addStretch()
         self.btn_test_llm = mdi_button("测试连接", "search"); self.btn_test_llm.setObjectName("secondary_button"); self.btn_test_llm.setFixedWidth(110); self.btn_test_llm.clicked.connect(self._test_llm_connection); rr1.addWidget(self.btn_test_llm)
@@ -506,11 +479,11 @@ class PageSetupMixin:
         _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         lg3.addLayout(_row(lambda r: (r.addWidget(QLabel("推理步数:")), setattr(self,'vox_timesteps_spin',QSpinBox()), self.vox_timesteps_spin.setRange(5,100), self.vox_timesteps_spin.setValue(20), self.vox_timesteps_spin.setFixedWidth(70), r.addWidget(self.vox_timesteps_spin), r.addSpacing(20),
             r.addWidget(QLabel("CFG:")), setattr(self,'vox_cfg_spin',QDoubleSpinBox()), self.vox_cfg_spin.setRange(0.5,10.0), self.vox_cfg_spin.setSingleStep(0.1), self.vox_cfg_spin.setValue(2.0), self.vox_cfg_spin.setFixedWidth(70), r.addWidget(self.vox_cfg_spin), r.addStretch())))
-        rr3 = QHBoxLayout()
-        self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); rr3.addWidget(self.llm_vox_status_val); rr3.addStretch()
+        rr3 = QHBoxLayout(); rr3.addStretch()
         b3_test = mdi_button("测试连接", "search"); b3_test.setObjectName("secondary_button"); b3_test.setFixedWidth(110); b3_test.clicked.connect(self._test_vox_connection); rr3.addWidget(b3_test)
-        b3 = mdi_button("保存", "save"); b3.setObjectName("secondary_button"); b3.setFixedWidth(80); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
+        b3 = mdi_button("保存", "save"); b3.setObjectName("primary_button"); b3.setFixedWidth(90); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
         lg3.addLayout(rr3)
+        self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); lg3.addWidget(self.llm_vox_status_val)
         scroll_layout.addWidget(g3)
 
         # ───── Ollama ─────
@@ -539,9 +512,10 @@ class PageSetupMixin:
         g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
         whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
-        lg5.addLayout(_row(lambda r: (setattr(self,'btn_test_whisper',mdi_button("测试连接", "search")), self.btn_test_whisper.setObjectName("secondary_button"), self.btn_test_whisper.setFixedWidth(110), self.btn_test_whisper.clicked.connect(self._test_whisper_connection),
+        lg5.addLayout(_row(lambda r: (r.addStretch(),
+            setattr(self,'btn_test_whisper',mdi_button("测试连接", "search")), self.btn_test_whisper.setObjectName("secondary_button"), self.btn_test_whisper.setFixedWidth(110), self.btn_test_whisper.clicked.connect(self._test_whisper_connection),
             r.addWidget(self.btn_test_whisper),
-            setattr(self,'btn_save_whisper',mdi_button("保存", "save")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper), r.addStretch())))
+            setattr(self,'btn_save_whisper',mdi_button("保存", "save")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper))))
         self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
         scroll_layout.addWidget(g5)
 
@@ -561,9 +535,10 @@ class PageSetupMixin:
         g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
         clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
         _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
-        lg7.addLayout(_row(lambda r: (setattr(self,'btn_test_clip',mdi_button("测试连接", "search")), self.btn_test_clip.setObjectName("secondary_button"), self.btn_test_clip.setFixedWidth(110), self.btn_test_clip.clicked.connect(self._test_clip_connection),
+        lg7.addLayout(_row(lambda r: (r.addStretch(),
+            setattr(self,'btn_test_clip',mdi_button("测试连接", "search")), self.btn_test_clip.setObjectName("secondary_button"), self.btn_test_clip.setFixedWidth(110), self.btn_test_clip.clicked.connect(self._test_clip_connection),
             r.addWidget(self.btn_test_clip),
-            setattr(self,'btn_save_clip',mdi_button("保存", "save")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip), r.addStretch())))
+            setattr(self,'btn_save_clip',mdi_button("保存", "save")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip))))
         self.clip_status_lbl = QLabel(""); self.clip_status_lbl.setObjectName("muted_text"); lg7.addWidget(self.clip_status_lbl)
         scroll_layout.addWidget(g7)
 
@@ -583,11 +558,11 @@ class PageSetupMixin:
         self.compute_server_input.setText(self.ai_config.get("compute_server_url", "http://192.168.111.18:8000"))
 
         # ── 统一管理：模型专属 API 地址置灰只读展示，禁止手动编辑 ──
+        # LLM API 地址输入框在「自定义」模式下可编辑，其余模式只读
         _readonly_style = (
             "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"
         )
         for inp in [
-            self.llm_api_url_input,
             self.llm_vision_api_url_input,
             getattr(self, "vox_api_url_input", None),
             getattr(self, "whisper_api_url_input", None),
@@ -596,6 +571,10 @@ class PageSetupMixin:
             if inp:
                 inp.setReadOnly(True)
                 inp.setStyleSheet(_readonly_style)
+        # LLM API 地址：根据当前提供商决定是否只读
+        if prov != "custom":
+            self.llm_api_url_input.setReadOnly(True)
+            self.llm_api_url_input.setStyleSheet(_readonly_style)
 
         self.refresh_llm_page_status()
 

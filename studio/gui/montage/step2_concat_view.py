@@ -195,12 +195,8 @@ class Step2ConcatView(BaseStepView):
         self.main_page.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
         row_params2.addWidget(self.main_page.transition_combo)
         row_params2.addStretch()
+        row_params2.addStretch()
 
-        self.main_page.btn_assemble_video = mdi_button("镜头重组", "video")
-        self.main_page.btn_assemble_video.setObjectName("action_button")
-        self.main_page.btn_assemble_video.setFixedHeight(35)
-        self.main_page.btn_assemble_video.clicked.connect(self.main_page._start_assemble_video)
-        row_params2.addWidget(self.main_page.btn_assemble_video)
         card_layout.addLayout(row_params2)
 
         # 智能匹配模式的口播文案输入框
@@ -212,6 +208,23 @@ class Step2ConcatView(BaseStepView):
         self.main_page.match_script_edit.setFixedHeight(96)
         self.main_page.match_script_edit.setVisible(False)
         card_layout.addWidget(self.main_page.match_script_edit)
+
+        # ── 脚本工具栏：AI 生成文案 + 镜头重组（两种模式共用）──
+        script_toolbar = QHBoxLayout()
+        self.main_page.btn_gen_script = mdi_button("🤖 AI 生成文案", "sparkles")
+        self.main_page.btn_gen_script.setObjectName("primary_button")
+        self.main_page.btn_gen_script.setFixedHeight(35)
+        self.main_page.btn_gen_script.setToolTip("根据已勾选的镜头素材描述，调用大模型自动生成口播文案（受时长限制约束）")
+        self.main_page.btn_gen_script.clicked.connect(self.main_page._on_gen_script_clicked)
+        self.main_page.btn_gen_script.setVisible(False)
+        script_toolbar.addWidget(self.main_page.btn_gen_script)
+        script_toolbar.addStretch()
+        self.main_page.btn_assemble_video = mdi_button("镜头重组", "video")
+        self.main_page.btn_assemble_video.setObjectName("action_button")
+        self.main_page.btn_assemble_video.setFixedHeight(35)
+        self.main_page.btn_assemble_video.clicked.connect(self.main_page._start_assemble_video)
+        script_toolbar.addWidget(self.main_page.btn_assemble_video)
+        card_layout.addLayout(script_toolbar)
 
         # Intermediate result viewer
         result_box = QFrame()

@@ -266,18 +266,30 @@ class AIConfigMixin:
     def _on_llm_provider_changed(self, index):
         provider = self.llm_provider_combo.currentData()
         presets = {
-            "deepseek": ("https://api.deepseek.com", "deepseek-v4-flash"),
-            "openai": ("https://api.openai.com", "gpt-3.5-turbo"),
-            "custom": ("", ""),
+            "deepseek":     ("https://api.deepseek.com",                          "deepseek-v4-flash"),
+            "openai":       ("https://api.openai.com/v1",                          "gpt-4o"),
+            "ollama":       ("http://localhost:11434/v1",                          "qwen2.5:7b"),
+            "dashscope":    ("https://dashscope.aliyuncs.com/compatible-mode/v1",  "qwen-plus"),
+            "zhipu":        ("https://open.bigmodel.cn/api/paas/v4",               "glm-4-flash"),
+            "moonshot":     ("https://api.moonshot.cn/v1",                         "moonshot-v1-8k"),
+            "custom":       ("", ""),
         }
         url, model = presets.get(provider, ("", ""))
-        if url:
-            self.llm_api_url_input.setText(url)
-        if model:
-            self.llm_model_input.setText(model)
         if provider == "custom":
-            self.llm_api_url_input.setPlaceholderText("https://your-api-endpoint.com")
+            # 自定义模式：API 地址恢复可编辑，清空占位
+            self.llm_api_url_input.setReadOnly(False)
+            self.llm_api_url_input.setStyleSheet("")
+            self.llm_api_url_input.setPlaceholderText("https://your-api-endpoint.com/v1")
             self.llm_model_input.setPlaceholderText("your-model-name")
+        else:
+            # 预设提供商：地址只读，自动填充
+            _ro = "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"
+            self.llm_api_url_input.setReadOnly(True)
+            self.llm_api_url_input.setStyleSheet(_ro)
+            if url:
+                self.llm_api_url_input.setText(url)
+            if model:
+                self.llm_model_input.setText(model)
 
     # ──────────────────── Ollama 管理 ────────────────────
 

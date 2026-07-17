@@ -1463,6 +1463,131 @@ class SceneCopyWorker(BaseWorker):
             self.error.emit(str(e))
 
 
+class GenScriptWorker(BaseWorker):
+    """根据已勾选的镜头素材描述 + 产品背景 + 时长限制，调用大模型生成口播文案。
+
+    用于「按文案智能匹配」模式：先根据素材生成文案，用户编辑确认后再做镜头匹配。
+    输出每行对应一个镜头画面，按顺序排列。
+    """
+    finished = Signal(str)  # 生成的口播文案（每行一句）
+
+    def __init__(self, api_url, api_key, model, clip_descriptions,
+                 brand="", product="", model_name="", extra="", total_duration_sec=30):
+        super().__init__()
+        self.api_url = api_url
+        self.api_key = api_key
+        self.model = model
+        self.clip_descriptions = clip_descriptions or []
+        self.brand = brand
+        self.product = product
+        self.model_name = model_name
+        self.extra = extra
+        self.total_duration_sec = total_duration_sec
+
+    def run(self):
+        try:
+            import requests
+            n = len(self.clip_descriptions)
+            if n == 0:
+                raise RuntimeError("没有可用的镜头素材描述，无法生成文案。")
+
+            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 根据总时长估算每行文案的字数上限
+            # 正常语速约 3.5 字/秒
+            sec_per_shot = self.total_duration_sec / n
+            max_chars_per_line = int(sec_per_shot * 3.5)
+            max_chars_per_line = max(5, min(max_chars_per_line, 40))
+            total_max_chars = max_chars_per_line * n
+
+            duration_hint = (
+                f"\n视频总时长限制为 {self.total_duration_sec} 秒，共 {n} 个镜头，"
+                f"平均每个镜头约 {sec_per_shot:.1f} 秒。"
+                f"每行文案请控制在 {max_chars_per_line} 字以内（总计不超过 {total_max_chars} 字），"
+                f"确保能在对应镜头时长内以正常语速（约3.5字/秒）读完。"
+            )
+
+            system_prompt = (
+                "你是资深电商短视频口播文案撰稿人。用户会给出一个产品的共同背景信息（品牌/品类/型号/卖点），"
+                "以及该视频可用的每一个镜头画面描述。\n"
+                "请为这条视频撰写一段用于电商带货的口播文案（旁白），要求：\n"
+                f"1. 严格输出 {n} 行，第 i 行对应第 i 个镜头画面（按给定顺序），顺序不可打乱。\n"
+                f"2. 每行文案贴合对应镜头画面内容（如产品外观、特写、使用场景、价格对比等），"
+                f"口语化、有节奏、有卖点和号召力，每行约 5-{max_chars_per_line} 字。{duration_hint}\n"
+                "3. 所有行围绕同一款产品（同一型号）展开，整体文案在逻辑与情感上连贯、朗朗上口。\n"
+                "4. 若不确定具体参数，用准确的通用描述，切勿编造虚假数字。\n"
+                "5. 不要 markdown、不要标题、不要编号、不要解释说明，只输出文案本身，每句独占一行。"
+            )
+            clips_str = "\n".join(
+                f"{i + 1}. {desc.strip() or '（无画面描述，请根据上下文合理发挥）'}"
+                for i, desc in enumerate(self.clip_descriptions)
+            )
+            user_msg = (
+                "产品共同背景：\n"
+                f"品牌：{self.brand or '未提供'}\n"
+                f"产品/品类：{self.product or '未提供'}\n"
+                f"型号：{self.model_name or '未提供'}\n"
+                f"补充卖点：{self.extra or '无'}\n\n"
+                f"本条视频共有 {n} 个镜头画面，按顺序如下：\n{clips_str}\n\n"
+                f"请按要求生成口播文案，严格输出 {n} 行。"
+            )
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_msg}
+                ],
+                "temperature": 0.7
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=90)
+            if res.status_code != 200:
+                raise RuntimeError(f"LLM API 请求失败: HTTP {res.status_code} {res.text[:200]}")
+            data = res.json()
+            choices = data.get("choices", [])
+            if not choices:
+                raise RuntimeError("大模型返回为空")
+            content = choices[0].get("message", {}).get("content", "").strip()
+            if content.startswith("```"):
+                lines = content.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+            # 去掉空行和编号前缀
+            lines = []
+            for ln in content.splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                # 去掉可能的编号前缀 "1." "1、" "1）"
+                import re
+                ln = re.sub(r'^\d+[\.、，,）\)]\s*', '', ln).strip()
+                if ln:
+                    lines.append(ln)
+            content = "\n".join(lines)
+            if not content:
+                raise RuntimeError("大模型未生成有效文案")
+
+            # 校验行数是否匹配镜头数
+            actual_lines = len(lines)
+            if actual_lines != n:
+                if actual_lines < n:
+                    last_line = lines[-1] if lines else ""
+                    for _ in range(n - actual_lines):
+                        content += f"\n{last_line}"
+                else:
+                    content = "\n".join(lines[:n])
+
+            self.finished.emit(content)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class ProductCopyInputDialog(QDialog):
     """输入品牌/产品/型号/补充卖点，用于生成口播文案。"""
     def __init__(self, parent=None):
@@ -5766,9 +5891,11 @@ class VideoMontagePage(BasePage):
         self.lbl_batch_count.setVisible(not is_script)
         self.batch_count_spin.setVisible(not is_script)
 
+        # 时长限制：两种模式都展示（随机模式控制视频时长，文案模式控制生成文案时长）
         if hasattr(self, "lbl_duration_limit") and hasattr(self, "duration_limit_combo"):
-            self.lbl_duration_limit.setVisible(not is_script)
-            self.duration_limit_combo.setVisible(not is_script)
+            self.lbl_duration_limit.setText("文案时长限制:" if is_script else "时长限制:")
+            self.lbl_duration_limit.setVisible(True)
+            self.duration_limit_combo.setVisible(True)
 
         if hasattr(self, "lbl_randomness") and hasattr(self, "randomness_combo"):
             self.lbl_randomness.setVisible(not is_script)
@@ -5776,6 +5903,14 @@ class VideoMontagePage(BasePage):
 
         if hasattr(self, "match_script_edit"):
             self.match_script_edit.setVisible(is_script)
+
+        # AI 生成文案按钮：仅在智能匹配模式下可见
+        if hasattr(self, "btn_gen_script"):
+            self.btn_gen_script.setVisible(is_script)
+
+        # 「合成视频生成文案」按钮：仅在随机洗牌模式下可见
+        if hasattr(self, "btn_batch_scene_copy"):
+            self.btn_batch_scene_copy.setVisible(not is_script)
 
         if not is_script:
             self.clip_count_combo.setEnabled(True)
@@ -5785,6 +5920,89 @@ class VideoMontagePage(BasePage):
                 self.randomness_combo.setEnabled(True)
                 self.randomness_combo.setCurrentIndex(0) # 中 (保留同场景)
         self._update_batch_count_recommendation()
+
+    def _on_gen_script_clicked(self):
+        """智能匹配模式：根据已勾选的镜头素材描述，调用 AI 生成口播文案（受时长限制约束）。"""
+        cfg = getattr(self.main_window, "ai_config", {}) or {}
+        api_url = cfg.get("llm_api_url", "").strip()
+        api_key = cfg.get("llm_api_key", "").strip()
+        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
+        if not api_url or not api_key:
+            QMessageBox.warning(self.parent_widget, "未配置大模型",
+                                "请先在设置中配置 LLM 接口地址和密钥。")
+            return
+
+        # 收集已勾选的镜头素材及其描述
+        checked_clips = []
+        clip_descriptions = []
+        for r in range(self.concat_clips_list_widget.rowCount()):
+            item = self.concat_clips_list_widget.item(r, 0)
+            if item and item.checkState() == Qt.Checked:
+                path = item.data(Qt.UserRole)
+                if path:
+                    norm_path = os.path.abspath(path)
+                    checked_clips.append(norm_path)
+                    # 获取描述：先查 split_descriptions，再查缓存
+                    desc = self.split_descriptions.get(norm_path, "").strip()
+                    if not desc:
+                        cache = self.split_clips_cache.get(norm_path, {})
+                        desc = cache.get("desc", "").strip() if isinstance(cache, dict) else ""
+                    clip_descriptions.append(desc if desc else f"（镜头片段 {os.path.basename(norm_path)}）")
+
+        if not checked_clips:
+            QMessageBox.warning(self.parent_widget, "无素材",
+                                "请先在待排列镜头列表中勾选要用于生成文案的镜头。")
+            return
+
+        # 获取产品信息
+        info = self._ensure_shared_product_info()
+        if info is None:
+            return
+        brand, product, model_name, extra = info
+
+        # 获取时长限制
+        duration_limit = int(self.duration_limit_combo.currentData()) if hasattr(self, "duration_limit_combo") else 30
+
+        # 禁用按钮防止重复点击
+        self.btn_gen_script.setEnabled(False)
+        self.stage_label.setText(f"🤖 正在根据 {len(clip_descriptions)} 个镜头素材生成口播文案（时长限制 {duration_limit} 秒）...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        # 启动 worker
+        self._gen_script_worker = GenScriptWorker(
+            api_url, api_key, model, clip_descriptions,
+            brand, product, model_name, extra, duration_limit
+        )
+        self._gen_script_worker.finished.connect(self._on_gen_script_finished)
+        self._gen_script_worker.error.connect(self._on_gen_script_error)
+        self._gen_script_worker.start()
+
+    def _on_gen_script_finished(self, script_text):
+        """AI 生成文案完成：写入文案框，恢复 UI。"""
+        self.btn_gen_script.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.stage_label.setText("✅ AI 文案生成完成，可编辑后点击「镜头重组」进行智能匹配")
+
+        if hasattr(self, "match_script_edit"):
+            self.match_script_edit.setPlainText(script_text)
+
+        QMessageBox.information(
+            self.parent_widget, "文案已生成",
+            f"AI 已根据 {script_text.count(chr(10)) + 1} 个镜头素材生成口播文案。\n"
+            f"可在文案框中编辑调整，确认后点击「镜头重组」进行智能匹配。")
+
+    def _on_gen_script_error(self, err):
+        """AI 生成文案失败：恢复 UI，提示错误。"""
+        self.btn_gen_script.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("❌ AI 文案生成失败")
+        QMessageBox.critical(self.parent_widget, "文案生成失败",
+                             f"调用大模型生成文案时出错：\n{err}")
 
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)

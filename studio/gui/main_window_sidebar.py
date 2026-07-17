@@ -169,7 +169,7 @@ class SidebarMixin:
         compose_layout.addWidget(compose_header)
 
         compose_menus = [
-            # ("🚀 一键成片", 34),           # 下版本
+            ("一键成片", 34, "rocket"),
             ("智能混剪", 15, "cut"),
             ("📡 直播切片", 19, None),
         ]

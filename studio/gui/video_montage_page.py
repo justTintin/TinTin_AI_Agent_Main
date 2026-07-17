@@ -4646,6 +4646,9 @@ class VideoMontagePage(BasePage):
             self._score_worker.score_ready.connect(self._on_score_ready)
             self._score_worker.all_done.connect(self._on_score_all_done)
             self._score_worker.start()
+        else:
+            # 无镜头需评分，直接触发完成
+            self._on_score_all_done()
 
         # Set default directory for Step 2 and scan it
         if splits_dir and os.path.exists(splits_dir):
@@ -4679,6 +4682,15 @@ class VideoMontagePage(BasePage):
         """所有后台评分完成。"""
         log.info(f"[评分] 后台评分全部完成，共 {len(self._pending_score_rows)} 个镜头")
         self._pending_score_rows = []
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        # 评分完成后显示之前暂存的结果对话框
+        pending = getattr(self, "_pending_dialog", None)
+        if pending:
+            title, detail = pending
+            self._pending_dialog = None
+            self.stage_label.setText(f"✅ {title}")
+            QMessageBox.information(self.parent_widget, title, detail)
             self.clip_count_info_lbl.setText("待排列镜头个数: 0  (已勾选: 0)")
             self.btn_assemble_video.setEnabled(False)
 
@@ -5319,24 +5331,25 @@ class VideoMontagePage(BasePage):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)
-        self.progress_bar.setValue(100)
         self._check_split_clips_exist()
 
         if count == 0:
-            cur_threshold = self.threshold_spin.value()
+            self.progress_bar.setValue(100)
             self.stage_label.setText("⚠ 未检测到镜头切点，请调低分割阈值后重试。")
             QMessageBox.information(
                 self.parent_widget, "未检测到镜头切点",
                 f"该视频画面切换不明显，PySceneDetect 未能分出任何镜头。\n\n"
-                f"当前分割阈值为 {cur_threshold:.0f}（值越小越敏感）。\n"
+                f"当前分割阈值为 {self.threshold_spin.value():.0f}（值越小越敏感）。\n"
                 f"建议把阈值调低（如 27 或更低）后重新分割。"
             )
             return
 
-        self.stage_label.setText(f"✅ 镜头分割完成！共切出 {count} 个镜头。")
+        self.stage_label.setText(f"✅ 镜头分割完成！共切出 {count} 个镜头。正在评分...")
+        self.progress_bar.setRange(0, 0)  # 不确定进度
         self.temp_scenes = scenes
         self.temp_out_dir = out_dir
         self.temp_count = count
+        self._pending_dialog = ("分割完成", f"智能镜头分割完成，共切出 {count} 个镜头。")
 
         # Rename splits with timestamps
         self._rename_all_splits_with_metadata(out_dir, scenes)
@@ -5477,30 +5490,29 @@ class VideoMontagePage(BasePage):
         self.btn_pick_highlights.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)
-        self.progress_bar.setValue(100)
 
-        # 让下方表格读取共享 splits：清掉单视频选中态，使 _check_split_clips_exist 落到 <扫描目录>/splits
+        # 让下方表格读取共享 splits
         self.processing_video_path = ""
         self.video_list.setCurrentItem(None)
         self.temp_scenes = []
         self._check_split_clips_exist()
 
         msg = (f"批量挑精华完成：成功 {self._hl_ok} 个，失败 {self._hl_fail} 个"
-               f"（共 {self._hl_total}）。已统一写入 {self._hl_shared_splits}，下方列表已刷新，可直接进入下一步组合混剪。")
-        self.stage_label.setText("✅ " + msg)
+               f"（共 {self._hl_total}）。")
         detail = msg
         if self._hl_fail_msgs:
             detail += "\n\n失败明细：\n" + "\n".join(self._hl_fail_msgs[:8])
 
+        self.stage_label.setText("✅ " + msg + " 正在评分...")
+        self.progress_bar.setRange(0, 0)
+        self._pending_dialog = ("批量挑精华完成", detail)
+
         # Trigger vision analysis on highlight clips
         if self._hl_ok > 0 and os.path.exists(self._hl_shared_splits):
-            # Build scenes from split files
             files = sorted([f for f in os.listdir(self._hl_shared_splits)
                            if f.lower().endswith((".mp4", ".m4v"))])
             scenes = self._get_split_scenes_times(self._hl_shared_splits, files) if files else []
             self._trigger_vision_on_dir(self._hl_shared_splits, scenes, "批量挑精华")
-
-        QMessageBox.information(self.parent_widget, "批量挑精华完成", detail)
 
 
     def _trigger_vision_on_dir(self, splits_dir, scenes, source_label="镜头分割"):

@@ -36,20 +36,10 @@ SAMPLE_TEXT_CAP = 280   # 单条样本文本截断
 
 
 def _chat(cfg, system, user, temperature=0.4, timeout=120):
-    url = f"{cfg['api_url'].rstrip('/')}/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"}
-    payload = {
-        "model": cfg["model"],
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": temperature,
-    }
-    res = requests.post(url, json=payload, headers=headers, timeout=timeout)
-    if res.status_code != 200:
-        raise RuntimeError(f"LLM 请求失败: HTTP {res.status_code} - {res.text[:200]}")
-    return res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    """通过服务端代理调用 LLM（不再直连 API）。"""
+    from utils.llm_proxy import llm_chat
+    model = cfg.get("model", "deepseek-v4-flash")
+    return llm_chat(system, user, model=model, temperature=temperature, timeout=timeout)
 
 
 def _parse_json(text):
@@ -150,8 +140,8 @@ def distill_hotspots(hotspot_mgr, my_knowledge_mgr, cfg, progress_cb=None):
             progress_cb(m)
         log.info(f"[hotspot-distill] {m}")
 
-    if not (cfg.get("api_url") and cfg.get("api_key")):
-        return 0, 0, "未配置 LLM。"
+    if not cfg.get("model"):
+        return 0, 0, "未配置 LLM 模型。"
     cats = ["AI", "数码", "科技"]
     existing = {(it.get("dim"), it.get("dim_value")): it
                 for it in my_knowledge_mgr.items if it.get("distilled")}
@@ -211,8 +201,8 @@ def run_distillation(manager, cfg, progress_cb=None):
             progress_cb(m)
         log.info(f"[stylize] {m}")
 
-    if not (cfg.get("api_url") and cfg.get("api_key")):
-        return 0, 0, "未配置 LLM（请在「AI 设置」填 API 地址与 Key）。"
+    if not cfg.get("model"):
+        return 0, 0, "未配置 LLM 模型。"
 
     samples = [it for it in manager.all_items()
                if it.get("type") == REFERENCE_TYPE and (it.get("content") or "").strip()]

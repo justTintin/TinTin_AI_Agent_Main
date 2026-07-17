@@ -130,38 +130,17 @@ class LLMWorker(BaseWorker):
 
     def __init__(self, api_url, api_key, model, system_prompt, user_prompt):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": self.user_prompt}
-                ],
-                "temperature": 0.7
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=60)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM 请求失败: HTTP {res.status_code} - {res.text}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError(f"接口未返回内容: {data}")
-            
-            content = choices[0].get("message", {}).get("content", "")
+            from utils.llm_proxy import llm_chat
+            content = llm_chat(
+                self.system_prompt, self.user_prompt,
+                model=self.model, temperature=0.7, timeout=60
+            )
             self.finished.emit(content)
         except Exception as e:
             self.error.emit(str(e))
@@ -520,9 +499,9 @@ class AIScriptPage(BasePage):
         llm_api_key = ai.get("llm_api_key", "")
         llm_model   = ai.get("llm_model", "deepseek-chat")
 
-        if not llm_api_url or not llm_api_key:
+        if not llm_model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在「AI 设置」配置 LLM 的 API 地址与 Key。")
+                                "请先在「AI 设置」配置 LLM 模型名称。")
             return
 
         background   = self.edit_references.toPlainText().strip()

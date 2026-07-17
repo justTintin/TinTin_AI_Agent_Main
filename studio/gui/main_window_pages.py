@@ -104,6 +104,16 @@ class PageSetupMixin:
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
         tabs.addTab(p1, "🎭 声音样本")
 
+        # Tab 2: 视频配置（LUT 还原）
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_video_config_tab(p2)
+        tabs.addTab(p2, "🎬 视频配置")
+
+        # Tab 3: 本地配置（缓存目录）
+        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_local_config_tab(p3)
+        tabs.addTab(p3, "📁 本地配置")
+
         layout.addWidget(tabs, 1)
 
     def setup_video_ocr_page(self):
@@ -1289,21 +1299,91 @@ class PageSetupMixin:
 
         layout.addWidget(tabs)
 
-        # ── 资源配置 ──
-        res_label = QLabel("🎬 资源配置")
-        res_label.setObjectName("section_label")
-        res_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #9ca3af; padding: 0; margin-top: 8px;")
-        layout.addWidget(res_label)
+    def _setup_local_config_tab(self, parent_widget):
+        """本地配置 Tab：设置本地缓存/生成目录。"""
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
 
-        res_tabs = QTabWidget()
-        res_tabs.setStyleSheet(tabs.styleSheet())
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
-        rp1 = QWidget(); rp1.setStyleSheet("QWidget { background: transparent; }")
-        self._setup_video_config_tab(rp1)
-        res_tabs.addTab(rp1, "🎬 视频配置")
+        title = QLabel("📁 本地缓存配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
 
-        layout.addWidget(res_tabs)
+        hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(QLabel("缓存目录:"))
+        self.local_cache_dir_input = QLineEdit()
+        self.local_cache_dir_input.setPlaceholderText("默认为 outputs 目录，可自定义...")
+        dir_row.addWidget(self.local_cache_dir_input, 1)
+        btn_browse = QPushButton("浏览...")
+        btn_browse.clicked.connect(lambda: self._browse_local_cache_dir())
+        dir_row.addWidget(btn_browse)
+        layout.addLayout(dir_row)
+
+        self.local_cache_status = QLabel("")
+        self.local_cache_status.setObjectName("muted_text")
+        layout.addWidget(self.local_cache_status)
+
+        # 加载已有配置
+        if os.path.isfile(_LOCAL_CFG):
+            try:
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                self.local_cache_dir_input.setText(data.get("cache_dir", ""))
+                self.local_cache_status.setText("已加载配置")
+            except Exception:
+                pass
+
+        btn_save = QPushButton("💾 保存")
+        btn_save.setObjectName("primary_button")
+        btn_save.setFixedWidth(90)
+        btn_save.clicked.connect(lambda: self._save_local_config())
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
         layout.addStretch()
+
+    def _browse_local_cache_dir(self):
+        d = QFileDialog.getExistingDirectory(self.local_cache_dir_input, "选择本地缓存目录")
+        if d:
+            self.local_cache_dir_input.setText(d)
+
+    def _save_local_config(self):
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        cache_dir = self.local_cache_dir_input.text().strip()
+        try:
+            with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
+                _json.dump({"cache_dir": cache_dir}, f, indent=2, ensure_ascii=False)
+            self.local_cache_status.setText("✅ 已保存")
+        except Exception as e:
+            self.local_cache_status.setText(f"❌ 保存失败: {e}")
+
+    def get_local_cache_dir(self):
+        """获取配置的本地缓存目录，未配置返回空。"""
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        try:
+            if os.path.isfile(_LOCAL_CFG):
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                d = data.get("cache_dir", "").strip()
+                if d and os.path.isdir(d):
+                    return d
+        except Exception:
+            pass
+        return ""
 
     def _setup_video_config_tab(self, parent_widget):
         """视频配置 Tab：管理 LUT 还原文件映射（文件名 → LUT 路径）。"""

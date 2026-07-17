@@ -280,7 +280,7 @@ class Step2ConcatView(BaseStepView):
         self.main_page.assembled_clips_list_widget = QListWidget()
         self.main_page.assembled_clips_list_widget.setFixedHeight(120)
         self.main_page.assembled_clips_list_widget.setTextElideMode(Qt.ElideRight)
-        self.main_page.assembled_clips_list_widget.itemDoubleClicked.connect(self.main_page._preview_video_item)
+        self.main_page.assembled_clips_list_widget.itemDoubleClicked.connect(self.main_page._on_assembled_double_clicked)
         self.main_page.assembled_clips_list_widget.itemClicked.connect(self.main_page._on_assembled_item_clicked)
         self.main_page.assembled_clips_list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.main_page.assembled_clips_list_widget.customContextMenuRequested.connect(self.main_page._show_assembled_context_menu)
@@ -384,3 +384,6 @@ class Step2ConcatView(BaseStepView):
         self.main_page.btn_next_to_step_3.clicked.connect(lambda: self.main_page._go_to_step(2))
         nav_row.addWidget(self.main_page.btn_next_to_step_3)
         layout.addLayout(nav_row)
+
+        # 加载 LUT 配置到下拉框
+        self.main_page._load_lut_combo()

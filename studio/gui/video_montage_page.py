@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QSpinBox, QListWidgetItem, QGroupBox, QDialog, QDialogButtonBox, QPlainTextEdit, QScrollArea,
                                QListView, QMenu)
 from PySide6.QtCore import Signal, QThread, Qt, QMimeData
-from PySide6.QtGui import QDrag, QAction
+from PySide6.QtGui import QDrag, QAction, QColor
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -1058,10 +1058,9 @@ class LocalVisionDescWorker(BaseWorker):
 
     finished = Signal(str)  # JSON string: {"1": "desc1", "2": "desc2", ...}
 
-    def __init__(self, vision_api_url, vision_model, split_video_paths, scenes,
+    def __init__(self, vision_model, split_video_paths, scenes,
                  srt_text="", srt_segments=None):
         super().__init__()
-        self.vision_api_url = vision_api_url.rstrip("/")
         self.vision_model = vision_model
         self.split_video_paths = split_video_paths
         self.scenes = scenes
@@ -1148,31 +1147,18 @@ class LocalVisionDescWorker(BaseWorker):
                         system_prompt = system_prompt_vision_only
                         user_text = "请描述这张截图的画面内容。"
 
-                    payload = {
-                        "model": self.vision_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_text,
-                             "images": [frame_b64]},
-                        ],
-                        "stream": False,
-                        "options": {"num_ctx": 4096},
-                    }
-                    resp = requests.post(
-                        f"{self.vision_api_url}/api/chat",
-                        json=payload,
-                        timeout=60,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        content = data.get("message", {}).get("content", "").strip()
-                        content = content.strip("'\"\"'").split("\n")[0].strip()
-                        if content:
-                            desc_dict[idx] = content[:30]
-                        else:
-                            desc_dict[idx] = f"镜头片段 {idx}"
+                    from utils.llm_proxy import llm_chat_messages
+                    text = llm_chat_messages(
+                        [{"role": "system", "content": system_prompt},
+                         {"role": "user", "content": [
+                             {"type": "text", "text": user_text},
+                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}},
+                         ]}],
+                        model=self.vision_model, temperature=0.2, max_tokens=60, timeout=60)
+                    content = text.strip().strip("'\"\"'").split("\n")[0].strip()
+                    if content:
+                        desc_dict[idx] = content[:30]
                     else:
-                        log.warning(f"Vision API error for clip {idx}: HTTP {resp.status_code}")
                         desc_dict[idx] = f"镜头片段 {idx}"
                 except Exception as e:
                     log.warning(f"Vision analysis failed for clip {idx}: {e}")
@@ -1567,97 +1553,6 @@ class GenScriptWorker(BaseWorker):
             self.error.emit(str(e))
 
 
-class RateClipsWorker(BaseWorker):
-    """AI 智能评分 Worker：根据镜头素材的描述文案（或画面信息），
-    调用大模型对每条分割镜头进行质量评分（0-10 分），返回 JSON 数组。
-    """
-    finished = Signal(str)  # JSON string: [{"index": 1, "score": 8.5, "reason": "..."}, ...]
-
-    def __init__(self, clips_info):
-        """
-        Args:
-            clips_info: list of dict, 每个 dict 包含:
-                - index: int (1-based 镜头序号)
-                - filename: str (文件名)
-                - desc: str (描述文案，可能为空)
-                - duration: float (时长秒数)
-        """
-        super().__init__()
-        self.clips_info = clips_info or []
-
-    def run(self):
-        try:
-            n = len(self.clips_info)
-            if n == 0:
-                raise RuntimeError("没有可用的镜头素材，无法评分。")
-
-            from utils.llm_proxy import llm_chat
-
-            system_prompt = (
-                "你是一位资深的短视频内容质量评估专家。"
-                "你擅长从画面内容、拍摄质量、信息量和商业价值四个维度对短视频镜头素材进行评分。"
-                "评分标准（0-10分）：\n"
-                "- 9-10分：画面精美、内容清晰、信息丰富，非常适合用于电商带货短视频\n"
-                "- 7-8分：画面良好、内容较清晰，适合用于短视频制作\n"
-                "- 5-6分：画面一般、内容简单，可用但不出彩\n"
-                "- 3-4分：画面较差、内容模糊或信息不足，不太适合使用\n"
-                "- 0-2分：画面质量差、内容混乱或无意义，建议剔除\n\n"
-                "评分维度权重：\n"
-                "- 画面内容吸引力与产品展示效果（40%）\n"
-                "- 描述文案的营销价值和信息量（30%）\n"
-                "- 镜头时长是否适合短视频节奏（15%）\n"
-                "- 整体画面质量感受（15%）\n\n"
-                "请注意：\n"
-                "1. 如果描述文案为空或极简，说明该镜头可能只是过渡/空白片段，评分应较低\n"
-                "2. 时长过短（<1秒）或过长（>30秒）的镜头适当扣分\n"
-                "3. 描述中包含产品特写、功能展示、使用场景等关键词的镜头应加分\n"
-                "请严格以 JSON 数组格式输出，每个元素包含 index(镜头序号)、score(评分，保留一位小数)、reason(简短评分理由，10字以内)，"
-                "不要包含 markdown 标记或任何解释文字。"
-            )
-
-            clips_str_parts = []
-            for c in self.clips_info:
-                idx = c.get("index", 0)
-                fname = c.get("filename", "未知")
-                desc = (c.get("desc") or "").strip()
-                dur = c.get("duration", 0) or 0
-                desc_display = desc or "(无描述)"
-                part = f"镜头 {idx}: 文件名={fname}, 描述=\"{desc_display}\", 时长={dur:.1f}秒"
-                clips_str_parts.append(part)
-
-            user_msg = (
-                f"请对以下 {n} 个短视频镜头素材逐一评分（0-10分）：\n\n"
-                + "\n".join(clips_str_parts)
-                + f"\n\n请输出 JSON 数组，共 {n} 个元素。"
-            )
-
-            res_json = llm_chat(system_prompt, user_msg, model="", temperature=0.3, timeout=120)
-            # 清理可能的 markdown 包裹
-            content = res_json.strip()
-            if content.startswith("```"):
-                lines = content.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                content = "\n".join(lines).strip()
-
-            # 尝试提取 JSON 数组
-            import re
-            m = re.search(r"\[.*\]", content, re.DOTALL)
-            if m:
-                content = m.group(0)
-
-            import json
-            ratings = json.loads(content)
-            if not isinstance(ratings, list) or len(ratings) == 0:
-                raise RuntimeError("AI 未返回有效的评分数据")
-
-            self.finished.emit(json.dumps(ratings, ensure_ascii=False))
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class ProductCopyInputDialog(QDialog):
     """输入品牌/产品/型号/补充卖点，用于生成口播文案。"""
     def __init__(self, parent=None):
@@ -1925,13 +1820,29 @@ class VideoConcatWorker(BaseWorker):
     }
 
     def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
-        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。"""
+        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。"""
         if not clips:
             return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
 
-        # 单个镜头直接复制
+        # 读取 LUT 配置
+        lut_path = self._get_selected_lut_path() if hasattr(self, "_get_selected_lut_path") else ""
+        if lut_path and not os.path.isfile(lut_path):
+            log.warning(f"[LUT] 文件不存在，跳过: {lut_path}")
+            lut_path = ""
+        if lut_path:
+            log.info(f"[LUT] 应用色彩还原: {os.path.basename(lut_path)}")
+
+        # 单个镜头直接复制（带 LUT 时需要重新编码）
         if len(clips) == 1:
-            cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
+            if lut_path:
+                lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
+                vf = f"lut3d='{lut_esc}'"
+                cmd = [ffmpeg_path, "-y", "-i", clips[0], "-vf", vf,
+                       "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
+                       "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                       "-movflags", "+faststart", out_file]
+            else:
+                cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
             return subprocess.run(cmd, capture_output=True, text=True,
                                   creationflags=subprocess.CREATE_NO_WINDOW)
 
@@ -1964,14 +1875,24 @@ class VideoConcatWorker(BaseWorker):
         for clip in clips:
             inputs += ["-i", clip]
 
+        # ── LUT 色彩还原：在 xfade 之前给每个片段加 lut3d ──
+        if lut_path:
+            lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
+            for i in range(n):
+                filter_parts.append(f"[{i}:v]lut3d='{lut_esc}'[lut{i}];")
+
         # 第一个转场
-        prev_label = "0:v"
+        if lut_path:
+            prev_label = "lut0"
+        else:
+            prev_label = "0:v"
         accumulated = durations[0]
         for i in range(1, n):
             offset = max(0, accumulated - transition_dur)
             out_label = f"v{i:02d}"
+            src_label = f"lut{i}" if lut_path else f"{i}:v"
             filter_parts.append(
-                f"[{prev_label}][{i}:v]xfade=transition={xfade_type}:duration={transition_dur}:offset={offset:.3f}[{out_label}]"
+                f"[{prev_label}][{src_label}]xfade=transition={xfade_type}:duration={transition_dur}:offset={offset:.3f}[{out_label}]"
             )
             prev_label = out_label
             accumulated = offset + transition_dur + (durations[i] - transition_dur)
@@ -3041,12 +2962,9 @@ class VideoMontagePage(BasePage):
         self.desc_worker = None
         self.rewrite_worker = None
         self.script_match_worker = None
-        self.rate_worker = None
         
         # State variables
         self.split_descriptions = {} # split video path -> description
-        self.clip_ratings = {}  # split video path -> {"score": float, "reason": str}
-        self.min_score_filter = 0.0  # 最低评分阈值（0=不过滤）
         self.rewritten_script = []
         self.split_clips_list = []
         self.assembled_video_path = ""
@@ -3158,8 +3076,8 @@ class VideoMontagePage(BasePage):
         self.sources_detail_widget = ReorderableClipsTable()
         self.sources_detail_widget.setWordWrap(False)
         self.sources_detail_widget.verticalHeader().setDefaultSectionSize(30)
-        self.sources_detail_widget.setColumnCount(4)
-        self.sources_detail_widget.setHorizontalHeaderLabels(["⠿", "分割文件名", "时间戳", "描述文案"])
+        self.sources_detail_widget.setColumnCount(5)
+        self.sources_detail_widget.setHorizontalHeaderLabels(["⠿", "分割文件名", "时间戳", "描述文案", "评分"])
         self.sources_detail_widget.setFixedHeight(220)
         self.sources_detail_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.sources_detail_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -3172,6 +3090,8 @@ class VideoMontagePage(BasePage):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.sources_detail_widget.setColumnWidth(4, 50)
         
         self.step2.detail_layout.addWidget(self.sources_detail_widget)
         self.stacked_widget.addWidget(self.step2)
@@ -3380,8 +3300,8 @@ class VideoMontagePage(BasePage):
         self.split_result_table = QTableWidget()
         self.split_result_table.setWordWrap(False)
         self.split_result_table.verticalHeader().setDefaultSectionSize(30)
-        self.split_result_table.setColumnCount(4)
-        self.split_result_table.setHorizontalHeaderLabels(["序号", "视频片段", "时间戳", "画面文案描述"])
+        self.split_result_table.setColumnCount(5)
+        self.split_result_table.setHorizontalHeaderLabels(["序号", "视频片段", "时间戳", "画面文案描述", "评分"])
         self.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.split_result_table.setMinimumHeight(180)
         self.split_result_table.itemDoubleClicked.connect(self._preview_table_item)
@@ -3392,6 +3312,9 @@ class VideoMontagePage(BasePage):
         header.setSectionResizeMode(1, QHeaderView.Interactive)
         self.split_result_table.setColumnWidth(1, 180)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.split_result_table.setColumnWidth(4, 50)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setStretchLastSection(False)
         
@@ -3472,8 +3395,8 @@ class VideoMontagePage(BasePage):
         self.concat_clips_list_widget = QTableWidget()
         self.concat_clips_list_widget.setWordWrap(False)
         self.concat_clips_list_widget.verticalHeader().setDefaultSectionSize(30)
-        self.concat_clips_list_widget.setColumnCount(5)
-        self.concat_clips_list_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "描述文案", "文件目录", "操作"])
+        self.concat_clips_list_widget.setColumnCount(6)
+        self.concat_clips_list_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "描述文案", "评分", "文件目录", "操作"])
         self.concat_clips_list_widget.setFixedHeight(180)
         self.concat_clips_list_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.concat_clips_list_widget.itemDoubleClicked.connect(self._preview_concat_table_item)
@@ -3484,10 +3407,12 @@ class VideoMontagePage(BasePage):
         self.concat_clips_list_widget.setColumnWidth(0, 160)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # 时间戳
         header.setSectionResizeMode(2, QHeaderView.Stretch)           # 描述文案
-        header.setSectionResizeMode(3, QHeaderView.Interactive)       # 文件目录
-        self.concat_clips_list_widget.setColumnWidth(3, 120)
-        header.setSectionResizeMode(4, QHeaderView.Fixed)             # 操作
-        self.concat_clips_list_widget.setColumnWidth(4, 30)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)             # 评分
+        self.concat_clips_list_widget.setColumnWidth(3, 50)
+        header.setSectionResizeMode(4, QHeaderView.Interactive)       # 文件目录
+        self.concat_clips_list_widget.setColumnWidth(4, 120)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)             # 操作
+        self.concat_clips_list_widget.setColumnWidth(5, 30)
         
         card_layout.addWidget(self.concat_clips_list_widget)
 
@@ -3609,6 +3534,14 @@ class VideoMontagePage(BasePage):
         self.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
         row_params2.addWidget(self.transition_combo)
 
+        row_params2.addSpacing(12)
+        row_params2.addWidget(QLabel("LUT 还原:"))
+        self.lut_combo = QComboBox()
+        self.lut_combo.addItem("无", "")
+        self.lut_combo.setFixedWidth(140)
+        self.lut_combo.setToolTip("对分割镜头应用 LUT 色彩还原（需先在「运行环境 → 视频配置」中配置 LUT 文件）")
+        row_params2.addWidget(self.lut_combo)
+
         row_params2.addStretch()
 
         self.btn_assemble_video = mdi_button("镜头重组", "video")
@@ -3661,8 +3594,8 @@ class VideoMontagePage(BasePage):
         self.sources_detail_widget = ReorderableClipsTable()
         self.sources_detail_widget.setWordWrap(False)
         self.sources_detail_widget.verticalHeader().setDefaultSectionSize(30)
-        self.sources_detail_widget.setColumnCount(4)
-        self.sources_detail_widget.setHorizontalHeaderLabels(["⠿", "分割文件名", "时间戳", "描述文案"])
+        self.sources_detail_widget.setColumnCount(5)
+        self.sources_detail_widget.setHorizontalHeaderLabels(["⠿", "分割文件名", "时间戳", "描述文案", "评分"])
         self.sources_detail_widget.setFixedHeight(220)
         self.sources_detail_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.sources_detail_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -3675,6 +3608,8 @@ class VideoMontagePage(BasePage):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.sources_detail_widget.setColumnWidth(4, 50)
         
         left_vbox.addWidget(self.sources_detail_widget)
 
@@ -4600,31 +4535,50 @@ class VideoMontagePage(BasePage):
                     
                     if desc:
                         self.split_descriptions[norm_path] = desc
-                        
+
+                    # 评分（填充缓存并显示）
+                    score = self._score_clip(norm_path)
+                    self.split_clips_cache[norm_path] = {
+                        "filename": f, "time_str": time_str,
+                        "desc": desc, "duration": 0.0, "score": score,
+                    }
+
                     # Col 0: Index (1-based)
                     idx_item = QTableWidgetItem(str(idx + 1))
-                    idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable) # Read-only
+                    idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
                     idx_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 0, idx_item)
-                    
+
                     # Col 1: Filename
                     file_item = QTableWidgetItem(f)
-                    file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable) # Read-only
-                    file_item.setData(Qt.UserRole, norm_path) # Save full path in UserRole
+                    file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable)
+                    file_item.setData(Qt.UserRole, norm_path)
                     file_item.setToolTip(norm_path)
                     self.split_result_table.setItem(idx, 1, file_item)
-                    
+
                     # Col 2: Timestamp
                     time_item = QTableWidgetItem(time_str)
-                    time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable) # Read-only
+                    time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable)
                     time_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 2, time_item)
-                    
+
                     # Col 3: Scene Description
                     desc_item = QTableWidgetItem(desc)
-                    # Keep description editable
                     desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable)
                     self.split_result_table.setItem(idx, 3, desc_item)
+
+                    # Col 4: Score
+                    score_text = f"{score:.1f}" if score >= 0 else "—"
+                    score_item = QTableWidgetItem(score_text)
+                    score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+                    score_item.setTextAlignment(Qt.AlignCenter)
+                    if score >= 8.0:
+                        score_item.setForeground(QColor("#2ecc71"))
+                    elif score >= 6.0:
+                        score_item.setForeground(QColor("#f1c40f"))
+                    elif score >= 0:
+                        score_item.setForeground(QColor("#e74c3c"))
+                    self.split_result_table.setItem(idx, 4, score_item)
                     initial_desc_lines.append(desc)
                 
                 # Update rewritten_srt_display
@@ -5496,11 +5450,10 @@ class VideoMontagePage(BasePage):
 
         供批量分割、批量挑精华等批量路径复用。
         """
-        vision_api_url = self.main_window.ai_config.get("llm_vision_api_url", "")
         vision_model = self.main_window.ai_config.get("llm_vision_model", "")
 
-        if not vision_api_url or not vision_model:
-            log.info(f"[{source_label}] 未配置本地视觉模型，跳过画面描述生成")
+        if not vision_model:
+            log.info(f"[{source_label}] 未配置视觉模型，跳过画面描述生成")
             return
 
         if not os.path.exists(splits_dir):
@@ -5542,7 +5495,6 @@ class VideoMontagePage(BasePage):
         self._trigger_splits_dir = splits_dir
 
         self.vision_desc_worker = LocalVisionDescWorker(
-            vision_api_url=vision_api_url,
             vision_model=vision_model,
             split_video_paths=split_video_paths,
             scenes=scenes if scenes else [],
@@ -5966,12 +5918,10 @@ class VideoMontagePage(BasePage):
     def _on_gen_script_clicked(self):
         """智能匹配模式：根据已勾选的镜头素材描述，调用 AI 生成口播文案（受时长限制约束）。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
-        api_url = cfg.get("llm_api_url", "").strip()
-        api_key = cfg.get("llm_api_key", "").strip()
-        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
-        if not api_url or not api_key:
+        model = (cfg.get("llm_model", "") or "deepseek-v4-flash").strip()
+        if not model:
             QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                "请先在设置中配置 LLM 接口地址和密钥。")
+                                "请先在设置中配置 LLM 模型名称。")
             return
 
         # 收集已勾选的镜头素材及其描述
@@ -6045,162 +5995,6 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("❌ AI 文案生成失败")
         QMessageBox.critical(self.parent_widget, "文案生成失败",
                              f"调用大模型生成文案时出错：\n{err}")
-
-    # --- AI 智能评分 ---
-    def _rate_clips(self):
-        """AI 智能评分：收集所有分割镜头的描述与时长，调用大模型评分。"""
-        cfg = getattr(self.main_window, "ai_config", {}) or {}
-        api_key = cfg.get("llm_api_key", "").strip()
-        if not api_key:
-            QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                "请先在设置中配置 LLM 接口地址和密钥。")
-            return
-
-        # 收集镜头信息
-        clips_info = []
-        for r in range(self.concat_clips_list_widget.rowCount()):
-            item = self.concat_clips_list_widget.item(r, 0)
-            if item:
-                path = item.data(Qt.UserRole)
-                if path:
-                    norm_path = os.path.abspath(path)
-                    desc_item = self.concat_clips_list_widget.item(r, 3)
-                    desc = desc_item.text().strip() if desc_item else ""
-                    if not desc:
-                        desc = self.split_descriptions.get(norm_path, "")
-                    duration = self._get_clip_duration(norm_path)
-                    clips_info.append({
-                        "index": r + 1,
-                        "filename": item.text(),
-                        "desc": desc,
-                        "duration": duration,
-                    })
-
-        if not clips_info:
-            QMessageBox.warning(self.parent_widget, "无素材",
-                                "没有可评分的镜头素材。")
-            return
-
-        self.btn_rate_clips.setEnabled(False)
-        self.lbl_rate_status.setText(f"⏳ 正在 AI 评分 {len(clips_info)} 个镜头…")
-        self.stage_label.setText(f"🤖 正在调用大模型对 {len(clips_info)} 个镜头进行质量评分…")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-
-        self.rate_worker = RateClipsWorker(clips_info)
-        self.rate_worker.finished.connect(self._on_rate_finished)
-        self.rate_worker.error.connect(self._on_rate_error)
-        self.rate_worker.start()
-
-    def _on_rate_finished(self, json_str):
-        """AI 评分完成：解析结果，更新表格与缓存。"""
-        self.btn_rate_clips.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        self.rate_worker = None
-
-        import json
-        try:
-            ratings = json.loads(json_str)
-        except Exception as e:
-            self.lbl_rate_status.setText("❌ 评分结果解析失败")
-            QMessageBox.critical(self.parent_widget, "评分失败",
-                                 f"解析 AI 返回的评分结果时出错：\n{e}")
-            return
-
-        stats = {"total": 0, "high": 0, "mid": 0, "low": 0, "sum": 0.0}
-        for entry in ratings:
-            idx = entry.get("index", 0)
-            score = entry.get("score", 0)
-            reason = entry.get("reason", "")
-            row = idx - 1
-            if 0 <= row < self.concat_clips_list_widget.rowCount():
-                file_item = self.concat_clips_list_widget.item(row, 0)
-                if file_item:
-                    norm_path = os.path.abspath(file_item.data(Qt.UserRole))
-                    self.clip_ratings[norm_path] = {"score": score, "reason": reason}
-
-                    score_text = f"⭐ {score:.1f}"
-                    score_item = QTableWidgetItem(score_text)
-                    score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
-                    score_item.setTextAlignment(Qt.AlignCenter)
-                    score_item.setToolTip(reason)
-                    if score >= 7:
-                        score_item.setForeground(Qt.green)
-                    elif score >= 4:
-                        score_item.setForeground(Qt.yellow)
-                    else:
-                        score_item.setForeground(Qt.red)
-                    self.concat_clips_list_widget.setItem(row, 2, score_item)
-
-                    stats["total"] += 1
-                    stats["sum"] += score
-                    if score >= 7:
-                        stats["high"] += 1
-                    elif score >= 4:
-                        stats["mid"] += 1
-                    else:
-                        stats["low"] += 1
-
-        avg_score = stats["sum"] / stats["total"] if stats["total"] > 0 else 0
-        self.lbl_rate_status.setText(
-            f"✅ 均分 {avg_score:.1f} | ⭐≥7: {stats['high']} | ⭐4-6: {stats['mid']} | ⭐<4: {stats['low']}"
-        )
-        self.stage_label.setText(f"✅ AI 评分完成，平均分 {avg_score:.1f}")
-        QMessageBox.information(
-            self.parent_widget, "评分完成",
-            f"AI 对 {stats['total']} 个镜头素材评分完成，平均分 {avg_score:.1f}。\n"
-            f"⭐ ≥7 分: {stats['high']} 个\n"
-            f"⭐ 4-6 分: {stats['mid']} 个\n"
-            f"⭐ <4 分: {stats['low']} 个\n\n"
-            "可在「最低评分筛选」下拉框中设置阈值，自动过滤低分镜头。"
-        )
-
-    def _on_rate_error(self, err):
-        """AI 评分出错：恢复 UI，提示错误。"""
-        self.btn_rate_clips.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.lbl_rate_status.setText("❌ 评分失败")
-        self.stage_label.setText("❌ AI 评分失败")
-        self.rate_worker = None
-        QMessageBox.critical(self.parent_widget, "评分失败",
-                             f"调用大模型进行评分时出错：\n{err}")
-
-    def _apply_score_filter(self, index):
-        """根据最低评分筛选阈值，自动取消勾选低分镜头。"""
-        threshold = self.score_filter_combo.currentData()
-        self.min_score_filter = threshold
-
-        if threshold <= 0:
-            self._select_all_clips()
-            self.lbl_rate_status.setText("")
-            return
-
-        unchecked = 0
-        self.concat_clips_list_widget.blockSignals(True)
-        for r in range(self.concat_clips_list_widget.rowCount()):
-            file_item = self.concat_clips_list_widget.item(r, 0)
-            score_item = self.concat_clips_list_widget.item(r, 2)
-            if file_item and score_item:
-                norm_path = os.path.abspath(file_item.data(Qt.UserRole))
-                rating_info = self.clip_ratings.get(norm_path, {})
-                score = rating_info.get("score", None) if isinstance(rating_info, dict) else None
-                if score is not None and score < threshold:
-                    file_item.setCheckState(Qt.Unchecked)
-                    unchecked += 1
-                else:
-                    file_item.setCheckState(Qt.Checked)
-        self.concat_clips_list_widget.blockSignals(False)
-
-        self._update_concat_count_lbl()
-
-        if unchecked > 0:
-            self.lbl_rate_status.setText(f"🔽 已自动取消勾选 {unchecked} 个低于 {threshold} 分的镜头")
-        else:
-            self.lbl_rate_status.setText(f"✅ 所有镜头均 ≥ {threshold} 分")
 
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)
@@ -6364,12 +6158,10 @@ class VideoMontagePage(BasePage):
 
         # 1. Check configs
         ai_config = getattr(self.main_window, "ai_config", {})
-        api_key = ai_config.get("llm_api_key", "").strip()
-        api_url = ai_config.get("llm_api_url", "").strip()
         model = ai_config.get("llm_model", "").strip()
         
-        if not api_key:
-            QMessageBox.warning(self.parent_widget, "未配置AI大模型", "请先在“设置”或“AI模型配置”中配置 LLM API Key。")
+        if not model:
+            QMessageBox.warning(self.parent_widget, "未配置AI大模型", "请先在“设置”或“AI模型配置”中配置 LLM 模型名称。")
             return
             
         # 2. Build tasks
@@ -7099,12 +6891,10 @@ class VideoMontagePage(BasePage):
         - 支持有/无字幕两种模式
         """
         cfg = getattr(self.main_window, "ai_config", {}) or {}
-        api_url = cfg.get("llm_api_url", "").strip()
-        api_key = cfg.get("llm_api_key", "").strip()
-        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
-        if not api_url or not api_key:
+        model = (cfg.get("llm_model", "") or "deepseek-v4-flash").strip()
+        if not model:
             QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                "请先在设置中配置 LLM 接口地址和密钥以使用画面描述生成。")
+                                "请先在设置中配置 LLM 模型名称以使用画面描述生成。")
             return
 
         # 构建场景列表
@@ -7150,7 +6940,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
 
         self._batch_desc_worker = BatchGenerateDescriptionsWorker(
-            api_url, api_key, model, raw_srt, scenes, clip_paths)
+            "", "", model, raw_srt, scenes, clip_paths)
 
         def on_desc_ok(json_str):
             import json as _json
@@ -7403,6 +7193,8 @@ class VideoMontagePage(BasePage):
             self.concat_clips_list_widget.blockSignals(True)
             self.concat_clips_list_widget.setRowCount(len(files))
             
+            # 保留旧缓存中的评分，避免重复计算
+            _old_cache = getattr(self, "split_clips_cache", {}) or {}
             self.split_clips_cache = {}
             for idx, filepath in enumerate(files):
                 filename = os.path.basename(filepath)
@@ -7436,58 +7228,66 @@ class VideoMontagePage(BasePage):
                     self.split_descriptions[norm_path] = desc
                 
                 clip_dur = get_media_duration(norm_path)
+
+                # 评分：优先读缓存（含旧缓存），否则计算
+                cached = self.split_clips_cache.get(norm_path, {})
+                score = cached.get("score", None)
+                if score is None and norm_path in _old_cache:
+                    old_entry = _old_cache[norm_path]
+                    if isinstance(old_entry, dict):
+                        score = old_entry.get("score")
+                if score is None:
+                    score = self._score_clip(norm_path)
+
                 self.split_clips_cache[norm_path] = {
                     "filename": filename,
                     "time_str": time_str,
                     "desc": desc,
                     "duration": clip_dur,
+                    "score": score,
                 }
-                
-                # Col 0: 分割文件名 (Checkable)
+
+                # Col 0: 分割文件名 (Checkable) — 高分自动选中
                 file_item = QTableWidgetItem(filename)
                 file_item.setFlags(file_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                file_item.setCheckState(Qt.Checked)
-                file_item.setData(Qt.UserRole, norm_path) # Store full path
+                auto_check = (score >= 0 and score >= 7.0) or score < 0  # 未评分/高分 → 默认勾选
+                file_item.setCheckState(Qt.Checked if auto_check else Qt.Unchecked)
+                file_item.setData(Qt.UserRole, norm_path)
                 file_item.setToolTip(norm_path)
                 self.concat_clips_list_widget.setItem(idx, 0, file_item)
-                
-                # Col 1: 时间戳 (ReadOnly)
+
+                # Col 1: 时间戳
                 time_item = QTableWidgetItem(time_str)
-                time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable) # Read-only
+                time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable)
                 time_item.setTextAlignment(Qt.AlignCenter)
                 self.concat_clips_list_widget.setItem(idx, 1, time_item)
-                
-                # Col 2: 评分 (ReadOnly) - 从 clip_ratings 缓存读取
-                rating_info = self.clip_ratings.get(norm_path, {})
-                score = rating_info.get("score", None) if isinstance(rating_info, dict) else None
-                score_text = f"⭐ {score:.1f}" if score is not None else "-"
-                score_item = QTableWidgetItem(score_text)
-                score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
-                score_item.setTextAlignment(Qt.AlignCenter)
-                score_item.setToolTip(rating_info.get("reason", "") if isinstance(rating_info, dict) and score is not None else "未评分")
-                # 根据评分高低设置颜色
-                if score is not None:
-                    if score >= 7:
-                        score_item.setForeground(Qt.green)
-                    elif score >= 4:
-                        score_item.setForeground(Qt.yellow)
-                    else:
-                        score_item.setForeground(Qt.red)
-                self.concat_clips_list_widget.setItem(idx, 2, score_item)
-                
-                # Col 3: 描述文案 (Editable, with ellipsis + tooltip + double-click popup)
+
+                # Col 2: 描述文案
                 desc_item = QTableWidgetItem(desc)
                 desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 desc_item.setToolTip(desc if desc else "（双击可编辑/查看完整文案）")
-                self.concat_clips_list_widget.setItem(idx, 3, desc_item)
-                
-                # Col 4: 文件目录 (ReadOnly)
+                self.concat_clips_list_widget.setItem(idx, 2, desc_item)
+
+                # Col 3: 评分
+                score_text = f"{score:.1f}" if score >= 0 else "—"
+                score_item = QTableWidgetItem(score_text)
+                score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+                score_item.setTextAlignment(Qt.AlignCenter)
+                if score >= 8.0:
+                    score_item.setForeground(QColor("#2ecc71"))
+                elif score >= 6.0:
+                    score_item.setForeground(QColor("#f1c40f"))
+                elif score >= 0:
+                    score_item.setForeground(QColor("#e74c3c"))
+                self.concat_clips_list_widget.setItem(idx, 3, score_item)
+
+                # Col 4: 文件目录
                 dir_item = QTableWidgetItem(file_dir)
-                dir_item.setFlags(dir_item.flags() & ~Qt.ItemIsEditable) # Read-only
+                dir_item.setFlags(dir_item.flags() & ~Qt.ItemIsEditable)
                 dir_item.setToolTip(norm_path)
                 self.concat_clips_list_widget.setItem(idx, 4, dir_item)
-                
-                # Col 5: 操作 (Play button)
+
+                # Col 5: 播放按钮
                 play_btn = mdi_button("", "play")
                 play_btn.setToolTip("播放该镜头")
                 play_btn.setFixedWidth(28)
@@ -7580,7 +7380,206 @@ class VideoMontagePage(BasePage):
             cache[norm]["duration"] = dur
         return dur
 
-    def _build_precompose_plans(self, clips, target_clip_count, batch_count, randomness="medium", duration_limit_sec=0):
+    def _load_lut_combo(self):
+        """从 video_config.json 加载 LUT 配置到下拉框。"""
+        if not hasattr(self, "lut_combo"):
+            return
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+        current = self.lut_combo.currentData()
+        self.lut_combo.blockSignals(True)
+        self.lut_combo.clear()
+        self.lut_combo.addItem("无", "")
+        if os.path.isfile(VIDEO_CONFIG_FILE):
+            try:
+                with open(VIDEO_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                for name, path in data.items():
+                    self.lut_combo.addItem(name, path)
+            except Exception:
+                pass
+        # 恢复之前选中的项
+        for i in range(self.lut_combo.count()):
+            if self.lut_combo.itemData(i) == current:
+                self.lut_combo.setCurrentIndex(i)
+                break
+        self.lut_combo.blockSignals(False)
+
+    def _get_selected_lut_path(self):
+        """返回当前选中 LUT 的文件路径，无选择返回空串。"""
+        if not hasattr(self, "lut_combo"):
+            return ""
+        return self.lut_combo.currentData() or ""
+
+    def _compute_clip_hash(self, clip_path):
+        """提取视频中间帧，计算 64 位平均哈希用于相似度比较。
+        返回 64 位整数的哈希值，失败返回 None。两帧汉明距离 < 8 视为高度相似。
+        """
+        import cv2
+        import numpy as np
+        try:
+            cap = cv2.VideoCapture(clip_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total <= 0:
+                cap.release()
+                return None
+            # 取中间帧
+            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            resized = cv2.resize(gray, (8, 8), interpolation=cv2.INTER_AREA)
+            avg = resized.mean()
+            bits = (resized > avg).flatten()
+            # 64-bit integer
+            h = 0
+            for b in bits:
+                h = (h << 1) | int(b)
+            return h
+        except Exception:
+            return None
+
+    def _compute_clip_quality(self, clip_path):
+        """评估镜头质量分数（0~100）。基于清晰度、对比度、是否有音频。
+        失败返回 -1。
+        """
+        import cv2
+        import numpy as np
+        import subprocess
+        try:
+            cap = cv2.VideoCapture(clip_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total <= 0:
+                cap.release()
+                return -1
+            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 3)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return -1
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # 清晰度：Laplacian 方差（越高越清晰）
+            lap = cv2.Laplacian(gray, cv2.CV_64F).var()
+            # 映射到 0-50 分（正常清晰视频 ~100-500，模糊 < 50）
+            sharpness_score = min(50, max(0, lap / 10))
+
+            # 对比度：灰度标准差（太低=灰片，太高=过曝）
+            contrast = float(np.std(gray))
+            contrast_score = min(30, max(0, (contrast - 20) * 1.5))
+
+            # 音频：有音频 +20 分
+            audio_score = 0
+            try:
+                from utils.platform_utils import find_ffprobe
+                ffprobe = find_ffprobe()
+                if not ffprobe:
+                    from utils.platform_utils import find_ffmpeg
+                    ff = find_ffmpeg()
+                    if ff:
+                        ffprobe = ff.replace("ffmpeg", "ffprobe")
+                if ffprobe:
+                    r = subprocess.run(
+                        [ffprobe, "-v", "error", "-select_streams", "a",
+                         "-show_entries", "stream=codec_type", "-of", "csv=p=0", clip_path],
+                        capture_output=True, text=True, timeout=10,
+                        creationflags=0x08000000)
+                    if "audio" in (r.stdout or ""):
+                        audio_score = 20
+            except Exception:
+                pass
+
+            return min(100, round(sharpness_score + contrast_score + audio_score))
+        except Exception:
+            return -1
+
+    def _score_clip(self, clip_path):
+        """综合评分镜头质量（0~10 分）。
+        维度：清晰度、干净度（噪点）、抖动、主体突出、曝光。
+        失败返回 -1。
+        """
+        import cv2
+        import numpy as np
+        try:
+            cap = cv2.VideoCapture(clip_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total < 3:
+                cap.release()
+                return -1
+            # 采样 3 帧：前 1/4、中间、后 3/4
+            positions = [total // 4, total // 2, total * 3 // 4]
+            frames = []
+            for pos in positions:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if ret:
+                    frames.append(frame)
+            cap.release()
+            if not frames:
+                return -1
+
+            scores = []
+            for frame in frames:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                h, w = gray.shape
+
+                # 1. 清晰度：Laplacian 方差（0~500+），映射到 0-3 分
+                lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                sharpness = min(3.0, max(0.0, lap_var / 150.0))
+
+                # 2. 干净度（噪点）：高斯滤波后与原图的 SSIM 近似
+                #    用滤波前后差的 std 做反比：差值越大 → 噪点多
+                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                noise_diff = np.std(gray.astype(float) - blurred.astype(float))
+                # noise_diff: 干净 ~2-5, 噪点多 ~10-20
+                cleanliness = max(0.0, min(2.0, 2.0 - (noise_diff - 2.0) / 5.0))
+
+                # 3. 抖动：当前帧和下一帧的差异
+                #    取下一帧（如果有），算帧间变化
+                shake_score = 2.0  # 默认满分
+                # 用 frame vs 其相邻帧（如果有）
+
+                # 4. 主体突出：中心区域清晰度 / 边缘清晰度比值
+                ch, cw = h // 2, w // 2
+                center = gray[ch - h//6 : ch + h//6, cw - w//6 : cw + w//6]
+                center_lap = cv2.Laplacian(center, cv2.CV_64F).var()
+                edge_lap = max(1.0, lap_var - center_lap * (center.size / gray.size))
+                subject_ratio = min(2.0, max(0.0, center_lap / max(1.0, edge_lap) * 0.8))
+
+                # 5. 曝光：均值偏离 128 越远越差，理想 90~160
+                mean_bright = gray.mean()
+                if 90 <= mean_bright <= 160:
+                    exposure = 1.0
+                elif 60 <= mean_bright <= 200:
+                    exposure = 0.6
+                else:
+                    exposure = 0.2
+
+                frame_score = sharpness + cleanliness + shake_score + subject_ratio + exposure
+                scores.append(frame_score)
+
+            # 帧间抖动：相邻帧的光流变化
+            if len(frames) >= 2:
+                prev_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+                curr_gray = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
+                flow_diff = np.mean(np.abs(curr_gray.astype(float) - prev_gray.astype(float)))
+                # flow_diff: 静止 < 5, 微抖 5-15, 严重 > 20
+                if flow_diff > 20:
+                    shake_penalty = 1.5
+                elif flow_diff > 10:
+                    shake_penalty = 0.5
+                else:
+                    shake_penalty = 0.0
+                avg = np.mean(scores) - shake_penalty
+            else:
+                avg = np.mean(scores)
+
+            return round(max(0.0, min(10.0, avg)), 1)
+        except Exception:
+            return -1
         base = [os.path.abspath(c) for c in clips if c]
         if not base:
             return []
@@ -7595,15 +7594,45 @@ class VideoMontagePage(BasePage):
 
         plans = []
         cursor = 0
+
+        # 镜头缓存：hash + quality（同一视频只算一次）
+        _hash_cache = {}
+        _quality_cache = {}
+
+        def _hash(clip):
+            if clip not in _hash_cache:
+                _hash_cache[clip] = self._compute_clip_hash(clip)
+            return _hash_cache[clip]
+
+        def _quality(clip):
+            if clip not in _quality_cache:
+                _quality_cache[clip] = self._compute_clip_quality(clip)
+            return _quality_cache[clip]
+
+        def _hamming(a, b):
+            """汉明距离：两个 64-bit hash 的不同位数。"""
+            if a is None or b is None:
+                return 64
+            xor = a ^ b
+            dist = 0
+            while xor:
+                dist += xor & 1
+                xor >>= 1
+            return dist
+
+        SIMILARITY_THRESHOLD = 8  # 汉明距离 < 8 视为高度相似
+
         for _i in range(batch_count):
             if randomness == "high":
                 random.shuffle(deck)
             seq = []
+            seq_hashes = []      # 已入列的镜头 hash
+            seq_qualities = []    # 已入列的镜头质量分
             total_dur = 0.0
             _safety = 0
             while len(seq) < target_clip_count:
                 _safety += 1
-                if _safety > target_clip_count * 4:
+                if _safety > target_clip_count * 6:
                     break
                 if cursor >= len(deck):
                     cursor = 0
@@ -7620,7 +7649,33 @@ class VideoMontagePage(BasePage):
                         if total_dur + clip_dur > max_total and len(seq) > 0:
                             break
                         total_dur += clip_dur
-                    seq.append(clip)
+
+                    h = _hash(clip)
+                    q = _quality(clip)
+
+                    # ── 去重检查：和已入列镜头比较 ──
+                    replaced = False
+                    for j, prev_h in enumerate(seq_hashes):
+                        if _hamming(h, prev_h) < SIMILARITY_THRESHOLD:
+                            prev_q = seq_qualities[j]
+                            if q > prev_q and q > 0:
+                                # 新镜头更好 → 替换旧镜头
+                                log.info(f"[去重] 替换: {os.path.basename(clip)} (q={q}) → {os.path.basename(seq[j])} (q={prev_q})")
+                                seq[j] = clip
+                                seq_hashes[j] = h
+                                seq_qualities[j] = q
+                                replaced = True
+                            else:
+                                # 新镜头不如旧的 → 跳过
+                                log.info(f"[去重] 跳过相似镜头: {os.path.basename(clip)} (q={q}) vs {os.path.basename(seq[j])} (q={prev_q})")
+                                replaced = True
+                            break
+
+                    if not replaced:
+                        seq.append(clip)
+                        seq_hashes.append(h)
+                        seq_qualities.append(q)
+
                     if max_total > 0 and total_dur >= max_total:
                         break
                 cursor += take
@@ -7681,8 +7736,9 @@ class VideoMontagePage(BasePage):
         confirmed = plan.get("confirmed") and bool(out_path)
         status_txt = "✅已合成" if confirmed else "⏳待确认"
         file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
-        has_copy = bool(out_path and self._assembled_has_copy(out_path))
-        copy_mark = " 📄" if has_copy else ""
+        # 文案状态：用文字而非图标
+        copy_preview = self._assembled_copy_preview(out_path) if out_path else ""
+        copy_mark = f"  📝{copy_preview}" if copy_preview else ""
         plan_id = plan.get("_plan_id")
         if plan_id is None:
             plan_id = index
@@ -7755,6 +7811,29 @@ class VideoMontagePage(BasePage):
             return os.path.exists(txt) and os.path.getsize(txt) > 0
         except Exception:
             return False
+
+    def _assembled_copy_preview(self, path):
+        """获取文案的文字预览（前30字），无文案返回空串。"""
+        if not path:
+            return ""
+        txt = os.path.splitext(path)[0] + ".txt"
+        try:
+            if os.path.exists(txt) and os.path.getsize(txt) > 0:
+                with open(txt, "r", encoding="utf-8") as f:
+                    content = f.read().strip().replace("\n", " ")
+                return content[:30] + ("…" if len(content) > 30 else "")
+        except Exception:
+            pass
+        return ""
+
+    def _on_assembled_double_clicked(self, item):
+        """双击预合成列表项：展示完整口播文案。"""
+        idx = item.data(Qt.UserRole)
+        if idx is None or idx < 0 or idx >= len(self.precompose_plans):
+            return
+        path = (self.precompose_plans[idx].get("output_path") or "").strip()
+        if path and self._assembled_has_copy(path):
+            self._view_assembled_copy(idx)
 
     def _refresh_assembled_copy_buttons(self):
         w = self.assembled_clips_list_widget
@@ -7932,9 +8011,27 @@ class VideoMontagePage(BasePage):
             desc_item.setFlags(desc_item.flags() & ~Qt.ItemIsEditable)
             self.sources_detail_widget.setItem(idx, 3, desc_item)
 
+            # 评分：优先用缓存，否则现场计算
+            score = cache_item.get("score") if cache_item else None
+            if score is None:
+                score = self._score_clip(src_path)
+                if cache_item is not None:
+                    cache_item["score"] = score
+            score_text = f"{score:.1f}" if score >= 0 else "—"
+            score_item = QTableWidgetItem(score_text)
+            score_item.setTextAlignment(Qt.AlignCenter)
+            score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+            if score >= 8.0:
+                score_item.setForeground(QColor("#2ecc71"))
+            elif score >= 6.0:
+                score_item.setForeground(QColor("#f1c40f"))
+            elif score >= 0:
+                score_item.setForeground(QColor("#e74c3c"))
+            self.sources_detail_widget.setItem(idx, 4, score_item)
+
             is_deleted = idx < len(deleted_flags) and deleted_flags[idx]
             if is_deleted:
-                for col in range(4):
+                for col in range(5):
                     cell = self.sources_detail_widget.item(idx, col)
                     if cell:
                         cell.setBackground(Qt.red)
@@ -8122,12 +8219,10 @@ class VideoMontagePage(BasePage):
         """为某个组合视频，根据其画面镜头描述 + 共用产品背景，用大模型生成口播文案并存同名 .txt。
         如果镜头缺少画面描述，先用视觉 LLM 自动补生成。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
-        api_url = cfg.get("llm_api_url", "").strip()
-        api_key = cfg.get("llm_api_key", "").strip()
-        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
-        if not api_url or not api_key:
+        model = (cfg.get("llm_model", "") or "deepseek-v4-flash").strip()
+        if not model:
             QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                "请先在设置中配置 LLM 接口地址和密钥。")
+                                "请先在设置中配置 LLM 模型名称。")
             return
 
         scenes = self._get_video_scene_descriptions(path)
@@ -8148,15 +8243,13 @@ class VideoMontagePage(BasePage):
                     missing_clips.append(os.path.abspath(src_path))
 
         if missing_clips:
-            vision_url = cfg.get("llm_vision_api_url", "").strip() or api_url
-            vision_key = cfg.get("llm_api_key", "").strip() or api_key
             vision_model = cfg.get("llm_vision_model", "").strip() or model
             self.stage_label.setText(f"正在为 {len(missing_clips)} 个缺失描述的镜头生成画面描述...")
             self._batch_gen_missing_descriptions(
-                missing_clips, vision_url, vision_key, vision_model,
-                lambda: self._do_gen_copy_for_assembled(path, cfg, api_url, api_key, model))
+                missing_clips, "", "", vision_model,
+                lambda: self._do_gen_copy_for_assembled(path, cfg, "", "", model))
         else:
-            self._do_gen_copy_for_assembled(path, cfg, api_url, api_key, model)
+            self._do_gen_copy_for_assembled(path, cfg, "", "", model)
 
     def _do_gen_copy_for_assembled(self, path, cfg, api_url, api_key, model):
         """实际执行单个视频的口播文案生成（描述已就绪后调用）。"""
@@ -8213,12 +8306,10 @@ class VideoMontagePage(BasePage):
         """一键为所有已生成的组合视频，按各自画面镜头描述生成口播文案（共用一份产品背景）。
         如果镜头缺少画面描述（如原视频无声音未生成），先用视觉 LLM 自动补生成描述。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
-        api_url = cfg.get("llm_api_url", "").strip()
-        api_key = cfg.get("llm_api_key", "").strip()
-        model = (cfg.get("llm_model", "") or "deepseek-chat").strip()
-        if not api_url or not api_key:
+        model = (cfg.get("llm_model", "") or "deepseek-v4-flash").strip()
+        if not model:
             QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                "请先在设置中配置 LLM 接口地址和密钥。")
+                                "请先在设置中配置 LLM 模型名称。")
             return
 
         paths = self._collect_assembled_paths()
@@ -8262,14 +8353,12 @@ class VideoMontagePage(BasePage):
 
         if missing_desc_clips:
             # 有镜头缺少画面描述，用视觉 LLM 自动生成
-            vision_url = cfg.get("llm_vision_api_url", "").strip() or api_url
-            vision_key = cfg.get("llm_api_key", "").strip() or api_key
             vision_model = cfg.get("llm_vision_model", "").strip() or model
             self._batch_gen_missing_descriptions(
-                list(missing_desc_clips), vision_url, vision_key, vision_model,
-                lambda: self._start_batch_copy(api_url, api_key, model, info, targets))
+                list(missing_desc_clips), "", "", vision_model,
+                lambda: self._start_batch_copy("", "", model, info, targets))
         else:
-            self._start_batch_copy(api_url, api_key, model, info, targets)
+            self._start_batch_copy("", "", model, info, targets)
 
     def _batch_gen_missing_descriptions(self, clip_paths, api_url, api_key, model, on_done):
         """用视觉 LLM 为缺少描述的分割镜头批量生成画面描述。"""
@@ -8459,13 +8548,30 @@ class VideoMontagePage(BasePage):
     def _on_preview_media_status_changed(self, status):
         try:
             from PySide6.QtMultimedia import QMediaPlayer
+            from PySide6.QtCore import QTimer
             if status == QMediaPlayer.EndOfMedia and self._preview_sequence_clips:
                 self._preview_sequence_idx += 1
                 if self._preview_sequence_idx >= len(self._preview_sequence_clips):
                     self._preview_sequence_idx = 0
-                self._play_current_sequence_clip()
+                # 用 QTimer 延迟播放下一个，避免在 mediaStatusChanged 信号内
+                # 直接调 setSource() 导致 Qt 内部死锁 / 界面卡死
+                QTimer.singleShot(50, self._play_current_sequence_clip)
+            elif status == QMediaPlayer.InvalidMedia:
+                # 当前片段无法播放，跳过并尝试下一个
+                if self._preview_sequence_clips:
+                    log.warning(f"[预览] 无法播放片段: {self._preview_sequence_clips[self._preview_sequence_idx]}")
+                    QTimer.singleShot(50, self._skip_to_next_preview_clip)
         except Exception:
             pass
+
+    def _skip_to_next_preview_clip(self):
+        """跳过当前无法播放的片段，播下一个。"""
+        if not self._preview_sequence_clips:
+            return
+        self._preview_sequence_idx += 1
+        if self._preview_sequence_idx >= len(self._preview_sequence_clips):
+            self._preview_sequence_idx = 0
+        self._play_current_sequence_clip()
 
     def _preview_video_item(self, item):
         path = ""
@@ -8510,9 +8616,9 @@ class VideoMontagePage(BasePage):
         row = item.row()
         col = item.column()
         
-        # Col 3 (描述文案): double-click shows popup with full description
-        if col == 3:
-            desc_item = self.concat_clips_list_widget.item(row, 3)
+        # Col 2 (描述文案): double-click shows popup with full description
+        if col == 2:
+            desc_item = self.concat_clips_list_widget.item(row, 2)
             full_desc = desc_item.text().strip() if desc_item else ""
             file_item = self.concat_clips_list_widget.item(row, 0)
             filename = file_item.text() if file_item else "未知"
@@ -8574,9 +8680,9 @@ class VideoMontagePage(BasePage):
     def _on_concat_table_cell_changed(self, row, col):
         if col == 0:
             self._update_concat_count_lbl()
-        elif col == 3:
+        elif col == 2:
             file_item = self.concat_clips_list_widget.item(row, 0)
-            desc_item = self.concat_clips_list_widget.item(row, 3)
+            desc_item = self.concat_clips_list_widget.item(row, 2)
             if file_item and desc_item:
                 path = file_item.data(Qt.UserRole)
                 if path:

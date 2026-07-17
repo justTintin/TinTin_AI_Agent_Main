@@ -3,7 +3,7 @@
 LLM 代理客户端 — 文本 LLM 调用统一走服务端代理。
 
 客户端不再直接持有 API Key 调用 DeepSeek/OpenAI，
-而是通过服务端 /llm/chat 接口转发：
+而是通过服务端 /llm/chat/completions 接口转发：
   客户端 → 服务端（携带 model 名称）→ DeepSeek/OpenAI → 服务端 → 客户端
 
 服务端负责：
@@ -79,7 +79,7 @@ def llm_chat(
     if not model:
         model = _get_default_model()
 
-    url = f"{base}/llm/chat"
+    url = f"{base}/llm/chat/completions"
     payload = {
         "model": model,
         "messages": [
@@ -142,7 +142,7 @@ def llm_chat_messages(
     if not model:
         model = _get_default_model()
 
-    url = f"{base}/llm/chat"
+    url = f"{base}/llm/chat/completions"
     payload = {
         "model": model,
         "messages": messages,

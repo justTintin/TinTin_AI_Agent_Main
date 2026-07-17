@@ -1227,14 +1227,12 @@ class StoryboardPage(BasePage):
     # ──────────────────── LLM 调用 ──────────────────────────────────
     def _ai_cfg(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        url = ai.get("llm_api_url", "")
-        key = ai.get("llm_api_key", "")
-        model = ai.get("llm_model", "deepseek-chat")
-        if not url or not key:
+        model = ai.get("llm_model", "deepseek-v4-flash")
+        if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在「AI 设置 / 大模型配置」中填写并测试 API 地址与密钥。")
+                                "请先在「AI 设置 / 大模型配置」中选择模型名称。")
             return None
-        return url, key, model
+        return "", "", model
 
     def _run_llm(self, system_prompt, user_prompt, on_done, busy_btn, busy_text):
         cfg = self._ai_cfg()

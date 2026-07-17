@@ -376,12 +376,10 @@ class ProductLibraryPage(BasePage):
     def _on_mine(self):
         # 1. 确保大模型配置存在
         ai = self.ai_config
-        url = ai.get("llm_api_url", "")
-        key = ai.get("llm_api_key", "")
-        model = ai.get("llm_model", "deepseek-chat")
-        if not url or not key:
+        model = ai.get("llm_model", "deepseek-v4-flash")
+        if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在“AI 设置 / 大模型配置”中填写并测试 API 地址与密钥。")
+                                "请先在“AI 设置 / 大模型配置”中选择模型名称。")
             return
 
         # 2. 收集当前界面的产品资料作为查询输入
@@ -422,7 +420,7 @@ class ProductLibraryPage(BasePage):
 
         from gui.ai_script_page import LLMWorker
 
-        self.mine_worker = LLMWorker(url, key, model, system_prompt, user_prompt)
+        self.mine_worker = LLMWorker("", "", model, system_prompt, user_prompt)
 
         def _on_mine_done(content):
             self.btn_mine.setEnabled(True)

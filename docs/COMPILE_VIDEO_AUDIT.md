@@ -1,14 +1,15 @@
-# 一键成片 / 定时任务 成片质量审查清单
+# 一键成片 / 成片任务 审查清单
 
-> 审查日期：2026-07-17（2026-07-18 纠正素材评分结论 + 追加服务端实测）
-> 审查范围：`utils/video_compiler.py`（162 行）+ `gui/compile_video_page.py`（892 行）+ 服务端 `/openapi.json` 实测
-> 当前状态：**成片质量问题待修；素材评分/向量检索/定时执行均待服务端就绪**。本文档记录全部问题与服务端真实能力，供后续决策。
+> 审查日期：2026-07-17（2026-07-18 多次纠正：素材评分结论 + 定时执行结论 + 脚本成片执行器）
+> 审查范围：客户端 `utils/video_compiler.py` + `gui/compile_video_page.py` + 服务端 `/scheduled/tasks` 实测
+> 当前状态：**客户端已全面转为 thin client（提交服务端执行）；脚本成片待服务端加执行器**。
 >
 > 关键结论：
-> - 默认配置下客户端无法剪出合格的电商带货短视频（5 个致命问题，见下）
-> - 素材评分/向量检索能力在**服务端已设计**，但当前部署实例**数据未就绪**（详见文末）
-> - 「全面转服务端」**当前不可行**：服务端定时任务不执行、无成片端点（详见文末"服务端真实能力实测"）
-> - 决策：**等服务端就绪再动**（客户端执行链路暂保留）
+> - 客户端「产品成片」「脚本成片」都已改为提交服务端 `/scheduled/tasks` 执行
+> - 服务端 `video_montage`（产品成片）执行器**已实现**，会真实编译视频
+> - 服务端 `script_montage`（脚本成片）执行器**未实现**，提交后一直 pending（详见文末）
+> - 素材评分/向量检索在服务端已设计但数据未就绪（`quality_score` 列缺、pgvector 未启用）
+> - 决策：**脚本成片等服务端加执行器**；客户端代码已就绪，无需再改
 
 ---
 
@@ -313,39 +314,80 @@ else:
 
 ---
 
-## 服务端真实能力实测（2026-07-18，供"全面转服务端"决策）
+## 服务端真实能力实测（2026-07-18 更新）
 
-> 决策结论：**等服务端就绪再动**。当前服务端定时任务不会执行、无成片端点，"全面转服务端"不可行。
+> ⚠ 本节为最新实测结论，覆盖了早期"定时任务不会执行"的错误判断。
 
-### 定时任务 `/scheduled/tasks` —— 仅存储，不执行
+### 定时任务 `/scheduled/tasks` —— CRUD 可用 + 部分类型有执行器
 
-实测创建 `compile_video` 任务，5 秒后仍 `status:pending / progress:0 / result:{}`，**无执行引擎处理**。
-样例任务 "GPW鼠标宣传片 completed" 是**预置演示数据**（`client_ip:127.0.0.1`、4秒完成、固定文件名 `montage_001.mp4`），非真实执行。
+实测确认：**服务端定时任务会真实执行**（早期判断"仅存储不执行"是错的，源于测错了 task_type）。不同 task_type 的执行器覆盖情况：
 
-| 能力 | 实测状态 |
-|---|---|
-| CRUD（增删改查） | ✅ 可用 |
-| **执行引擎** | ❌ 不存在（任务一直 pending） |
-| `task_type` 支持 | 任意字符串都收，但无对应执行器 |
-
-### 服务端待就绪清单（决定"全面转服务端"能否落地）
-
-| # | 待办 | 阻塞的能力 |
+| task_type | 实测状态（提交后 3-20 秒） | 执行器 |
 |---|---|---|
-| 1 | `/scheduled/tasks` 执行引擎 | 定时任务真正执行 |
-| 2 | 一键成片端点（从素材→成片的完整流水线） | 成片迁移到服务端 |
-| 3 | 数据库 `quality_score` 列迁移 | `/material/score` 评分 |
-| 4 | pgvector 启用 | `/material/search` 向量检索（返回 score） |
-| 5 | 素材批量评分（`/material/batch_score`） | 评分数据落库 |
+| `video_montage`（产品成片） | `pending` → `running`(progress=30) → completed/failed | ✅ **有执行器**，会真实编译视频 |
+| `script_montage`（脚本成片） | `pending` → 20 秒仍 `pending/progress=0` | ❌ **无执行器**，任务永不执行 |
+| `compile_video`（早期误测） | 一直 pending | ❌ 无效 task_type |
 
-### 服务端就绪后的目标架构
+- CRUD（增删改查）：✅ 全部可用
+- 任务参数：服务端接受客户端任意扩展参数（16+ 字段全保留存储，无 422）
+- `video_montage` 执行器会产出成片（`result.video_url`），但偶发 `error_msg:"视频编译失败"`（服务端实现质量问题）
 
+### 服务端待就绪清单（已按实测更新）
+
+| # | 待办 | 状态 | 阻塞的能力 |
+|---|---|---|---|
+| 1 | `script_montage` 执行器 | ❌ **未实现** | **脚本成片**（客户端已就绪，提交后一直 pending） |
+| 2 | 数据库 `quality_score` 列迁移 | ❌ 未实现 | `/material/score` 评分（GET 报 column does not exist） |
+| 3 | pgvector 启用（`vector_search.available`） | ❌ false | `/material/search` 向量相似度 score |
+| 4 | 素材批量评分（`/material/batch_score`） | ❌ 未跑 | 评分数据落库（`ai_confidence` 全 null） |
+| 5 | `video_montage` 成片质量 | ⚠️ 会执行但偶发失败 | 产品成片稳定性 |
+
+### `script_montage` 执行器接口契约（给服务端开发对接用）
+
+客户端脚本成片 tab 提交任务时，`POST /scheduled/tasks` 的 body：
+```json
+{
+  "task_type": "script_montage",
+  "title": "{topic}-{script_name}-脚本成片",
+  "params": {
+    "script_name": "脚本名",
+    "script_path": "客户端 json 路径（服务端可能无法访问，仅供参考）",
+    "topic": "脚本主题",
+    "ratio": "9:16",
+    "total_duration": 15,
+    "shot_count": 3,
+    "shots": [
+      {
+        "index": 1,
+        "shot_type": "特写",
+        "duration": 5,
+        "sfx": "渐入",
+        "visual": "画面描述",
+        "narration": "旁白文案",
+        "material_type": "local",
+        "material_path": "素材绝对路径（服务端按此取素材）",
+        "material_hash": "去重hash"
+      }
+    ],
+    "predict_platform": "抖音",
+    "autocheck": true
+  },
+  "schedule": null
+}
 ```
-客户端（thin）：选产品 → 配参数 → POST /scheduled/tasks → 轮询状态 → 下载成片
-服务端（执行）：定时触发 → 向量检索素材 → 评分排序 → ffmpeg 合成 → 存结果
-```
 
-优势：服务端直连 NAS、有 GPU、7×24 常驻、评分/向量检索零网络开销、不占用用户机器。
+**服务端执行器期望行为**（客户端假设）：
+1. 按 `shots` 顺序，每镜头用 `material_path` 取素材文件（服务端 NAS 直连）
+2. 按 `narration` 配文案（字幕/配音）、按 `duration` 控每镜时长
+3. 按 `ratio` 输出对应画幅，拼接成片
+4. 完成后 `result: {"video_url": "/output/xxx.mp4"}`，客户端凭此打开结果
+5. 进度通过 `status`（pending→running→completed/failed）+ `progress`（0-100）反馈
+
+**关键差异**（与 `video_montage` 的区别）：
+- `video_montage`：服务端自主做素材匹配（客户端只传 products），全托管
+- `script_montage`：客户端已指定每镜头的素材路径 + 文案 + 时长，服务端只负责按这张"镜头表"执行 ffmpeg，**不需要再做素材匹配**
+
+客户端代码已就绪（`compile_video_page.py` 的 `_submit_script`），服务端实现 `script_montage` 执行器后自动生效，无需客户端再改。
 
 
 ---

@@ -816,11 +816,8 @@ class PunctuationSRTLLMWorker(BaseWorker):
     def run(self):
         try:
             import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个字幕标点符号恢复专家。给定的内容是一个SRT字幕文件，其中包含时间轴和字幕文本。你的任务是给字幕文本添加合适的中文标点符号（，。！？：等），"
                 "使阅读更清晰自然。请注意：\n"
@@ -838,7 +835,11 @@ class PunctuationSRTLLMWorker(BaseWorker):
                 "temperature": 0.2
             }
             log.info(f"PunctuationSRTLLMWorker - 开始恢复字幕标点。模型: {self.model}, 字符数: {len(self.srt_content)}")
-            res = requests.post(url, json=payload, headers=headers, timeout=45)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=45)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             log.info(f"PunctuationSRTLLMWorker - API 响应状态码: {res.status_code}")
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")
@@ -1017,11 +1018,8 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                     user_content.append({"type": "text", "text": "\n\n"})
                 
             # Call LLM API
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             
             payload = {
                 "model": self.model,
@@ -1033,7 +1031,11 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
             }
             
             log.info(f"BatchGenerateDescriptionsWorker - 正在请求大模型 API: {url}，以整体方式生成镜头描述。")
-            res = requests.post(url, json=payload, headers=headers, timeout=60)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=60)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")
             
@@ -1224,11 +1226,8 @@ class AITextRewriteWorker(BaseWorker):
     def run(self):
         try:
             import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个顶尖的短视频脚本与广告文案改写、润色与重构专家。\n"
                 "请对用户提供的一段短视频配音文案（每行对应一个画面的旁白/配音）进行整体性的改写和润色，使其更具有爆款短视频的吸引力、更通顺、更有销售力或表现力。\n"
@@ -1248,7 +1247,11 @@ class AITextRewriteWorker(BaseWorker):
                 "temperature": 0.3
             }
             
-            res = requests.post(url, json=payload, headers=headers, timeout=45)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=45)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
             
@@ -1289,11 +1292,8 @@ class ProductCopyWorker(BaseWorker):
     def run(self):
         try:
             import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是资深电商短视频口播文案撰稿人。用户会给出产品的品牌、品类/产品、型号以及可选卖点。\n"
                 "请基于你对该产品的了解，撰写一段用于电商带货短视频的口播文案（旁白）。\n"
@@ -1317,7 +1317,11 @@ class ProductCopyWorker(BaseWorker):
                 ],
                 "temperature": 0.6
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=60)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=60)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API 请求失败: HTTP {res.status_code} {res.text[:200]}")
             data = res.json()
@@ -1368,11 +1372,8 @@ class SceneCopyWorker(BaseWorker):
             if n == 0:
                 raise RuntimeError("该视频没有可用的画面镜头描述，无法按画面生成文案。")
 
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
 
             # 根据总时长估算每行文案的字数上限
             # 正常语速约 3-4 字/秒，按 3.5 字/秒计算
@@ -1424,7 +1425,11 @@ class SceneCopyWorker(BaseWorker):
                 ],
                 "temperature": 0.6
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=90)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=90)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API 请求失败: HTTP {res.status_code} {res.text[:200]}")
             data = res.json()
@@ -1491,11 +1496,8 @@ class GenScriptWorker(BaseWorker):
             if n == 0:
                 raise RuntimeError("没有可用的镜头素材描述，无法生成文案。")
 
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
 
             # 根据总时长估算每行文案的字数上限
             # 正常语速约 3.5 字/秒
@@ -1543,7 +1545,11 @@ class GenScriptWorker(BaseWorker):
                 ],
                 "temperature": 0.7
             }
-            res = requests.post(url, json=payload, headers=headers, timeout=90)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=90)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API 请求失败: HTTP {res.status_code} {res.text[:200]}")
             data = res.json()
@@ -1648,11 +1654,8 @@ class BatchAITextRewriteWorker(BaseWorker):
     def run(self):
         try:
             import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             
             freedom_pct = int((1.0 - self.temperature) * 100)
             
@@ -1758,11 +1761,8 @@ class ScriptMatchLLMWorker(BaseWorker):
             for idx, line in enumerate(rewritten_lines, 1):
                 rewritten_list_str += f"{idx}. {line}\n"
 
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            # 走服务端代理
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个视频智能剪辑匹配专家。你的任务是分析改写后的文案（按行分开），以及待排列的视频镜头候选列表（包含编号、文件名和画面描述）。\n"
                 "请为改写后文案的每一行，从待排列候选镜头中找出最匹配的一个镜头。请按顺序匹配，并严格以 JSON 格式返回结果。\n"
@@ -1785,7 +1785,11 @@ class ScriptMatchLLMWorker(BaseWorker):
                 "temperature": 0.1
             }
             
-            res = requests.post(url, json=payload, headers=headers, timeout=45)
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=45)
+            class _R:
+                status_code = 200
+            res = _R()
+            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
             if res.status_code != 200:
                 raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
             
@@ -5790,7 +5794,7 @@ class VideoMontagePage(BasePage):
             self.stage_label.setText("🎯 正在用大模型为每句文案匹配最贴合的镜头...")
 
             self.script_match_worker = ScriptMatchLLMWorker(
-                api_url=llm_api_url, api_key=llm_api_key, model=llm_model,
+                model=llm_model,
                 rewritten_text=script_text,
                 candidate_clips=list(self.split_clips_list),
                 split_descriptions=self.split_descriptions,

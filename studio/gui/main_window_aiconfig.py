@@ -300,40 +300,38 @@ class AIConfigMixin:
             btn.setEnabled(False)
         self.llm_status_lbl.setText("正在测试...")
         self.llm_status_lbl.setStyleSheet("color: #f39c12;")
-        try:
-            import requests
-            api_url = self.llm_api_url_input.text().strip()
-            api_key = self.llm_api_key_input.text().strip()
-            model = self.llm_model_input.text().strip()
-            if not api_key or not api_url:
-                self.llm_status_lbl.setText("⚠️ 请填写 API Key 和接口地址")
-                self.llm_status_lbl.setStyleSheet("color: #f39c12;")
-                if btn:
-                    btn.setEnabled(True)
-                return
-            url = f"{api_url.rstrip('/')}/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-            payload = {"model": model, "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                self.llm_status_lbl.setText(f"✅ 连接成功 ({model})")
-                self.llm_status_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            elif res.status_code == 401:
-                self.llm_status_lbl.setText(f"❌ API Key 无效，请检查")
-                self.llm_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            elif res.status_code == 404:
-                self.llm_status_lbl.setText(f"❌ 接口地址或模型名错误 (404)")
-                self.llm_status_lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            else:
-                msg = res.json().get("error", {}).get("message", res.text[:60])
-                self.llm_status_lbl.setText(f"❌ HTTP {res.status_code}: {msg}")
-                self.llm_status_lbl.setStyleSheet("color: #e74c3c;")
-        except Exception as e:
-            err = str(e)[:80]
-            self.llm_status_lbl.setText(f"❌ 连接失败: {err}")
-            self.llm_status_lbl.setStyleSheet("color: #e74c3c;")
-        if btn:
-            btn.setEnabled(True)
+
+        model = self.llm_model_input.text().strip() or "deepseek-v4-flash"
+        self._llm_test_worker = self._create_proxy_test_worker(model, self.llm_status_lbl, btn)
+        self._llm_test_worker.start()
+
+    def _create_proxy_test_worker(self, model, status_lbl, btn):
+        class _ProxyTestWorker(QThread):
+            done = Signal(bool, str)
+            def __init__(self, mdl):
+                super().__init__()
+                self.mdl = mdl
+            def run(self):
+                try:
+                    from utils.llm_proxy import llm_chat
+                    llm_chat("", "Hi", model=self.mdl, timeout=10, max_tokens=5)
+                    self.done.emit(True, f"✅ 连接成功 ({self.mdl})")
+                except RuntimeError as e:
+                    self.done.emit(False, f"❌ {e}")
+                except Exception as e:
+                    self.done.emit(False, f"❌ 连接失败: {str(e)[:80]}")
+
+        def _on_done(ok, text):
+            status_lbl.setText(text)
+            status_lbl.setStyleSheet(
+                "color: #2ecc71; font-weight: bold;" if ok else "color: #e74c3c;"
+            )
+            if btn:
+                btn.setEnabled(True)
+
+        w = _ProxyTestWorker(model)
+        w.done.connect(_on_done)
+        return w
 
     def _test_vision_connection(self):
         sender = self.sender()

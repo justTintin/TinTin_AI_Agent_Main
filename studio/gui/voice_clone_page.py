@@ -3,7 +3,6 @@ import os
 import sys
 import shutil
 import subprocess
-import requests
 import json
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
@@ -29,40 +28,16 @@ from gui.video_montage_page import (
 class PunctuationLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, raw_text):
+    def __init__(self, model, raw_text):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.raw_text = raw_text
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            from utils.llm_proxy import llm_chat
             system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.raw_text}
-                ],
-                "temperature": 0.3
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=25)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -72,21 +47,14 @@ class PunctuationLLMWorker(BaseWorker):
 class SentenceSplitterLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, text):
+    def __init__(self, model, text):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.text = text
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个短视频文案拆句专家。请把输入的文本段落拆分成适合逐句进行克隆配音合成的句子列表。\n"
                 "规则：\n"
@@ -94,23 +62,7 @@ class SentenceSplitterLLMWorker(BaseWorker):
                 "2. 主要依据句号（。）、感叹号（！）、问号（？）以及换行进行拆分。如果某个大句字数过长（例如超过30字），可在逗号（，）等语义停顿处进行合理切分，使每一行句意相对完整独立。\n"
                 "3. 每行输出一句话，不需要任何编号、Markdown标记或前缀，严格保持原文文字内容，绝对不能漏字或改字，只做合理的断句换行。"
             )
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.text}
-                ],
-                "temperature": 0.2
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=25)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=25)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -742,13 +694,11 @@ class VoiceClonePage(BasePage):
             
             plain_text = self._clean_srt_to_text(srt_content)
             
-            llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-            llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
             
-            if llm_api_url and llm_api_key and plain_text.strip():
+            if llm_model and plain_text.strip():
                 self.stage_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
-                self.punc_worker = PunctuationLLMWorker(llm_api_url, llm_api_key, llm_model, plain_text)
+                self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
                 
                 def on_punc_done(punctuated_text):
                     self.ref_text_input.setPlainText(punctuated_text)
@@ -837,13 +787,11 @@ class VoiceClonePage(BasePage):
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ 音频时间戳分析完成，正在裁切音频并填充列表...")
                 
-                llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-                llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
                 llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
                 
-                if llm_api_url and llm_api_key:
+                if llm_model:
                     self.stage_label.setText("⏳ 正在使用 AI 模型智能拆分整体文案...")
-                    self.split_worker = SentenceSplitterLLMWorker(llm_api_url, llm_api_key, llm_model, text)
+                    self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
                     
                     def on_split_done(result_text):
                         lines = [line.strip() for line in result_text.split('\n') if line.strip()]
@@ -1472,16 +1420,14 @@ class VoiceClonePage(BasePage):
         self.voice_worker.start()
 
     def _split_and_populate_text_only(self, text):
-        llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-        llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
         llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
-        if llm_api_url and llm_api_key:
+        if llm_model:
             self.btn_split_text.setEnabled(False)
             self.btn_split_text.setText("⏳ AI 拆分中...")
             self.stage_label.setText("⏳ 正在使用大模型智能拆分文案...")
 
-            self.split_worker = SentenceSplitterLLMWorker(llm_api_url, llm_api_key, llm_model, text)
+            self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
 
             def on_split_done(result_text):
                 self.btn_split_text.setEnabled(True)

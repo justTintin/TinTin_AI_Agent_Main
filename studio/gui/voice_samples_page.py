@@ -19,40 +19,16 @@ METADATA_PATH = os.path.join(VOICE_SAMPLES_DIR, "metadata.json")
 class PunctuationLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, raw_text):
+    def __init__(self, model, raw_text):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.raw_text = raw_text
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            from utils.llm_proxy import llm_chat
             system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.raw_text}
-                ],
-                "temperature": 0.3
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=25)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -494,13 +470,11 @@ class VoiceSamplesPage(BasePage):
                 except Exception:
                     pass
 
-            llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-            llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
-            if llm_api_url and llm_api_key and plain_text.strip():
+            if llm_model and plain_text.strip():
                 self.status_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
-                self.punc_worker = PunctuationLLMWorker(llm_api_url, llm_api_key, llm_model, plain_text)
+                self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
                 
                 def on_punc_done(punctuated_text):
                     save_text(punctuated_text)

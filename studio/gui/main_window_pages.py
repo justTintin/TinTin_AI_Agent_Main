@@ -581,6 +581,22 @@ class PageSetupMixin:
         self.load_voxcpm_config()
         # 统一服务端地址初始化（会联动同步 Whisper/CLIP/PaddleOCR 的地址）
         self.compute_server_input.setText(self.ai_config.get("compute_server_url", "http://192.168.111.18:8000"))
+
+        # ── 统一管理：模型专属 API 地址置灰只读展示，禁止手动编辑 ──
+        _readonly_style = (
+            "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"
+        )
+        for inp in [
+            self.llm_api_url_input,
+            self.llm_vision_api_url_input,
+            getattr(self, "vox_api_url_input", None),
+            getattr(self, "whisper_api_url_input", None),
+            getattr(self, "clip_api_url_input", None),
+        ]:
+            if inp:
+                inp.setReadOnly(True)
+                inp.setStyleSheet(_readonly_style)
+
         self.refresh_llm_page_status()
 
     # ═══════════════════════════════════════════════════════════════

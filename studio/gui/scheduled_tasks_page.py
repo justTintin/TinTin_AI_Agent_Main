@@ -220,6 +220,7 @@ class ScheduledTasksPage(BasePage):
     @staticmethod
     def _type_label(t):
         return {"video_montage": "产品成片", "compile_video": "产品成片",
+                "storyboard_montage": "脚本成片",
                 "script_montage": "脚本成片"}.get(t, t or "—")
 
     @staticmethod

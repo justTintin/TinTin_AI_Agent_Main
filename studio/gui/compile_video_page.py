@@ -2,9 +2,16 @@
 """
 一键成片页。
 
-把 镜头素材目录(图片) + 配音 + 字幕文案 + 封面 用 ffmpeg 自动拼成成品视频（幻灯片式）。
-重型剪辑仍走「智能混剪」；本页面向"快速出片"。
+整体布局（上左右下三段式）：
+    ┌─ heading ────────────────────────────────────────────┐
+    ├─ 上段（QSplitter 横向）                              │
+    │   左：产品选择（必选，任务起点）+ 性能参数/核心卖点      │
+    │   右：可选设置（素材目录/配音/TTS/开场/封面/字幕文案）  │
+    ├─ 设置段（QGroupBox）：视频条数/总时长/比例/平台 + 执行  │
+    └─ 输出段：结果列表 + 执行日志 + 进度条                  │
 
+产品库读取用 ProductLibraryManager；远程素材匹配用 /material/search；
+重型剪辑仍走「智能混剪」；本页面向"快速出片"。
 逻辑见 utils/video_compiler.py。
 """
 import os
@@ -12,23 +19,41 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame,
-    QComboBox, QDoubleSpinBox, QFileDialog, QProgressBar, QCheckBox,
+    QComboBox, QDoubleSpinBox, QSpinBox, QFileDialog, QProgressBar, QCheckBox,
+    QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QTextBrowser, QWidget,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.gui_icons import mdi_button, mdi_icon
+from utils.gui_icons import mdi_button
 from utils.logger_utils import log
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
+from utils.product_library_manager import ProductLibraryManager
 from config.paths import FINAL_OUTPUT_DIR
+
+
+# ─── 远程素材服务地址（与 vector_search_page 一致） ─────────────────────────
+def _get_server_url():
+    try:
+        import json
+        from config.paths import AI_CONFIG_FILE
+        if os.path.isfile(AI_CONFIG_FILE):
+            cfg = json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return "http://192.168.111.30:8000"
 
 
 class TTSWorker(BaseWorker):
     phase = Signal(str)
-    finished = Signal(str)
+    done = Signal(str)
 
     def __init__(self, text, ref_wav, out_path):
         super().__init__()
@@ -37,126 +62,408 @@ class TTSWorker(BaseWorker):
     def do_work(self):
         self.phase.emit("正在合成配音…")
         synthesize_tts(self.text, self.ref_wav, self.out_path)
-        self.finished.emit(self.out_path)
+        self.done.emit(self.out_path)
+
+
+class MaterialMatchWorker(BaseWorker):
+    """按产品 brand/model/category 调远程 /material/search，返回素材目录路径。
+    成功 emit 一个目录字符串；失败 emit 空字符串。"""
+    result_ready = Signal(str)
+    log_line = Signal(str)
+
+    def __init__(self, brand, model, category):
+        super().__init__()
+        self.brand = brand; self.model = model; self.category = category
+
+    def do_work(self):
+        import requests
+        try:
+            url = f"{_get_server_url()}/material/search"
+            params = {"limit": 200, "offset": 0}
+            if self.brand:
+                params["brand"] = self.brand
+            if self.category:
+                params["category"] = self.category
+            if self.model:
+                params["model"] = self.model
+            self.log_line.emit(f"🔎 远程匹配素材: brand={self.brand!r} category={self.category!r}")
+            resp = requests.post(url, json=params, timeout=15)
+            if resp.status_code != 200:
+                self.log_line.emit(f"⚠ 服务端返回 {resp.status_code}")
+                self.result_ready.emit("")
+                return
+            results = resp.json().get("results") or resp.json().get("data") or []
+            if not results:
+                self.log_line.emit("⚠ 远程未匹配到任何素材")
+                self.result_ready.emit("")
+                return
+            # 收集所有 path，取公共父目录作为素材目录
+            paths = [r.get("path", "") for r in results if r.get("path")]
+            paths = [p for p in paths if p]
+            if not paths:
+                self.log_line.emit("⚠ 匹配结果无可用 path 字段")
+                self.result_ready.emit("")
+                return
+            common = os.path.commonpath(paths) if len(paths) > 1 else os.path.dirname(paths[0])
+            # commonpath 可能指向文件，确保是目录：若指向文件则取其父
+            if os.path.isfile(common):
+                common = os.path.dirname(common)
+            self.log_line.emit(f"✅ 匹配到 {len(paths)} 个素材，目录: {common}")
+            self.result_ready.emit(common)
+        except Exception as e:
+            self.log_line.emit(f"⚠ 远程匹配失败: {e}")
+            # 异常交由 BaseWorker.run() 统一 emit error；这里发空结果让 UI 回落
+            self.result_ready.emit("")
 
 
 class CompileVideoWorker(BaseWorker):
+    """一键成片 Worker。支持一次生成 N 个独立成片。
+    done 信号发射成片路径列表（list[str]）。"""
     phase = Signal(str)
-    finished = Signal(str)
+    progress = Signal(int)          # 0-100
+    log_line = Signal(str)
+    done = Signal(list)
 
-    def __init__(self, folder, out_path, audio, cover, subtitle, ratio, per_dur, intro=""):
+    def __init__(self, folder, out_dir, audio, cover, subtitle, ratio, per_dur,
+                 count=1, total_dur=0.0, intro=""):
         super().__init__()
-        self.folder = folder; self.out_path = out_path
+        self.folder = folder
+        self.out_dir = out_dir
         self.audio = audio; self.cover = cover; self.subtitle = subtitle
-        self.ratio = ratio; self.per_dur = per_dur; self.intro = intro
+        self.ratio = ratio; self.per_dur = per_dur
+        self.count = max(1, int(count))
+        self.total_dur = float(total_dur or 0.0)
+        self.intro = intro
 
     def do_work(self):
         images = collect_images(self.folder)
         if not images:
             raise RuntimeError("素材目录里没有图片（支持 jpg/png/webp 等）。")
-        compile_video(images, self.out_path, audio=self.audio, cover=self.cover,
-                      subtitle_text=self.subtitle, ratio=self.ratio, per_dur=self.per_dur,
-                      intro=self.intro, progress=self.phase.emit)
-        self.finished.emit(self.out_path)
+
+        # 总时长换算 per_dur（无配音时）：覆盖入参 per_dur
+        per_dur = float(self.per_dur)
+        has_audio = bool(self.audio and os.path.isfile(self.audio))
+        if not has_audio and self.total_dur > 0:
+            per_dur = max(0.8, self.total_dur / len(images))
+            self.log_line.emit(f"📏 按总时长 {self.total_dur}s / {len(images)} 张 → 每张 {per_dur:.2f}s")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results = []
+
+        if self.count == 1:
+            out_path = os.path.join(self.out_dir, f"final_{timestamp}.mp4")
+            self.phase.emit("正在生成成片…")
+            self.progress.emit(20)
+            self._compile_one(images, out_path, per_dur, has_audio)
+            results.append(out_path)
+            self.log_line.emit(f"✅ 成片: {os.path.basename(out_path)}")
+        else:
+            # N 个成片：把 images 分成 N 组（不足循环填充）
+            groups = self._split_groups(images, self.count)
+            total = self.count
+            for i, group in enumerate(groups):
+                out_path = os.path.join(self.out_dir, f"final_{timestamp}_{i + 1}.mp4")
+                self.phase.emit(f"正在生成第 {i + 1}/{total} 个成片…")
+                self.progress.emit(int(i / total * 100))
+                try:
+                    self._compile_one(group, out_path, per_dur, has_audio)
+                    results.append(out_path)
+                    self.log_line.emit(f"✅ [{i + 1}/{total}] {os.path.basename(out_path)}")
+                except Exception as e:
+                    self.log_line.emit(f"❌ [{i + 1}/{total}] 失败: {e}")
+                    log.warning(f"成片 {i + 1} 失败: {e}")
+
+        self.progress.emit(100)
+        self.done.emit(results)
+
+    def _compile_one(self, images, out_path, per_dur, has_audio):
+        compile_video(images, out_path, audio=self.audio, cover=self.cover,
+                      subtitle_text=self.subtitle, ratio=self.ratio, per_dur=per_dur,
+                      intro=self.intro, progress=self.log_line.emit)
+
+    @staticmethod
+    def _split_groups(images, n):
+        """把 images 尽量均分成 n 组；不足 n 时循环填充。"""
+        if len(images) >= n:
+            # 均分
+            k, m = divmod(len(images), n)
+            groups = []
+            start = 0
+            for i in range(n):
+                size = k + (1 if i < m else 0)
+                groups.append(images[start:start + size])
+                start += size
+            return groups
+        else:
+            # 不足：循环填充到 n 组
+            return [images[i % len(images):i % len(images) + 1] if not images[i % len(images):]
+                    else [images[i % len(images)]] for i in range(n)] if images else [[] for _ in range(n)]
 
 
 class CompileVideoPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
-        self._last_out = ""
+        self._product_mgr = ProductLibraryManager()
+        self._last_results = []          # 最近一次成片路径列表
         self._self_check_data = None
 
+    # ════════════════════════════════════════════════════════════════════════
+    #  setup：构建界面
+    # ════════════════════════════════════════════════════════════════════════
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
-        root.setContentsMargins(40, 40, 40, 40)
-        root.setSpacing(14)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(12)
 
         heading = QLabel("🎬 一键成片")
         heading.setObjectName("heading")
         root.addWidget(heading)
-        sub = QLabel("镜头素材(图片) + 配音 + 字幕 + 封面 → 自动拼成成品视频。复杂剪辑请用「智能混剪」。")
+        sub = QLabel("选择产品（必选，任务起点）→ 可选设置/自动匹配素材 → 设置条数与时长 → 开始执行。复杂剪辑请用「智能混剪」。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
         root.addWidget(sub)
 
-        card = QFrame(); card.setObjectName("card")
-        form = QVBoxLayout(card); form.setContentsMargins(20, 16, 20, 16); form.setSpacing(10)
+        # ── 上段：左右分割（左=产品，右=可选设置）──────────────────────────
+        top_splitter = QSplitter(Qt.Horizontal)
 
-        self.in_folder = self._file_row(form, "镜头素材目录", self._browse_folder, folder=True,
-                                        placeholder="选择图片素材目录（如即梦生成的 shots_ 目录）")
-        self.in_audio = self._file_row(form, "配音音频(可选)", self._browse_audio,
-                                       placeholder="wav/mp3/m4a，留空则无声（按每张时长）")
-        # TTS 一键配音（用下方『字幕文案』作为配音文案）
+        # 左：产品选择 + 性能/卖点
+        left_card = QFrame(); left_card.setObjectName("card")
+        left_lay = QVBoxLayout(left_card)
+        left_lay.setContentsMargins(16, 14, 16, 14); left_lay.setSpacing(10)
+
+        left_title = QLabel("📦 产品选择（必选）"); left_title.setStyleSheet("font-weight:bold;")
+        left_lay.addWidget(left_title)
+
+        prod_row = QHBoxLayout()
+        self.combo_product = QComboBox()
+        self.combo_product.setEditable(True)
+        self.combo_product.setInsertPolicy(QComboBox.NoInsert)
+        self.combo_product.setCurrentIndex(-1)
+        prod_row.addWidget(self.combo_product, 1)
+        self.btn_reload_product = QPushButton("刷新")
+        self.btn_reload_product.setObjectName("secondary_button")
+        self.btn_reload_product.clicked.connect(lambda: self._populate_products())
+        prod_row.addWidget(self.btn_reload_product)
+        left_lay.addLayout(prod_row)
+
+        # 性能参数
+        left_lay.addWidget(QLabel("📋 性能参数"))
+        self.txt_features = QTextBrowser()
+        self.txt_features.setOpenExternalLinks(False)
+        self.txt_features.setMinimumHeight(80)
+        self.txt_features.setPlaceholderText("选择产品后显示性能参数…")
+        left_lay.addWidget(self.txt_features, 1)
+
+        # 核心卖点
+        left_lay.addWidget(QLabel("💡 核心卖点"))
+        self.txt_selling = QTextBrowser()
+        self.txt_selling.setOpenExternalLinks(False)
+        self.txt_selling.setMinimumHeight(80)
+        self.txt_selling.setPlaceholderText("选择产品后显示核心卖点…")
+        left_lay.addWidget(self.txt_selling, 1)
+
+        top_splitter.addWidget(left_card)
+
+        # 右：可选设置
+        right_card = QFrame(); right_card.setObjectName("card")
+        right_lay = QVBoxLayout(right_card)
+        right_lay.setContentsMargins(16, 14, 16, 14); right_lay.setSpacing(8)
+
+        right_title = QLabel("⚙️ 可选设置"); right_title.setStyleSheet("font-weight:bold;")
+        right_lay.addWidget(right_title)
+
+        self.in_folder = self._file_row(right_lay, "镜头素材目录（留空=按产品自动匹配）",
+                                        self._browse_folder, folder=True,
+                                        placeholder="留空则按产品自动从素材库匹配")
+        self.in_audio = self._file_row(right_lay, "配音音频(可选)", self._browse_audio,
+                                       placeholder="wav/mp3/m4a，留空则无声")
+        # TTS 一键配音
         tts_row = QHBoxLayout()
-        tts_row.addWidget(QLabel("　TTS 音色"))
+        tts_row.addWidget(QLabel("TTS 音色"))
         self.combo_voice = QComboBox()
         tts_row.addWidget(self.combo_voice, 1)
-        self.btn_tts = mdi_button("用文案生成配音(TTS)", "audio")
+        self.btn_tts = mdi_button("用文案生成配音", "audio")
         self.btn_tts.setObjectName("secondary_button")
         self.btn_tts.clicked.connect(self._tts_generate)
         tts_row.addWidget(self.btn_tts)
-        form.addLayout(tts_row)
+        right_lay.addLayout(tts_row)
 
-        self.in_intro = self._file_row(form, "开场视频(可选)", self._browse_intro,
-                                       placeholder="片头开场视频，如 MG 动态标题；拼在最前面")
-        intro_row = QHBoxLayout()
-        intro_row.addStretch()
+        self.in_intro = self._file_row(right_lay, "开场视频(可选)", self._browse_intro,
+                                       placeholder="片头开场视频，拼在最前面")
+        intro_row = QHBoxLayout(); intro_row.addStretch()
         self.btn_mg_intro = mdi_button("用动态标题生成开场(MG)", "film")
         self.btn_mg_intro.setObjectName("secondary_button")
         self.btn_mg_intro.clicked.connect(self._gen_mg_intro)
         intro_row.addWidget(self.btn_mg_intro)
-        form.addLayout(intro_row)
+        right_lay.addLayout(intro_row)
 
-        self.in_cover = self._file_row(form, "封面(可选)", self._browse_cover,
+        self.in_cover = self._file_row(right_lay, "封面(可选)", self._browse_cover,
                                        placeholder="片头封面图，显示 2 秒")
 
-        form.addWidget(QLabel("字幕文案 / 配音文案(可选；均分烧录为字幕，也作 TTS 配音文本)"))
+        right_lay.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
         self.in_subtitle = QTextEdit(); self.in_subtitle.setFixedHeight(70)
-        self.in_subtitle.setPlaceholderText("粘贴文案；按句子均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
-        form.addWidget(self.in_subtitle)
+        self.in_subtitle.setPlaceholderText("粘贴文案；按句均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
+        right_lay.addWidget(self.in_subtitle)
+        right_lay.addStretch()
 
-        opt = QHBoxLayout()
-        opt.addWidget(QLabel("比例"))
-        self.combo_ratio = QComboBox(); self.combo_ratio.addItems(list(RATIO_SIZES.keys()))
-        opt.addWidget(self.combo_ratio)
-        opt.addWidget(QLabel("每张时长(无配音时)"))
+        top_splitter.addWidget(right_card)
+        top_splitter.setStretchFactor(0, 1)   # 左侧产品
+        top_splitter.setStretchFactor(1, 1)   # 右侧可选
+        top_splitter.setSizes([420, 520])
+        root.addWidget(top_splitter, 2)
+
+        # ── 设置段 ────────────────────────────────────────────────────────
+        setting_group = QGroupBox("设置")
+        s_lay = QVBoxLayout(setting_group); s_lay.setSpacing(10)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("视频条数"))
+        self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10); self.spin_count.setValue(1)
+        self.spin_count.setToolTip("一次生成 N 个独立成片（素材不足时循环填充）")
+        row1.addWidget(self.spin_count)
+        row1.addSpacing(12)
+        row1.addWidget(QLabel("视频总时长"))
+        self.spin_total_dur = QDoubleSpinBox()
+        self.spin_total_dur.setRange(0.0, 600.0); self.spin_total_dur.setValue(0.0)
+        self.spin_total_dur.setSuffix(" 秒")
+        self.spin_total_dur.setToolTip("仅无配音时生效：按总时长/图片数计算每张时长。0=用「每张时长」。")
+        row1.addWidget(self.spin_total_dur)
+        row1.addSpacing(12)
+        row1.addWidget(QLabel("每张时长(无配音时)"))
         self.spin_dur = QDoubleSpinBox(); self.spin_dur.setRange(0.5, 30.0); self.spin_dur.setValue(3.0)
-        self.spin_dur.setSuffix(" 秒"); opt.addWidget(self.spin_dur)
+        self.spin_dur.setSuffix(" 秒")
+        row1.addWidget(self.spin_dur)
+        row1.addSpacing(12)
+        row1.addWidget(QLabel("比例"))
+        self.combo_ratio = QComboBox(); self.combo_ratio.addItems(list(RATIO_SIZES.keys()))
+        row1.addWidget(self.combo_ratio)
+        row1.addStretch()
+        s_lay.addLayout(row1)
+
+        row2 = QHBoxLayout()
         self.chk_autocheck = QCheckBox("成片后自动视频评价预测")
         self.chk_autocheck.setChecked(True)
-        opt.addWidget(self.chk_autocheck)
-        opt.addWidget(QLabel("平台"))
+        row2.addWidget(self.chk_autocheck)
+        row2.addWidget(QLabel("平台"))
         self.combo_predict_platform = QComboBox(); self.combo_predict_platform.addItems(PLATFORMS)
         self.combo_predict_platform.setFixedWidth(96)
-        opt.addWidget(self.combo_predict_platform)
-        opt.addStretch()
-        self.btn_make = mdi_button("生成成片", "video"); self.btn_make.setObjectName("primary_button")
+        row2.addWidget(self.combo_predict_platform)
+        row2.addStretch()
+        self.btn_make = mdi_button("🚀 开始执行", "video"); self.btn_make.setObjectName("primary_button")
+        self.btn_make.setFixedHeight(36)
         self.btn_make.clicked.connect(self._make)
-        opt.addWidget(self.btn_make)
-        form.addLayout(opt)
-        root.addWidget(card)
+        row2.addWidget(self.btn_make)
+        self.btn_open_out = QPushButton("📂 打开输出目录")
+        self.btn_open_out.setFixedHeight(36)
+        self.btn_open_out.clicked.connect(self._open_output_dir)
+        row2.addWidget(self.btn_open_out)
+        s_lay.addLayout(row2)
+        root.addWidget(setting_group)
 
+        # ── 输出段：结果列表 + 日志 + 进度条 ───────────────────────────────
+        out_splitter = QSplitter(Qt.Horizontal)
+
+        # 左：结果列表 + 进度条
+        out_left = QWidget()
+        ol_lay = QVBoxLayout(out_left); ol_lay.setContentsMargins(0, 0, 0, 0); ol_lay.setSpacing(6)
+        ol_lay.addWidget(QLabel("🎞️ 输出结果"))
+        self.result_table = QTableWidget(0, 4)
+        self.result_table.setHorizontalHeaderLabels(["序号", "文件名", "状态", "操作"])
+        self.result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.result_table.verticalHeader().setVisible(False)
+        rh = self.result_table.horizontalHeader()
+        rh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        rh.setSectionResizeMode(1, QHeaderView.Stretch)
+        rh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        rh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        ol_lay.addWidget(self.result_table, 1)
+
+        self.progress_bar = QProgressBar(); self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
+        self.progress_bar.setFixedHeight(16)
+        ol_lay.addWidget(self.progress_bar)
+        self.stage_label = QLabel("就绪"); self.stage_label.setObjectName("muted_text")
+        ol_lay.addWidget(self.stage_label)
+        out_splitter.addWidget(out_left)
+
+        # 右：执行日志
+        out_right = QWidget()
+        or_lay = QVBoxLayout(out_right); or_lay.setContentsMargins(0, 0, 0, 0); or_lay.setSpacing(6)
+        or_lay.addWidget(QLabel("📜 执行日志"))
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setStyleSheet("background: #1a1a2e; color: #c8d6e5; font-size: 12px; border-radius: 6px;")
+        or_lay.addWidget(self.log_box, 1)
+        out_splitter.addWidget(out_right)
+
+        out_splitter.setStretchFactor(0, 1)
+        out_splitter.setStretchFactor(1, 1)
+        out_splitter.setSizes([420, 420])
+        root.addWidget(out_splitter, 1)
+
+        # 评分预测状态行
         score_row = QHBoxLayout()
         self.score_label = QLabel("")
         self.score_label.setObjectName("muted_text"); self.score_label.setWordWrap(True)
         score_row.addWidget(self.score_label, 1)
-        self.btn_detail = mdi_button("查看详情/建议", "right"); self.btn_detail.setObjectName("secondary_button")
-        self.btn_detail.clicked.connect(self._open_detail); self.btn_detail.setVisible(False)
+        self.btn_detail = mdi_button("查看详情/建议", "right")
+        self.btn_detail.setObjectName("secondary_button")
+        self.btn_detail.clicked.connect(self._open_detail)
+        self.btn_detail.setVisible(False)
         score_row.addWidget(self.btn_detail)
         root.addLayout(score_row)
 
-        res = QHBoxLayout()
-        self.status = QLabel("就绪"); self.status.setObjectName("muted_text")
-        res.addWidget(self.status, 1)
-        self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(160)
-        res.addWidget(self.pbar)
-        self.btn_open = QPushButton("打开成片"); self.btn_open.setObjectName("secondary_button")
-        self.btn_open.clicked.connect(self._open); self.btn_open.setEnabled(False)
-        res.addWidget(self.btn_open)
-        root.addLayout(res)
-        root.addStretch()
+        # 信号绑定
+        self.combo_product.currentIndexChanged.connect(self._on_product_changed)
+
+        # 初始化数据
+        self._populate_products()
         self._populate_voices()
 
+    # ════════════════════════════════════════════════════════════════════════
+    #  产品选择
+    # ════════════════════════════════════════════════════════════════════════
+    def _populate_products(self):
+        self.combo_product.blockSignals(True)
+        self.combo_product.clear()
+        try:
+            grouped = self._product_mgr.grouped()
+            # 先放一个占位空项
+            self.combo_product.addItem("— 请选择产品 —", "")
+            for cat, brands in grouped.items():
+                for brand, items in brands.items():
+                    for it in items:
+                        model = it.get("model", "").strip() or it.get("goods_no", "")
+                        label = f"[{cat}] {brand} / {model}"
+                        self.combo_product.addItem(label, it.get("id", ""))
+        except Exception as e:
+            log.error(f"载入产品库失败: {e}")
+            self._log(f"⚠ 载入产品库失败: {e}")
+        self.combo_product.setCurrentIndex(0)
+        self.combo_product.blockSignals(False)
+
+    def _on_product_changed(self, _idx):
+        item_id = self.combo_product.currentData() or ""
+        if not item_id:
+            self.txt_features.setMarkdown("*未选择产品*")
+            self.txt_selling.setMarkdown("*未选择产品*")
+            return
+        it = self._product_mgr.get(item_id) or {}
+        feat = (it.get("features") or "").strip()
+        sell = (it.get("selling_points") or "").strip()
+        self.txt_features.setMarkdown(feat if feat else "*该产品暂无性能参数*")
+        self.txt_selling.setMarkdown(sell if sell else "*该产品暂无核心卖点*")
+
+    def _current_product(self):
+        """返回当前选中产品 dict（无则 None）。"""
+        item_id = self.combo_product.currentData() or ""
+        if not item_id:
+            return None
+        return self._product_mgr.get(item_id)
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  音色
+    # ════════════════════════════════════════════════════════════════════════
     def _populate_voices(self):
         self.combo_voice.clear()
         self.combo_voice.addItem("默认音色（无参考）", "")
@@ -170,6 +477,9 @@ class CompileVideoPage(BasePage):
         except Exception as e:
             log.error(f"载入音色样本失败: {e}")
 
+    # ════════════════════════════════════════════════════════════════════════
+    #  TTS / MG 开场
+    # ════════════════════════════════════════════════════════════════════════
     def _tts_generate(self):
         text = self.in_subtitle.toPlainText().strip()
         if not text:
@@ -177,20 +487,201 @@ class CompileVideoPage(BasePage):
             return
         ref = self.combo_voice.currentData() or ""
         out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("tts_%Y%m%d_%H%M%S.wav"))
-        self.btn_tts.setEnabled(False); self.pbar.setVisible(True)
-        self.status.setText("准备配音…")
+        self.btn_tts.setEnabled(False); self.progress_bar.setVisible(True)
+        self.stage_label.setText("准备配音…")
         worker = TTSWorker(text, ref, out)
-        worker.phase.connect(self.status.setText)
+        worker.phase.connect(self.stage_label.setText)
 
         def done(path):
-            self.btn_tts.setEnabled(True); self.pbar.setVisible(False)
+            self.btn_tts.setEnabled(True); self.progress_bar.setVisible(False)
             self.in_audio.setText(path)
-            self.status.setText(f"✅ 配音已生成并填入：{os.path.basename(path)}")
+            self.stage_label.setText(f"✅ 配音已生成并填入：{os.path.basename(path)}")
+            self._log(f"✅ 配音已生成: {path}")
 
-        worker.finished.connect(done)
-        worker.error.connect(lambda e: (self.btn_tts.setEnabled(True), self.pbar.setVisible(False),
+        worker.done.connect(done)
+        worker.error.connect(lambda e: (self.btn_tts.setEnabled(True), self.progress_bar.setVisible(False),
                                         self.show_error(str(e), "TTS 配音失败")))
         self.track_worker(worker); worker.start()
+
+    def _gen_mg_intro(self):
+        from utils.remotion_client import is_installed
+        if not is_installed():
+            self.show_warning("Remotion 依赖未安装。请先到「🎞️ MG 动画」页点『安装依赖』。")
+            return
+        from PySide6.QtWidgets import QInputDialog
+        default = (self.in_subtitle.toPlainText().strip().splitlines() or [""])[0][:16]
+        title, ok = QInputDialog.getText(self.parent_widget, "动态标题开场", "标题文字：", text=default)
+        if not ok or not title.strip():
+            return
+        from gui.mg_animation_page import MGRenderWorker
+        out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("mgintro_%Y%m%d_%H%M%S.mp4"))
+        self.btn_mg_intro.setEnabled(False); self.progress_bar.setVisible(True)
+        self.stage_label.setText("正在渲染动态标题开场(MG)…")
+        w = MGRenderWorker("TitleReveal", {"title": title.strip(), "subtitle": "",
+                                           "bg": "#101418", "color": "#FFFFFF"}, out)
+        w.phase.connect(self.stage_label.setText)
+
+        def done(path):
+            self.btn_mg_intro.setEnabled(True); self.progress_bar.setVisible(False)
+            self.in_intro.setText(path)
+            self.stage_label.setText(f"✅ 开场动画已生成：{os.path.basename(path)}")
+            self._log(f"✅ MG 开场已生成: {path}")
+        w.finished.connect(done)
+        w.error.connect(lambda e: (self.btn_mg_intro.setEnabled(True), self.progress_bar.setVisible(False),
+                                   self.show_error(str(e), "MG 开场生成失败")))
+        self.track_worker(w); w.start()
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  开始执行
+    # ════════════════════════════════════════════════════════════════════════
+    def _make(self):
+        # 1. 必选产品校验
+        product = self._current_product()
+        if not product:
+            self.show_warning("请先选择产品（产品是一键成片的起点）。")
+            return
+
+        folder = self.in_folder.text().strip()
+
+        # 2. 素材目录：空则远程匹配
+        if not folder or not os.path.isdir(folder):
+            self._log(f"📦 未指定素材目录，按产品「{product.get('model','')}」远程匹配…")
+            self._match_material_then_make(product)
+            return
+
+        self._do_make(folder)
+
+    def _match_material_then_make(self, product):
+        """异步远程匹配素材目录，成功后继续 _do_make。"""
+        self.btn_make.setEnabled(False)
+        self.stage_label.setText("正在按产品远程匹配素材目录…")
+        brand = product.get("brand", "")
+        model = product.get("model", "")
+        category = product.get("category", "")
+        mw = MaterialMatchWorker(brand, model, category)
+        mw.log_line.connect(self._log)
+
+        def on_done(folder):
+            self.btn_make.setEnabled(True)
+            if folder and os.path.isdir(folder):
+                self.in_folder.setText(folder)
+                self.stage_label.setText(f"✅ 已匹配素材目录: {folder}")
+                self._do_make(folder)
+            else:
+                self.stage_label.setText("⚠ 未能自动匹配素材目录")
+                self.show_warning("未能自动匹配到素材目录，请手动选择「镜头素材目录」。")
+
+        def on_err(e):
+            self.btn_make.setEnabled(True)
+            self.stage_label.setText("⚠ 素材匹配失败")
+            self.show_warning(f"素材匹配失败：{e}\n请手动选择「镜头素材目录」。")
+
+        mw.result_ready.connect(on_done)
+        mw.error.connect(on_err)
+        self.track_worker(mw); mw.start()
+
+    def _do_make(self, folder):
+        out_dir = FINAL_OUTPUT_DIR
+        os.makedirs(out_dir, exist_ok=True)
+        count = self.spin_count.value()
+        total_dur = self.spin_total_dur.value()
+        self.btn_make.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.result_table.setRowCount(0)
+        self._last_results = []
+
+        self.worker = CompileVideoWorker(
+            folder, out_dir,
+            self.in_audio.text().strip(),
+            self.in_cover.text().strip(),
+            self.in_subtitle.toPlainText().strip(),
+            self.combo_ratio.currentText(),
+            self.spin_dur.value(),
+            count=count,
+            total_dur=total_dur,
+            intro=self.in_intro.text().strip(),
+        )
+        self.worker.phase.connect(self.stage_label.setText)
+        self.worker.progress.connect(self.progress_bar.setValue)
+        self.worker.log_line.connect(self._log)
+        self.worker.done.connect(self._done)
+        self.worker.error.connect(self._err)
+        self.track_worker(self.worker); self.worker.start()
+
+    def _done(self, results):
+        self._last_results = results or []
+        self.btn_make.setEnabled(True)
+        # 填充结果列表
+        self.result_table.setRowCount(len(self._last_results))
+        for i, path in enumerate(self._last_results):
+            self.result_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self.result_table.setItem(i, 1, QTableWidgetItem(os.path.basename(path)))
+            status_item = QTableWidgetItem("✅ 完成")
+            status_item.setForeground(Qt.GlobalColor.green)
+            self.result_table.setItem(i, 2, status_item)
+            btn = QPushButton("打开")
+            btn.clicked.connect(lambda _=False, p=path: self._open_file(p))
+            self.result_table.setCellWidget(i, 3, btn)
+        self.stage_label.setText(f"✅ 完成：共生成 {len(self._last_results)} 个成片")
+        self._log(f"═══ 全部完成：{len(self._last_results)} 个成片 ═══")
+
+        # 自动视频评价预测（只对第一个成片）
+        if self.chk_autocheck.isChecked() and self._last_results:
+            cfg = self.ai_config
+            if cfg.get("llm_vision_api_url") and cfg.get("llm_vision_model"):
+                from gui.hook_score_page import HookScoreWorker
+                platform = self.combo_predict_platform.currentText()
+                self._predict_platform = platform
+                try:
+                    calib = VideoPredictionManager().calibration_text(platform=platform)
+                except Exception:
+                    calib = ""
+                self.score_label.setText(f"⏳ 正在按「{platform}」做视频评价预测…")
+                out = self._last_results[0]
+                sw = HookScoreWorker(out, cfg, platform=platform, calibration=calib)
+                sw.finished.connect(self._on_self_check)
+                sw.error.connect(lambda e: self.score_label.setText(f"视频预测失败：{e}"))
+                self.track_worker(sw); sw.start()
+            else:
+                self.score_label.setText("（未配置视觉模型，跳过视频评价预测。）")
+
+    def _on_self_check(self, data):
+        self._self_check_data = data
+        total = data.get("total", "—")
+        level = data.get("play_level", "")
+        comment = str(data.get("comment", ""))
+        self.score_label.setText(f"📈 视频预测：综合 {total} 分 · 预测{level}　{comment}")
+        self.btn_detail.setVisible(True)
+        try:
+            if self._last_results:
+                VideoPredictionManager().add_prediction(
+                    self._last_results[0], getattr(self, "_predict_platform", "抖音"), data)
+        except Exception:
+            pass
+
+    def _open_detail(self):
+        tool = getattr(self.main_window, "hook_score_tool", None)
+        try:
+            self.main_window.switch_page(35)  # 开头黄金3秒评分
+            if tool and hasattr(tool, "show_result") and self._last_results:
+                tool.show_result(self._last_results[0], self._self_check_data)
+        except Exception as e:
+            self.show_error(f"跳转失败：{e}")
+
+    def _err(self, e):
+        self.btn_make.setEnabled(True)
+        self.stage_label.setText("成片失败。")
+        self._log(f"❌ 失败: {e}")
+        self.show_error(str(e), "一键成片失败")
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  辅助
+    # ════════════════════════════════════════════════════════════════════════
+    def _log(self, text):
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%H:%M:%S")
+        self.log_box.append(f"[{ts}] {text}")
+        self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
 
     def _file_row(self, parent, label, on_browse, folder=False, placeholder=""):
         parent.addWidget(QLabel(label))
@@ -224,104 +715,10 @@ class CompileVideoPage(BasePage):
         if f:
             edit.setText(f)
 
-    def _gen_mg_intro(self):
-        from utils.remotion_client import is_installed
-        if not is_installed():
-            self.show_warning("Remotion 依赖未安装。请先到「🎞️ MG 动画」页点『安装依赖』。")
-            return
-        from PySide6.QtWidgets import QInputDialog
-        default = (self.in_subtitle.toPlainText().strip().splitlines() or [""])[0][:16]
-        title, ok = QInputDialog.getText(self.parent_widget, "动态标题开场", "标题文字：", text=default)
-        if not ok or not title.strip():
-            return
-        from gui.mg_animation_page import MGRenderWorker
-        out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("mgintro_%Y%m%d_%H%M%S.mp4"))
-        self.btn_mg_intro.setEnabled(False); self.pbar.setVisible(True)
-        self.status.setText("正在渲染动态标题开场(MG)…")
-        w = MGRenderWorker("TitleReveal", {"title": title.strip(), "subtitle": "",
-                                           "bg": "#101418", "color": "#FFFFFF"}, out)
-        w.phase.connect(self.status.setText)
+    def _open_file(self, path):
+        if path and os.path.isfile(path) and os.name == "nt":
+            os.startfile(path)  # noqa
 
-        def done(path):
-            self.btn_mg_intro.setEnabled(True); self.pbar.setVisible(False)
-            self.in_intro.setText(path)
-            self.status.setText(f"✅ 开场动画已生成并填入：{os.path.basename(path)}")
-        w.finished.connect(done)
-        w.error.connect(lambda e: (self.btn_mg_intro.setEnabled(True), self.pbar.setVisible(False),
-                                   self.show_error(str(e), "MG 开场生成失败")))
-        self.track_worker(w); w.start()
-
-    def _make(self):
-        folder = self.in_folder.text().strip()
-        if not folder or not os.path.isdir(folder):
-            self.show_warning("请先选择有效的镜头素材目录。")
-            return
-        out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("final_%Y%m%d_%H%M%S.mp4"))
-        self.btn_make.setEnabled(False); self.pbar.setVisible(True)
-        self.btn_open.setEnabled(False)
-        self.worker = CompileVideoWorker(
-            folder, out, self.in_audio.text().strip(), self.in_cover.text().strip(),
-            self.in_subtitle.toPlainText().strip(), self.combo_ratio.currentText(), self.spin_dur.value(),
-            intro=self.in_intro.text().strip())
-        self.worker.phase.connect(self.status.setText)
-        self.worker.finished.connect(self._done)
-        self.worker.error.connect(self._err)
-        self.track_worker(self.worker); self.worker.start()
-
-    def _done(self, out):
-        self._last_out = out
-        self.btn_make.setEnabled(True); self.pbar.setVisible(False)
-        self.btn_open.setEnabled(True)
-        self.status.setText(f"✅ 成片完成：{out}")
-        # 自动视频评价预测：按所选平台预测成片表现
-        if self.chk_autocheck.isChecked():
-            cfg = self.ai_config
-            if cfg.get("llm_vision_api_url") and cfg.get("llm_vision_model"):
-                from gui.hook_score_page import HookScoreWorker
-                platform = self.combo_predict_platform.currentText()
-                self._predict_platform = platform
-                try:
-                    calib = VideoPredictionManager().calibration_text(platform=platform)
-                except Exception:
-                    calib = ""
-                self.score_label.setText(f"⏳ 正在按「{platform}」做视频评价预测…")
-                sw = HookScoreWorker(out, cfg, platform=platform, calibration=calib)
-                sw.finished.connect(self._on_self_check)
-                sw.error.connect(lambda e: self.score_label.setText(f"视频预测失败：{e}"))
-                self.track_worker(sw); sw.start()
-            else:
-                self.score_label.setText("（未配置视觉模型，跳过视频评价预测。）")
-
-    def _on_self_check(self, data):
-        self._self_check_data = data
-        total = data.get("total", "—")
-        level = data.get("play_level", "")
-        comment = str(data.get("comment", ""))
-        self.score_label.setText(f"📈 视频预测：综合 {total} 分 · 预测{level}　{comment}")
-        self.btn_detail.setVisible(True)
-        # 纳入预测库（回填真实数据/校准闭环）
-        try:
-            VideoPredictionManager().add_prediction(
-                self._last_out, getattr(self, "_predict_platform", "抖音"), data)
-        except Exception:
-            pass
-
-    def _open_detail(self):
-        tool = getattr(self.main_window, "hook_score_tool", None)
-        try:
-            self.main_window.switch_page(35)  # 开头黄金3秒评分
-            if tool and hasattr(tool, "show_result"):
-                tool.show_result(self._last_out, self._self_check_data)
-        except Exception as e:
-            self.show_error(f"跳转失败：{e}")
-
-    def _err(self, e):
-        self.btn_make.setEnabled(True); self.pbar.setVisible(False)
-        self.status.setText("成片失败。")
-        self.show_error(str(e), "一键成片失败")
-
-    def _open(self):
-        if self._last_out and os.path.isfile(self._last_out) and os.name == "nt":
-            os.startfile(self._last_out)  # noqa
-
-	
+    def _open_output_dir(self):
+        if os.path.isdir(FINAL_OUTPUT_DIR) and os.name == "nt":
+            os.startfile(FINAL_OUTPUT_DIR)  # noqa

@@ -902,6 +902,33 @@ def extract_keyframes(video_path, num_frames=3):
 class BatchGenerateDescriptionsWorker(BaseWorker):
     finished = Signal(str)  # JSON string: {"1": "desc1", "2": "desc2", ...}
 
+
+class ScoreClipsWorker(BaseWorker):
+    """后台批量评分分割镜头，完成时通过信号通知主线程刷新表格。"""
+    score_ready = Signal(int, float)  # row_index, score
+    all_done = Signal()
+
+    def __init__(self, page_ref, clip_paths):
+        super().__init__()
+        self.page_ref = page_ref
+        self.clip_paths = clip_paths
+
+    def run(self):
+        for idx, clip_path in enumerate(self.clip_paths):
+            if self._should_stop:
+                break
+            try:
+                score = self.page_ref._score_clip(clip_path)
+            except Exception:
+                score = -1
+            self.score_ready.emit(idx, score)
+        self.all_done.emit()
+
+    _should_stop = False
+
+    def stop(self):
+        self._should_stop = True
+
     def __init__(self, api_url, api_key, model, srt_text, scenes, split_video_paths):
         super().__init__()
         self.api_url = api_url
@@ -4465,6 +4492,7 @@ class VideoMontagePage(BasePage):
         # Block signals on table during update to avoid triggering cellChanged slot
         self.split_result_table.blockSignals(True)
         self.split_result_table.setRowCount(0)
+        self._pending_score_rows = []  # 待后台评分的行
 
         splits_dir = ""
         if dir_path and os.path.exists(dir_path):
@@ -4536,14 +4564,13 @@ class VideoMontagePage(BasePage):
                     if desc:
                         self.split_descriptions[norm_path] = desc
 
-                    # 评分（填充缓存并显示）
-                    score = self._score_clip(norm_path)
+                    # 缓存先占位（后台异步评分）
                     self.split_clips_cache[norm_path] = {
                         "filename": f, "time_str": time_str,
-                        "desc": desc, "duration": 0.0, "score": score,
+                        "desc": desc, "duration": 0.0, "score": None,
                     }
 
-                    # Col 0: Index (1-based)
+                    # Col 0: Index
                     idx_item = QTableWidgetItem(str(idx + 1))
                     idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
                     idx_item.setTextAlignment(Qt.AlignCenter)
@@ -4567,18 +4594,12 @@ class VideoMontagePage(BasePage):
                     desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable)
                     self.split_result_table.setItem(idx, 3, desc_item)
 
-                    # Col 4: Score
-                    score_text = f"{score:.1f}" if score >= 0 else "—"
-                    score_item = QTableWidgetItem(score_text)
+                    # Col 4: Score — 先占位，后台异步评分后更新
+                    score_item = QTableWidgetItem("⏳")
                     score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
                     score_item.setTextAlignment(Qt.AlignCenter)
-                    if score >= 8.0:
-                        score_item.setForeground(QColor("#2ecc71"))
-                    elif score >= 6.0:
-                        score_item.setForeground(QColor("#f1c40f"))
-                    elif score >= 0:
-                        score_item.setForeground(QColor("#e74c3c"))
                     self.split_result_table.setItem(idx, 4, score_item)
+                    self._pending_score_rows.append((idx, norm_path))
                     initial_desc_lines.append(desc)
                 
                 # Update rewritten_srt_display
@@ -4614,6 +4635,18 @@ class VideoMontagePage(BasePage):
                     
         self.split_result_table.blockSignals(False)
 
+        # 启动后台异步评分
+        if self._pending_score_rows:
+            # 停止上一次未完成的评分
+            if hasattr(self, "_score_worker") and self._score_worker and self._score_worker.isRunning():
+                self._score_worker.stop()
+                self._score_worker.wait(1000)
+            clip_paths = [norm_path for _, norm_path in self._pending_score_rows]
+            self._score_worker = ScoreClipsWorker(self, clip_paths)
+            self._score_worker.score_ready.connect(self._on_score_ready)
+            self._score_worker.all_done.connect(self._on_score_all_done)
+            self._score_worker.start()
+
         # Set default directory for Step 2 and scan it
         if splits_dir and os.path.exists(splits_dir):
             self.concat_src_dir_input.setText(splits_dir)
@@ -4621,6 +4654,31 @@ class VideoMontagePage(BasePage):
         else:
             self.concat_clips_list_widget.clearContents()
             self.concat_clips_list_widget.setRowCount(0)
+
+    def _on_score_ready(self, row_idx, score):
+        """后台评分完成一行，更新表格和缓存。"""
+        if row_idx < 0 or row_idx >= len(self._pending_score_rows):
+            return
+        _, norm_path = self._pending_score_rows[row_idx]
+        # 更新缓存
+        if norm_path in self.split_clips_cache:
+            self.split_clips_cache[norm_path]["score"] = score
+        # 更新表格
+        score_text = f"{score:.1f}" if score >= 0 else "—"
+        item = self.split_result_table.item(row_idx, 4)
+        if item:
+            item.setText(score_text)
+            if score >= 8.0:
+                item.setForeground(QColor("#2ecc71"))
+            elif score >= 6.0:
+                item.setForeground(QColor("#f1c40f"))
+            elif score >= 0:
+                item.setForeground(QColor("#e74c3c"))
+
+    def _on_score_all_done(self):
+        """所有后台评分完成。"""
+        log.info(f"[评分] 后台评分全部完成，共 {len(self._pending_score_rows)} 个镜头")
+        self._pending_score_rows = []
             self.clip_count_info_lbl.setText("待排列镜头个数: 0  (已勾选: 0)")
             self.btn_assemble_video.setEnabled(False)
 

@@ -66,7 +66,7 @@ class OllamaManager:
         """列出远程 Ollama 已加载的模型。"""
         url = f"{_read_ollama_api()}/ollama/models"
         try:
-            r = requests.get(f"{_read_ollama_api()}/ollama/models", timeout=5)
+            r = resilient_get(url, timeout=5, service="ollama", circuit_breaker=False)
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
             if r.status_code == 200:
                 data = r.json()

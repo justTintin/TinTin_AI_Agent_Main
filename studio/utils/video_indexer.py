@@ -81,12 +81,11 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
                          api_key: str, model: str) -> list[str]:
     """
     把多帧 base64 图片一次发给视觉模型，提取画面语义标签列表。
-    返回 ["键盘", "机械轴", "俯拍", "客制化"] 格式。
+    走服务端代理（不再直连 Ollama），api_url/api_key 参数保留兼容但不再使用。
     """
     if not frames_b64:
         return []
     try:
-        import requests as req
         system_prompt = (
             "你是专业的消费电子/产品视频标注专家。\n"
             "给你若干视频关键帧，请归纳画面中出现的所有语义标签。\n"
@@ -95,16 +94,21 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
             "[\"键盘\", \"机械轴\", \"客制化\", \"俯拍\", \"白色\", \"特写\"]"
         )
         content = [{"type": "text", "text": "请分析以下视频关键帧，返回语义标签数组："}]
-        for i, b64 in enumerate(frames_b64[:6]):   # 最多 6 帧，防止 token 超限
+        for i, b64 in enumerate(frames_b64[:6]):
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
-        url = f"{api_url.rstrip('/')}/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+        # 走服务端代理
+        from utils.llm_proxy import _get_server_url
+        from utils.http_client import resilient_post
+        base = _get_server_url()
+        if not base:
+            base = api_url.rstrip("/")
+        url = f"{base}/llm/chat/completions"
         payload = {
             "model": model,
-            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
@@ -112,7 +116,7 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
             "temperature": 0.1,
             "max_tokens": 300,
         }
-        resp = req.post(url, json=payload, headers=headers, timeout=90)
+        resp = resilient_post(url, json=payload, timeout=90, service="llm")
         if resp.status_code != 200:
             log.error(f"视觉 LLM 返回 {resp.status_code}: {resp.text[:200]}")
             return []

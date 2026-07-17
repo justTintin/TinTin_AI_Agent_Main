@@ -117,37 +117,22 @@ class AIStatusCheckThread(QThread):
                 "clone_ok": False,
             }
             try:
-                # 1. 检测大模型 (Ollama/Vision)
+                # 1. 检测大模型 — 走服务端代理（不再直连带 API Key）
                 if os.path.isfile(self.config_file_path):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
-                    api_url = cfg.get("llm_vision_api_url", "").strip()
-                    api_key = (cfg.get("llm_vision_api_key") or cfg.get("llm_api_key", "")).strip()
+                    server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
                     model   = cfg.get("llm_vision_model", "").strip()
-                    
-                    if api_url:
+
+                    if server_url:
                         try:
                             res = resilient_get(
-                                f"{api_url.rstrip('/')}/v1/models",
-                                headers={"Authorization": f"Bearer {api_key}"},
+                                f"{server_url.rstrip('/')}/ollama/status",
                                 timeout=2, service="ollama", circuit_breaker=False,
                             )
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
-                                # vision_ok：服务端存在带 vision 能力的模型即为可用
-                                # 模型名由服务端定义，客户端不做字符串匹配
-                                try:
-                                    models_data = res.json().get("data", [])
-                                    for m in models_data:
-                                        caps = m.get("capabilities", [])
-                                        if "vision" in caps:
-                                            status["vision_ok"] = True
-                                            break
-                                    if not status["vision_ok"]:
-                                        # 兼容无 capabilities 字段的旧服务端
-                                        status["vision_ok"] = bool(models_data)
-                                except Exception:
-                                    status["vision_ok"] = True
+                                status["vision_ok"] = True  # 服务端代理管理视觉模型
                         except Exception:
                             pass
             except Exception:

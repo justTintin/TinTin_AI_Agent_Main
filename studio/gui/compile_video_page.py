@@ -611,14 +611,38 @@ class CompileVideoPage(BasePage):
         return "\n".join(lines)
 
     def _collect_script_params(self):
-        """收集脚本成片的提交参数。"""
+        """收集脚本成片的提交参数（适配服务端 storyboard_montage 执行器契约）。
+
+        服务端契约（实测 /scheduled/tasks id=12/15）：
+          params = {shots:[{index,shot_type,duration,visual,audio}], voice_settings:{speaker}}
+        注意：文案字段服务端叫 `audio`（不是 storyboard 的 narration）；服务端自己做
+        素材匹配，不收 material_path（保留无害）。
+        """
         s = self._current_script() or {}
+        raw_shots = s.get("shots", [])
+        # 转成服务端期望的字段：narration → audio
+        server_shots = []
+        for sh in raw_shots:
+            server_shots.append({
+                "index": sh.get("index", 0),
+                "shot_type": sh.get("shot_type", ""),
+                "duration": sh.get("duration", 3),
+                "visual": sh.get("visual", ""),
+                "audio": sh.get("narration", "") or sh.get("audio", ""),  # 文案字段对齐
+                # 以下服务端不一定用，但保留供未来扩展（如服务端支持指定素材）
+                "material_path": sh.get("material_path", ""),
+                "material_type": sh.get("material_type", ""),
+                "sfx": sh.get("sfx", ""),
+            })
         return {
+            # 服务端 storyboard_montage 执行器识别的核心字段
+            "shots": server_shots,
+            "voice_settings": {"speaker": "default"},
+            # 客户端附加信息（服务端按需取用，不影响执行）
             "script_name": s.get("name", ""),
             "script_path": s.get("path", ""),
             "topic": s.get("topic", ""),
             "ratio": self.script_combo_ratio.currentText(),
-            "shots": s.get("shots", []),   # 完整镜头表（含素材路径+文案+时长）
             "total_duration": s.get("total_duration", 0),
             "shot_count": s.get("shot_count", 0),
             "predict_platform": self.script_combo_platform.currentText(),
@@ -626,7 +650,7 @@ class CompileVideoPage(BasePage):
         }
 
     def _submit_script(self, immediate, schedule=None, title=""):
-        """提交脚本成片任务到服务端（task_type=script_montage）。"""
+        """提交脚本成片任务到服务端（task_type=storyboard_montage）。"""
         from utils import scheduled_task_client as stc
         from utils.thread_worker import TaskWorker as Worker
 
@@ -641,7 +665,7 @@ class CompileVideoPage(BasePage):
         self.script_status.setText("正在提交到服务端…" if immediate else "正在提交定时任务…")
 
         def _do():
-            return stc.create_task("script_montage", task_title, params, schedule=schedule)
+            return stc.create_task("storyboard_montage", task_title, params, schedule=schedule)
 
         worker = Worker(_do)
         def _ok(tid):

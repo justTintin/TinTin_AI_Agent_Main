@@ -98,7 +98,6 @@ HOTSPOTS_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "hotspots")
 HOTSPOTS_FILE = os.path.join(DATA_DIR, "hotspots.json")
 VIDEO_PREDICTIONS_FILE = os.path.join(DATA_DIR, "video_predictions.json")
 VIDEO_INDEX_FILE = os.path.join(DATA_DIR, "video_index.json")
-SCHEDULED_TASKS_FILE = os.path.join(DATA_DIR, "scheduled_tasks.json")
 
 # Platform-specific binary directories（内置 bin 是只读资源，frozen 时在 _BUNDLE_DIR）
 BIN_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "bin")

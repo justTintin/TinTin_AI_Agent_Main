@@ -187,11 +187,6 @@ class PageSetupMixin:
         self.compile_video_tool = CompileVideoPage(self.page_compile_video, self)
         self.compile_video_tool.setup()
 
-    def setup_scheduled_tasks_page(self):
-        from gui.scheduled_tasks_page import ScheduledTasksPage
-        self.scheduled_tasks_tool = ScheduledTasksPage(self.page_scheduled_tasks, self)
-        self.scheduled_tasks_tool.setup()
-
     def setup_hook_score_page(self):
         from gui.hook_score_page import HookScorePage
         self.hook_score_tool = HookScorePage(self.page_hook_score, self)

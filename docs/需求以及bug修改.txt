@@ -12,3 +12,14 @@
    - 统一地址修改后联动更新 Whisper/CLIP（始终使用统一地址，无需手动维护）
    - VoxCPM 的 API 地址保留手动维护（需手动加 /voxcpm/tts 后缀）
    - 6个模型Tab合并为单个滚动页面，无需切换Tab
+
+7.任务队列页面点击后卡顿崩溃修复                                                  完成
+   - 根因：_sync_server_tasks_async 将 _sync_server_tasks 放入 Worker 子线程执行，
+     而该方法内部直接操作了 Qt 控件(task_table.insertRow/setItem/setCellWidget 等)，
+     在非 GUI 线程操作 Qt 控件导致未定义行为和崩溃
+   - 修复：将 _sync_server_tasks 拆分为两个方法：
+     · _fetch_server_tasks_data()：仅做 HTTP 请求和数据处理，返回纯数据 dict，不触碰任何 Qt 控件
+     · _apply_server_tasks_data(data)：执行所有 GUI 更新，通过 finished 信号回调到主线程执行
+   - Worker 对象存为 self._sync_worker 防止 GC 回收导致额外崩溃
+   - 「同步服务端」按钮改用 _sync_server_tasks_async，避免点击时阻塞主线程
+   - 涉及文件：studio/gui/main_window_pages.py

@@ -128,7 +128,18 @@ except ImportError:
 def mdi_icon(name: str, color: str = "#c9cdd4") -> QIcon:
     """获取图标。优先 qtawesome，回退 emoji。"""
     if _HAS_QTA:
-        mdi_name = "mdi." + name.replace("_", "-")
+        # 部分别名：历史代码用了非标准 mdi 图标名，这里统一映射到有效名，
+        # 避免逐个改各页面调用点。映射不命中则原样加 mdi. 前缀。
+        _ALIAS = {
+            "audio": "volume-high", "backward": "skip-backward",
+            "balance-scale": "scale", "celebration": "party-popper",
+            "cut": "content-cut", "edit": "pencil", "gear": "cog",
+            "left": "arrow-left", "mic": "microphone", "right": "arrow-right",
+            "save": "content-save", "search": "magnify", "trash": "trash-can",
+            "voice": "account-voice", "volume": "volume-high",
+        }
+        normalized = _ALIAS.get(name, name).replace("_", "-")
+        mdi_name = "mdi." + normalized
         return qta.icon(mdi_name, color=color)
     # emoji fallback — 创建空图标（文字由按钮文本提供）
     return QIcon()

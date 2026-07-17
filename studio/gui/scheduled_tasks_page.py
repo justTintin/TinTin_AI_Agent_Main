@@ -36,10 +36,10 @@ class ScheduledTasksPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
-        heading = QLabel("⏰ 定时任务")
+        heading = QLabel("⏰ 成片任务")
         heading.setObjectName("heading")
         root.addWidget(heading)
-        sub = QLabel("监控服务端定时任务的执行状态与输出结果。任务由服务端调度执行，客户端仅提交与监控。")
+        sub = QLabel("监控服务端成片任务（产品成片 / 脚本成片）的执行状态与输出结果。任务由服务端调度执行，客户端仅提交与监控。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
         root.addWidget(sub)
 
@@ -48,7 +48,7 @@ class ScheduledTasksPage(BasePage):
         ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
 
         list_header = QHBoxLayout()
-        list_header.addWidget(QLabel("📋 任务列表（来自服务端）"))
+        list_header.addWidget(QLabel("📋 成片任务列表（来自服务端）"))
         list_header.addStretch()
         self.btn_refresh = QPushButton("刷新")
         self.btn_refresh.setObjectName("secondary_button")
@@ -219,7 +219,8 @@ class ScheduledTasksPage(BasePage):
     # ── 格式化 helper ─────────────────────────────────────────────────────
     @staticmethod
     def _type_label(t):
-        return {"video_montage": "一键成片/混剪", "compile_video": "一键成片"}.get(t, t or "—")
+        return {"video_montage": "产品成片", "compile_video": "产品成片",
+                "script_montage": "脚本成片"}.get(t, t or "—")
 
     @staticmethod
     def _status_label(s):

@@ -105,7 +105,7 @@ class SidebarMixin:
             ("📚 我的知识库", 29, None),
             ("产品资料", 28, "download"),
             ("🛒 产品文案创作", 30, None),
-            ("分镜脚本创作", 38, "edit"),
+            ("分镜脚本创作", 38, "pencil"),
         ]
         for text, index, icon_name in script_menus:
             if icon_name:
@@ -169,9 +169,9 @@ class SidebarMixin:
         compose_layout.addWidget(compose_header)
 
         compose_menus = [
-            ("定时任务", 44, "clock-outline"),
+            ("成片任务", 44, "clock-outline"),
             ("一键成片", 34, "rocket"),
-            ("智能混剪", 15, "cut"),
+            ("智能混剪", 15, "content-cut"),
             ("📡 直播切片", 19, None),
         ]
         for text, index, icon_name in compose_menus:

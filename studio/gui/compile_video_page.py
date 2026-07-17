@@ -15,13 +15,15 @@
 逻辑见 utils/video_compiler.py。
 """
 import os
+import json
 from datetime import datetime
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame,
     QComboBox, QDoubleSpinBox, QSpinBox, QFileDialog, QProgressBar, QCheckBox,
     QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QTextBrowser, QWidget,
+    QAbstractItemView, QTextBrowser, QWidget, QTabWidget, QButtonGroup,
+    QRadioButton, QDialog, QDialogButtonBox, QFormLayout, QTimeEdit,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -33,7 +35,7 @@ from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from utils.product_library_manager import ProductLibraryManager
-from config.paths import FINAL_OUTPUT_DIR
+from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 
 
 # ─── 远程素材服务地址（与 vector_search_page 一致） ─────────────────────────
@@ -209,7 +211,7 @@ class CompileVideoPage(BasePage):
         self._self_check_data = None
 
     # ════════════════════════════════════════════════════════════════════════
-    #  setup：构建界面
+    #  setup：构建界面（顶层 QTabWidget：产品成片 + 脚本成片）
     # ════════════════════════════════════════════════════════════════════════
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
@@ -219,6 +221,33 @@ class CompileVideoPage(BasePage):
         heading = QLabel("🎬 一键成片")
         heading.setObjectName("heading")
         root.addWidget(heading)
+
+        # 顶层 tab：产品成片（选产品）+ 脚本成片（选分镜脚本）
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; } "
+            "QTabBar::tab { padding: 8px 18px; font-size: 13px; } "
+            "QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+        root.addWidget(self.tabs, 1)
+
+        # tab1：产品成片（原有完整界面）
+        tab_product = QWidget()
+        self._setup_product_tab(tab_product)
+        self.tabs.addTab(tab_product, "📦 产品成片")
+
+        # tab2：脚本成片（选分镜脚本提交服务端）
+        tab_script = QWidget()
+        self._setup_script_tab(tab_script)
+        self.tabs.addTab(tab_script, "📜 脚本成片")
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  产品成片 tab（原有界面，整体挂到 container）
+    # ════════════════════════════════════════════════════════════════════════
+    def _setup_product_tab(self, container):
+        root = QVBoxLayout(container)
+        root.setContentsMargins(0, 8, 0, 0)
+        root.setSpacing(12)
+
         sub = QLabel("选择产品（必选，任务起点）→ 可选设置/自动匹配素材 → 设置条数与时长 → 开始执行。复杂剪辑请用「智能混剪」。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
         root.addWidget(sub)
@@ -424,6 +453,254 @@ class CompileVideoPage(BasePage):
         # 初始化数据
         self._populate_products()
         self._populate_voices()
+
+    # ════════════════════════════════════════════════════════════════════════
+    #  脚本成片 tab（选分镜脚本 → 提交服务端成片）
+    # ════════════════════════════════════════════════════════════════════════
+    def _setup_script_tab(self, container):
+        root = QVBoxLayout(container)
+        root.setContentsMargins(0, 8, 0, 0)
+        root.setSpacing(10)
+
+        sub = QLabel("选择一个已保存的分镜脚本（含素材+文案），直接提交服务端成片。脚本在「分镜脚本」页保存为 JSON 格式生成。")
+        sub.setObjectName("muted_text"); sub.setWordWrap(True)
+        root.addWidget(sub)
+
+        # ── 脚本选择行 ─────────────────────────────────────────────────────
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(QLabel("选择脚本"))
+        self.combo_script = QComboBox()
+        self.combo_script.setMinimumWidth(360)
+        self.combo_script.currentIndexChanged.connect(self._on_script_changed)
+        sel_row.addWidget(self.combo_script, 1)
+        self.btn_reload_script = QPushButton("刷新")
+        self.btn_reload_script.setObjectName("secondary_button")
+        self.btn_reload_script.clicked.connect(self._populate_scripts)
+        sel_row.addWidget(self.btn_reload_script)
+        root.addLayout(sel_row)
+
+        # ── 脚本预览 ───────────────────────────────────────────────────────
+        root.addWidget(QLabel("📋 脚本预览"))
+        self.script_preview = QTextBrowser()
+        self.script_preview.setOpenExternalLinks(False)
+        self.script_preview.setMinimumHeight(220)
+        self.script_preview.setPlaceholderText("选择上方脚本后，这里显示镜头表（镜号|时长|画面|文案|素材路径）")
+        root.addWidget(self.script_preview, 1)
+
+        # ── 设置行 ─────────────────────────────────────────────────────────
+        opt_row = QHBoxLayout()
+        opt_row.addWidget(QLabel("比例"))
+        self.script_combo_ratio = QComboBox(); self.script_combo_ratio.addItems(list(RATIO_SIZES.keys()))
+        opt_row.addWidget(self.script_combo_ratio)
+        opt_row.addSpacing(12)
+        opt_row.addWidget(QLabel("平台"))
+        self.script_combo_platform = QComboBox(); self.script_combo_platform.addItems(PLATFORMS)
+        self.script_combo_platform.setFixedWidth(96)
+        opt_row.addWidget(self.script_combo_platform)
+        opt_row.addSpacing(12)
+        self.script_chk_autocheck = QCheckBox("成片后评价预测")
+        self.script_chk_autocheck.setChecked(True)
+        opt_row.addWidget(self.script_chk_autocheck)
+        opt_row.addStretch()
+        root.addLayout(opt_row)
+
+        # ── 执行按钮行 ─────────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        self.btn_script_make = mdi_button("🚀 开始执行", "video")
+        self.btn_script_make.setObjectName("primary_button")
+        self.btn_script_make.setFixedHeight(36)
+        self.btn_script_make.clicked.connect(lambda: self._submit_script(immediate=True))
+        btn_row.addWidget(self.btn_script_make)
+        self.btn_script_add_task = QPushButton("📌 添加为定时任务")
+        self.btn_script_add_task.setFixedHeight(36)
+        self.btn_script_add_task.clicked.connect(self._add_script_scheduled_task)
+        btn_row.addWidget(self.btn_script_add_task)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        # ── 状态/日志 ──────────────────────────────────────────────────────
+        self.script_status = QLabel("就绪"); self.script_status.setObjectName("muted_text")
+        root.addWidget(self.script_status)
+
+        # 首次加载脚本列表
+        self._populate_scripts()
+
+    def _populate_scripts(self):
+        """扫描 KNOWLEDGE_MEDIA_DIR/*/storyboard/*.json，填充脚本下拉。"""
+        self.combo_script.blockSignals(True)
+        self.combo_script.clear()
+        scripts = self._scan_storyboard_scripts()
+        self.combo_script.addItem("— 请选择脚本 —", None)
+        for s in scripts:
+            label = f"[{s['topic']}] {s['name']}（{s['shot_count']}镜/{s['total_duration']}s）"
+            self.combo_script.addItem(label, s)
+        self.combo_script.setCurrentIndex(0)
+        self.combo_script.blockSignals(False)
+        self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+
+    @staticmethod
+    def _scan_storyboard_scripts():
+        """扫描所有分镜 JSON 脚本。返回 [{name, path, topic, ratio, total_duration, shot_count, shots}]。"""
+        results = []
+        try:
+            base = KNOWLEDGE_MEDIA_DIR
+            if not base or not os.path.isdir(base):
+                return results
+            for topic_dir in sorted(os.listdir(base)):
+                sb_dir = os.path.join(base, topic_dir, "storyboard")
+                if not os.path.isdir(sb_dir):
+                    continue
+                for fn in sorted(os.listdir(sb_dir)):
+                    if not fn.lower().endswith(".json"):
+                        continue
+                    fp = os.path.join(sb_dir, fn)
+                    try:
+                        with open(fp, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        # 兼容性检查：必须有 shots 数组
+                        if not isinstance(data, dict) or not isinstance(data.get("shots"), list):
+                            continue
+                        results.append({
+                            "name": os.path.splitext(fn)[0],
+                            "path": fp,
+                            "topic": data.get("topic", topic_dir),
+                            "ratio": data.get("ratio", "9:16"),
+                            "total_duration": data.get("total_duration", 0),
+                            "shot_count": data.get("shot_count", len(data.get("shots", []))),
+                            "shots": data.get("shots", []),
+                            "saved_at": data.get("saved_at", 0),
+                        })
+                    except Exception as e:
+                        log.warning(f"读取脚本失败 {fp}: {e}")
+        except Exception as e:
+            log.warning(f"扫描脚本失败: {e}")
+        return results
+
+    def _current_script(self):
+        """返回当前选中的脚本 dict（无则 None）。"""
+        return self.combo_script.currentData() if hasattr(self, "combo_script") else None
+
+    def _on_script_changed(self, _idx):
+        s = self._current_script()
+        if not s:
+            self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+            return
+        # 比例默认取脚本里的
+        idx = self.script_combo_ratio.findText(s.get("ratio", "9:16"))
+        if idx >= 0:
+            self.script_combo_ratio.setCurrentIndex(idx)
+        # 渲染预览
+        self.script_preview.setMarkdown(self._render_script_preview(s))
+
+    @staticmethod
+    def _render_script_preview(s):
+        shots = s.get("shots", [])
+        lines = [
+            f"### {s.get('topic','')} — {s.get('name','')}",
+            "",
+            f"- **画幅**：{s.get('ratio','9:16')}　**总时长**：{s.get('total_duration',0)}s　**镜头数**：{s.get('shot_count',0)}",
+            "",
+            "| 镜号 | 时长 | 画面描述 | 旁白文案 | 素材路径 |",
+            "|:---:|:---:|---|---|---|",
+        ]
+        for sh in shots:
+            vis = str(sh.get("visual", "")).replace("|", "｜").replace("\n", " ").strip()
+            nar = str(sh.get("narration", "")).replace("|", "｜").replace("\n", " ").strip()
+            mat = str(sh.get("material_path", "")).replace("|", "｜").strip()
+            lines.append(f"| {sh.get('index','')} | {sh.get('duration','')}s | {vis} | {nar or '—'} | {mat or '—'} |")
+        return "\n".join(lines)
+
+    def _collect_script_params(self):
+        """收集脚本成片的提交参数。"""
+        s = self._current_script() or {}
+        return {
+            "script_name": s.get("name", ""),
+            "script_path": s.get("path", ""),
+            "topic": s.get("topic", ""),
+            "ratio": self.script_combo_ratio.currentText(),
+            "shots": s.get("shots", []),   # 完整镜头表（含素材路径+文案+时长）
+            "total_duration": s.get("total_duration", 0),
+            "shot_count": s.get("shot_count", 0),
+            "predict_platform": self.script_combo_platform.currentText(),
+            "autocheck": self.script_chk_autocheck.isChecked(),
+        }
+
+    def _submit_script(self, immediate, schedule=None, title=""):
+        """提交脚本成片任务到服务端（task_type=script_montage）。"""
+        from utils import scheduled_task_client as stc
+        from utils.thread_worker import TaskWorker as Worker
+
+        s = self._current_script()
+        if not s:
+            self.show_warning("请先选择一个脚本。")
+            return
+        params = self._collect_script_params()
+        task_title = title or f"{s.get('topic','')}-{s.get('name','')}-脚本成片"
+
+        self.btn_script_make.setEnabled(False); self.btn_script_add_task.setEnabled(False)
+        self.script_status.setText("正在提交到服务端…" if immediate else "正在提交定时任务…")
+
+        def _do():
+            return stc.create_task("script_montage", task_title, params, schedule=schedule)
+
+        worker = Worker(_do)
+        def _ok(tid):
+            self.btn_script_make.setEnabled(True); self.btn_script_add_task.setEnabled(True)
+            if tid:
+                self.script_status.setText(f"✅ 已提交服务端，任务 ID={tid}")
+                self.show_info(f"任务已提交服务端（ID={tid}）。\n\n"
+                               + ("服务端正在执行，可在「成片任务」页查看进度。" if immediate
+                                  else "服务端将按计划定时执行，可在「成片任务」页监控。"))
+            else:
+                self.script_status.setText("⚠ 提交失败")
+                self.show_warning("提交服务端失败，请确认服务端在线后重试。")
+        def _err(e):
+            self.btn_script_make.setEnabled(True); self.btn_script_add_task.setEnabled(True)
+            self.script_status.setText("⚠ 提交异常")
+            self.show_error(f"提交异常：{e}", "错误")
+
+        worker.finished.connect(_ok)
+        worker.error.connect(_err)
+        self.track_worker(worker); worker.start()
+
+    def _add_script_scheduled_task(self):
+        """脚本成片的「添加为定时任务」：弹窗选调度，提交服务端定时执行。"""
+        s = self._current_script()
+        if not s:
+            self.show_warning("请先选择一个脚本。")
+            return
+        from datetime import datetime as _dt
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle("添加为定时任务（脚本成片，提交服务端）")
+        form = QFormLayout(dlg)
+        name_edit = QLineEdit(f"{s.get('topic','')}-{s.get('name','')}")
+        form.addRow("任务名称", name_edit)
+        combo_mode = QComboBox()
+        combo_mode.addItems({"daily": "每天（按时刻）", "once": "单次（指定日期时间）",
+                             "weekly": "每周（指定星期）", "interval": "间隔（每 N 小时）"}.values())
+        form.addRow("调度方式", combo_mode)
+        time_edit = QTimeEdit(); time_edit.setTime(_dt.now().time().replace(second=0, microsecond=0))
+        time_edit.setDisplayFormat("HH:mm"); form.addRow("执行时刻", time_edit)
+        date_edit = QLineEdit(_dt.now().strftime("%Y-%m-%d")); date_edit.setPlaceholderText("YYYY-MM-DD")
+        form.addRow("执行日期", date_edit)
+        interval_spin = QSpinBox(); interval_spin.setRange(1, 168); interval_spin.setValue(24)
+        form.addRow("间隔小时", interval_spin)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        mode_map = {0: "daily", 1: "once", 2: "weekly", 3: "interval"}
+        mode = mode_map[combo_mode.currentIndex()]
+        hhmm = time_edit.time().toString("HH:mm")
+        schedule = {"mode": mode, "time": hhmm}
+        if mode == "once":
+            schedule["date"] = date_edit.text().strip()
+        elif mode == "weekly":
+            schedule["weekdays"] = [0, 1, 2, 3, 4]
+        elif mode == "interval":
+            schedule["interval_hours"] = interval_spin.value()
+        self._submit_script(immediate=False, schedule=schedule, title=name_edit.text().strip())
 
     # ════════════════════════════════════════════════════════════════════════
     #  产品选择

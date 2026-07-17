@@ -7812,6 +7812,40 @@ class VideoMontagePage(BasePage):
         except Exception:
             return False
 
+    def _save_script_meta(self, video_path, clips, brand="", product="", model_name="", extra=""):
+        """保存脚本关联元数据（与 .txt 同名的 .meta.json）。"""
+        import json as _json
+        from datetime import datetime
+        meta_path = os.path.splitext(video_path)[0] + ".meta.json"
+        meta = {
+            "generated_at": datetime.now().isoformat(),
+            "model": self.main_window.ai_config.get("llm_model", ""),
+            "source_clips": [os.path.basename(c) for c in clips if c],
+            "product": {
+                "brand": brand or "",
+                "product": product or "",
+                "model": model_name or "",
+                "extra": extra or "",
+            },
+        }
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                _json.dump(meta, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            log.warning(f"保存脚本元数据失败: {e}")
+
+    def _load_script_meta(self, video_path):
+        """读取脚本关联元数据。"""
+        import json as _json
+        meta_path = os.path.splitext(video_path)[0] + ".meta.json"
+        try:
+            if os.path.exists(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    return _json.load(f)
+        except Exception:
+            pass
+        return None
+
     def _assembled_copy_preview(self, path):
         """获取文案的文字预览（前30字），无文案返回空串。"""
         if not path:
@@ -8164,6 +8198,17 @@ class VideoMontagePage(BasePage):
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
 
+    def _get_video_scene_sources(self, path):
+        """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
+        sources_file = os.path.splitext(path)[0] + "_sources.txt"
+        if not os.path.exists(sources_file):
+            return []
+        try:
+            with open(sources_file, "r", encoding="utf-8") as sf:
+                return [line.strip() for line in sf if line.strip()]
+        except Exception:
+            return []
+
     def _get_video_scene_descriptions(self, path):
         """读取某组合视频的 _sources.txt，按顺序解析出每个镜头画面的描述文案。"""
         scenes = []
@@ -8287,6 +8332,9 @@ class VideoMontagePage(BasePage):
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "保存失败", f"写入文案文件失败：\n{e}")
                 return
+            # 保存关联元数据
+            clips = self._get_video_scene_sources(pth)
+            self._save_script_meta(pth, clips, brand, product, model_name, extra)
             self.stage_label.setText("✅ 口播文案已按画面生成并保存")
             self._refresh_assembled_copy_buttons()
             QMessageBox.information(
@@ -8472,11 +8520,14 @@ class VideoMontagePage(BasePage):
             total_duration=total_dur)
 
         companion_txt = os.path.splitext(path)[0] + ".txt"
+        source_clips = self._get_video_scene_sources(path)
 
-        def on_ok(content, ctxt=companion_txt, pth=path):
+        def on_ok(content, ctxt=companion_txt, pth=path, clips=source_clips):
             try:
                 with open(ctxt, "w", encoding="utf-8") as f:
                     f.write(content)
+                # 保存关联元数据
+                self._save_script_meta(pth, clips, brand, product, model_name, extra)
                 # Invalidate the step-3 cache entry so the table re-reads the file on next scan
                 if hasattr(self, "original_texts"):
                     self.original_texts.pop(pth, None)

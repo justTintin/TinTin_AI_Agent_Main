@@ -26,6 +26,7 @@ import time
 from gui.montage.utils_media import (
     find_ffmpeg, get_media_duration, parse_srt, extract_keyframes,
     format_seconds_to_srt_timestamp, parse_srt_to_descriptions,
+    compute_clip_hash, compute_clip_quality,
 )
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
@@ -54,6 +55,7 @@ from gui.montage.workers.script_workers import (PunctuationSRTLLMWorker, AITextR
 
 
 class VideoMontagePage(BasePage):
+    # [1·初始化]  __init__
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
@@ -110,7 +112,7 @@ class VideoMontagePage(BasePage):
         self._confirm_queue = []
         self._preview_sequence_clips = []
         self._preview_sequence_idx = 0
-
+    # [1·初始化]  setup
     def setup(self):
         # Main layout
         layout = QVBoxLayout(self.parent_widget)
@@ -228,7 +230,7 @@ class VideoMontagePage(BasePage):
         # Initialize UI indicators
         self.update_step_indicator(0)
         self._populate_ref_audio_samples()
-
+    # [9·其他]  update_step_indicator
     def update_step_indicator(self, index):
         for i, lbl in enumerate(self.step_labels):
             if i == index:
@@ -239,7 +241,7 @@ class VideoMontagePage(BasePage):
                 lbl.setProperty("status", "pending")
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
-
+    # [2·基础设施]  _go_to_step
     def _go_to_step(self, index):
         # Stop any ongoing media playback when switching steps
         if hasattr(self, "_bgm_player") and self._bgm_player:
@@ -263,7 +265,7 @@ class VideoMontagePage(BasePage):
                 self._populate_default_mix_videos()
             else:
                 self._update_final_inputs_label()
-
+    # [2·基础设施]  _on_enter_step_3
     def _on_enter_step_3(self):
         dir_path = ""
         confirmed_paths = self._collect_assembled_paths() if hasattr(self, "_collect_assembled_paths") else []
@@ -293,6 +295,7 @@ class VideoMontagePage(BasePage):
         self._populate_ref_audio_samples()
 
     # ==================== PAGE 0: SMART SPLIT ====================
+    # [1·初始化]  _setup_page_split_legacy
     def _setup_page_split_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -453,6 +456,7 @@ class VideoMontagePage(BasePage):
         self.stacked_widget.addWidget(page)
 
     # ==================== PAGE 1: CLIP ASSEMBLY ====================
+    # [1·初始化]  _setup_page_concat_legacy
     def _setup_page_concat_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -812,7 +816,7 @@ class VideoMontagePage(BasePage):
 
         self.stacked_widget.addWidget(page)
         self._on_logic_combo_changed()
-
+    # [1·初始化]  _setup_page_voice_legacy
     def _setup_page_voice_legacy(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -1065,6 +1069,7 @@ class VideoMontagePage(BasePage):
         self.stacked_widget.addWidget(page)
 
     # ==================== PAGE 3: FINAL MIX ====================
+    # [1·初始化]  _setup_page_final_legacy
     def _setup_page_final_legacy(self):
         from PySide6.QtMultimediaWidgets import QVideoWidget
         from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -1262,11 +1267,12 @@ class VideoMontagePage(BasePage):
 
 
     # ==================== STEP HELPER ACTIONS ====================
+    # [9·其他]  _decorate_video_item_widget
     def _decorate_video_item_widget(self, item):
         path = item.text().strip()
         if not path:
             return
-
+    # [9·其他]  _show_video_context_menu
     def _show_video_context_menu(self, pos):
         item = self.video_list.itemAt(pos)
         if not item:
@@ -1276,7 +1282,7 @@ class VideoMontagePage(BasePage):
         act.triggered.connect(lambda: self._remove_source_video_item(item))
         menu.addAction(act)
         menu.exec_(self.video_list.viewport().mapToGlobal(pos))
-
+    # [9·其他]  _remove_source_video_item
     def _remove_source_video_item(self, item):
         row = self.video_list.row(item)
         if row < 0:
@@ -1289,7 +1295,7 @@ class VideoMontagePage(BasePage):
         self._kill_running_workers()
         self._refresh_source_root_hint()
         self._check_split_clips_exist()
-
+    # [2·基础设施]  _kill_running_workers
     def _kill_running_workers(self):
         """终止所有可能正在后台运行的 worker（镜头分割 / 批量分割 / 挑精华）。"""
         for attr in ("worker", "highlight_worker"):
@@ -1314,7 +1320,7 @@ class VideoMontagePage(BasePage):
             if btn:
                 btn.setEnabled(True)
         self.progress_bar.setVisible(False)
-
+    # [2·基础设施]  _refresh_source_root_hint
     def _refresh_source_root_hint(self):
         paths = []
         for i in range(self.video_list.count()):
@@ -1329,7 +1335,7 @@ class VideoMontagePage(BasePage):
         except Exception:
             common_dir = os.path.dirname(os.path.abspath(paths[0]))
         self.folder_path_input.setText(common_dir)
-
+    # [2·基础设施]  _select_folder
     def _select_folder(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self.parent_widget,
@@ -1367,7 +1373,7 @@ class VideoMontagePage(BasePage):
         else:
             self.stage_label.setText(f"已新增 {added} 个素材到列表。")
 
-
+    # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
         if hasattr(self, "temp_scenes") and self.temp_scenes and len(self.temp_scenes) == len(files):
             return self.temp_scenes
@@ -1388,7 +1394,7 @@ class VideoMontagePage(BasePage):
             scenes.append((current_time, current_time + duration))
             current_time += duration
         return scenes
-
+    # [3·分割]  _parse_split_filename
     def _parse_split_filename(self, filename):
         import re
         pattern = r"_shot_(\d+)_(\d{2}-\d{2}-\d{2},\d{3})_(\d{2}-\d{2}-\d{2},\d{3})(?:_(.*))?$"
@@ -1401,7 +1407,7 @@ class VideoMontagePage(BasePage):
             desc = match.group(4) or ""
             return idx, start_str, end_str, desc
         return None
-
+    # [2·基础设施]  _get_renamed_path
     def _get_renamed_path(self, old_path, idx, start_sec, end_sec, desc):
         import re
         dir_name = os.path.dirname(old_path)
@@ -1426,7 +1432,7 @@ class VideoMontagePage(BasePage):
         else:
             new_name = f"{prefix}_shot_{idx:03d}_{start_str}_{end_str}.mp4"
         return os.path.abspath(os.path.join(dir_name, new_name))
-
+    # [3·分割]  _rename_all_splits_with_metadata
     def _rename_all_splits_with_metadata(self, splits_dir, scenes, desc_dict=None):
         if not os.path.exists(splits_dir):
             return
@@ -1473,7 +1479,7 @@ class VideoMontagePage(BasePage):
         self.split_clips_list = new_split_clips_list
         for p, d in new_split_descriptions.items():
             self.split_descriptions[p] = d
-
+    # [3·分割]  _update_raw_srt_display_from_splits
     def _update_raw_srt_display_from_splits(self):
         dir_path = self.folder_path_input.text().strip()
         if not dir_path or not os.path.exists(dir_path):
@@ -1509,7 +1515,7 @@ class VideoMontagePage(BasePage):
         srt_content = "\n".join(srt_lines)
         if hasattr(self, "raw_srt_display"):
             self.raw_srt_display.setPlainText(srt_content)
-
+    # [3·分割]  _save_split_srt
     def _save_split_srt(self):
         selected_item = self.video_list.currentItem()
         video_path = selected_item.text() if selected_item else ""
@@ -1557,7 +1563,7 @@ class VideoMontagePage(BasePage):
             log.info(f"成功保存分割字幕到文件: {srt_path}")
         except Exception as e:
             log.warning(f"保存分割字幕文件失败: {e}")
-
+    # [3·分割]  _check_split_clips_exist
     def _check_split_clips_exist(self, item=None):
         dir_path = self.folder_path_input.text().strip()
         _cur_item = self.video_list.currentItem() if hasattr(self, "video_list") else None
@@ -1734,7 +1740,7 @@ class VideoMontagePage(BasePage):
         else:
             self.concat_clips_list_widget.clearContents()
             self.concat_clips_list_widget.setRowCount(0)
-
+    # [3·分割]  _on_score_ready
     def _on_score_ready(self, row_idx, score):
         """后台评分完成一行，更新表格和缓存。"""
         if row_idx < 0 or row_idx >= len(self._pending_score_rows):
@@ -1754,7 +1760,7 @@ class VideoMontagePage(BasePage):
                 item.setForeground(QColor("#f1c40f"))
             elif score >= 0:
                 item.setForeground(QColor("#e74c3c"))
-
+    # [3·分割]  _on_score_all_done
     def _on_score_all_done(self):
         """所有后台评分完成。"""
         log.info(f"[评分] 后台评分全部完成，共 {len(self._pending_score_rows)} 个镜头")
@@ -1772,7 +1778,7 @@ class VideoMontagePage(BasePage):
             self.btn_assemble_video.setEnabled(False)
 
         self.btn_next_to_step_2.setEnabled(True)
-
+    # [7·混音导出]  _select_bgm
     def _select_bgm(self):
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget,
@@ -1782,7 +1788,7 @@ class VideoMontagePage(BasePage):
         )
         if path:
             self.bgm_input.setText(path)
-
+    # [2·基础设施]  _select_ref_audio
     def _select_ref_audio(self):
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget,
@@ -1801,7 +1807,7 @@ class VideoMontagePage(BasePage):
             name = os.path.basename(path)
             self.ref_audio_combo.insertItem(0, f"本地: {name}", path)
             self.ref_audio_combo.setCurrentIndex(0)
-
+    # [2·基础设施]  _on_ref_audio_combo_changed
     def _on_ref_audio_combo_changed(self, index):
         data = self.ref_audio_combo.currentData()
         if data == "custom":
@@ -1820,12 +1826,12 @@ class VideoMontagePage(BasePage):
                     if s.get("path") and os.path.abspath(s.get("path")) == os.path.abspath(path):
                         self.ref_text_input.setText(s.get("ref_text", s.get("text", "")))
                         break
-
+    # [9·其他]  _play_ref_audio
     def _play_ref_audio(self):
         path = self.ref_audio_combo.currentData()
         if path and os.path.exists(path):
             self._play_video(path)
-
+    # [2·基础设施]  _populate_ref_audio_samples
     def _populate_ref_audio_samples(self):
         self.ref_audio_combo.blockSignals(True)
         self.ref_audio_combo.clear()
@@ -1846,7 +1852,7 @@ class VideoMontagePage(BasePage):
             
         self.ref_audio_combo.blockSignals(False)
         self._on_ref_audio_combo_changed(self.ref_audio_combo.currentIndex())
-
+    # [6·配音]  _select_voice_video_dir
     def _select_voice_video_dir(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self.parent_widget,
@@ -1859,10 +1865,10 @@ class VideoMontagePage(BasePage):
             self.voice_video_dir_input.setText(dir_path)
             self.selected_voice_video_files = file_paths
             self._scan_voice_video_dir()
-
+    # [6·配音]  _on_voice_video_dir_changed
     def _on_voice_video_dir_changed(self):
         self._scan_voice_video_dir()
-
+    # [6·配音]  _scan_voice_video_dir
     def _scan_voice_video_dir(self):
         if getattr(self, "_scanning_voice_dir", False):
             return
@@ -1871,7 +1877,7 @@ class VideoMontagePage(BasePage):
             self._do_scan_voice_video_dir()
         finally:
             self._scanning_voice_dir = False
-
+    # [6·配音]  _do_scan_voice_video_dir
     def _do_scan_voice_video_dir(self):
         dir_path = self.voice_video_dir_input.text().strip()
         self.voice_video_paths = []
@@ -2107,7 +2113,7 @@ class VideoMontagePage(BasePage):
             self.voice_table.setCellWidget(i, 1, detail_widget)
 
         self._adjust_table_height()
-
+    # [2·基础设施]  _adjust_table_height
     def _adjust_table_height(self):
         row_count = self.voice_table.rowCount()
         if row_count == 0:
@@ -2129,7 +2135,7 @@ class VideoMontagePage(BasePage):
         # Cap height between a minimum of 350px and a maximum of 600px to ensure scrolling if there are many files
         capped_height = min(max(target_height, 350), 600)
         self.voice_table.setFixedHeight(capped_height)
-
+    # [9·其他]  _on_edit_double_clicked
     def _on_edit_double_clicked(self, row_idx):
         edit = self.row_edits.get(row_idx)
         if edit:
@@ -2137,7 +2143,7 @@ class VideoMontagePage(BasePage):
             if dialog.exec() == QDialog.Accepted:
                 new_text = dialog.get_text()
                 edit.setText(new_text)
-
+    # [7·混音导出]  _on_btn_compare_clicked
     def _on_btn_compare_clicked(self, row_idx):
         item_file = self.voice_table.item(row_idx, 1)
         if not item_file:
@@ -2155,7 +2161,7 @@ class VideoMontagePage(BasePage):
             new_text = dialog.get_text()
             if edit:
                 edit.setText(new_text)
-
+    # [8·事件回调]  _on_row_progress
     def _on_row_progress(self, row_idx, value):
         edit = self.row_edits.get(row_idx)
         if edit:
@@ -2198,12 +2204,12 @@ class VideoMontagePage(BasePage):
                     }}
                 """
             edit.setStyleSheet(style)
-
+    # [9·其他]  _on_btn_play_clicked
     def _on_btn_play_clicked(self, video_path):
         wav_path = self.generated_voice_paths.get(video_path, "")
         if wav_path and os.path.exists(wav_path):
             self._play_audio(wav_path)
-
+    # [7·混音导出]  _on_btn_export_clicked
     def _on_btn_export_clicked(self, video_path):
         wav_path = self.generated_voice_paths.get(video_path, "")
         if not wav_path or not os.path.exists(wav_path):
@@ -2221,7 +2227,7 @@ class VideoMontagePage(BasePage):
                 QMessageBox.information(self.parent_widget, "导出成功", f"人声音频成功导出至：\n{save_path}")
             except Exception as e:
                 QMessageBox.warning(self.parent_widget, "导出失败", f"无法导出文件: {e}")
-
+    # [6·配音]  _play_audio
     def _play_audio(self, wav_path):
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -2242,7 +2248,7 @@ class VideoMontagePage(BasePage):
             self._media_player.play()
         except Exception as e:
             log.error(f"播放音频失败: {e}")
-
+    # [9·其他]  _on_btn_regen_clicked
     def _on_btn_regen_clicked(self, video_path):
         for i in range(self.voice_table.rowCount()):
             item = self.voice_table.item(i, 1)
@@ -2255,7 +2261,7 @@ class VideoMontagePage(BasePage):
                 
                 self._start_single_synthesize(i, video_path, text)
                 break
-
+    # [6·配音]  _start_single_synthesize
     def _start_single_synthesize(self, row_idx, video_path, text):
         if self.voice_worker and self.voice_worker.isRunning():
             QMessageBox.warning(self.parent_widget, "合成中", "当前有克隆人声合成任务正在运行，请等待其完成。")
@@ -2309,7 +2315,7 @@ class VideoMontagePage(BasePage):
         self.voice_worker.finished.connect(self._on_voice_finished)
         self.voice_worker.error.connect(self._on_voice_error)
         self.voice_worker.start()
-
+    # [3·分割]  _install_scenedetect
     def _install_scenedetect(self):
         if hasattr(self, "_install_thread") and self._install_thread and self._install_thread.isRunning():
             return
@@ -2370,6 +2376,7 @@ class VideoMontagePage(BasePage):
     # ==================== CONTROLLER RUN WORKERS ====================
 
     # --- Step 1 single video split ---
+    # [3·分割]  _start_split
     def _start_split(self):
         if self.worker and self.worker.isRunning():
             return
@@ -2403,7 +2410,7 @@ class VideoMontagePage(BasePage):
         self.worker.finished.connect(self._on_split_finished)
         self.worker.error.connect(self._on_split_error)
         self.worker.start()
-
+    # [3·分割]  _on_split_finished
     def _on_split_finished(self, out_dir, count, scenes):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
@@ -2430,7 +2437,7 @@ class VideoMontagePage(BasePage):
 
         # Rename splits with timestamps
         self._rename_all_splits_with_metadata(out_dir, scenes)
-
+    # [3·分割]  _on_split_error
     def _on_split_error(self, err):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
@@ -2442,6 +2449,7 @@ class VideoMontagePage(BasePage):
         QMessageBox.critical(self.parent_widget, "运行错误", f"处理过程中发生错误：\n{err}")
 
     # --- Step 1 batch "pick best N seconds" highlights ---
+    # [3·分割]  _start_pick_highlights
     def _start_pick_highlights(self):
         if (self.worker and self.worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
@@ -2515,7 +2523,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
 
         self._pick_highlight_next()
-
+    # [3·分割]  _pick_highlight_next
     def _pick_highlight_next(self):
         if not self._hl_queue:
             self._on_highlights_all_finished()
@@ -2547,13 +2555,13 @@ class VideoMontagePage(BasePage):
         self.highlight_worker.finished.connect(self._on_highlight_finished)
         self.highlight_worker.error.connect(self._on_highlight_error)
         self.highlight_worker.start()
-
+    # [3·分割]  _on_highlight_finished
     def _on_highlight_finished(self, out_path, start, end):
         self._hl_ok += 1
         log.info(f"精华片段已生成：{out_path}  [{start:.2f}-{end:.2f}]")
         self._hl_done += 1
         self._pick_highlight_next()
-
+    # [3·分割]  _on_highlight_error
     def _on_highlight_error(self, err):
         self._hl_fail += 1
         last_line = (err or "").strip().splitlines()[-1] if err else "未知错误"
@@ -2561,7 +2569,7 @@ class VideoMontagePage(BasePage):
         log.error(f"批量挑精华单条失败：{err}")
         self._hl_done += 1
         self._pick_highlight_next()
-
+    # [3·分割]  _on_highlights_all_finished
     def _on_highlights_all_finished(self):
         self.btn_split.setEnabled(True)
         self.btn_pick_highlights.setEnabled(True)
@@ -2591,7 +2599,7 @@ class VideoMontagePage(BasePage):
             scenes = self._get_split_scenes_times(self._hl_shared_splits, files) if files else []
             self._trigger_vision_on_dir(self._hl_shared_splits, scenes, "批量挑精华")
 
-
+    # [4·文案脚本]  _trigger_vision_on_dir
     def _trigger_vision_on_dir(self, splits_dir, scenes, source_label="镜头分割"):
         """对指定 splits 目录中的所有片段运行视觉AI画面分析。
 
@@ -2651,7 +2659,7 @@ class VideoMontagePage(BasePage):
         self.vision_desc_worker.finished.connect(self._on_trigger_vision_finished)
         self.vision_desc_worker.error.connect(self._on_desc_error)
         self.vision_desc_worker.start()
-
+    # [4·文案脚本]  _on_trigger_vision_finished
     def _on_trigger_vision_finished(self, desc_json):
         """批量路径视觉分析完成回调。"""
         import json as _json
@@ -2674,7 +2682,7 @@ class VideoMontagePage(BasePage):
 
         self._check_split_clips_exist()
 
-
+    # [4·文案脚本]  _on_desc_error
     def _on_desc_error(self, err):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -2697,7 +2705,7 @@ class VideoMontagePage(BasePage):
             "描述生成失败",
             f"大模型批量分析描述失败，已采用空白默认值，您可以双击单元格手动编辑描述文案。\n\n错误信息：{err}"
         )
-
+    # [9·其他]  _preview_table_item
     def _preview_table_item(self, item):
         row = item.row()
         file_item = self.split_result_table.item(row, 1)
@@ -2705,7 +2713,7 @@ class VideoMontagePage(BasePage):
             path = file_item.data(Qt.UserRole)
             if path and os.path.exists(path):
                 self._play_video(path)
-
+    # [8·事件回调]  _on_table_cell_changed
     def _on_table_cell_changed(self, row, col):
         if col == 3:
             file_item = self.split_result_table.item(row, 1)
@@ -2750,6 +2758,7 @@ class VideoMontagePage(BasePage):
                     self._save_split_srt()
 
     # --- Step 1 subtitle generation execution ---
+    # [4·文案脚本]  _start_transcribe_raw
     def _start_transcribe_raw(self):
         if hasattr(self, "transcribe_raw_worker") and self.transcribe_raw_worker and self.transcribe_raw_worker.isRunning():
             return
@@ -2811,7 +2820,7 @@ class VideoMontagePage(BasePage):
         self.transcribe_raw_worker.finished.connect(self._on_transcribe_raw_finished)
         self.transcribe_raw_worker.error.connect(self._on_transcribe_raw_error)
         self.transcribe_raw_worker.start()
-
+    # [4·文案脚本]  _on_transcribe_raw_finished
     def _on_transcribe_raw_finished(self, srt_content, srt_path):
         llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
@@ -2828,7 +2837,7 @@ class VideoMontagePage(BasePage):
             self.punc_srt_worker.start()
         else:
             self._finalize_transcribe_raw(srt_content, srt_path)
-
+    # [4·文案脚本]  _on_punc_srt_finished
     def _on_punc_srt_finished(self, srt_punctuated):
         try:
             with open(self.pending_srt_path, "w", encoding="utf-8") as f:
@@ -2837,11 +2846,11 @@ class VideoMontagePage(BasePage):
         except Exception as e:
             log.warning(f"保存AI优化后的字幕失败: {e}")
             self._finalize_transcribe_raw(self.raw_unpunctuated_srt, self.pending_srt_path)
-
+    # [4·文案脚本]  _on_punc_srt_error
     def _on_punc_srt_error(self, err):
         log.warning(f"AI优化字幕标点失败: {err}，将采用原始字幕。")
         self._finalize_transcribe_raw(self.raw_unpunctuated_srt, self.pending_srt_path)
-
+    # [4·文案脚本]  _finalize_transcribe_raw
     def _finalize_transcribe_raw(self, srt_content, srt_path, info_msg=""):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
@@ -2860,7 +2869,7 @@ class VideoMontagePage(BasePage):
         if getattr(self, "_pending_gen_descriptions", False):
             self._pending_gen_descriptions = False
             self._gen_split_descriptions()
-
+    # [4·文案脚本]  _on_transcribe_raw_error
     def _on_transcribe_raw_error(self, err):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
@@ -2873,13 +2882,14 @@ class VideoMontagePage(BasePage):
             "字幕生成错误",
             f"处理过程中发生错误：\n{err}"
         )
-
+    # [4·文案脚本]  _transcription_deps_ok
     def _transcription_deps_ok(self):
         # 纯远程 ASR 模式：转写由远程服务完成，不再依赖本地 torch / whisperx。
         return True
 
 
     # --- Step 2 Concat execution ---
+    # [5·拼接合成]  _start_assemble_video
     def _start_assemble_video(self):
         if self.concat_worker and self.concat_worker.isRunning():
             return
@@ -2974,7 +2984,7 @@ class VideoMontagePage(BasePage):
             f"已生成 {len(plan_clips_list)} 条预合成方案。\n"
             "可在下方删除/调序镜头，确认无误后点击“确认合成视频”。"
         )
-
+    # [4·文案脚本]  _on_script_match_finished
     def _on_script_match_finished(self, matched_paths, matched_descs):
         """LLM 匹配完成：生成 1 条按文案顺序的预合成方案，待用户确认合成。"""
         out_montage_dir = getattr(self, "_pending_out_montage_dir", "")
@@ -2987,7 +2997,7 @@ class VideoMontagePage(BasePage):
         self._load_precompose_plans(plan, out_montage_dir)
         self.stage_label.setText(f"🎯 匹配完成：{len(matched_paths)} 句文案已配齐，请确认合成")
         self.progress_bar.setVisible(False)
-
+    # [4·文案脚本]  _on_script_match_error
     def _on_script_match_error(self, err):
         self.btn_assemble_video.setEnabled(True)
         self.progress_bar.setRange(0, 100)
@@ -2995,7 +3005,7 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("❌ 文案镜头匹配失败")
         QMessageBox.critical(self.parent_widget, "智能匹配失败",
                              f"大模型匹配文案与镜头时出错：\n{err}\n\n可切换回「随机洗牌」模式继续。")
-
+    # [5·拼接合成]  _launch_concat_worker
     def _launch_concat_worker(self, selected_clips, out_montage_dir, recombine_mode,
                               target_clip_count, batch_count, randomness,
                               selected_descriptions_list=None):
@@ -3021,7 +3031,7 @@ class VideoMontagePage(BasePage):
         self.concat_worker.finished.connect(self._on_concat_finished)
         self.concat_worker.error.connect(self._on_concat_error)
         self.concat_worker.start()
-
+    # [8·事件回调]  _on_logic_combo_changed
     def _on_logic_combo_changed(self):
         logic = self.logic_combo.currentData() if hasattr(self, "logic_combo") else "random"
         is_script = (logic == "script")
@@ -3061,7 +3071,7 @@ class VideoMontagePage(BasePage):
                 self.randomness_combo.setEnabled(True)
                 self.randomness_combo.setCurrentIndex(0) # 中 (保留同场景)
         self._update_batch_count_recommendation()
-
+    # [4·文案脚本]  _on_gen_script_clicked
     def _on_gen_script_clicked(self):
         """智能匹配模式：根据已勾选的镜头素材描述，调用 AI 生成口播文案（受时长限制约束）。"""
         cfg = getattr(self.main_window, "ai_config", {}) or {}
@@ -3116,7 +3126,7 @@ class VideoMontagePage(BasePage):
         self._gen_script_worker.finished.connect(self._on_gen_script_finished)
         self._gen_script_worker.error.connect(self._on_gen_script_error)
         self._gen_script_worker.start()
-
+    # [4·文案脚本]  _on_gen_script_finished
     def _on_gen_script_finished(self, script_text):
         """AI 生成文案完成：写入文案框，恢复 UI。"""
         self.btn_gen_script.setEnabled(True)
@@ -3132,7 +3142,7 @@ class VideoMontagePage(BasePage):
             self.parent_widget, "文案已生成",
             f"AI 已根据 {script_text.count(chr(10)) + 1} 个镜头素材生成口播文案。\n"
             f"可在文案框中编辑调整，确认后点击「镜头重组」进行智能匹配。")
-
+    # [4·文案脚本]  _on_gen_script_error
     def _on_gen_script_error(self, err):
         """AI 生成文案失败：恢复 UI，提示错误。"""
         self.btn_gen_script.setEnabled(True)
@@ -3142,7 +3152,7 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("❌ AI 文案生成失败")
         QMessageBox.critical(self.parent_widget, "文案生成失败",
                              f"调用大模型生成文案时出错：\n{err}")
-
+    # [5·拼接合成]  _on_concat_finished
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)
         self.progress_bar.setValue(100)
@@ -3197,7 +3207,7 @@ class VideoMontagePage(BasePage):
                 "排列生成成功",
                 f"批量镜头排列生成完毕，共生成 {len(paths)} 个视频文件，已保存至输出目录中。"
             )
-
+    # [5·拼接合成]  _on_concat_error
     def _on_concat_error(self, err):
         self.btn_assemble_video.setEnabled(True)
         self._confirming_plan_index = None
@@ -3209,6 +3219,7 @@ class VideoMontagePage(BasePage):
 
 
     # --- Step 3 Voice synthesis execution ---
+    # [4·文案脚本]  _show_ai_rewrite_settings
     def _show_ai_rewrite_settings(self):
         dialog = QDialog(self.parent_widget)
         dialog.setWindowTitle("文案生成设置")
@@ -3298,7 +3309,7 @@ class VideoMontagePage(BasePage):
         if dialog.exec() == QDialog.Accepted:
             freedom_pct = slider.value()
             self.ai_rewrite_temperature = 1.0 - (freedom_pct / 100.0)
-
+    # [4·文案脚本]  _batch_ai_rewrite_scripts
     def _batch_ai_rewrite_scripts(self):
         if hasattr(self, "batch_rewrite_worker") and self.batch_rewrite_worker and self.batch_rewrite_worker.isRunning():
             return
@@ -3345,19 +3356,19 @@ class VideoMontagePage(BasePage):
         self.batch_rewrite_worker.finished.connect(self._on_batch_rewrite_finished)
         self.batch_rewrite_worker.error.connect(self._on_batch_rewrite_error)
         self.batch_rewrite_worker.start()
-        
+    # [4·文案脚本]  _on_batch_rewrite_row_finished
     def _on_batch_rewrite_row_finished(self, row_idx, content):
         edit = self.row_edits.get(row_idx)
         if edit:
             edit.setText(content)
-            
+    # [4·文案脚本]  _on_batch_rewrite_finished
     def _on_batch_rewrite_finished(self):
         self.btn_batch_ai_rewrite.setEnabled(True)
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
         self.stage_label.setText("✅ 一键AI修改全部文案完成！")
         QMessageBox.information(self.parent_widget, "成功", "批量AI文案修改润色完成！")
-        
+    # [4·文案脚本]  _on_batch_rewrite_error
     def _on_batch_rewrite_error(self, err):
         self.btn_batch_ai_rewrite.setEnabled(True)
         self.btn_synthesize_voice.setEnabled(True)
@@ -3365,7 +3376,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ AI修改文案失败")
         QMessageBox.critical(self.parent_widget, "AI修改失败", f"批量修改失败：\n{err}")
-
+    # [6·配音]  _start_synthesize_voice
     def _start_synthesize_voice(self):
         if self.voice_worker and self.voice_worker.isRunning():
             return
@@ -3450,7 +3461,7 @@ class VideoMontagePage(BasePage):
         self.voice_worker.finished.connect(self._on_voice_finished)
         self.voice_worker.error.connect(self._on_voice_error)
         self.voice_worker.start()
-
+    # [6·配音]  _on_voice_finished
     def _on_voice_finished(self, results):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
@@ -3490,7 +3501,7 @@ class VideoMontagePage(BasePage):
                 "合成成功",
                 f"批量人声克隆合成完毕，共生成 {len(results)} 个音频文件。"
             )
-
+    # [6·配音]  _on_voice_error
     def _on_voice_error(self, err):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(bool(self.generated_voice_paths))
@@ -3499,7 +3510,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
         QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
-
+    # [7·混音导出]  _start_dubbing_videos
     def _start_dubbing_videos(self):
         if self.dub_worker and self.dub_worker.isRunning():
             return
@@ -3560,7 +3571,7 @@ class VideoMontagePage(BasePage):
         self.dub_worker.finished.connect(self._on_dubbing_finished)
         self.dub_worker.error.connect(self._on_dubbing_error)
         self.dub_worker.start()
-
+    # [7·混音导出]  _on_dubbing_finished
     def _on_dubbing_finished(self, results):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
@@ -3577,7 +3588,7 @@ class VideoMontagePage(BasePage):
         # Pop up playable dubbed videos list dialog
         dlg = DubbedVideosDialog(self.parent_widget, results)
         dlg.exec()
-
+    # [7·混音导出]  _on_dubbing_error
     def _on_dubbing_error(self, err):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
@@ -3589,6 +3600,7 @@ class VideoMontagePage(BasePage):
 
 
     # --- Step 4 Final mix helpers & execution ---
+    # [7·混音导出]  _populate_default_mix_videos
     def _populate_default_mix_videos(self):
         self.mix_video_table.setRowCount(0)
         
@@ -3614,7 +3626,7 @@ class VideoMontagePage(BasePage):
             
         self._adjust_mix_table_height()
         self._update_final_inputs_label()
-
+    # [7·混音导出]  _add_video_to_mix_table
     def _add_video_to_mix_table(self, filepath, source_type="手动选择"):
         filepath = os.path.abspath(filepath)
         for r in range(self.mix_video_table.rowCount()):
@@ -3687,7 +3699,7 @@ class VideoMontagePage(BasePage):
         action_layout.addWidget(btn_del)
 
         self.mix_video_table.setCellWidget(row_idx, 4, action_w)
-
+    # [7·混音导出]  _select_per_video_bgm
     def _select_per_video_bgm(self, filepath, button):
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget,
@@ -3699,7 +3711,7 @@ class VideoMontagePage(BasePage):
             self.per_video_bgm[filepath] = path
             button.setToolTip(f"已选: {os.path.basename(path)}\n点击更换")
             button.setStyleSheet("padding: 0px; font-size: 11px; background-color: rgba(46,204,113,0.2);")
-
+    # [7·混音导出]  _remove_mix_video_row
     def _remove_mix_video_row(self):
         button = self.parent_widget.sender()
         if button:
@@ -3713,7 +3725,7 @@ class VideoMontagePage(BasePage):
                         item.setText(str(r + 1))
                 self._adjust_mix_table_height()
                 self._update_final_inputs_label()
-
+    # [7·混音导出]  _add_mix_videos
     def _add_mix_videos(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self.parent_widget,
@@ -3726,12 +3738,12 @@ class VideoMontagePage(BasePage):
                 self._add_video_to_mix_table(path, "手动选择")
             self._adjust_mix_table_height()
             self._update_final_inputs_label()
-
+    # [7·混音导出]  _clear_mix_videos
     def _clear_mix_videos(self):
         self.mix_video_table.setRowCount(0)
         self._adjust_mix_table_height()
         self._update_final_inputs_label()
-
+    # [7·混音导出]  _adjust_mix_table_height
     def _adjust_mix_table_height(self):
         row_count = self.mix_video_table.rowCount()
         if row_count == 0:
@@ -3756,10 +3768,10 @@ class VideoMontagePage(BasePage):
         target_height = header_height + total_rows_height + frame_width + margin_height + 4
         capped_height = min(max(target_height, 120), 400)
         self.mix_video_table.setFixedHeight(capped_height)
-
+    # [9·其他]  _update_final_inputs_label
     def _update_final_inputs_label(self):
         pass
-
+    # [9·其他]  _get_out_montage_dir
     def _get_out_montage_dir(self, dir_path):
         dir_path = os.path.abspath(dir_path)
         path_str = dir_path.replace("\\", "/").rstrip("/")
@@ -3773,7 +3785,7 @@ class VideoMontagePage(BasePage):
             
         base_parent = os.path.abspath(os.path.join(dir_path, ".."))
         return os.path.abspath(os.path.join(base_parent, "outputs"))
-
+    # [9·其他]  _get_out_final_dir
     def _get_out_final_dir(self, first_vid):
         first_vid = os.path.abspath(first_vid)
         path_str = first_vid.replace("\\", "/").rstrip("/")
@@ -3787,7 +3799,7 @@ class VideoMontagePage(BasePage):
         if os.path.basename(os.path.dirname(first_vid)) in ("dubbed", "outputs"):
             base_parent = os.path.abspath(os.path.join(base_parent, ".."))
         return os.path.abspath(os.path.join(base_parent, "final"))
-
+    # [7·混音导出]  _toggle_bgm_play
     def _toggle_bgm_play(self):
         bgm_path = self.bgm_input.text().strip()
         if not bgm_path or not os.path.exists(bgm_path):
@@ -3818,7 +3830,7 @@ class VideoMontagePage(BasePage):
         except Exception as e:
             log.error(f"播放背景音乐失败: {e}")
             QMessageBox.critical(self.parent_widget, "播放错误", f"播放背景音乐失败: {e}")
-
+    # [7·混音导出]  _stop_bgm_play
     def _stop_bgm_play(self):
         try:
             from PySide6.QtMultimedia import QMediaPlayer
@@ -3829,20 +3841,20 @@ class VideoMontagePage(BasePage):
             self.lbl_bgm_time.setText("00:00 / 00:00")
         except Exception as e:
             log.error(f"停止背景音乐失败: {e}")
-
+    # [7·混音导出]  _on_bgm_position_changed
     def _on_bgm_position_changed(self, position):
         self.bgm_progress_slider.blockSignals(True)
         self.bgm_progress_slider.setValue(position)
         self.bgm_progress_slider.blockSignals(False)
         self._update_bgm_time_label(position, self._bgm_player.duration())
-
+    # [7·混音导出]  _on_bgm_duration_changed
     def _on_bgm_duration_changed(self, duration):
         self.bgm_progress_slider.setRange(0, duration)
         self._update_bgm_time_label(self._bgm_player.position(), duration)
-
+    # [7·混音导出]  _set_bgm_position
     def _set_bgm_position(self, position):
         self._bgm_player.setPosition(position)
-
+    # [7·混音导出]  _update_bgm_time_label
     def _update_bgm_time_label(self, position, duration):
         def format_time(ms):
             s = ms // 1000
@@ -3850,12 +3862,12 @@ class VideoMontagePage(BasePage):
             s = s % 60
             return f"{m:02d}:{s:02d}"
         self.lbl_bgm_time.setText(f"{format_time(position)} / {format_time(duration)}")
-
+    # [7·混音导出]  _on_bgm_volume_changed
     def _on_bgm_volume_changed(self, value):
         self.volume_label.setText(f"{value}%")
         if hasattr(self, "_bgm_audio_output") and self._bgm_audio_output:
             self._bgm_audio_output.setVolume(value / 100.0)
-
+    # [7·混音导出]  _start_final_mix
     def _start_final_mix(self):
         if self.mix_worker and self.mix_worker.isRunning():
             return
@@ -3914,7 +3926,7 @@ class VideoMontagePage(BasePage):
         self.mix_worker.finished.connect(self._on_mix_finished)
         self.mix_worker.error.connect(self._on_mix_error)
         self.mix_worker.start()
-
+    # [7·混音导出]  _on_mix_finished
     def _on_mix_finished(self, paths):
         self.btn_final_assemble.setEnabled(True)
         self.btn_open_final_dir.setEnabled(True)
@@ -3930,14 +3942,14 @@ class VideoMontagePage(BasePage):
                 self.final_video_list.item(self.final_video_list.count() - 1).setData(Qt.UserRole, p)
         else:
             self.final_video_path = ""
-
+    # [7·混音导出]  _on_mix_error
     def _on_mix_error(self, err):
         self.btn_final_assemble.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
         QMessageBox.critical(self.parent_widget, "合成错误", f"处理过程中发生错误：\n{err}")
-
+    # [9·其他]  _open_output_dir
     def _open_output_dir(self):
         if self.final_video_path:
             p = os.path.dirname(self.final_video_path)
@@ -3946,7 +3958,7 @@ class VideoMontagePage(BasePage):
                     os.startfile(p)
                 except Exception as e:
                     QMessageBox.warning(self.parent_widget, "打开失败", str(e))
-
+    # [5·拼接合成]  _export_to_jianying_draft
     def _export_to_jianying_draft(self):
         """一键导出为剪映工程草稿"""
         selected_item = self.final_video_list.currentItem()
@@ -4020,7 +4032,7 @@ class VideoMontagePage(BasePage):
                 "导出失败",
                 f"导出剪映草稿时发生错误：\n{result_path}"
             )
-
+    # [9·其他]  _preview_final_video
     def _preview_final_video(self, item):
         path = item.data(Qt.UserRole)
         if path and os.path.exists(path):
@@ -4028,7 +4040,7 @@ class VideoMontagePage(BasePage):
             self.final_preview_player.setSource(QUrl.fromLocalFile(path))
             self.final_preview_player.play()
             self.final_preview_title.setText(f"🎥 {os.path.basename(path)}")
-
+    # [4·文案脚本]  _run_batch_vision_descriptions
     def _run_batch_vision_descriptions(self, splits_dir, split_files, missing_only=None):
         """用 BatchGenerateDescriptionsWorker 对分割镜头做批量画面分析，生成描述。
 
@@ -4120,7 +4132,7 @@ class VideoMontagePage(BasePage):
         self._batch_desc_worker.finished.connect(on_desc_ok)
         self._batch_desc_worker.error.connect(on_desc_err)
         self._batch_desc_worker.start()
-
+    # [3·分割]  _gen_split_descriptions
     def _gen_split_descriptions(self):
         """为当前选中视频的每个分割镜头生成文案描述。
 
@@ -4217,7 +4229,7 @@ class VideoMontagePage(BasePage):
             QMessageBox.information(
                 self.parent_widget, "描述生成完成",
                 f"已从字幕匹配到 {updated_count} 个镜头的文案描述。")
-
+    # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):
         selected_item = self.video_list.currentItem()
         if selected_item:
@@ -4241,7 +4253,7 @@ class VideoMontagePage(BasePage):
                     QMessageBox.warning(self.parent_widget, "打开失败", f"无法打开文件夹:\n{e}")
             else:
                 QMessageBox.warning(self.parent_widget, "路径无效", "请先选择有效的素材目录。")
-
+    # [5·拼接合成]  _select_concat_src_dir
     def _select_concat_src_dir(self):
         default_dir = self.concat_src_dir_input.text().strip()
         if not default_dir or not os.path.exists(default_dir):
@@ -4267,7 +4279,7 @@ class VideoMontagePage(BasePage):
             self.concat_src_dir_input.setText(dir_path)
             self.selected_concat_clips_files = file_paths
             self._scan_concat_src_dir()
-
+    # [5·拼接合成]  _scan_concat_src_dir
     def _scan_concat_src_dir(self):
         dir_path = self.concat_src_dir_input.text().strip()
         
@@ -4446,7 +4458,7 @@ class VideoMontagePage(BasePage):
             self.concat_clips_list_widget.blockSignals(False)
         
         self._update_concat_count_lbl()
-
+    # [9·其他]  _select_all_clips
     def _select_all_clips(self):
         self.concat_clips_list_widget.blockSignals(True)
         for r in range(self.concat_clips_list_widget.rowCount()):
@@ -4455,7 +4467,7 @@ class VideoMontagePage(BasePage):
                 item.setCheckState(Qt.Checked)
         self.concat_clips_list_widget.blockSignals(False)
         self._update_concat_count_lbl()
-
+    # [9·其他]  _deselect_all_clips
     def _deselect_all_clips(self):
         self.concat_clips_list_widget.blockSignals(True)
         for r in range(self.concat_clips_list_widget.rowCount()):
@@ -4464,7 +4476,7 @@ class VideoMontagePage(BasePage):
                 item.setCheckState(Qt.Unchecked)
         self.concat_clips_list_widget.blockSignals(False)
         self._update_concat_count_lbl()
-
+    # [5·拼接合成]  _update_concat_count_lbl
     def _update_concat_count_lbl(self):
         self.split_clips_list = []
         checked_count = 0
@@ -4495,14 +4507,14 @@ class VideoMontagePage(BasePage):
             self.btn_assemble_video.setEnabled(True)
         else:
             self.btn_assemble_video.setEnabled(False)
-
+    # [5·拼接合成]  _recommend_batch_count
     def _recommend_batch_count(self):
         checked = max(1, len(self.split_clips_list))
         recommended = checked // 2
         if recommended <= 0:
             recommended = 1
         return max(1, min(10, recommended))
-
+    # [5·拼接合成]  _update_batch_count_recommendation
     def _update_batch_count_recommendation(self):
         if not hasattr(self, "batch_count_spin"):
             return
@@ -4514,7 +4526,7 @@ class VideoMontagePage(BasePage):
             self.batch_count_spin.setValue(10)
         if cur != rec:
             self.batch_count_spin.setValue(rec)
-
+    # [9·其他]  _get_clip_duration
     def _get_clip_duration(self, clip_path):
         """获取镜头时长（秒），优先从缓存读取。"""
         norm = os.path.abspath(clip_path)
@@ -4526,7 +4538,7 @@ class VideoMontagePage(BasePage):
         if dur > 0 and norm in cache:
             cache[norm]["duration"] = dur
         return dur
-
+    # [2·基础设施]  _load_lut_combo
     def _load_lut_combo(self):
         """从 video_config.json 加载 LUT 配置到下拉框。"""
         if not hasattr(self, "lut_combo"):
@@ -4551,98 +4563,13 @@ class VideoMontagePage(BasePage):
                 self.lut_combo.setCurrentIndex(i)
                 break
         self.lut_combo.blockSignals(False)
-
+    # [9·其他]  _get_selected_lut_path
     def _get_selected_lut_path(self):
         """返回当前选中 LUT 的文件路径，无选择返回空串。"""
         if not hasattr(self, "lut_combo"):
             return ""
         return self.lut_combo.currentData() or ""
-
-    def _compute_clip_hash(self, clip_path):
-        """提取视频中间帧，计算 64 位平均哈希用于相似度比较。
-        返回 64 位整数的哈希值，失败返回 None。两帧汉明距离 < 8 视为高度相似。
-        """
-        import cv2
-        import numpy as np
-        try:
-            cap = cv2.VideoCapture(clip_path)
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if total <= 0:
-                cap.release()
-                return None
-            # 取中间帧
-            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
-            ret, frame = cap.read()
-            cap.release()
-            if not ret:
-                return None
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (8, 8), interpolation=cv2.INTER_AREA)
-            avg = resized.mean()
-            bits = (resized > avg).flatten()
-            # 64-bit integer
-            h = 0
-            for b in bits:
-                h = (h << 1) | int(b)
-            return h
-        except Exception:
-            return None
-
-    def _compute_clip_quality(self, clip_path):
-        """评估镜头质量分数（0~100）。基于清晰度、对比度、是否有音频。
-        失败返回 -1。
-        """
-        import cv2
-        import numpy as np
-        import subprocess
-        try:
-            cap = cv2.VideoCapture(clip_path)
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if total <= 0:
-                cap.release()
-                return -1
-            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 3)
-            ret, frame = cap.read()
-            cap.release()
-            if not ret:
-                return -1
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            # 清晰度：Laplacian 方差（越高越清晰）
-            lap = cv2.Laplacian(gray, cv2.CV_64F).var()
-            # 映射到 0-50 分（正常清晰视频 ~100-500，模糊 < 50）
-            sharpness_score = min(50, max(0, lap / 10))
-
-            # 对比度：灰度标准差（太低=灰片，太高=过曝）
-            contrast = float(np.std(gray))
-            contrast_score = min(30, max(0, (contrast - 20) * 1.5))
-
-            # 音频：有音频 +20 分
-            audio_score = 0
-            try:
-                from utils.platform_utils import find_ffprobe
-                ffprobe = find_ffprobe()
-                if not ffprobe:
-                    from utils.platform_utils import find_ffmpeg
-                    ff = find_ffmpeg()
-                    if ff:
-                        ffprobe = ff.replace("ffmpeg", "ffprobe")
-                if ffprobe:
-                    r = subprocess.run(
-                        [ffprobe, "-v", "error", "-select_streams", "a",
-                         "-show_entries", "stream=codec_type", "-of", "csv=p=0", clip_path],
-                        capture_output=True, text=True, timeout=10,
-                        creationflags=0x08000000)
-                    if "audio" in (r.stdout or ""):
-                        audio_score = 20
-            except Exception:
-                pass
-
-            return min(100, round(sharpness_score + contrast_score + audio_score))
-        except Exception:
-            return -1
-
+    # [3·分割]  _score_clip
     def _score_clip(self, clip_path):
         """综合评分镜头质量（0~10 分）。
         维度：清晰度、干净度（噪点）、抖动、主体突出、曝光。
@@ -4748,12 +4675,12 @@ class VideoMontagePage(BasePage):
 
         def _hash(clip):
             if clip not in _hash_cache:
-                _hash_cache[clip] = self._compute_clip_hash(clip)
+                _hash_cache[clip] = compute_clip_hash(clip)
             return _hash_cache[clip]
 
         def _quality(clip):
             if clip not in _quality_cache:
-                _quality_cache[clip] = self._compute_clip_quality(clip)
+                _quality_cache[clip] = compute_clip_quality(clip)
             return _quality_cache[clip]
 
         def _hamming(a, b):
@@ -4834,7 +4761,7 @@ class VideoMontagePage(BasePage):
             plans.append({"clips": seq, "deleted_flags": [False] * len(seq), "mode": "random"})
         log.info(f"[DIAG _build_precompose_plans] target={target_clip_count} batch={batch_count} total_clips={len(unique)} plans={len(plans)} plan_sizes={[len(p['clips']) for p in plans]}")
         return plans
-
+    # [5·拼接合成]  _load_precompose_plans
     def _load_precompose_plans(self, plan_specs, out_montage_dir):
         self.precompose_plans = []
         self.current_precompose_index = -1
@@ -4866,7 +4793,7 @@ class VideoMontagePage(BasePage):
             self.assembled_clips_list_widget.setCurrentItem(item)
             self._on_assembled_item_clicked(item)
         self._update_confirm_all_button()
-
+    # [5·拼接合成]  _add_assembled_row
     def _add_assembled_row(self, index, path, plan=None):
         """在预合成列表中添加一行，支持确认合成状态与单条确认操作。"""
         if plan is None:
@@ -4895,7 +4822,7 @@ class VideoMontagePage(BasePage):
         item.setData(Qt.UserRole, index)
         item.setData(Qt.UserRole + 1, int(confirmed))
         self.assembled_clips_list_widget.addItem(item)
-
+    # [5·拼接合成]  _show_assembled_context_menu
     def _show_assembled_context_menu(self, pos):
         item = self.assembled_clips_list_widget.itemAt(pos)
         if not item:
@@ -4919,7 +4846,7 @@ class VideoMontagePage(BasePage):
                 act_view.triggered.connect(lambda: self._view_assembled_copy(idx))
                 menu.addAction(act_view)
         menu.exec_(self.assembled_clips_list_widget.viewport().mapToGlobal(pos))
-
+    # [4·文案脚本]  _view_assembled_copy
     def _view_assembled_copy(self, idx):
         if idx < 0 or idx >= len(self.precompose_plans):
             return
@@ -4950,7 +4877,7 @@ class VideoMontagePage(BasePage):
         btn_row.addWidget(btn_close)
         lay.addLayout(btn_row)
         dlg.exec_()
-
+    # [4·文案脚本]  _assembled_has_copy
     def _assembled_has_copy(self, path):
         """该组合视频是否已有同名 .txt 文案。"""
         txt = os.path.splitext(path)[0] + ".txt"
@@ -4958,7 +4885,7 @@ class VideoMontagePage(BasePage):
             return os.path.exists(txt) and os.path.getsize(txt) > 0
         except Exception:
             return False
-
+    # [4·文案脚本]  _save_script_meta
     def _save_script_meta(self, video_path, clips, brand="", product="", model_name="", extra=""):
         """保存脚本关联元数据（与 .txt 同名的 .meta.json）。"""
         import json as _json
@@ -4980,7 +4907,7 @@ class VideoMontagePage(BasePage):
                 _json.dump(meta, f, indent=2, ensure_ascii=False)
         except Exception as e:
             log.warning(f"保存脚本元数据失败: {e}")
-
+    # [4·文案脚本]  _load_script_meta
     def _load_script_meta(self, video_path):
         """读取脚本关联元数据。"""
         import json as _json
@@ -4992,7 +4919,7 @@ class VideoMontagePage(BasePage):
         except Exception:
             pass
         return None
-
+    # [4·文案脚本]  _assembled_copy_preview
     def _assembled_copy_preview(self, path):
         """获取文案的文字预览（前30字），无文案返回空串。"""
         if not path:
@@ -5006,7 +4933,7 @@ class VideoMontagePage(BasePage):
         except Exception:
             pass
         return ""
-
+    # [5·拼接合成]  _on_assembled_double_clicked
     def _on_assembled_double_clicked(self, item):
         """双击预合成列表项：展示完整口播文案。"""
         idx = item.data(Qt.UserRole)
@@ -5015,7 +4942,7 @@ class VideoMontagePage(BasePage):
         path = (self.precompose_plans[idx].get("output_path") or "").strip()
         if path and self._assembled_has_copy(path):
             self._view_assembled_copy(idx)
-
+    # [4·文案脚本]  _refresh_assembled_copy_buttons
     def _refresh_assembled_copy_buttons(self):
         w = self.assembled_clips_list_widget
         for i in range(w.count()):
@@ -5044,7 +4971,7 @@ class VideoMontagePage(BasePage):
                     item.setToolTip("")
             else:
                 item.setToolTip("")
-
+    # [5·拼接合成]  _collect_assembled_paths
     def _collect_assembled_paths(self):
         """按列表顺序返回已确认合成的视频路径。"""
         paths = []
@@ -5053,7 +4980,7 @@ class VideoMontagePage(BasePage):
             if plan.get("confirmed") and out_path and os.path.exists(out_path):
                 paths.append(out_path)
         return paths
-
+    # [4·文案脚本]  _gen_copy_for_plan
     def _gen_copy_for_plan(self, plan_index):
         if plan_index < 0 or plan_index >= len(self.precompose_plans):
             return
@@ -5066,7 +4993,7 @@ class VideoMontagePage(BasePage):
             )
             return
         self._gen_copy_for_assembled(out_path)
-
+    # [5·拼接合成]  _refresh_precompose_list
     def _refresh_precompose_list(self, select_index=None):
         self.assembled_clips_list_widget.clear()
         for idx, plan in enumerate(self.precompose_plans):
@@ -5078,7 +5005,7 @@ class VideoMontagePage(BasePage):
             self.assembled_clips_list_widget.setCurrentItem(item)
             self._on_assembled_item_clicked(item)
         self._update_confirm_all_button()
-
+    # [9·其他]  _update_confirm_all_button
     def _update_confirm_all_button(self):
         if not hasattr(self, "btn_confirm_all"):
             return
@@ -5092,7 +5019,7 @@ class VideoMontagePage(BasePage):
                 self.btn_batch_scene_copy.setObjectName("secondary_button")
             self.btn_batch_scene_copy.style().unpolish(self.btn_batch_scene_copy)
             self.btn_batch_scene_copy.style().polish(self.btn_batch_scene_copy)
-
+    # [5·拼接合成]  _confirm_all_precompose
     def _confirm_all_precompose(self):
         if self.concat_worker and self.concat_worker.isRunning():
             QMessageBox.information(self.parent_widget, "处理中", "当前已有合成任务在执行，请稍候。")
@@ -5103,14 +5030,14 @@ class VideoMontagePage(BasePage):
             return
         self._confirm_queue = unconfirmed
         self._confirm_next_in_queue()
-
+    # [9·其他]  _confirm_next_in_queue
     def _confirm_next_in_queue(self):
         if not self._confirm_queue:
             self._update_confirm_all_button()
             return
         idx = self._confirm_queue.pop(0)
         self._confirm_precompose(idx)
-
+    # [5·拼接合成]  _confirm_precompose
     def _confirm_precompose(self, index):
         if self.concat_worker and self.concat_worker.isRunning():
             return
@@ -5149,7 +5076,7 @@ class VideoMontagePage(BasePage):
         )
         remaining = len(getattr(self, "_confirm_queue", []) or [])
         self.stage_label.setText(f"🎬 正在确认合成预合成 {index + 1}... (剩余 {remaining} 条待确认)")
-
+    # [2·基础设施]  _refresh_sources_for_plan
     def _refresh_sources_for_plan(self, plan_index):
         self.sources_detail_widget.setRowCount(0)
         if plan_index < 0 or plan_index >= len(self.precompose_plans):
@@ -5216,7 +5143,7 @@ class VideoMontagePage(BasePage):
                     cell = self.sources_detail_widget.item(idx, col)
                     if cell:
                         cell.setBackground(Qt.red)
-
+    # [9·其他]  _mark_current_plan_dirty
     def _mark_current_plan_dirty(self):
         idx = self.current_precompose_index
         if idx < 0 or idx >= len(self.precompose_plans):
@@ -5228,7 +5155,7 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "btn_batch_scene_copy"):
             self.btn_batch_scene_copy.setEnabled(bool(self._collect_assembled_paths()))
         self._update_confirm_all_button()
-
+    # [2·基础设施]  _on_source_order_changed
     def _on_source_order_changed(self, from_row, to_row):
         idx = self.current_precompose_index
         if idx < 0 or idx >= len(self.precompose_plans):
@@ -5251,7 +5178,7 @@ class VideoMontagePage(BasePage):
         self._refresh_sources_for_plan(idx)
         self.sources_detail_widget.selectRow(to_row)
         self._start_sequence_preview_for_plan(idx)
-
+    # [2·基础设施]  _on_source_context_menu
     def _on_source_context_menu(self, pos):
         row = self.sources_detail_widget.rowAt(pos.y())
         if row < 0:
@@ -5271,7 +5198,7 @@ class VideoMontagePage(BasePage):
         action = menu.exec(self.sources_detail_widget.viewport().mapToGlobal(pos))
         if action:
             self._toggle_source_deleted(row)
-
+    # [2·基础设施]  _toggle_source_deleted
     def _toggle_source_deleted(self, row):
         idx = self.current_precompose_index
         if idx < 0 or idx >= len(self.precompose_plans):
@@ -5295,7 +5222,7 @@ class VideoMontagePage(BasePage):
         self._refresh_sources_for_plan(idx)
         self._update_confirm_all_button()
         self._start_sequence_preview_for_plan(idx)
-
+    # [5·拼接合成]  _start_sequence_preview_for_plan
     def _start_sequence_preview_for_plan(self, plan_index):
         self.preview_player.stop()
         self._preview_sequence_clips = []
@@ -5321,7 +5248,7 @@ class VideoMontagePage(BasePage):
             return
         self._preview_sequence_idx = 0
         self._play_current_sequence_clip()
-
+    # [5·拼接合成]  _start_sequence_preview
     def _start_sequence_preview(self, clips, start_idx=0):
         self._preview_sequence_clips = [os.path.abspath(p) for p in clips if p and os.path.exists(p)]
         if not self._preview_sequence_clips:
@@ -5331,7 +5258,7 @@ class VideoMontagePage(BasePage):
             return
         self._preview_sequence_idx = max(0, min(start_idx, len(self._preview_sequence_clips) - 1))
         self._play_current_sequence_clip()
-
+    # [9·其他]  _play_current_sequence_clip
     def _play_current_sequence_clip(self):
         if not self._preview_sequence_clips:
             return
@@ -5344,7 +5271,7 @@ class VideoMontagePage(BasePage):
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
-
+    # [3·分割]  _get_video_scene_sources
     def _get_video_scene_sources(self, path):
         """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
         sources_file = os.path.splitext(path)[0] + "_sources.txt"
@@ -5355,7 +5282,7 @@ class VideoMontagePage(BasePage):
                 return [line.strip() for line in sf if line.strip()]
         except Exception:
             return []
-
+    # [3·分割]  _get_video_scene_descriptions
     def _get_video_scene_descriptions(self, path):
         """读取某组合视频的 _sources.txt，按顺序解析出每个镜头画面的描述文案。"""
         scenes = []
@@ -5383,7 +5310,7 @@ class VideoMontagePage(BasePage):
                     desc = self.split_descriptions.get(os.path.abspath(src_path), "")
             scenes.append(desc or "")
         return scenes
-
+    # [4·文案脚本]  _ensure_shared_product_info
     def _ensure_shared_product_info(self, force=False):
         """获取一次共用的产品背景信息（品牌/产品/型号/卖点），缓存后全局复用。
 
@@ -5406,7 +5333,7 @@ class VideoMontagePage(BasePage):
         info = dlg.get_values()
         self._shared_product_info = info
         return info
-
+    # [4·文案脚本]  _gen_copy_for_assembled
     def _gen_copy_for_assembled(self, path):
         """为某个组合视频，根据其画面镜头描述 + 共用产品背景，用大模型生成口播文案并存同名 .txt。
         如果镜头缺少画面描述，先用视觉 LLM 自动补生成。"""
@@ -5442,7 +5369,7 @@ class VideoMontagePage(BasePage):
                 lambda: self._do_gen_copy_for_assembled(path, cfg, "", "", model))
         else:
             self._do_gen_copy_for_assembled(path, cfg, "", "", model)
-
+    # [4·文案脚本]  _do_gen_copy_for_assembled
     def _do_gen_copy_for_assembled(self, path, cfg, api_url, api_key, model):
         """实际执行单个视频的口播文案生成（描述已就绪后调用）。"""
         scenes = self._get_video_scene_descriptions(path)
@@ -5496,7 +5423,7 @@ class VideoMontagePage(BasePage):
         self._scene_copy_worker.finished.connect(on_ok)
         self._scene_copy_worker.error.connect(on_err)
         self._scene_copy_worker.start()
-
+    # [3·分割]  _batch_gen_copy_by_scene
     def _batch_gen_copy_by_scene(self):
         """一键为所有已生成的组合视频，按各自画面镜头描述生成口播文案（共用一份产品背景）。
         如果镜头缺少画面描述（如原视频无声音未生成），先用视觉 LLM 自动补生成描述。"""
@@ -5554,7 +5481,7 @@ class VideoMontagePage(BasePage):
                 lambda: self._start_batch_copy("", "", model, info, targets))
         else:
             self._start_batch_copy("", "", model, info, targets)
-
+    # [4·文案脚本]  _batch_gen_missing_descriptions
     def _batch_gen_missing_descriptions(self, clip_paths, api_url, api_key, model, on_done):
         """用视觉 LLM 为缺少描述的分割镜头批量生成画面描述。"""
         if not clip_paths:
@@ -5612,7 +5539,7 @@ class VideoMontagePage(BasePage):
         self._desc_gen_worker.finished.connect(on_desc_ok)
         self._desc_gen_worker.error.connect(on_desc_err)
         self._desc_gen_worker.start()
-
+    # [4·文案脚本]  _start_batch_copy
     def _start_batch_copy(self, api_url, api_key, model, info, targets):
         """启动批量口播文案生成。"""
         self._batch_llm = (api_url, api_key, model)
@@ -5623,7 +5550,7 @@ class VideoMontagePage(BasePage):
         self._batch_copy_failures = []
         self.btn_batch_scene_copy.setEnabled(False)
         self._batch_copy_next()
-
+    # [4·文案脚本]  _batch_copy_next
     def _batch_copy_next(self):
         """处理批量队列中的下一个组合视频（逐个串行调用大模型）。"""
         if not self._batch_copy_queue:
@@ -5691,7 +5618,7 @@ class VideoMontagePage(BasePage):
         self._scene_copy_worker.finished.connect(on_ok)
         self._scene_copy_worker.error.connect(on_err)
         self._scene_copy_worker.start()
-
+    # [5·拼接合成]  _on_assembled_item_clicked
     def _on_assembled_item_clicked(self, item):
         idx = item.data(Qt.UserRole)
         if idx is None:
@@ -5724,7 +5651,7 @@ class VideoMontagePage(BasePage):
             self.preview_player.stop()
             self.preview_overlay_label.hide()
             self.btn_preview_play.setIcon(mdi_icon("play"))
-
+    # [8·事件回调]  _toggle_preview_video
     def _toggle_preview_video(self):
         from PySide6.QtMultimedia import QMediaPlayer
         if self.preview_player.playbackState() == QMediaPlayer.PlayingState:
@@ -5733,16 +5660,16 @@ class VideoMontagePage(BasePage):
         else:
             self.preview_player.play()
             self.btn_preview_play.setIcon(mdi_icon("pause"))
-            
+    # [9·其他]  _set_preview_position
     def _set_preview_position(self, position):
         self.preview_player.setPosition(position)
-        
+    # [8·事件回调]  _on_preview_position_changed
     def _on_preview_position_changed(self, position):
         self.preview_slider.setValue(position)
-        
+    # [8·事件回调]  _on_preview_duration_changed
     def _on_preview_duration_changed(self, duration):
         self.preview_slider.setRange(0, duration)
-
+    # [8·事件回调]  _on_preview_media_status_changed
     def _on_preview_media_status_changed(self, status):
         try:
             from PySide6.QtMultimedia import QMediaPlayer
@@ -5761,7 +5688,7 @@ class VideoMontagePage(BasePage):
                     QTimer.singleShot(50, self._skip_to_next_preview_clip)
         except Exception:
             pass
-
+    # [9·其他]  _skip_to_next_preview_clip
     def _skip_to_next_preview_clip(self):
         """跳过当前无法播放的片段，播下一个。"""
         if not self._preview_sequence_clips:
@@ -5770,7 +5697,7 @@ class VideoMontagePage(BasePage):
         if self._preview_sequence_idx >= len(self._preview_sequence_clips):
             self._preview_sequence_idx = 0
         self._play_current_sequence_clip()
-
+    # [8·事件回调]  _preview_video_item
     def _preview_video_item(self, item):
         path = ""
         idx = item.data(Qt.UserRole)
@@ -5797,7 +5724,7 @@ class VideoMontagePage(BasePage):
                 QMessageBox.warning(self.parent_widget, "无法播放", f"播放视频失败:\n{e}")
         else:
             QMessageBox.warning(self.parent_widget, "文件不存在", f"找不到该视频文件:\n{path}")
-
+    # [9·其他]  _play_video
     def _play_video(self, path):
         if os.path.exists(path):
             try:
@@ -5806,10 +5733,10 @@ class VideoMontagePage(BasePage):
                 QMessageBox.warning(self.parent_widget, "播放失败", f"无法播放该视频:\n{e}")
         else:
             QMessageBox.warning(self.parent_widget, "文件不存在", f"找不到视频文件:\n{path}")
-
+    # [9·其他]  _make_play_slot
     def _make_play_slot(self, filepath):
         return lambda: self._play_video(filepath)
-
+    # [5·拼接合成]  _preview_concat_table_item
     def _preview_concat_table_item(self, item):
         row = item.row()
         col = item.column()
@@ -5874,7 +5801,7 @@ class VideoMontagePage(BasePage):
             path = file_item.data(Qt.UserRole)
             if path:
                 self._play_video(path)
-
+    # [5·拼接合成]  _on_concat_table_cell_changed
     def _on_concat_table_cell_changed(self, row, col):
         if col == 0:
             self._update_concat_count_lbl()

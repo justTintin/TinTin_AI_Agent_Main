@@ -825,6 +825,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 22: # 资源配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
+            if hasattr(self, "_load_lut_config"):
+                self._load_lut_config()
 
 
 

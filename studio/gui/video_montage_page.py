@@ -6102,6 +6102,162 @@ class VideoMontagePage(BasePage):
         QMessageBox.critical(self.parent_widget, "文案生成失败",
                              f"调用大模型生成文案时出错：\n{err}")
 
+    # --- AI 智能评分 ---
+    def _rate_clips(self):
+        """AI 智能评分：收集所有分割镜头的描述与时长，调用大模型评分。"""
+        cfg = getattr(self.main_window, "ai_config", {}) or {}
+        api_key = cfg.get("llm_api_key", "").strip()
+        if not api_key:
+            QMessageBox.warning(self.parent_widget, "未配置大模型",
+                                "请先在设置中配置 LLM 接口地址和密钥。")
+            return
+
+        # 收集镜头信息
+        clips_info = []
+        for r in range(self.concat_clips_list_widget.rowCount()):
+            item = self.concat_clips_list_widget.item(r, 0)
+            if item:
+                path = item.data(Qt.UserRole)
+                if path:
+                    norm_path = os.path.abspath(path)
+                    desc_item = self.concat_clips_list_widget.item(r, 3)
+                    desc = desc_item.text().strip() if desc_item else ""
+                    if not desc:
+                        desc = self.split_descriptions.get(norm_path, "")
+                    duration = self._get_clip_duration(norm_path)
+                    clips_info.append({
+                        "index": r + 1,
+                        "filename": item.text(),
+                        "desc": desc,
+                        "duration": duration,
+                    })
+
+        if not clips_info:
+            QMessageBox.warning(self.parent_widget, "无素材",
+                                "没有可评分的镜头素材。")
+            return
+
+        self.btn_rate_clips.setEnabled(False)
+        self.lbl_rate_status.setText(f"⏳ 正在 AI 评分 {len(clips_info)} 个镜头…")
+        self.stage_label.setText(f"🤖 正在调用大模型对 {len(clips_info)} 个镜头进行质量评分…")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        self.rate_worker = RateClipsWorker(clips_info)
+        self.rate_worker.finished.connect(self._on_rate_finished)
+        self.rate_worker.error.connect(self._on_rate_error)
+        self.rate_worker.start()
+
+    def _on_rate_finished(self, json_str):
+        """AI 评分完成：解析结果，更新表格与缓存。"""
+        self.btn_rate_clips.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.rate_worker = None
+
+        import json
+        try:
+            ratings = json.loads(json_str)
+        except Exception as e:
+            self.lbl_rate_status.setText("❌ 评分结果解析失败")
+            QMessageBox.critical(self.parent_widget, "评分失败",
+                                 f"解析 AI 返回的评分结果时出错：\n{e}")
+            return
+
+        stats = {"total": 0, "high": 0, "mid": 0, "low": 0, "sum": 0.0}
+        for entry in ratings:
+            idx = entry.get("index", 0)
+            score = entry.get("score", 0)
+            reason = entry.get("reason", "")
+            row = idx - 1
+            if 0 <= row < self.concat_clips_list_widget.rowCount():
+                file_item = self.concat_clips_list_widget.item(row, 0)
+                if file_item:
+                    norm_path = os.path.abspath(file_item.data(Qt.UserRole))
+                    self.clip_ratings[norm_path] = {"score": score, "reason": reason}
+
+                    score_text = f"⭐ {score:.1f}"
+                    score_item = QTableWidgetItem(score_text)
+                    score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+                    score_item.setTextAlignment(Qt.AlignCenter)
+                    score_item.setToolTip(reason)
+                    if score >= 7:
+                        score_item.setForeground(Qt.green)
+                    elif score >= 4:
+                        score_item.setForeground(Qt.yellow)
+                    else:
+                        score_item.setForeground(Qt.red)
+                    self.concat_clips_list_widget.setItem(row, 2, score_item)
+
+                    stats["total"] += 1
+                    stats["sum"] += score
+                    if score >= 7:
+                        stats["high"] += 1
+                    elif score >= 4:
+                        stats["mid"] += 1
+                    else:
+                        stats["low"] += 1
+
+        avg_score = stats["sum"] / stats["total"] if stats["total"] > 0 else 0
+        self.lbl_rate_status.setText(
+            f"✅ 均分 {avg_score:.1f} | ⭐≥7: {stats['high']} | ⭐4-6: {stats['mid']} | ⭐<4: {stats['low']}"
+        )
+        self.stage_label.setText(f"✅ AI 评分完成，平均分 {avg_score:.1f}")
+        QMessageBox.information(
+            self.parent_widget, "评分完成",
+            f"AI 对 {stats['total']} 个镜头素材评分完成，平均分 {avg_score:.1f}。\n"
+            f"⭐ ≥7 分: {stats['high']} 个\n"
+            f"⭐ 4-6 分: {stats['mid']} 个\n"
+            f"⭐ <4 分: {stats['low']} 个\n\n"
+            "可在「最低评分筛选」下拉框中设置阈值，自动过滤低分镜头。"
+        )
+
+    def _on_rate_error(self, err):
+        """AI 评分出错：恢复 UI，提示错误。"""
+        self.btn_rate_clips.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.lbl_rate_status.setText("❌ 评分失败")
+        self.stage_label.setText("❌ AI 评分失败")
+        self.rate_worker = None
+        QMessageBox.critical(self.parent_widget, "评分失败",
+                             f"调用大模型进行评分时出错：\n{err}")
+
+    def _apply_score_filter(self, index):
+        """根据最低评分筛选阈值，自动取消勾选低分镜头。"""
+        threshold = self.score_filter_combo.currentData()
+        self.min_score_filter = threshold
+
+        if threshold <= 0:
+            self._select_all_clips()
+            self.lbl_rate_status.setText("")
+            return
+
+        unchecked = 0
+        self.concat_clips_list_widget.blockSignals(True)
+        for r in range(self.concat_clips_list_widget.rowCount()):
+            file_item = self.concat_clips_list_widget.item(r, 0)
+            score_item = self.concat_clips_list_widget.item(r, 2)
+            if file_item and score_item:
+                norm_path = os.path.abspath(file_item.data(Qt.UserRole))
+                rating_info = self.clip_ratings.get(norm_path, {})
+                score = rating_info.get("score", None) if isinstance(rating_info, dict) else None
+                if score is not None and score < threshold:
+                    file_item.setCheckState(Qt.Unchecked)
+                    unchecked += 1
+                else:
+                    file_item.setCheckState(Qt.Checked)
+        self.concat_clips_list_widget.blockSignals(False)
+
+        self._update_concat_count_lbl()
+
+        if unchecked > 0:
+            self.lbl_rate_status.setText(f"🔽 已自动取消勾选 {unchecked} 个低于 {threshold} 分的镜头")
+        else:
+            self.lbl_rate_status.setText(f"✅ 所有镜头均 ≥ {threshold} 分")
+
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)
         self.progress_bar.setValue(100)

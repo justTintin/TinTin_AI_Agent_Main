@@ -420,7 +420,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.monitor.stats_updated.connect(self.update_system_stats)
         # ComfyUI 默认不启动检测，用户可在「AI 设置」手动开启
         # self.monitor.start()
-        
+
+        # 定时任务调度线程：每 30 秒扫描 scheduled_tasks.json，到期触发任务
+        from gui.threads import ScheduledTaskThread
+        self.scheduler = ScheduledTaskThread()
+        self.scheduler.task_due.connect(self._on_scheduled_task_due)
+        self.scheduler.start()
+        log.info("[定时任务] 调度线程已启动（每 30 秒扫描一次）")
+
         self.comfy_ws = None
         # self.start_comfyui_websocket()
         
@@ -460,6 +467,26 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         if hasattr(self, 'cpu_label'):
             self.cpu_label.setText(f"CPU: {stats['cpu']}%")
             self.gpu_label.setText(f"显存: {stats['gpu']}")
+
+    def _on_scheduled_task_due(self, task_id):
+        """定时任务到期（或用户在定时任务页点「立即运行」）时触发：
+        切到一键成片页 → 载入任务参数 → 自动执行。"""
+        try:
+            from utils.scheduled_task_manager import ScheduledTaskManager
+            task = ScheduledTaskManager().get(task_id)
+            if not task:
+                log.warning(f"[定时任务] 找不到任务 {task_id}")
+                return
+            params = dict(task.get("params", {}) or {})
+            params["_task_id"] = task_id   # 注入任务 id，供执行完成后回写状态
+            tool = getattr(self, "compile_video_tool", None)
+            if tool and hasattr(tool, "apply_params_and_run"):
+                self.switch_page(34)  # 切到一键成片页
+                tool.apply_params_and_run(params)
+            else:
+                log.warning("[定时任务] compile_video_tool 未就绪，无法执行")
+        except Exception as e:
+            log.exception(f"[定时任务] 触发执行失败: {e}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -501,6 +528,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "monitor") and self.monitor:
                 self.monitor.running = False
                 self.monitor.wait()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "scheduler") and self.scheduler:
+                self.scheduler.running = False
+                self.scheduler.wait(2000)
         except Exception:
             pass
         try:
@@ -772,6 +805,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.page_dreamina_assets = QWidget()
         self.setup_dreamina_assets_page()
         self.content_stack.addWidget(self.page_dreamina_assets)
+
+        # 44: Scheduled Tasks (定时任务) Page
+        self.page_scheduled_tasks = QWidget()
+        self.setup_scheduled_tasks_page()
+        self.content_stack.addWidget(self.page_scheduled_tasks)
 
 
     def trigger_page_logic(self, index):

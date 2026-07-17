@@ -357,11 +357,6 @@ class CompileVideoPage(BasePage):
         self.btn_open_out.setFixedHeight(36)
         self.btn_open_out.clicked.connect(self._open_output_dir)
         row2.addWidget(self.btn_open_out)
-        self.btn_add_task = QPushButton("📌 添加为定时任务")
-        self.btn_add_task.setFixedHeight(36)
-        self.btn_add_task.setToolTip("把当前配置保存为一个定时任务（可到「定时任务」页查看与管理）")
-        self.btn_add_task.clicked.connect(self._add_scheduled_task)
-        row2.addWidget(self.btn_add_task)
         s_lay.addLayout(row2)
         root.addWidget(setting_group)
 
@@ -537,148 +532,6 @@ class CompileVideoPage(BasePage):
         self.track_worker(w); w.start()
 
     # ════════════════════════════════════════════════════════════════════════
-    #  定时任务：收集参数 / 添加任务 / 外部触发执行
-    # ════════════════════════════════════════════════════════════════════════
-    def _collect_params(self):
-        """收集当前界面的一键成片参数为可序列化 dict（供定时任务保存）。"""
-        product = self._current_product() or {}
-        return {
-            "product_id": product.get("id", ""),
-            "product_label": self.combo_product.currentText(),
-            "folder": self.in_folder.text().strip(),
-            "audio": self.in_audio.text().strip(),
-            "cover": self.in_cover.text().strip(),
-            "subtitle": self.in_subtitle.toPlainText().strip(),
-            "ratio": self.combo_ratio.currentText(),
-            "per_dur": self.spin_dur.value(),
-            "count": self.spin_count.value(),
-            "total_dur": self.spin_total_dur.value(),
-            "intro": self.in_intro.text().strip(),
-            "predict_platform": self.combo_predict_platform.currentText(),
-            "autocheck": self.chk_autocheck.isChecked(),
-        }
-
-    def _add_scheduled_task(self):
-        """把当前配置保存为一个定时任务。弹窗输入任务名 + 调度配置。"""
-        product = self._current_product()
-        if not product:
-            self.show_warning("请先选择产品（产品是一键成片的起点）。")
-            return
-        from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QSpinBox, QTimeEdit
-        from utils.scheduled_task_manager import ScheduledTaskManager, SCHEDULE_MODES, WEEKDAY_NAMES
-
-        params = self._collect_params()
-        dlg = QDialog(self.parent_widget)
-        dlg.setWindowTitle("添加为定时任务")
-        form = QFormLayout(dlg)
-
-        name_edit = QLineEdit()
-        name_edit.setText(f"{product.get('model','') or product.get('brand','')}-成片")
-        name_edit.setPlaceholderText("给这个定时任务起个名字")
-        form.addRow("任务名称", name_edit)
-
-        combo_mode = QComboBox()
-        combo_mode.addItems({
-            "daily": "每天（按时刻）", "once": "单次（指定日期时间）",
-            "weekly": "每周（指定星期）", "interval": "间隔（每 N 小时）",
-        }.values())
-        combo_mode.setCurrentIndex(0)
-        form.addRow("调度方式", combo_mode)
-
-        time_edit = QTimeEdit()
-        from datetime import datetime as _dt
-        time_edit.setTime(_dt.now().time().replace(second=0, microsecond=0))
-        time_edit.setDisplayFormat("HH:mm")
-        form.addRow("执行时刻", time_edit)
-
-        date_edit = QLineEdit()
-        date_edit.setText(_dt.now().strftime("%Y-%m-%d"))
-        date_edit.setPlaceholderText("YYYY-MM-DD（单次模式用）")
-        form.addRow("执行日期", date_edit)
-
-        interval_spin = QSpinBox()
-        interval_spin.setRange(1, 168); interval_spin.setValue(24)
-        form.addRow("间隔小时", interval_spin)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        form.addRow(btns)
-
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        # 构建 schedule（按所选模式只填相关字段）
-        mode_map = {0: "daily", 1: "once", 2: "weekly", 3: "interval"}
-        mode = mode_map[combo_mode.currentIndex()]
-        hhmm = time_edit.time().toString("HH:mm")
-        schedule = {"mode": mode, "time": hhmm, "enabled": True}
-        if mode == "once":
-            schedule["date"] = date_edit.text().strip()
-        elif mode == "weekly":
-            schedule["weekdays"] = [0, 1, 2, 3, 4]  # 默认工作日；后续可在任务页编辑
-        elif mode == "interval":
-            schedule["interval_hours"] = interval_spin.value()
-
-        try:
-            mgr = ScheduledTaskManager()
-            tid = mgr.add_item(name_edit.text().strip(), "compile_video", params, schedule)
-            self._log(f"📌 已保存为定时任务「{name_edit.text().strip()}」(id={tid[:8]})")
-            self.show_info(f"已保存为定时任务「{name_edit.text().strip()}」。\n\n"
-                           f"可到「定时任务」页查看与管理。\n"
-                           f"⚠ 需保持应用运行，调度才会生效。")
-        except Exception as e:
-            self.show_error(f"保存定时任务失败：{e}", "错误")
-
-    def apply_params_and_run(self, params):
-        """供调度线程/手动「立即运行」调用：把 params 填回各控件，然后执行。
-        params: _collect_params() 产出的 dict。"""
-        if not params:
-            return
-        # 1. 选产品：按 product_id 在下拉里找到对应项
-        pid = params.get("product_id", "")
-        target_idx = -1
-        for i in range(self.combo_product.count()):
-            if self.combo_product.itemData(i) == pid:
-                target_idx = i
-                break
-        if target_idx < 0:
-            self._log(f"⚠ 定时任务找不到产品(id={pid[:8]})，可能产品库已变更")
-            self.show_warning("定时任务引用的产品已不存在，请重新配置。")
-            return
-        self.combo_product.setCurrentIndex(target_idx)
-        # _on_product_changed 会自动刷新性能/卖点展示
-
-        # 2. 填回其它参数
-        self.in_folder.setText(params.get("folder", ""))
-        self.in_audio.setText(params.get("audio", ""))
-        self.in_cover.setText(params.get("cover", ""))
-        self.in_intro.setText(params.get("intro", ""))
-        self.in_subtitle.setPlainText(params.get("subtitle", ""))
-
-        ratio = params.get("ratio", "9:16")
-        idx = self.combo_ratio.findText(ratio)
-        if idx >= 0:
-            self.combo_ratio.setCurrentIndex(idx)
-
-        self.spin_count.setValue(int(params.get("count", 1)))
-        self.spin_dur.setValue(float(params.get("per_dur", 3.0)))
-        self.spin_total_dur.setValue(float(params.get("total_dur", 0.0)))
-
-        pidx = self.combo_predict_platform.findText(params.get("predict_platform", "抖音"))
-        if pidx >= 0:
-            self.combo_predict_platform.setCurrentIndex(pidx)
-        self.chk_autocheck.setChecked(bool(params.get("autocheck", True)))
-
-        # 3. 记录当前正在执行的定时任务 id（用于完成后回写状态）
-        self._running_task_id = params.get("_task_id", "")
-
-        self._log(f"⏰ 定时任务触发，已载入参数：产品={self.combo_product.currentText()}")
-        self.stage_label.setText("⏰ 定时任务触发执行…")
-        # 4. 走正常执行流程
-        self._make()
-
-    # ════════════════════════════════════════════════════════════════════════
     #  开始执行
     # ════════════════════════════════════════════════════════════════════════
     def _make(self):
@@ -758,8 +611,6 @@ class CompileVideoPage(BasePage):
     def _done(self, results):
         self._last_results = results or []
         self.btn_make.setEnabled(True)
-        # 定时任务执行完成：回写状态
-        self._mark_task_status("done", f"生成 {len(self._last_results)} 个成片")
         # 填充结果列表
         self.result_table.setRowCount(len(self._last_results))
         for i, path in enumerate(self._last_results):
@@ -821,25 +672,7 @@ class CompileVideoPage(BasePage):
         self.btn_make.setEnabled(True)
         self.stage_label.setText("成片失败。")
         self._log(f"❌ 失败: {e}")
-        self._mark_task_status("failed", f"失败: {e}")
         self.show_error(str(e), "一键成片失败")
-
-    def _mark_task_status(self, status, result_msg):
-        """若当前执行源于定时任务，回写其状态/结果，并刷新定时任务页。"""
-        tid = getattr(self, "_running_task_id", "")
-        if not tid:
-            return
-        try:
-            from utils.scheduled_task_manager import ScheduledTaskManager
-            mgr = ScheduledTaskManager()
-            mgr.update_item(tid, {"status": status, "last_result": result_msg})
-            self._running_task_id = ""
-            # 刷新定时任务页（若已创建）
-            tool = getattr(self.main_window, "scheduled_tasks_tool", None)
-            if tool and hasattr(tool, "refresh"):
-                tool.refresh()
-        except Exception as e:
-            log.warning(f"回写定时任务状态失败: {e}")
 
     # ════════════════════════════════════════════════════════════════════════
     #  辅助

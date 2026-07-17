@@ -55,46 +55,6 @@ class SystemMonitorThread(QThread):
             time.sleep(3)
 
 
-class ScheduledTaskThread(QThread):
-    """定时任务调度线程：每 30 秒扫描一次 scheduled_tasks.json，发现到期任务就发信号。
-    应用必须保持运行，调度才生效（应用内置调度，非系统 cron）。
-    到期触发后，立即把任务 status 置 running、last_run 置 now，避免重复触发；
-    执行结果（done/failed）由执行方（compile_video_page）回调更新。"""
-    task_due = Signal(str)   # 发任务 id，由 MainWindow 接收并跳转执行
-
-    def __init__(self):
-        super().__init__()
-        self.running = True
-
-    def run(self):
-        while self.running:
-            try:
-                from utils.scheduled_task_manager import ScheduledTaskManager, is_due
-                mgr = ScheduledTaskManager()
-                now = time.time()
-                has_running = False
-                for t in mgr.all_items():
-                    sch = t.get("schedule", {}) or {}
-                    if not sch.get("enabled", True):
-                        continue
-                    if t.get("status") == "running":
-                        has_running = True
-                        continue
-                    if is_due(t, now):
-                        # 标记 running + 记录本次触发时间，避免循环内重复触发
-                        mgr.update_item(t["id"], {"status": "running", "last_run": int(now)})
-                        log.info(f"[定时任务] 触发: {t.get('name')} ({t['id']})")
-                        self.task_due.emit(t["id"])
-                        break  # 一次只触发一个（前台执行占用界面，串行处理）
-            except Exception as e:
-                log.warning(f"[定时任务] 调度扫描异常: {e}")
-            # 每 30 秒扫一次；用短循环支持快速响应 stop
-            for _ in range(30):
-                if not self.running:
-                    break
-                time.sleep(1)
-
-
 class ComfyWSThread(QThread):
     progress_received = Signal(str, int)  # prompt_id, percentage
     status_received = Signal(str, str)    # prompt_id, status_text

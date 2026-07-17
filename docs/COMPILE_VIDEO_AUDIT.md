@@ -1,15 +1,16 @@
 # 一键成片 / 成片任务 审查清单
 
-> 审查日期：2026-07-17（2026-07-18 多次纠正：素材评分结论 + 定时执行结论 + 脚本成片执行器）
+> 审查日期：2026-07-17（2026-07-18 多次纠正：素材评分结论 + 定时执行结论 + 脚本成片执行器名修正）
 > 审查范围：客户端 `utils/video_compiler.py` + `gui/compile_video_page.py` + 服务端 `/scheduled/tasks` 实测
-> 当前状态：**客户端已全面转为 thin client（提交服务端执行）；脚本成片待服务端加执行器**。
+> 当前状态：**客户端 thin client 完成；产品成片 + 脚本成片执行器均已对接服务端并可真实出片**。
 >
 > 关键结论：
-> - 客户端「产品成片」「脚本成片」都已改为提交服务端 `/scheduled/tasks` 执行
+> - 客户端「产品成片」「脚本成片」都提交服务端 `/scheduled/tasks` 执行
 > - 服务端 `video_montage`（产品成片）执行器**已实现**，会真实编译视频
-> - 服务端 `script_montage`（脚本成片）执行器**未实现**，提交后一直 pending（详见文末）
+> - 服务端 `storyboard_montage`（脚本成片）执行器**已实现**，按镜头表执行并返回 7 维 quality_score
+>   （注：早期客户端误用 `script_montage` 提交导致一直 pending，已修正为 `storyboard_montage`）
 > - 素材评分/向量检索在服务端已设计但数据未就绪（`quality_score` 列缺、pgvector 未启用）
-> - 决策：**脚本成片等服务端加执行器**；客户端代码已就绪，无需再改
+> - 决策：**成片链路已打通**；素材评分/向量检索仍待服务端数据就绪
 
 ---
 
@@ -318,76 +319,87 @@ else:
 
 > ⚠ 本节为最新实测结论，覆盖了早期"定时任务不会执行"的错误判断。
 
-### 定时任务 `/scheduled/tasks` —— CRUD 可用 + 部分类型有执行器
+### 定时任务 `/scheduled/tasks` —— CRUD 可用 + 成片执行器均已实现
 
 实测确认：**服务端定时任务会真实执行**（早期判断"仅存储不执行"是错的，源于测错了 task_type）。不同 task_type 的执行器覆盖情况：
 
-| task_type | 实测状态（提交后 3-20 秒） | 执行器 |
+| task_type | 实测状态 | 执行器 |
 |---|---|---|
 | `video_montage`（产品成片） | `pending` → `running`(progress=30) → completed/failed | ✅ **有执行器**，会真实编译视频 |
-| `script_montage`（脚本成片） | `pending` → 20 秒仍 `pending/progress=0` | ❌ **无执行器**，任务永不执行 |
+| `storyboard_montage`（脚本成片） | `pending` → `running`(progress=40) → completed | ✅ **有执行器**，按镜头表成片 + 返回 7 维 quality_score |
+| `script_montage`（客户端曾误用） | 一直 pending | ❌ 无效 task_type（正确名是 `storyboard_montage`） |
 | `compile_video`（早期误测） | 一直 pending | ❌ 无效 task_type |
 
 - CRUD（增删改查）：✅ 全部可用
 - 任务参数：服务端接受客户端任意扩展参数（16+ 字段全保留存储，无 422）
 - `video_montage` 执行器会产出成片（`result.video_url`），但偶发 `error_msg:"视频编译失败"`（服务端实现质量问题）
+- `storyboard_montage` 执行器产出 `result.video_path` + `result.quality_score`（含 clarity/texture/aesthetics/composition/color_quality/figure_quality/subject_prominence 七维），这就是"服务端素材评分"的落地点
 
-### 服务端待就绪清单（已按实测更新）
+### 服务端能力清单（已按实测更新）
 
-| # | 待办 | 状态 | 阻塞的能力 |
+| # | 能力 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | `script_montage` 执行器 | ❌ **未实现** | **脚本成片**（客户端已就绪，提交后一直 pending） |
-| 2 | 数据库 `quality_score` 列迁移 | ❌ 未实现 | `/material/score` 评分（GET 报 column does not exist） |
-| 3 | pgvector 启用（`vector_search.available`） | ❌ false | `/material/search` 向量相似度 score |
-| 4 | 素材批量评分（`/material/batch_score`） | ❌ 未跑 | 评分数据落库（`ai_confidence` 全 null） |
-| 5 | `video_montage` 成片质量 | ⚠️ 会执行但偶发失败 | 产品成片稳定性 |
+| 1 | `video_montage` 执行器（产品成片） | ✅ 已实现 | 会执行，偶发"视频编译失败" |
+| 2 | `storyboard_montage` 执行器（脚本成片） | ✅ 已实现 | 按镜头表成片 + 返回 7 维 quality_score |
+| 3 | 数据库 `quality_score` 列（素材库评分） | ❌ 未实现 | `/material/score` GET 报 column does not exist；但成片结果的 quality_score 已返回 |
+| 4 | pgvector 启用（`vector_search.available`） | ❌ false | `/material/search` 向量相似度 score 未返回 |
+| 5 | 素材批量评分（`/material/batch_score`） | ❌ 未跑 | 素材库 `ai_confidence` 全 null |
 
-### `script_montage` 执行器接口契约（给服务端开发对接用）
+> 注：第 3 项的 `quality_score` 指的是**素材库的素材评分**（`/material/score` 端点），与成片结果里返回的 `quality_score`（对**成片视频**的 7 维评分）是两回事——后者已在 `storyboard_montage`/`video_montage` 的 `result` 里返回，可用。
+
+### `storyboard_montage` 执行器接口契约（实测，客户端已对齐）
 
 客户端脚本成片 tab 提交任务时，`POST /scheduled/tasks` 的 body：
 ```json
 {
-  "task_type": "script_montage",
+  "task_type": "storyboard_montage",
   "title": "{topic}-{script_name}-脚本成片",
   "params": {
-    "script_name": "脚本名",
-    "script_path": "客户端 json 路径（服务端可能无法访问，仅供参考）",
-    "topic": "脚本主题",
-    "ratio": "9:16",
-    "total_duration": 15,
-    "shot_count": 3,
     "shots": [
       {
         "index": 1,
         "shot_type": "特写",
         "duration": 5,
-        "sfx": "渐入",
         "visual": "画面描述",
-        "narration": "旁白文案",
-        "material_type": "local",
-        "material_path": "素材绝对路径（服务端按此取素材）",
-        "material_hash": "去重hash"
+        "audio": "旁白文案（注意：服务端字段名是 audio，不是 narration）"
       }
     ],
-    "predict_platform": "抖音",
-    "autocheck": true
+    "voice_settings": {"speaker": "default"},
+    "script_name": "脚本名",
+    "topic": "脚本主题",
+    "ratio": "9:16"
   },
   "schedule": null
 }
 ```
 
-**服务端执行器期望行为**（客户端假设）：
-1. 按 `shots` 顺序，每镜头用 `material_path` 取素材文件（服务端 NAS 直连）
-2. 按 `narration` 配文案（字幕/配音）、按 `duration` 控每镜时长
-3. 按 `ratio` 输出对应画幅，拼接成片
-4. 完成后 `result: {"video_url": "/output/xxx.mp4"}`，客户端凭此打开结果
-5. 进度通过 `status`（pending→running→completed/failed）+ `progress`（0-100）反馈
+**服务端执行器实际行为**（实测 id=12/15）：
+1. 按 `shots` 顺序成片，每镜时长取 `duration`
+2. 文案用 `audio` 字段（不是 `narration`）；服务端自己做素材匹配，不收 `material_path`
+3. 完成后 `result`：
+   ```json
+   {
+     "shots": 2,
+     "narration": "合并后的完整旁白",
+     "video_path": "/home/.../server/output/montage/<id>/output.mp4",
+     "quality_score": {"total": 4.4, "clarity": 1.0, "texture": 1.0, "aesthetics": 5.0,
+                       "composition": 7.5, "color_quality": 10.0, "figure_quality": 5.0,
+                       "subject_prominence": 1.0, "engine": "laion+opencv"},
+     "total_duration": 10
+   }
+   ```
+4. 进度通过 `status`（pending→running→completed/failed）+ `progress`（0-100）反馈
 
 **关键差异**（与 `video_montage` 的区别）：
-- `video_montage`：服务端自主做素材匹配（客户端只传 products），全托管
-- `script_montage`：客户端已指定每镜头的素材路径 + 文案 + 时长，服务端只负责按这张"镜头表"执行 ffmpeg，**不需要再做素材匹配**
+- `video_montage`：客户端只传 `products`，服务端自主做素材匹配 + 脚本生成 + 成片，全托管
+- `storyboard_montage`：客户端传完整 `shots`（含 visual/audio/duration），服务端按镜头表执行，**不需要再做脚本生成**
 
-客户端代码已就绪（`compile_video_page.py` 的 `_submit_script`），服务端实现 `script_montage` 执行器后自动生效，无需客户端再改。
+**客户端契约对齐**（`compile_video_page.py` 的 `_collect_script_params`）：
+- task_type 用 `storyboard_montage`（早期误用 `script_montage` 已修正）
+- `shots[].narration` → `audio`（字段名对齐）
+- 保留 `material_path`/`sfx` 等附加字段（服务端不用但保留无害，未来服务端支持指定素材时可直接生效）
+
+> ⚠ 历史纠错：本文档早期版本曾写"服务端无 script_montage 执行器、脚本成片待实现"。实测后纠正：执行器真实存在，名字是 `storyboard_montage`（不是 script_montage），且已实现可用。客户端 commit `dba479e` 已修正 task_type。
 
 
 ---

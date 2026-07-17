@@ -1594,6 +1594,97 @@ class GenScriptWorker(BaseWorker):
             self.error.emit(str(e))
 
 
+class RateClipsWorker(BaseWorker):
+    """AI 智能评分 Worker：根据镜头素材的描述文案（或画面信息），
+    调用大模型对每条分割镜头进行质量评分（0-10 分），返回 JSON 数组。
+    """
+    finished = Signal(str)  # JSON string: [{"index": 1, "score": 8.5, "reason": "..."}, ...]
+
+    def __init__(self, clips_info):
+        """
+        Args:
+            clips_info: list of dict, 每个 dict 包含:
+                - index: int (1-based 镜头序号)
+                - filename: str (文件名)
+                - desc: str (描述文案，可能为空)
+                - duration: float (时长秒数)
+        """
+        super().__init__()
+        self.clips_info = clips_info or []
+
+    def run(self):
+        try:
+            n = len(self.clips_info)
+            if n == 0:
+                raise RuntimeError("没有可用的镜头素材，无法评分。")
+
+            from utils.llm_proxy import llm_chat
+
+            system_prompt = (
+                "你是一位资深的短视频内容质量评估专家。"
+                "你擅长从画面内容、拍摄质量、信息量和商业价值四个维度对短视频镜头素材进行评分。"
+                "评分标准（0-10分）：\n"
+                "- 9-10分：画面精美、内容清晰、信息丰富，非常适合用于电商带货短视频\n"
+                "- 7-8分：画面良好、内容较清晰，适合用于短视频制作\n"
+                "- 5-6分：画面一般、内容简单，可用但不出彩\n"
+                "- 3-4分：画面较差、内容模糊或信息不足，不太适合使用\n"
+                "- 0-2分：画面质量差、内容混乱或无意义，建议剔除\n\n"
+                "评分维度权重：\n"
+                "- 画面内容吸引力与产品展示效果（40%）\n"
+                "- 描述文案的营销价值和信息量（30%）\n"
+                "- 镜头时长是否适合短视频节奏（15%）\n"
+                "- 整体画面质量感受（15%）\n\n"
+                "请注意：\n"
+                "1. 如果描述文案为空或极简，说明该镜头可能只是过渡/空白片段，评分应较低\n"
+                "2. 时长过短（<1秒）或过长（>30秒）的镜头适当扣分\n"
+                "3. 描述中包含产品特写、功能展示、使用场景等关键词的镜头应加分\n"
+                "请严格以 JSON 数组格式输出，每个元素包含 index(镜头序号)、score(评分，保留一位小数)、reason(简短评分理由，10字以内)，"
+                "不要包含 markdown 标记或任何解释文字。"
+            )
+
+            clips_str_parts = []
+            for c in self.clips_info:
+                idx = c.get("index", 0)
+                fname = c.get("filename", "未知")
+                desc = (c.get("desc") or "").strip()
+                dur = c.get("duration", 0) or 0
+                desc_display = desc or "(无描述)"
+                part = f"镜头 {idx}: 文件名={fname}, 描述=\"{desc_display}\", 时长={dur:.1f}秒"
+                clips_str_parts.append(part)
+
+            user_msg = (
+                f"请对以下 {n} 个短视频镜头素材逐一评分（0-10分）：\n\n"
+                + "\n".join(clips_str_parts)
+                + f"\n\n请输出 JSON 数组，共 {n} 个元素。"
+            )
+
+            res_json = llm_chat(system_prompt, user_msg, model="", temperature=0.3, timeout=120)
+            # 清理可能的 markdown 包裹
+            content = res_json.strip()
+            if content.startswith("```"):
+                lines = content.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+
+            # 尝试提取 JSON 数组
+            import re
+            m = re.search(r"\[.*\]", content, re.DOTALL)
+            if m:
+                content = m.group(0)
+
+            import json
+            ratings = json.loads(content)
+            if not isinstance(ratings, list) or len(ratings) == 0:
+                raise RuntimeError("AI 未返回有效的评分数据")
+
+            self.finished.emit(json.dumps(ratings, ensure_ascii=False))
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class ProductCopyInputDialog(QDialog):
     """输入品牌/产品/型号/补充卖点，用于生成口播文案。"""
     def __init__(self, parent=None):
@@ -3002,9 +3093,12 @@ class VideoMontagePage(BasePage):
         self.desc_worker = None
         self.rewrite_worker = None
         self.script_match_worker = None
+        self.rate_worker = None
         
         # State variables
         self.split_descriptions = {} # split video path -> description
+        self.clip_ratings = {}  # split video path -> {"score": float, "reason": str}
+        self.min_score_filter = 0.0  # 最低评分阈值（0=不过滤）
         self.rewritten_script = []
         self.split_clips_list = []
         self.assembled_video_path = ""
@@ -7263,26 +7357,44 @@ class VideoMontagePage(BasePage):
                 time_item.setTextAlignment(Qt.AlignCenter)
                 self.concat_clips_list_widget.setItem(idx, 1, time_item)
                 
-                # Col 2: 描述文案 (Editable, with ellipsis + tooltip + double-click popup)
+                # Col 2: 评分 (ReadOnly) - 从 clip_ratings 缓存读取
+                rating_info = self.clip_ratings.get(norm_path, {})
+                score = rating_info.get("score", None) if isinstance(rating_info, dict) else None
+                score_text = f"⭐ {score:.1f}" if score is not None else "-"
+                score_item = QTableWidgetItem(score_text)
+                score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+                score_item.setTextAlignment(Qt.AlignCenter)
+                score_item.setToolTip(rating_info.get("reason", "") if isinstance(rating_info, dict) and score is not None else "未评分")
+                # 根据评分高低设置颜色
+                if score is not None:
+                    if score >= 7:
+                        score_item.setForeground(Qt.green)
+                    elif score >= 4:
+                        score_item.setForeground(Qt.yellow)
+                    else:
+                        score_item.setForeground(Qt.red)
+                self.concat_clips_list_widget.setItem(idx, 2, score_item)
+                
+                # Col 3: 描述文案 (Editable, with ellipsis + tooltip + double-click popup)
                 desc_item = QTableWidgetItem(desc)
                 desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 desc_item.setToolTip(desc if desc else "（双击可编辑/查看完整文案）")
-                self.concat_clips_list_widget.setItem(idx, 2, desc_item)
+                self.concat_clips_list_widget.setItem(idx, 3, desc_item)
                 
-                # Col 3: 文件目录 (ReadOnly)
+                # Col 4: 文件目录 (ReadOnly)
                 dir_item = QTableWidgetItem(file_dir)
                 dir_item.setFlags(dir_item.flags() & ~Qt.ItemIsEditable) # Read-only
                 dir_item.setToolTip(norm_path)
-                self.concat_clips_list_widget.setItem(idx, 3, dir_item)
+                self.concat_clips_list_widget.setItem(idx, 4, dir_item)
                 
-                # Col 4: 操作 (Play button)
+                # Col 5: 操作 (Play button)
                 play_btn = mdi_button("", "play")
                 play_btn.setToolTip("播放该镜头")
                 play_btn.setFixedWidth(28)
                 play_btn.setFixedHeight(20)
                 play_btn.setStyleSheet("border: none; color: #9ca3af; font-size: 12px; padding: 0;")
                 play_btn.clicked.connect(self._make_play_slot(norm_path))
-                self.concat_clips_list_widget.setCellWidget(idx, 4, play_btn)
+                self.concat_clips_list_widget.setCellWidget(idx, 5, play_btn)
                 
             self.concat_clips_list_widget.blockSignals(False)
         
@@ -8298,9 +8410,9 @@ class VideoMontagePage(BasePage):
         row = item.row()
         col = item.column()
         
-        # Col 2 (描述文案): double-click shows popup with full description
-        if col == 2:
-            desc_item = self.concat_clips_list_widget.item(row, 2)
+        # Col 3 (描述文案): double-click shows popup with full description
+        if col == 3:
+            desc_item = self.concat_clips_list_widget.item(row, 3)
             full_desc = desc_item.text().strip() if desc_item else ""
             file_item = self.concat_clips_list_widget.item(row, 0)
             filename = file_item.text() if file_item else "未知"
@@ -8362,9 +8474,9 @@ class VideoMontagePage(BasePage):
     def _on_concat_table_cell_changed(self, row, col):
         if col == 0:
             self._update_concat_count_lbl()
-        elif col == 2:
+        elif col == 3:
             file_item = self.concat_clips_list_widget.item(row, 0)
-            desc_item = self.concat_clips_list_widget.item(row, 2)
+            desc_item = self.concat_clips_list_widget.item(row, 3)
             if file_item and desc_item:
                 path = file_item.data(Qt.UserRole)
                 if path:

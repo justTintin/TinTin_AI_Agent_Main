@@ -58,3 +58,21 @@
    - 新增 GenScriptWorker（BaseWorker 子类）：在后台线程调用 LLM 生成口播文案
    - 新增 _on_gen_script_clicked / _on_gen_script_finished / _on_gen_script_error 回调方法
    - 涉及文件：studio/gui/montage/step2_concat_view.py、studio/gui/video_montage_page.py
+
+11.镜头重组页面新增 AI 智能评分与筛选功能                                       完成
+   - 镜头列表表格新增「评分」列（位于"时间戳"和"描述文案"之间），显示 ⭐ + 分数
+   - 评分颜色编码：绿色(≥7分) / 黄色(4-6分) / 红色(<4分)，鼠标悬停显示评分理由
+   - 新增「🤖 AI 智能评分」按钮：调用大模型对所有镜头素材逐一评分（0-10分制）
+     · 评分维度：画面内容吸引力(40%) + 描述文案营销价值(30%) + 时长适配度(15%) + 整体质量(15%)
+     · 如描述文案为空，AI 会相应降低评分（视为过渡/空白片段）
+     · 时长过短(<1s)或过长(>30s)适当扣分
+   - 新增「最低评分筛选」下拉框：选项为"不过滤" / "≥1分" ~ "≥8分"
+     · 选择阈值后自动取消勾选低于该分数的镜头素材
+     · 选择"不过滤"时恢复全部勾选状态
+     · 过滤后可在状态栏看到过滤统计（如"筛选 ≥5分 | 已过滤 12/67 个镜头"）
+   - 评分完成后状态栏显示统计：均分 X.X | ⭐≥7: N | ⭐4-6: N | ⭐<4: N
+   - 新增 RateClipsWorker（BaseWorker 子类）：在后台线程调用 LLM 批量评分，输出 JSON 数组
+   - 评分结果缓存至 self.clip_ratings（dict: path → {score, reason}），重新扫描目录时自动恢复
+   - 新增 _rate_clips / _on_rate_finished / _on_rate_error / _apply_score_filter 回调方法
+   - 表格列数从 5 列扩展为 6 列，涉及 _scan_concat_src_dir / _preview_concat_table_item / _on_concat_table_cell_changed 的列索引同步更新
+   - 涉及文件：studio/gui/montage/step2_concat_view.py、studio/gui/video_montage_page.py

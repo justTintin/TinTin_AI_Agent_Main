@@ -57,11 +57,42 @@ class Step2ConcatView(BaseStepView):
         list_header_row.addWidget(btn_deselect_all)
         card_layout.addLayout(list_header_row)
 
+        # ── AI 评分与筛选控制行 ──
+        rate_row = QHBoxLayout()
+        self.main_page.btn_rate_clips = mdi_button("🤖 AI 智能评分", "sparkles")
+        self.main_page.btn_rate_clips.setObjectName("primary_button")
+        self.main_page.btn_rate_clips.setFixedHeight(30)
+        self.main_page.btn_rate_clips.setToolTip(
+            "调用大模型对每条分割镜头进行质量评分（0-10分），\n"
+            "评分维度包括画面内容、信息量、视频节奏适配度等。")
+        self.main_page.btn_rate_clips.clicked.connect(self.main_page._rate_clips)
+        rate_row.addWidget(self.main_page.btn_rate_clips)
+
+        rate_row.addSpacing(15)
+        rate_row.addWidget(QLabel("最低评分筛选:"))
+        self.main_page.score_filter_combo = QComboBox()
+        self.main_page.score_filter_combo.addItem("不过滤", 0.0)
+        for s in [1, 2, 3, 4, 5, 6, 7, 8]:
+            self.main_page.score_filter_combo.addItem(f"≥ {s} 分", float(s))
+        self.main_page.score_filter_combo.setCurrentIndex(0)
+        self.main_page.score_filter_combo.setToolTip(
+            "自动取消勾选评分低于此阈值的镜头素材。\n"
+            "选择「不过滤」时恢复全部勾选状态。")
+        self.main_page.score_filter_combo.currentIndexChanged.connect(self.main_page._apply_score_filter)
+        rate_row.addWidget(self.main_page.score_filter_combo)
+
+        self.main_page.lbl_rate_status = QLabel("")
+        self.main_page.lbl_rate_status.setObjectName("muted_text")
+        self.main_page.lbl_rate_status.setStyleSheet("color: #f39c12; font-size: 11px;")
+        rate_row.addWidget(self.main_page.lbl_rate_status)
+        rate_row.addStretch()
+        card_layout.addLayout(rate_row)
+
         self.main_page.concat_clips_list_widget = QTableWidget()
         self.main_page.concat_clips_list_widget.setWordWrap(False)
         self.main_page.concat_clips_list_widget.verticalHeader().setDefaultSectionSize(30)
-        self.main_page.concat_clips_list_widget.setColumnCount(5)
-        self.main_page.concat_clips_list_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "描述文案", "文件目录", "操作"])
+        self.main_page.concat_clips_list_widget.setColumnCount(6)
+        self.main_page.concat_clips_list_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "评分", "描述文案", "文件目录", "操作"])
         self.main_page.concat_clips_list_widget.setFixedHeight(180)
         self.main_page.concat_clips_list_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.main_page.concat_clips_list_widget.itemDoubleClicked.connect(self.main_page._preview_concat_table_item)
@@ -71,11 +102,13 @@ class Step2ConcatView(BaseStepView):
         header.setSectionResizeMode(0, QHeaderView.Interactive)       # 分割文件名
         self.main_page.concat_clips_list_widget.setColumnWidth(0, 160)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # 时间戳
-        header.setSectionResizeMode(2, QHeaderView.Stretch)           # 描述文案
-        header.setSectionResizeMode(3, QHeaderView.Interactive)       # 文件目录
-        self.main_page.concat_clips_list_widget.setColumnWidth(3, 120)
-        header.setSectionResizeMode(4, QHeaderView.Fixed)             # 操作
-        self.main_page.concat_clips_list_widget.setColumnWidth(4, 30)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # 评分
+        self.main_page.concat_clips_list_widget.setColumnWidth(2, 70)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)           # 描述文案
+        header.setSectionResizeMode(4, QHeaderView.Interactive)       # 文件目录
+        self.main_page.concat_clips_list_widget.setColumnWidth(4, 120)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)             # 操作
+        self.main_page.concat_clips_list_widget.setColumnWidth(5, 30)
         card_layout.addWidget(self.main_page.concat_clips_list_widget)
 
         # Parameters row 1

@@ -1,86 +1,158 @@
 # -*- coding: utf-8 -*-
-"""Material Design 扁平图标（qdawesome mdi 系列）。
+"""Windows 原生风格图标（Emoji 回退 + qtawesome 可选）。
 
-所有图标统一 24dp 大小，与 Google Material Design 规范一致。
-按钮使用方式：btn = mdi_button("播放", "play")
+所有图标优先使用 Emoji（Windows 原生渲染，无需额外字体），
+qtawesome 作为可选增强。图标尺寸 18px。
+
+用法：
+    btn = mdi_button("播放", "play")
+    icon = mdi_icon("save")
 """
-import qtawesome as qta
 from PySide6.QtWidgets import QPushButton, QLabel
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
 
-# 图标名 → mdi 名称映射
-MDI = {
-    "play":       "mdi.play",
-    "stop":       "mdi.stop",
-    "save":       "mdi.content-save",
-    "search":     "mdi.magnify",
-    "refresh":    "mdi.refresh",
-    "rocket":     "mdi.rocket-launch",
-    "flash":      "mdi.flash",
-    "folder":     "mdi.folder-open",
-    "cut":        "mdi.content-cut",
-    "cog":        "mdi.cog",
-    "left":       "mdi.chevron-left",
-    "right":      "mdi.chevron-right",
-    "undo":       "mdi.undo",
-    "check":      "mdi.check",
-    "close":      "mdi.close",
-    "plus":       "mdi.plus",
-    "minus":      "mdi.minus",
-    "download":   "mdi.download",
-    "upload":     "mdi.upload",
-    "edit":       "mdi.pencil",
-    "delete":     "mdi.delete",
-    "copy":       "mdi.content-copy",
-    "link":       "mdi.link-variant",
-    "eye":        "mdi.eye",
-    "lock":       "mdi.lock",
-    "unlock":     "mdi.lock-open",
-    "home":       "mdi.home",
-    "menu":       "mdi.menu",
-    "arrow_up":   "mdi.arrow-up",
-    "arrow_down": "mdi.arrow-down",
-    "open":       "mdi.open-in-new",
-    "server":     "mdi.server",
-    "image":      "mdi.image",
-    "video":      "mdi.video",
-    "audio":      "mdi.microphone",
-    "voice":      "mdi.account-voice",
-    "robot":      "mdi.robot",
-    "brain":      "mdi.brain",  # for AI
-    "checkbox_marked": "mdi.checkbox-marked",
-    "checkbox_blank":  "mdi.checkbox-blank-outline",
-    "star":       "mdi.star",
-    "info":       "mdi.information",
-    "warning":    "mdi.alert",
-    "error":      "mdi.alert-circle",
-    "success":    "mdi.check-circle",
-    "filter":     "mdi.filter-variant",
-    "sort":       "mdi.sort",
-    "expand":     "mdi.chevron-down",
-    "collapse":   "mdi.chevron-up",
-    "layers":     "mdi.layers",
-    "palette":    "mdi.palette",
-    "fullscreen": "mdi.fullscreen",
-    "pip":        "mdi.picture-in-picture-bottom-right",
-    "restore":    "mdi.restore",
-    "autofix":    "mdi.auto-fix",
-    "select_all":     "mdi.select-all",
-    "deselect_all":   "mdi.select-remove",
+# ── Emoji 映射（Windows 原生，不依赖任何第三方包）──
+EMOJI = {
+    # 媒体
+    "play":        "▶️",
+    "stop":        "⏹️",
+    "pause":       "⏸️",
+    "record":      "⏺️",
+    "forward":     "⏩",
+    "backward":    "⏪",
+    "next":        "⏭️",
+    "previous":    "⏮️",
+    # 操作
+    "save":        "💾",
+    "search":      "🔍",
+    "refresh":     "🔄",
+    "close":       "❌",
+    "plus":        "➕",
+    "minus":       "➖",
+    "edit":        "✏️",
+    "pencil":      "✏️",
+    "delete":      "🗑️",
+    "copy":        "📋",
+    "paste":       "📋",
+    "cut":         "✂️",
+    "undo":        "↩️",
+    "check":       "✅",
+    "download":    "⬇️",
+    "upload":      "⬆️",
+    "folder":      "📁",
+    "file":        "📄",
+    "open":        "📂",
+    "share":       "🔗",
+    # 方向
+    "left":        "◀️",
+    "right":       "▶️",
+    "arrow_up":    "⬆️",
+    "arrow_down":  "⬇️",
+    "expand":      "🔽",
+    "collapse":    "🔼",
+    # 工具
+    "cog":         "⚙️",
+    "gear":        "⚙️",
+    "wrench":      "🔧",
+    "rocket":      "🚀",
+    "flash":       "⚡",
+    "broom":       "🧹",
+    "lightbulb":   "💡",
+    "pin":         "📌",
+    "lock":        "🔒",
+    "unlock":      "🔓",
+    "key":         "🔑",
+    # 媒体类型
+    "video":       "🎬",
+    "film":        "🎞️",
+    "audio":       "🎵",
+    "mic":         "🎤",
+    "music":       "🎶",
+    "image":       "🖼️",
+    "camera":      "📷",
+    "palette":     "🎨",
+    "voice":       "🗣️",
+    "clipboard":   "📋",
+    # AI / 智能
+    "robot":       "🤖",
+    "brain":       "🧠",
+    "robot2":      "🤖",
+    "magic":       "🪄",
+    "sparkles":    "✨",
+    # 状态
+    "star":        "⭐",
+    "heart":       "❤️",
+    "info":        "ℹ️",
+    "warning":     "⚠️",
+    "error":       "🚫",
+    "success":     "✅",
+    "question":    "❓",
+    "hourglass":   "⏳",
+    "clock":       "🕐",
+    "eye":         "👁️",
+    "eyes":        "👀",
+    # 系统
+    "home":        "🏠",
+    "menu":        "☰",
+    "server":      "🖥️",
+    "link":        "🔗",
+    "download2":   "📥",
+    "upload2":     "📤",
+    "fullscreen":  "🖥️",
+    "restore":     "🪟",
+    "layers":      "📚",
+    "select_all":      "☑️",
+    "deselect_all":    "☐",
+    "sort":        "↕️",
+    "filter":      "🔍",
+    "autofix":     "🔧",
+    "projector":   "📽️",
+    "celebration": "🎉",
+    "balance-scale": "⚖️",
+    "volume":      "🔊",
+    "mute":        "🔇",
+    # 复选框
+    "checkbox_marked": "☑️",
+    "checkbox_blank":  "☐",
 }
+
+# qtawesome 作为增强（可选，未安装也不影响使用）
+try:
+    import qtawesome as qta
+    _HAS_QTA = True
+except ImportError:
+    _HAS_QTA = False
 
 
 def mdi_icon(name: str, color: str = "#c9cdd4") -> QIcon:
-    """取 Material Design 图标。"""
-    mdi_name = MDI.get(name, "mdi.help-circle")
-    return qta.icon(mdi_name, color=color)
+    """获取图标。优先 qtawesome，回退 emoji。"""
+    if _HAS_QTA:
+        mdi_name = "mdi." + name.replace("_", "-")
+        return qta.icon(mdi_name, color=color)
+    # emoji fallback — 创建空图标（文字由按钮文本提供）
+    return QIcon()
 
 
-def mdi_button(text: str, icon_name: str = "", parent=None, color: str = "#c9cdd4", size: int = 18) -> QPushButton:
-    """创建带 Material 图标的按钮。"""
+def mdi_button(text: str, icon_name: str = "", parent=None,
+               color: str = "#c9cdd4", size: int = 18) -> QPushButton:
+    """创建带图标的按钮。Emoji 直接加在文本前面。"""
+    if icon_name and icon_name in EMOJI:
+        text = EMOJI[icon_name] + " " + text
     btn = QPushButton(text, parent)
-    if icon_name:
+    if icon_name and _HAS_QTA:
         btn.setIcon(mdi_icon(icon_name, color))
         btn.setIconSize(QSize(size, size))
     return btn
+
+
+def emoji_icon(name: str) -> str:
+    """直接返回 emoji 字符，用于 QLabel 等。"""
+    return EMOJI.get(name, "❓")
+
+
+def emoji_button(text: str, emoji: str = "", parent=None) -> QPushButton:
+    """创建纯 Emoji 按钮（不依赖 qtawesome）。"""
+    if emoji:
+        text = emoji + " " + text
+    return QPushButton(text, parent)

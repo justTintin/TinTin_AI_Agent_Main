@@ -769,7 +769,7 @@ class PageSetupMixin:
             header.addWidget(self.lbl_task_status, 1)
             btn_sync = mdi_button("同步服务端", "refresh")
             btn_sync.setFixedWidth(100)
-            btn_sync.clicked.connect(self._sync_server_tasks_async)
+            btn_sync.clicked.connect(self._sync_server_tasks)
             header.addWidget(btn_sync)
             btn_clear = mdi_button("清除已完成", "close")
             btn_clear.setFixedWidth(100)
@@ -798,149 +798,95 @@ class PageSetupMixin:
             layout.addWidget(task_card, 1)
     
     def _sync_server_tasks_async(self):
-        """异步版本：HTTP 请求放到 Worker 线程，GUI 更新通过 finished 信号回主线程执行。
-
-        **关键修复**：此前 _do_sync 直接调用 _sync_server_tasks，而该方法内部操作了
-        self.task_table 等 Qt 控件。在非 GUI 线程操作控件会导致未定义行为甚至崩溃。
-        现在拆分为 _fetch_server_tasks_data（纯数据，线程安全）+
-        _apply_server_tasks_data（GUI 更新，主线程执行）两步。
-        """
+        """异步版本：HTTP 请求放 Worker 线程，UI 更新回主线程。"""
         from utils.thread_worker import TaskWorker as Worker
 
-        def _do_fetch():
-            return self._fetch_server_tasks_data()
-
-        def _on_fetched(data):
-            self._apply_server_tasks_data(data)
-
-        # 保持引用，防止 GC 导致线程未完成即被回收
-        self._sync_worker = Worker(_do_fetch)
-        self._sync_worker.finished.connect(_on_fetched)
-        self._sync_worker.start()
-
-    def _fetch_server_tasks_data(self):
-        """线程安全：从服务端 GET /tasks 拉取任务列表，返回纯数据 dict。
-
-        不触碰任何 Qt 控件，可安全在子线程调用。
-        返回格式: {"new_tasks": [...], "filtered": int, "error": str|None}
-        """
-        import requests as _req
-        import socket as _socket
-        result = {"new_tasks": [], "filtered": 0, "error": None}
-        try:
-            from config.paths import AI_CONFIG_FILE
-            import json as _json
-            base_url = "http://192.168.111.18:8000"
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r") as f:
-                    cfg = _json.load(f)
-                url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-                if url:
-                    base_url = url
-            resp = _req.get(f"{base_url}/tasks", timeout=10)
-            if resp.status_code != 200:
-                result["error"] = f"HTTP {resp.status_code}"
-                return result
-            tasks = resp.json()
-            if not isinstance(tasks, list):
-                result["error"] = "响应格式非列表"
-                return result
-
-            # 获取本机 IP
-            local_ip = ""
+        def _fetch():
+            """仅做 HTTP 请求，返回数据，不碰 UI。"""
+            import requests as _req
+            import socket as _socket
             try:
-                s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-                s.connect((base_url.replace("http://","").replace("https://","").split(":")[0], 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                pass
+                from config.paths import AI_CONFIG_FILE
+                import json as _json
+                base_url = "http://192.168.111.18:8000"
+                if os.path.isfile(AI_CONFIG_FILE):
+                    with open(AI_CONFIG_FILE, "r") as f:
+                        cfg = _json.load(f)
+                    url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                    if url:
+                        base_url = url
+                resp = _req.get(f"{base_url}/tasks", timeout=10)
+                if resp.status_code != 200:
+                    return None
+                tasks = resp.json()
+                if not isinstance(tasks, list):
+                    return None
 
-            # 不在此处读取 task_table（GUI 操作，子线程不安全）。
-            # 所有去重逻辑统一放到 _apply_server_tasks_data 在主线程执行。
-            seen = set()
-            filtered = 0
-            new_tasks = []
+                # 获取本机 IP
+                local_ip = ""
+                try:
+                    s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                    s.connect((base_url.replace("http://", "").replace("https://", "").split(":")[0], 80))
+                    local_ip = s.getsockname()[0]
+                    s.close()
+                except Exception:
+                    pass
+
+                # 过滤本机任务
+                my_tasks = []
+                for t in tasks:
+                    task_ip = (t.get("client_ip") or "").strip()
+                    if local_ip and task_ip and task_ip != local_ip:
+                        continue
+                    my_tasks.append(t)
+                return my_tasks
+            except Exception as e:
+                print(f"同步服务端任务失败: {e}")
+                return None
+
+        def _on_done(tasks):
+            """主线程回调：更新 UI。"""
+            if not tasks:
+                return
+            existing = set()
+            for row in range(self.task_table.rowCount()):
+                item = self.task_table.item(row, 0)
+                if item:
+                    existing.add(item.text())
+
+            added = 0
+            import datetime as _dt
             for t in tasks:
-                # 只显示本机 IP 的任务
-                task_ip = (t.get("client_ip") or "").strip()
-                if local_ip and task_ip and task_ip != local_ip:
-                    filtered += 1
-                    continue
-
                 tid = (t.get("id") or "")[:12]
-                if not tid or tid in seen:
+                if not tid or tid in existing:
                     continue
-                # 格式化时间
                 created_ts = t.get("created_at") or t.get("started_at") or 0
-                if created_ts:
-                    import datetime as _dt
-                    time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M")
-                else:
-                    time_str = ""
-                new_tasks.append({
-                    "tid": tid,
-                    "type": t.get("type", "未知"),
-                    "status": t.get("status", "unknown"),
-                    "progress": t.get("progress", 0),
-                    "time_str": time_str,
-                })
-                seen.add(tid)
+                time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M") if created_ts else ""
+                row = self.task_table.rowCount()
+                self.task_table.insertRow(row)
+                self.task_table.setItem(row, 0, QTableWidgetItem(tid))
+                self.task_table.setItem(row, 1, QTableWidgetItem(t.get("type", "未知")))
+                source_item = QTableWidgetItem("服务端")
+                source_item.setForeground(QColor("#60a5fa"))
+                self.task_table.setItem(row, 2, source_item)
+                status = t.get("status", "unknown")
+                status_map = {"completed": "✅ 完成", "processing": "⏳ 处理中", "pending": "⏳ 排队中", "failed": "❌ 失败", "error": "❌ 错误"}
+                self.task_table.setItem(row, 3, QTableWidgetItem(status_map.get(status, status)))
+                p_bar = QProgressBar()
+                p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
+                p_bar.setTextVisible(True)
+                self.task_table.setCellWidget(row, 4, p_bar)
+                self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
+                self.task_table.setCellWidget(row, 6, QWidget())
+                existing.add(tid)
+                added += 1
 
-            result["new_tasks"] = new_tasks
-            result["filtered"] = filtered
-        except Exception as e:
-            result["error"] = str(e)
-            print(f"同步服务端任务失败: {e}")
-        return result
+            if added > 0:
+                self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
 
-    def _apply_server_tasks_data(self, data):
-        """主线程执行：将 _fetch_server_tasks_data 返回的数据写入 task_table。"""
-        if not data:
-            return
-        if data.get("error"):
-            if hasattr(self, "lbl_task_status"):
-                self.lbl_task_status.setText(f"⚠️ 同步失败: {data['error']}")
-            return
-
-        new_tasks = data.get("new_tasks", [])
-        filtered = data.get("filtered", 0)
-
-        # 再次基于主线程安全的 task_table 状态去重
-        existing = set()
-        for row in range(self.task_table.rowCount()):
-            item = self.task_table.item(row, 0)
-            if item:
-                existing.add(item.text())
-
-        added = 0
-        for t in new_tasks:
-            tid = t["tid"]
-            if tid in existing:
-                continue
-            row = self.task_table.rowCount()
-            self.task_table.insertRow(row)
-            self.task_table.setItem(row, 0, QTableWidgetItem(tid))
-            self.task_table.setItem(row, 1, QTableWidgetItem(t["type"]))
-            source_item = QTableWidgetItem("服务端")
-            source_item.setForeground(QColor("#60a5fa"))
-            self.task_table.setItem(row, 2, source_item)
-            status = t["status"]
-            status_map = {"completed": "✅ 完成", "processing": "⏳ 处理中", "pending": "⏳ 排队中", "failed": "❌ 失败", "error": "❌ 错误"}
-            self.task_table.setItem(row, 3, QTableWidgetItem(status_map.get(status, status)))
-            p_bar = QProgressBar()
-            p_bar.setValue(t["progress"] if status == "processing" else (100 if status == "completed" else 0))
-            p_bar.setTextVisible(True)
-            self.task_table.setCellWidget(row, 4, p_bar)
-            self.task_table.setItem(row, 5, QTableWidgetItem(t["time_str"]))
-            self.task_table.setCellWidget(row, 6, QWidget())
-            existing.add(tid)
-            added += 1
-
-        if added > 0:
-            self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
-        elif filtered > 0:
-            self.lbl_task_status.setText(f"💡 服务端有 {filtered} 条其他客户端的任务已过滤")
+        w = Worker(_fetch)
+        w.finished.connect(_on_done)
+        w.start()
     
     def _clear_done_tasks(self):
         """清除所有已完成/失败的任务行。"""

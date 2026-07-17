@@ -821,9 +821,11 @@ class StoryboardPage(BasePage):
         bg = QButtonGroup(dlg)
         fmt_excel = QRadioButton("Excel（.xlsx）— 默认")
         fmt_md = QRadioButton("Markdown（.md）")
+        fmt_json = QRadioButton("JSON（.json，供脚本成片）")
         fmt_both = QRadioButton("Excel + Markdown")
+        fmt_all = QRadioButton("Excel + Markdown + JSON")
         fmt_excel.setChecked(True)
-        for rb in (fmt_excel, fmt_md, fmt_both):
+        for rb in (fmt_excel, fmt_md, fmt_json, fmt_both, fmt_all):
             bg.addButton(rb)
             dl.addWidget(rb)
 
@@ -845,8 +847,9 @@ class StoryboardPage(BasePage):
             return
 
         base_name = name_edit.text().strip() or default_name
-        do_excel = fmt_excel.isChecked() or fmt_both.isChecked()
-        do_md = fmt_md.isChecked() or fmt_both.isChecked()
+        do_excel = fmt_excel.isChecked() or fmt_both.isChecked() or fmt_all.isChecked()
+        do_md = fmt_md.isChecked() or fmt_both.isChecked() or fmt_all.isChecked()
+        do_json = fmt_json.isChecked() or fmt_all.isChecked()
         do_feishu = chk_feishu.isChecked()
 
         # 保存到配置的素材目录（与浏览器下载目录对齐）
@@ -866,6 +869,11 @@ class StoryboardPage(BasePage):
             md_path = os.path.join(out_dir, base_name + ".md")
             self._export_storyboard_md(md_path, topic, ratio, orient, style_name, total_dur, shots)
             saved_files.append(md_path)
+
+        if do_json:
+            json_path = os.path.join(out_dir, base_name + ".json")
+            self._export_storyboard_json(json_path, topic, ratio, total_dur, shots)
+            saved_files.append(json_path)
 
         if not saved_files:  # fallback
             xlsx_path = os.path.join(out_dir, base_name + ".xlsx")
@@ -961,6 +969,23 @@ class StoryboardPage(BasePage):
             )
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+
+    def _export_storyboard_json(self, path, topic, ratio, total_dur, shots):
+        """导出为 JSON（供「一键成片 > 脚本成片」tab 选择并提交服务端）。
+        结构：{topic, ratio, total_duration, shot_count, shots:[{index,shot_type,duration,sfx,visual,narration,material_type,material_path,material_hash}], saved_at}
+        """
+        import json as _json
+        import time as _time
+        data = {
+            "topic": topic,
+            "ratio": ratio,
+            "total_duration": total_dur,
+            "shot_count": len(shots),
+            "shots": shots,   # _collect_shots() 的输出，已含素材路径+文案
+            "saved_at": int(_time.time()),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=2)
 
     # ──────────────────── 风格化 ────────────────────────────────────
     def _reload_stylizations(self):

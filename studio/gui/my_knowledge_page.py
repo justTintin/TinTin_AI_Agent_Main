@@ -705,10 +705,9 @@ class MyKnowledgePage(BasePage):
 
     def _distill(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        cfg = {"api_url": ai.get("llm_api_url",""), "api_key": ai.get("llm_api_key",""),
-               "model": ai.get("llm_model","deepseek-chat")}
-        if not (cfg["api_url"] and cfg["api_key"]):
-            self.show_warning("请先在「AI 设置」配置 LLM 的 API 地址与 Key。", "未配置 LLM")
+        cfg = {"model": ai.get("llm_model","deepseek-v4-flash")}
+        if not cfg["model"]:
+            self.show_warning("请先在「AI 设置」配置 LLM 模型名称。", "未配置 LLM")
             return
         has_samples = any(it.get("type") == REFERENCE_TYPE for it in self.manager.all_items())
         if not has_samples:
@@ -747,10 +746,9 @@ class MyKnowledgePage(BasePage):
             self.show_warning("未找到此风格化的源素材，无法重新提炼。", "无源素材")
             return
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        cfg = {"api_url": ai.get("llm_api_url",""), "api_key": ai.get("llm_api_key",""),
-               "model": ai.get("llm_model","deepseek-chat")}
-        if not (cfg["api_url"] and cfg["api_key"]):
-            self.show_warning("请先配置 LLM。", "未配置 LLM")
+        cfg = {"model": ai.get("llm_model","deepseek-v4-flash")}
+        if not cfg["model"]:
+            self.show_warning("请先配置 LLM 模型名称。", "未配置 LLM")
             return
         self.action_status.setText("正在重新提炼…")
         self.btn_regen.setEnabled(False)
@@ -814,10 +812,9 @@ class MyKnowledgePage(BasePage):
     def _adjust_copy(self):
         s = self.current_stylization
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        api_url, api_key = ai.get("llm_api_url",""), ai.get("llm_api_key","")
-        model = ai.get("llm_model","deepseek-chat")
-        if not (api_url and api_key):
-            self.show_warning("请先在「AI 设置」配置 LLM 的 API 地址与 Key。", "未配置 LLM")
+        model = ai.get("llm_model","deepseek-v4-flash")
+        if not model:
+            self.show_warning("请先在「AI 设置」配置 LLM 模型名称。", "未配置 LLM")
             return
 
         # 推荐维度：当前风格化的 dim/dim_value 用于推荐排序
@@ -905,7 +902,7 @@ class MyKnowledgePage(BasePage):
             user = f"【风格指引】\n{kb}\n\n【待改写文案】\n{d}"
             btn_go.setEnabled(False)
             status.setText("正在调整…")
-            self._adj_worker = LLMWorker(api_url, api_key, model, system, user)
+            self._adj_worker = LLMWorker("", "", model, system, user)
             self._adj_worker.finished.connect(
                 lambda t: (out.setPlainText(t), status.setText("完成"), btn_go.setEnabled(True)))
             self._adj_worker.error.connect(

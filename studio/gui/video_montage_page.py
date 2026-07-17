@@ -806,17 +806,13 @@ class BestClipWorker(BaseWorker):
 class PunctuationSRTLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, srt_content):
+    def __init__(self, model, srt_content):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.srt_content = srt_content
 
     def run(self):
         try:
-            import requests
-            # 走服务端代理
             from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个字幕标点符号恢复专家。给定的内容是一个SRT字幕文件，其中包含时间轴和字幕文本。你的任务是给字幕文本添加合适的中文标点符号（，。！？：等），"
@@ -825,30 +821,8 @@ class PunctuationSRTLLMWorker(BaseWorker):
                 "2. 绝对不要修改、增加或删除原字幕文本的任何汉字或英文单词，只能在文本中合理地插入标点符号。\n"
                 "3. 直接输出加完标点符号后的完整SRT文件内容，不要用 markdown 包裹，不要有任何解释或废话。"
             )
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.srt_content}
-                ],
-                "temperature": 0.2
-            }
             log.info(f"PunctuationSRTLLMWorker - 开始恢复字幕标点。模型: {self.model}, 字符数: {len(self.srt_content)}")
-            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=45)
-            class _R:
-                status_code = 200
-            res = _R()
-            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
-            log.info(f"PunctuationSRTLLMWorker - API 响应状态码: {res.status_code}")
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.srt_content, model=self.model, timeout=45)
             if content.startswith("```"):
                 lines = content.split("\n")
                 if lines[0].startswith("```"):
@@ -856,7 +830,6 @@ class PunctuationSRTLLMWorker(BaseWorker):
                 if lines and lines[-1].startswith("```"):
                     lines = lines[:-1]
                 content = "\n".join(lines).strip()
-            
             log.info("PunctuationSRTLLMWorker - 字幕标点优化成功。")
             self.finished.emit(content)
         except Exception as e:
@@ -1824,10 +1797,8 @@ class BatchAITextRewriteWorker(BaseWorker):
 class ScriptMatchLLMWorker(BaseWorker):
     finished = Signal(list, list)  # Emits (matched_paths, matched_descriptions)
 
-    def __init__(self, api_url, api_key, model, rewritten_text, candidate_clips, split_descriptions):
+    def __init__(self, model, rewritten_text, candidate_clips, split_descriptions):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.rewritten_text = rewritten_text
         self.candidate_clips = candidate_clips
@@ -1835,8 +1806,8 @@ class ScriptMatchLLMWorker(BaseWorker):
 
     def run(self):
         try:
-            import requests
             import json
+            from utils.llm_proxy import llm_chat
             
             rewritten_lines = [line.strip() for line in self.rewritten_text.split("\n") if line.strip()]
             if not rewritten_lines:
@@ -1852,8 +1823,6 @@ class ScriptMatchLLMWorker(BaseWorker):
             for idx, line in enumerate(rewritten_lines, 1):
                 rewritten_list_str += f"{idx}. {line}\n"
 
-            # 走服务端代理
-            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个视频智能剪辑匹配专家。你的任务是分析改写后的文案（按行分开），以及待排列的视频镜头候选列表（包含编号、文件名和画面描述）。\n"
                 "请为改写后文案的每一行，从待排列候选镜头中找出最匹配的一个镜头。请按顺序匹配，并严格以 JSON 格式返回结果。\n"
@@ -1867,28 +1836,7 @@ class ScriptMatchLLMWorker(BaseWorker):
                 f"改写后的新文案列表：\n{rewritten_list_str}"
             )
 
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                "temperature": 0.1
-            }
-            
-            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=45)
-            class _R:
-                status_code = 200
-            res = _R()
-            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, user_content, model=self.model, timeout=45)
             
             if content.startswith("```"):
                 lines = content.split("\n")
@@ -5766,18 +5714,16 @@ class VideoMontagePage(BasePage):
         self.transcribe_raw_worker.start()
 
     def _on_transcribe_raw_finished(self, srt_content, srt_path):
-        llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-        llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
         llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
         self.pending_srt_path = srt_path
         self.raw_unpunctuated_srt = srt_content
 
-        if llm_api_url and llm_api_key and srt_content.strip():
+        if llm_model and srt_content.strip():
             self.stage_label.setText("🎙️ 正在使用 AI 模型自动优化字幕标点符号...")
             self.progress_bar.setRange(0, 0) # Infinite spinner
             
-            self.punc_srt_worker = PunctuationSRTLLMWorker(llm_api_url, llm_api_key, llm_model, srt_content)
+            self.punc_srt_worker = PunctuationSRTLLMWorker(llm_model, srt_content)
             self.punc_srt_worker.finished.connect(self._on_punc_srt_finished)
             self.punc_srt_worker.error.connect(self._on_punc_srt_error)
             self.punc_srt_worker.start()
@@ -5864,12 +5810,10 @@ class VideoMontagePage(BasePage):
                 QMessageBox.warning(self.parent_widget, "文案为空",
                                     "智能匹配模式需要口播文案。\n请在文案框中粘贴口播文案（每行一句）。")
                 return
-            llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-            llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
-            if not llm_api_url or not llm_api_key:
+            if not llm_model:
                 QMessageBox.warning(self.parent_widget, "未配置大模型",
-                                    "智能匹配需要大模型 API。\n请先在「环境配置」中配置 LLM API 地址与密钥。")
+                                    "智能匹配需要配置大模型。\n请先在「环境配置」中配置 LLM 模型。")
                 return
 
             # 无描述的镜头无法参与语义匹配，提示但不阻断（LLM 会按文件名兜底）

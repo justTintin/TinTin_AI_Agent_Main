@@ -310,17 +310,15 @@ class HotSpotAnalyzer(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)
 
-    def __init__(self, segments, use_llm=False, llm_url="", llm_key="", llm_model=""):
+    def __init__(self, segments, use_llm=False, llm_model=""):
         super().__init__()
         self.segments = [s for s in segments if hasattr(s, 'start') and hasattr(s, 'text')]
         self.use_llm = use_llm
-        self.llm_url = llm_url
-        self.llm_key = llm_key
         self.llm_model = llm_model
 
     def run(self):
         try:
-            if self.use_llm and self.llm_url and self.llm_key:
+            if self.use_llm and self.llm_model:
                 self._llm_analyze()
             else:
                 self._rule_analyze()
@@ -390,9 +388,9 @@ class HotSpotAnalyzer(BaseWorker):
         self.finished.emit(results)
 
     def _llm_analyze(self):
-        self.stage.emit("正在使用大模型(DeepSeek/OpenAI)分析热点...")
-        self.progress.emit(10)
-        import requests
+        import re
+        import json
+        from utils.llm_proxy import llm_chat_messages
         full = []
         for s in self.segments:
             ts = f"[{int(s.start//60):02d}:{int(s.start%60):02d}]"
@@ -435,25 +433,22 @@ class HotSpotAnalyzer(BaseWorker):
                 "【待分析字幕文本】：\n" + chunk
             )
             try:
-                resp = requests.post(
-                    f"{self.llm_url.rstrip('/')}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {self.llm_key}", "Content-Type": "application/json"},
-                    json={"model": self.llm_model, "messages": [{"role": "user", "content": prompt}],
-                          "temperature": 0.3, "max_tokens": 2000}, timeout=120)
-                if resp.status_code == 200:
-                    content = resp.json()["choices"][0]["message"]["content"]
-                    m = re.search(r"\[[\s\S]*\]", content)
-                    if m:
-                        for item in json.loads(m.group()):
-                            sp = item["start"].split(":"); ep = item["end"].split(":")
-                            item["start"] = int(sp[0]) * 60 + int(sp[1])
-                            item["end"] = int(ep[0]) * 60 + int(ep[1])
-                            item["duration"] = item["end"] - item["start"]
-                            item["start_str"] = item.get("start_str", item.get("start", ""))
-                            item["end_str"] = item.get("end_str", item.get("end", ""))
-                            item["preview"] = ""
-                            item["score"] = item.get("score", 5.0)
-                            all_results.append(item)
+                content = llm_chat_messages(
+                    [{"role": "user", "content": prompt}],
+                    model=self.llm_model, temperature=0.3, timeout=120, max_tokens=2000
+                )
+                m = re.search(r"\[[\s\S]*\]", content)
+                if m:
+                    for item in json.loads(m.group()):
+                        sp = item["start"].split(":"); ep = item["end"].split(":")
+                        item["start"] = int(sp[0]) * 60 + int(sp[1])
+                        item["end"] = int(ep[0]) * 60 + int(ep[1])
+                        item["duration"] = item["end"] - item["start"]
+                        item["start_str"] = item.get("start_str", item.get("start", ""))
+                        item["end_str"] = item.get("end_str", item.get("end", ""))
+                        item["preview"] = ""
+                        item["score"] = item.get("score", 5.0)
+                        all_results.append(item)
             except Exception as e:
                 log.warning(f"LLM chunk {ci} error: {e}")
                 
@@ -2049,25 +2044,23 @@ class LiveClipPage(BasePage):
 
         mode = self.analysis_mode.currentData()
         use_llm = (mode == "llm")
-        llm_url = llm_key = llm_model = ""
+        llm_model = ""
         if use_llm:
             cfg = getattr(self.main_window, "ai_config", {})
-            llm_url = cfg.get("llm_api_url", "")
-            llm_key = cfg.get("llm_api_key", "")
             llm_model = cfg.get("llm_model", "deepseek-chat")
-            if not llm_url or not llm_key:
+            if not llm_model:
                 QMessageBox.warning(self.parent_widget, "未配置LLM",
-                                    "请在 'AI 设置' 中配置大模型 API。\n将使用内置算法。")
+                                    "请在 'AI 设置' 中配置大模型。\n将使用内置算法。")
                 use_llm = False
 
         if use_llm:
-            self.stage_lbl.setText("正在使用大模型（DeepSeek/OpenAI）分析热点...")
+            self.stage_lbl.setText("正在使用大模型分析热点...")
         else:
             self.stage_lbl.setText("正在使用内置算法分析热点...")
         self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
 
         self._analyzer = HotSpotAnalyzer(self.transcript_segments,
-                                         use_llm=use_llm, llm_url=llm_url, llm_key=llm_key, llm_model=llm_model)
+                                         use_llm=use_llm, llm_model=llm_model)
         self._workers.append(self._analyzer)
         self._analyzer.stage.connect(self.stage_lbl.setText)
         self._analyzer.progress.connect(self.progress_bar.setValue)

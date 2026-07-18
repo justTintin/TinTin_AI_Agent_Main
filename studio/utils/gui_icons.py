@@ -171,3 +171,26 @@ def emoji_button(text: str, emoji: str = "", parent=None) -> QPushButton:
     if emoji:
         text = emoji + " " + text
     return QPushButton(text, parent)
+
+
+_TABLE_BTN_STYLE = """
+    QPushButton {
+        border: none; background: transparent; padding: 1px 5px;
+        font-size: 13px; color: #9ca3af;
+    }
+    QPushButton:hover {
+        color: #ffffff; background: rgba(255,255,255,0.1); border-radius: 3px;
+    }
+"""
+
+
+def table_action_button(text: str, tooltip: str = "", parent=None) -> QPushButton:
+    """表格操作列专用扁平按钮（无边框，icon+文字，不挤压行高）。
+    用法: btn = table_action_button('🗑', '删除')
+    """
+    btn = QPushButton(text, parent)
+    if tooltip:
+        btn.setToolTip(tooltip)
+    btn.setFlat(True)
+    btn.setStyleSheet(_TABLE_BTN_STYLE)
+    return btn

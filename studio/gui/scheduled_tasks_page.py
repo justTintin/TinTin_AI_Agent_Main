@@ -85,9 +85,22 @@ class ScheduledTasksPage(BasePage):
         dl.addWidget(QLabel("🔍 任务详情（参数 / 结果）"))
         self.detail = QTextBrowser()
         self.detail.setOpenExternalLinks(False)
-        self.detail.setMinimumHeight(120)
+        self.detail.setMinimumHeight(100)
         self.detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
         dl.addWidget(self.detail, 1)
+
+        # 变体打分区（仅当任务已完成且有 all_variants 时显示）
+        self.variants_title = QLabel("🎯 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
+        self.variants_title.setStyleSheet("font-weight:bold; color:#3b82f6;")
+        self.variants_title.setVisible(False)
+        dl.addWidget(self.variants_title)
+        self.variants_container = QWidget()   # 动态填充打分行的容器
+        self.variants_layout = QVBoxLayout(self.variants_container)
+        self.variants_layout.setContentsMargins(0, 0, 0, 0); self.variants_layout.setSpacing(4)
+        self.variants_container.setVisible(False)
+        dl.addWidget(self.variants_container)
+        self._current_task_id = None   # 当前展示详情的任务 id（供打分回调用）
+
         root.addWidget(detail_card, 1)
 
         # ── 自动轮询定时器：任务进行中时每 5 秒刷新 ────────────────────────
@@ -144,6 +157,7 @@ class ScheduledTasksPage(BasePage):
         t = stc.get_task(tid)
         if t:
             self.detail.setMarkdown(self._render_detail(t))
+            self._populate_variants(t)   # 填充变体打分区
 
     def _render_detail(self, t):
         params = t.get("params", {}) or {}
@@ -171,6 +185,88 @@ class ScheduledTasksPage(BasePage):
         else:
             lines.append("（无）")
         return "\n".join(lines)
+
+    # ── 变体打分区 ──────────────────────────────────────────────────────────
+    def _populate_variants(self, t):
+        """根据任务 result.all_variants 填充变体打分区。
+        仅当任务已完成且 result 含 all_variants 时显示；否则隐藏。"""
+        # 清空旧的打分行
+        while self.variants_layout.count():
+            child = self.variants_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        res = t.get("result") or {}
+        variants = res.get("all_variants") or []
+        best = res.get("best_variant")
+        is_done = t.get("status") == "completed"
+
+        if not is_done or not variants:
+            # 无变体可打分（任务未完成，或单变体 count=1）
+            self.variants_title.setVisible(False)
+            self.variants_container.setVisible(False)
+            self._current_task_id = None
+            return
+
+        self._current_task_id = t.get("id")
+        self.variants_title.setVisible(True)
+        self.variants_container.setVisible(True)
+        self.variants_title.setText(
+            f"🎯 变体打分（任务 {self._current_task_id}：对成片好/坏反馈，供服务端进化）　"
+            f"最优变体：{best or '—'}")
+
+        # 每个变体一行：变体名/风格/节奏/评分 + 👍👍 + 👎
+        for v in variants:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(2, 2, 2, 2); rl.setSpacing(8)
+            name = v.get("variant", "")
+            is_best = (name == best)
+            tag = "🏆" if is_best else "  "
+            rl.addWidget(QLabel(f"{tag} 变体 {name}"))
+            rl.addWidget(QLabel(f"风格：{v.get('style','—')}"))
+            rl.addWidget(QLabel(f"节奏：{v.get('pacing','—')}"))
+            rl.addWidget(QLabel(f"评分：{v.get('score','—')}"))
+            rl.addStretch()
+            btn_good = QPushButton("👍 好")
+            btn_good.setObjectName("secondary_button")
+            btn_good.setFixedWidth(64)
+            btn_good.clicked.connect(lambda _=False, fb="good": self._on_variant_feedback(fb))
+            rl.addWidget(btn_good)
+            btn_bad = QPushButton("👎 差")
+            btn_bad.setFixedWidth(64)
+            btn_bad.clicked.connect(lambda _=False, fb="bad": self._on_variant_feedback(fb))
+            rl.addWidget(btn_bad)
+            self.variants_layout.addWidget(row)
+
+    def _on_variant_feedback(self, feedback):
+        """提交变体好坏反馈到服务端。"""
+        tid = self._current_task_id
+        if not tid:
+            return
+        from utils.thread_worker import TaskWorker as Worker
+        self._feedback_btns_set_enabled(False)
+        worker = Worker(lambda: stc.evolution_feedback(tid, feedback))
+        def _ok(updated):
+            self._feedback_btns_set_enabled(True)
+            if updated:
+                self.show_info(f"已反馈「{'好' if feedback=='good' else '差'}」，服务端将据此进化。")
+            else:
+                self.show_warning("反馈未生效（任务 id 可能无效）。")
+        def _err(e):
+            self._feedback_btns_set_enabled(True)
+            self.show_error(f"反馈提交失败：{e}", "错误")
+        worker.finished.connect(_ok)
+        worker.error.connect(_err)
+        self.track_worker(worker); worker.start()
+
+    def _feedback_btns_set_enabled(self, enabled):
+        """禁用/启用所有变体打分按钮（提交中防重复点击）。"""
+        for i in range(self.variants_layout.count()):
+            w = self.variants_layout.itemAt(i).widget()
+            if w:
+                for btn in w.findChildren(QPushButton):
+                    btn.setEnabled(enabled)
 
     # ── 操作列 ────────────────────────────────────────────────────────────
     def _make_ops_widget(self, t):

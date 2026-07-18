@@ -108,7 +108,7 @@ class VectorSearchPage(BasePage):
         # 搜索行
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入关键词搜索素材（品牌/型号/文件名等）")
+        self.search_input.setPlaceholderText("输入关键词搜索素材（必填，如品牌/型号/产品名/画面描述）")
         self.search_input.returnPressed.connect(self._do_search)
         search_row.addWidget(self.search_input, 1)
         self.btn_search = QPushButton("搜索")
@@ -191,6 +191,11 @@ class VectorSearchPage(BasePage):
 
     def _do_search(self):
         query = self.search_input.text().strip()
+        # 前置校验：服务端要求 query 必填（空会返回 400），客户端提前拦截并提示
+        if not query:
+            self.lbl_stat.setText("⚠ 请输入搜索关键词（如品牌/型号/产品名）")
+            self.search_input.setFocus()
+            return
         brand = self.filter_brand.currentText().strip()
         category = self.filter_category.currentText()
         if category == "全部":
@@ -219,7 +224,13 @@ class VectorSearchPage(BasePage):
 
     def _on_search_error(self, msg):
         self.btn_search.setEnabled(True)
-        self.lbl_stat.setText(f"❌ {msg}")
+        # 把服务端原始错误转成对用户友好的中文提示
+        friendly = msg
+        if "400" in msg and ("query" in msg or "不能为空" in msg):
+            friendly = "请输入搜索关键词后再搜索"
+        elif "Connection" in msg or "timed out" in msg or "Max retries" in msg:
+            friendly = "无法连接服务端，请检查服务端是否在线"
+        self.lbl_stat.setText(f"❌ {friendly}")
         self.result_table.setRowCount(0)
 
     def _fill_table(self, rows):

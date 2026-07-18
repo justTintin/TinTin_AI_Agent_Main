@@ -1,16 +1,16 @@
 # 一键成片 / 成片任务 审查清单
 
-> 审查日期：2026-07-17（2026-07-18 多次纠正：素材评分结论 + 定时执行结论 + 脚本成片执行器名修正）
-> 审查范围：客户端 `utils/video_compiler.py` + `gui/compile_video_page.py` + 服务端 `/scheduled/tasks` 实测
-> 当前状态：**客户端 thin client 完成；产品成片 + 脚本成片执行器均已对接服务端并可真实出片**。
+> 审查日期：2026-07-17（2026-07-18 多次复查：素材评分列已迁移、进化机制上线、脚本成片执行器名修正）
+> 审查范围：客户端 `utils/video_compiler.py` + `gui/compile_video_page.py` + 服务端 `/openapi.json` 实测（91 端点）
+> 当前状态：**客户端 thin client 完成；产品成片 + 脚本成片执行器均已对接服务端并可真实出片；素材评分列已就绪**。
 >
 > 关键结论：
 > - 客户端「产品成片」「脚本成片」都提交服务端 `/scheduled/tasks` 执行
-> - 服务端 `video_montage`（产品成片）执行器**已实现**，会真实编译视频
-> - 服务端 `storyboard_montage`（脚本成片）执行器**已实现**，按镜头表执行并返回 7 维 quality_score
+> - 服务端 `video_montage`（产品成片）+ `storyboard_montage`（脚本成片）执行器**均已实现**，会真实编译视频
 >   （注：早期客户端误用 `script_montage` 提交导致一直 pending，已修正为 `storyboard_montage`）
-> - 素材评分/向量检索在服务端已设计但数据未就绪（`quality_score` 列缺、pgvector 未启用）
-> - 决策：**成片链路已打通**；素材评分/向量检索仍待服务端数据就绪
+> - 服务端 `/material/search` 返回字段已扩展（含 `quality_score`/`shot_type`/`visual_type`/`segment`），`quality_score` 列已迁移就绪
+> - 新增进化机制（`/scheduled/tasks/evolution/*`）+ 任务队列查询（`/scheduled/tasks/queue`）
+> - 仍待就绪：pgvector 向量相似度（`vector_search.available` 仍 false）、素材批量评分覆盖率（15.4万素材仅1.8万已分析）
 
 ---
 
@@ -293,24 +293,24 @@ else:
 | `ai_confidence: null` | 素材未跑批量评分 | search 返回的 ai_confidence 全为 null |
 | search 返回无 `path` 字段 | 服务端只暴露 id/filename/share_name/file_hash，不暴露本地路径 | 返回字段列表确认 |
 
-### 客户端 `MaterialMatchWorker` 当前问题（待服务端就绪后修）
+### 客户端 `MaterialMatchWorker` 当前问题（待服务端向量检索就绪后修）
 
 - **隐藏 bug**：不传 `query` 时服务端返回 400（query 必填），当前代码 brand/category 都有时就不传 query，会直接失败
 - **过滤参数错配**：客户端传 `category`/`model`，但服务端返回字段无 `category`（只有 `product`），且这些过滤当前未实现（只 `brand` 生效）
-- **path 取不到**：服务端不返回 path，当前 `r.get("path")` 永远空 → "无可用 path 字段"
-- **未消费 score**：即便向量检索启用返回 score，客户端也没排序
+- **未消费 quality_score**：`/material/search` 现已返回 `quality_score` 字段（列已迁移），但客户端未按它排序；当前大多素材 quality_score=null（批量评分覆盖率低）
+- **未消费向量相似度 score**：pgvector 未启用（`vector_search.available: false`），search 不返回相似度 score，客户端暂无法按语义相关性排序
 
 ### 服务端就绪后客户端改造点（待办）
 
-服务端完成以下三项后，客户端改造即可生效：
-1. 数据库迁移加 `quality_score` 列
-2. 对素材跑一次 `/material/batch_score`
-3. 启用 pgvector（`vector_search.available: true`）
+服务端完成以下两项后，客户端改造即可生效：
+1. 启用 pgvector（`vector_search.available: true`）→ search 返回相似度 score
+2. 提高素材批量评分覆盖率（`/material/batch_score`，当前仅 1.8万/15.4万 已分析）→ quality_score 有值
+
+> ✅ 已就绪（不再阻塞）：`quality_score` 列已迁移（`/material/list` `/material/score` 不再报错），search 返回字段已含 `quality_score`/`shot_type`/`visual_type`/`segment`。
 
 客户端 `MaterialMatchWorker` 改造（届时做）：
 - 传 `query`（产品 `selling_points` 卖点文本，必填）+ `brand` 过滤
-- 消费返回的 `score` 降序排序，取 top N
-- （可选）调 `/material/score` 补画面质量分，与相似度综合排序
+- 消费返回的 `quality_score`（画面质量分）+ 向量相似度 `score` 综合排序，取 top N
 - path 兜底：`share_name` + NAS 盘符映射（U:/V:/W:/X: 已挂载 `\\192.168.111.17`），或走 `/material/serve` 流式
 
 ---
@@ -335,15 +335,20 @@ else:
 - `video_montage` 执行器会产出成片（`result.video_url`），但偶发 `error_msg:"视频编译失败"`（服务端实现质量问题）
 - `storyboard_montage` 执行器产出 `result.video_path` + `result.quality_score`（含 clarity/texture/aesthetics/composition/color_quality/figure_quality/subject_prominence 七维），这就是"服务端素材评分"的落地点
 
-### 服务端能力清单（已按实测更新）
+### 服务端能力清单（2026-07-18 实测，端点数 88→91）
 
 | # | 能力 | 状态 | 说明 |
 |---|---|---|---|
 | 1 | `video_montage` 执行器（产品成片） | ✅ 已实现 | 会执行，偶发"视频编译失败" |
 | 2 | `storyboard_montage` 执行器（脚本成片） | ✅ 已实现 | 按镜头表成片 + 返回 7 维 quality_score |
-| 3 | 数据库 `quality_score` 列（素材库评分） | ❌ 未实现 | `/material/score` GET 报 column does not exist；但成片结果的 quality_score 已返回 |
-| 4 | pgvector 启用（`vector_search.available`） | ❌ false | `/material/search` 向量相似度 score 未返回 |
-| 5 | 素材批量评分（`/material/batch_score`） | ❌ 未跑 | 素材库 `ai_confidence` 全 null |
+| 3 | 数据库 `quality_score` 列（素材库评分） | ✅ **已迁移** | `/material/list` `/material/score` 不再报错；列存在但大多素材未评分（值 null） |
+| 4 | `/material/search` 返回字段扩展 | ✅ **已扩展** | 新增 `quality_score`/`shot_type`/`visual_type`/`segment`（共 16 字段），客户端可消费 |
+| 5 | pgvector 启用（`vector_search.available`） | ❌ 仍 false | `/material/search` 仍走关键词检索，无相似度 score 字段返回 |
+| 6 | 素材批量评分（`/material/batch_score`） | ⚠️ 部分跑 | 素材库 15.4 万条（image 14万 + video 1.4万），已分析 1.8 万、待分析 12.4 万 |
+| 7 | **进化机制 `/scheduled/tasks/evolution/*`** | ✅ **新增** | 策略进化 + 用户反馈（feedback/stats），当前 total_generations:0（刚启用） |
+| 8 | **任务队列 `/scheduled/tasks/queue`** | ✅ **新增** | 查询队列长度/运行中任务/最大并发（当前 max_concurrent:1，串行） |
+
+**素材库规模**（`/material/stats` 实测）：总计 153,869 条素材（image 139,564 + video 14,305），AI 分析状态：analyzed 17,989 / failed 12,273 / pending 123,607。
 
 > 注：第 3 项的 `quality_score` 指的是**素材库的素材评分**（`/material/score` 端点），与成片结果里返回的 `quality_score`（对**成片视频**的 7 维评分）是两回事——后者已在 `storyboard_montage`/`video_montage` 的 `result` 里返回，可用。
 

@@ -346,9 +346,9 @@ class CompileVideoPage(BasePage):
         s_lay = QVBoxLayout(setting_group); s_lay.setSpacing(10)
 
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("视频条数"))
+        row1.addWidget(QLabel("变体数量"))
         self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10); self.spin_count.setValue(1)
-        self.spin_count.setToolTip("一次生成 N 个独立成片（素材不足时循环填充）")
+        self.spin_count.setToolTip("服务端生成 N 个变体（不同风格/节奏），用进化机制选最优的 1 个输出。\n数值越大选择空间越大但耗时越长。默认 1 = 单变体直接输出。")
         row1.addWidget(self.spin_count)
         row1.addSpacing(12)
         row1.addWidget(QLabel("视频总时长"))

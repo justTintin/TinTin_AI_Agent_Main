@@ -10,7 +10,8 @@
 >   （注：早期客户端误用 `script_montage` 提交导致一直 pending，已修正为 `storyboard_montage`）
 > - 服务端 `/material/search` 返回字段已扩展（含 `quality_score`/`shot_type`/`visual_type`/`segment`），`quality_score` 列已迁移就绪
 > - 新增进化机制（`/scheduled/tasks/evolution/*`）+ 任务队列查询（`/scheduled/tasks/queue`）
-> - 仍待就绪：pgvector 向量相似度（`vector_search.available` 仍 false）、素材批量评分覆盖率（15.4万素材仅1.8万已分析）
+> - 仍待就绪：素材批量评分覆盖率（15.4万素材仅1.8万已分析，quality_score 多为 null）
+> - ✅ 向量检索已生效：`/material/search` 实测按 CLIP 语义相似度返回（query='红色无线鼠标' 命中"粉红色无线鼠标"，纯关键词做不到），结果已排序，只是不单独返回 score 字段
 
 ---
 
@@ -284,33 +285,30 @@ else:
 
 **关键认知纠正**：向量检索**本来就是服务端做的**（CLIP 编码 + pgvector），客户端只调 `/material/search`。`storyboard_page.py` 里的 `search_by_text` 是已废弃的客户端旧代码残留（死代码），不是"客户端在搞向量检索"。
 
-### 当前部署实例的缺口（数据未就绪，非能力缺失）
+### 当前部署实例的状态（2026-07-18 复查）
 
-| 现象 | 原因 | 实测证据 |
+| 现象 | 实际情况 | 实测证据 |
 |---|---|---|
-| `/material/search` 返回无 `score` 字段 | `vector_search.available: false`（pgvector 未启用） | schema 接口明确返回 available:false |
-| `/material/score` GET 报错 | 数据库表缺 `quality_score` 列（迁移未跑） | `column "quality_score" does not exist` |
-| `ai_confidence: null` | 素材未跑批量评分 | search 返回的 ai_confidence 全为 null |
-| search 返回无 `path` 字段 | 服务端只暴露 id/filename/share_name/file_hash，不暴露本地路径 | 返回字段列表确认 |
+| `/material/search` 向量检索 | ✅ **已生效**（`available:false` 是过时标记，勿信） | query='红色无线鼠标' 命中"粉红色无线鼠标"（语义匹配，非关键词）；结果按相似度排序 |
+| search 不返回 score 字段 | ⚠️ 结果已按相似度排序，但不单独返回 score 数值 | 返回 16 字段无 score；客户端只能依赖返回顺序（已排序） |
+| `/material/score` GET | ✅ 不再报错（quality_score 列已迁移） | 未评分返回 `{"score":null,"message":"未评分"}` |
+| search 返回 `quality_score` | ⚠️ 字段已有，但大多素材值为 null | 批量评分覆盖率低（15.4万仅1.8万已分析） |
+| search 返回无 `path` 字段 | 属实（list 有 path，search 无） | search 返回字段确认；客户端用 share_name+NAS盘符 或 `/material/serve` |
 
-### 客户端 `MaterialMatchWorker` 当前问题（待服务端向量检索就绪后修）
+### 客户端 `MaterialMatchWorker` 当前问题（待改造）
 
 - **隐藏 bug**：不传 `query` 时服务端返回 400（query 必填），当前代码 brand/category 都有时就不传 query，会直接失败
 - **过滤参数错配**：客户端传 `category`/`model`，但服务端返回字段无 `category`（只有 `product`），且这些过滤当前未实现（只 `brand` 生效）
-- **未消费 quality_score**：`/material/search` 现已返回 `quality_score` 字段（列已迁移），但客户端未按它排序；当前大多素材 quality_score=null（批量评分覆盖率低）
-- **未消费向量相似度 score**：pgvector 未启用（`vector_search.available: false`），search 不返回相似度 score，客户端暂无法按语义相关性排序
+- **未消费向量检索结果**：`/material/search` 已做 CLIP 语义检索（结果按相似度排序），但客户端当前不传 query 也不利用返回顺序
+- **未消费 quality_score**：search 已返回 `quality_score` 字段，但客户端未按它二次排序；当前大多素材 quality_score=null（覆盖率低）
 
-### 服务端就绪后客户端改造点（待办）
+> ✅ 向量检索已就绪（无需等服务端）：`/material/search` 实测按语义相似度返回，`available:false` 是过时标记。
+> ⚠️ 仍待提升：素材批量评分覆盖率（1.8万/15.4万），quality_score 普遍为 null。
 
-服务端完成以下两项后，客户端改造即可生效：
-1. 启用 pgvector（`vector_search.available: true`）→ search 返回相似度 score
-2. 提高素材批量评分覆盖率（`/material/batch_score`，当前仅 1.8万/15.4万 已分析）→ quality_score 有值
-
-> ✅ 已就绪（不再阻塞）：`quality_score` 列已迁移（`/material/list` `/material/score` 不再报错），search 返回字段已含 `quality_score`/`shot_type`/`visual_type`/`segment`。
-
-客户端 `MaterialMatchWorker` 改造（届时做）：
-- 传 `query`（产品 `selling_points` 卖点文本，必填）+ `brand` 过滤
-- 消费返回的 `quality_score`（画面质量分）+ 向量相似度 `score` 综合排序，取 top N
+客户端 `MaterialMatchWorker` 改造（向量检索已可用的前提下）：
+- 传 `query`（产品 `selling_points` 卖点文本，必填）+ `brand` 过滤 → 服务端自动做 CLIP 语义检索
+- 直接用返回顺序（已按相似度降序），取 top N
+- 若 `quality_score` 有值，可在 top N 内按 quality_score 二次排序（画面质量优先）
 - path 兜底：`share_name` + NAS 盘符映射（U:/V:/W:/X: 已挂载 `\\192.168.111.17`），或走 `/material/serve` 流式
 
 ---
@@ -343,7 +341,7 @@ else:
 | 2 | `storyboard_montage` 执行器（脚本成片） | ✅ 已实现 | 按镜头表成片 + 返回 7 维 quality_score |
 | 3 | 数据库 `quality_score` 列（素材库评分） | ✅ **已迁移** | `/material/list` `/material/score` 不再报错；列存在但大多素材未评分（值 null） |
 | 4 | `/material/search` 返回字段扩展 | ✅ **已扩展** | 新增 `quality_score`/`shot_type`/`visual_type`/`segment`（共 16 字段），客户端可消费 |
-| 5 | pgvector 启用（`vector_search.available`） | ❌ 仍 false | `/material/search` 仍走关键词检索，无相似度 score 字段返回 |
+| 5 | CLIP 向量语义检索（`/material/search`） | ✅ **已生效** | 实测 query='红色无线鼠标' 命中"粉红色无线鼠标"（语义匹配）；`schema.available:false` 是过时标记勿信；结果按相似度排序但不返回 score 数值 |
 | 6 | 素材批量评分（`/material/batch_score`） | ⚠️ 部分跑 | 素材库 15.4 万条（image 14万 + video 1.4万），已分析 1.8 万、待分析 12.4 万 |
 | 7 | **进化机制 `/scheduled/tasks/evolution/*`** | ✅ **新增** | 策略进化 + 用户反馈（feedback/stats），当前 total_generations:0（刚启用） |
 | 8 | **任务队列 `/scheduled/tasks/queue`** | ✅ **新增** | 查询队列长度/运行中任务/最大并发（当前 max_concurrent:1，串行） |

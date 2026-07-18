@@ -428,3 +428,39 @@ else:
 定时任务复用上述同一套 `compile_video` 管线，因此上述所有质量问题在定时自动出片时同样存在，且因为是无人值守自动执行，**默认配置的影响被放大**。建议：
 - 定时任务保存参数时，校验关键参数（per_dur 不应 > 2.0、必须填 BGM 或配音），不达标提示用户。
 - 「添加为定时任务」弹窗里显示预计成片效果摘要（节奏、时长、是否有 BGM），让用户知道默认会出什么样的视频。
+
+---
+
+## 服务端变体/进化机制（2026-07-18 实测，重要）
+
+> ⚠ 本节纠正"count = 视频条数 = 输出N个独立视频"的错误认知。
+
+实测 task id=29（product_montage, count=3）发现：服务端把客户端的 `count` 参数解释为**生成 N 个变体（variants）→ 用进化机制选最优的 1 个输出**，不是输出 N 个独立视频文件。
+
+### result 结构（count=3 实测）
+
+```json
+{
+  "video_path": ".../output.mp4",          // 只有 best_variant 的视频被输出（单个）
+  "all_variants": [                         // 生成的所有变体（元数据，非视频文件）
+    {"variant":"B","style":"专业","pacing":"中","score":7.1},
+    {"variant":"A","style":"激进","pacing":"快","score":7.1},
+    {"variant":"C","style":"情感","pacing":"慢","score":7.1}
+  ],
+  "best_variant": "B",                      // 进化选出的最优变体
+  "best_style": "专业", "best_pacing": "中",
+  "quality_score": {"total":7.1, ...7维},   // 最优变体的质量分
+  "evolution_mode": true,                   // 启用了进化选择
+  "images_used": 15, "script": "...", "video_size_mb": 0.6
+}
+```
+
+### 结论
+- **一个成片任务最终只输出 1 个视频文件**（`video_path`，即 best_variant）
+- `count` 是"变体数量/进化样本数"，不是"输出视频数"
+- `all_variants` 是候选变体的元数据（style/pacing/score），供进化决策，不是多个视频
+- 客户端「成片任务」页**不需要按任务分组展示多个视频**——现状（一行一任务、一个打开结果）是正确的
+- 客户端 UI 文案已从"视频条数"改为"变体数量"（`compile_video_page.py` spin_count），tooltip 说明"服务端生成N个变体→进化选最优1个输出"
+
+### 与进化机制的关联
+服务端的 `/scheduled/tasks/evolution/*` 端点（feedback/stats）正是为这套变体选择服务的：用户可对变体打分反馈，服务端据此进化未来的策略选择。

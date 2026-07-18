@@ -50,6 +50,11 @@ class ScheduledTasksPage(BasePage):
         list_header = QHBoxLayout()
         list_header.addWidget(QLabel("📋 成片任务列表（来自服务端）"))
         list_header.addStretch()
+        from PySide6.QtWidgets import QCheckBox
+        self.chk_autorefresh = QCheckBox("自动刷新")
+        self.chk_autorefresh.setChecked(False)
+        self.chk_autorefresh.setToolTip("有进行中任务时自动每 5 秒刷新列表")
+        list_header.addWidget(self.chk_autorefresh)
         self.btn_refresh = QPushButton("刷新")
         self.btn_refresh.setObjectName("secondary_button")
         self.btn_refresh.clicked.connect(self.refresh)
@@ -125,10 +130,10 @@ class ScheduledTasksPage(BasePage):
                 has_active = True
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
-        # 有进行中任务 → 启动轮询；否则停止
-        if has_active and not self._poll_timer.isActive():
+        # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
+        if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
             self._poll_timer.start()
-        elif not has_active and self._poll_timer.isActive():
+        elif (not has_active or not self.chk_autorefresh.isChecked()) and self._poll_timer.isActive():
             self._poll_timer.stop()
 
     def _on_row_clicked(self, row, _col):

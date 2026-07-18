@@ -382,10 +382,6 @@ class CompileVideoPage(BasePage):
         self.btn_make.setFixedHeight(36)
         self.btn_make.clicked.connect(self._make)
         row2.addWidget(self.btn_make)
-        self.btn_open_out = QPushButton("📂 打开输出目录")
-        self.btn_open_out.setFixedHeight(36)
-        self.btn_open_out.clicked.connect(self._open_output_dir)
-        row2.addWidget(self.btn_open_out)
         self.btn_add_task = QPushButton("📌 添加为定时任务")
         self.btn_add_task.setFixedHeight(36)
         self.btn_add_task.setToolTip("把当前配置提交给服务端，由服务端定时执行（可在「定时任务」页监控状态）")
@@ -1150,8 +1146,5 @@ class CompileVideoPage(BasePage):
 
     def _open_file(self, path):
         if path and os.path.isfile(path) and os.name == "nt":
-            os.startfile(path)  # noqa
+                os.startfile(path)  # noqa
 
-    def _open_output_dir(self):
-        if os.path.isdir(FINAL_OUTPUT_DIR) and os.name == "nt":
-            os.startfile(FINAL_OUTPUT_DIR)  # noqa

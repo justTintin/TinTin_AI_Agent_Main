@@ -147,14 +147,18 @@ def mdi_icon(name: str, color: str = "#c9cdd4") -> QIcon:
 
 def mdi_button(text: str, icon_name: str = "", parent=None,
                color: str = "#c9cdd4", size: int = 18) -> QPushButton:
-    """创建带图标的按钮。Emoji 直接加在文本前面。"""
-    if icon_name and icon_name in EMOJI:
-        text = EMOJI[icon_name] + " " + text
-    btn = QPushButton(text, parent)
-    if icon_name and _HAS_QTA:
-        btn.setIcon(mdi_icon(icon_name, color))
-        btn.setIconSize(QSize(size, size))
-    return btn
+    """创建带图标的按钮。qtawesome 可用时用 MDI 图标，否则回退 Emoji。"""
+    if icon_name:
+        if _HAS_QTA:
+            # qtawesome 可用 → 用 MDI 图标，不加 emoji
+            btn = QPushButton(text, parent)
+            btn.setIcon(mdi_icon(icon_name, color))
+            btn.setIconSize(QSize(size, size))
+            return btn
+        elif icon_name in EMOJI:
+            # qtawesome 不可用 → Emoji 回退
+            text = EMOJI[icon_name] + " " + text
+    return QPushButton(text, parent)
 
 
 def emoji_icon(name: str) -> str:

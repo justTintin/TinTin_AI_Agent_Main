@@ -154,3 +154,4 @@ resources/test/
 ai_skills/
 *.exe
 video_config.json
+studio/config/local_config.json

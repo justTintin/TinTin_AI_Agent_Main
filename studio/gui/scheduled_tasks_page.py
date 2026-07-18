@@ -176,21 +176,30 @@ class ScheduledTasksPage(BasePage):
     def _make_ops_widget(self, t):
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(2, 2, 2, 2); lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(6)
         status = t.get("status", "")
         result = t.get("result", {}) or {}
-        # 完成且有 video_url → 「下载/打开」按钮
+        # 完成且有 video_url → 打开结果
         video_url = result.get("video_url") or result.get("url")
         if status == "completed" and video_url:
-            btn_open = QPushButton("打开结果")
-            btn_open.setObjectName("secondary_button")
-            btn_open.setFixedWidth(72)
+            btn_open = self._flat_btn("📂", "打开结果")
             btn_open.clicked.connect(lambda _=False, u=video_url: self._open_result(u))
             lay.addWidget(btn_open)
-        btn_del = QPushButton("删除")
-        btn_del.setFixedWidth(44)
+        btn_del = self._flat_btn("🗑", "删除")
         btn_del.clicked.connect(lambda _=False, tid=t.get("id"): self._delete(tid))
         lay.addWidget(btn_del)
+        return w
+
+    def _flat_btn(self, icon_text, tooltip=""):
+        """无边框扁平按钮，仅图标+文字，不压缩单元格。"""
+        btn = QPushButton(icon_text)
+        btn.setToolTip(tooltip)
+        btn.setFlat(True)
+        btn.setStyleSheet(
+            "QPushButton { border: none; background: transparent; padding: 1px 4px; font-size: 13px; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.1); border-radius: 3px; }"
+        )
+        return btn
         return w
 
     def _open_result(self, video_url):

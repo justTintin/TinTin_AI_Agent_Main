@@ -12,7 +12,7 @@ from PySide6.QtGui import QDesktopServices, QAction
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from utils.base_worker import BaseWorker
-from utils.gui_icons import mdi_button
+from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
 from config.paths import TMP_DIR, OUTPUTS_DIR
 from gui.base_page import BasePage
@@ -326,8 +326,7 @@ class TranscriptionToolPage(BasePage):
             self.file_table.removeCellWidget(row, 3)
         # 已完成才显示按钮
         if f["status"] == "✅ 完成" and f["srt_text"]:
-            btn = QPushButton("💾 导出")
-            btn.setStyleSheet("padding: 4px 14px; font-size: 13px;")
+            btn = table_action_button("💾", "导出 SRT 字幕")
             btn.clicked.connect(lambda r=row: self._show_save_dialog(r))
             self.file_table.setCellWidget(row, 3, btn)
 

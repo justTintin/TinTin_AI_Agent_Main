@@ -29,7 +29,7 @@ from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.gui_icons import mdi_button
+from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
@@ -1048,7 +1048,7 @@ class CompileVideoPage(BasePage):
             status_item = QTableWidgetItem("✅ 完成")
             status_item.setForeground(Qt.GlobalColor.green)
             self.result_table.setItem(i, 2, status_item)
-            btn = QPushButton("打开")
+            btn = table_action_button("📂", "打开")
             btn.clicked.connect(lambda _=False, p=path: self._open_file(p))
             self.result_table.setCellWidget(i, 3, btn)
         self.stage_label.setText(f"✅ 完成：共生成 {len(self._last_results)} 个成片")

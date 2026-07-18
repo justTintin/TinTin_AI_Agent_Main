@@ -789,10 +789,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         """Triggers data refresh or UI reset for specific pages"""
         if index == 9: # Task List
             self.refresh_server_tasks()
-            # _sync_server_tasks 异步执行（不在主线程阻塞）
-            QTimer.singleShot(100, self._sync_server_tasks_async)
             self.refresh_timer.start()
-        else:
+        elif hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
             self.refresh_timer.stop()
 
         # 热点页面：只在活跃时轮询，离开后立即停止（减少主线程常驻 2次/秒 事件回调）

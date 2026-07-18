@@ -347,8 +347,8 @@ class CompileVideoPage(BasePage):
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("变体数量"))
-        self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10); self.spin_count.setValue(1)
-        self.spin_count.setToolTip("服务端生成 N 个变体（不同风格/节奏），用进化机制选最优的 1 个输出。\n数值越大选择空间越大但耗时越长。默认 1 = 单变体直接输出。")
+        self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10); self.spin_count.setValue(5)
+        self.spin_count.setToolTip("服务端生成 N 个变体（不同风格/节奏），用进化机制选最优的 1 个输出。\n数值越大选择空间越大但耗时越长。")
         row1.addWidget(self.spin_count)
         row1.addSpacing(12)
         row1.addWidget(QLabel("视频总时长"))
@@ -489,6 +489,11 @@ class CompileVideoPage(BasePage):
         self.script_combo_ratio = QComboBox(); self.script_combo_ratio.addItems(list(RATIO_SIZES.keys()))
         opt_row.addWidget(self.script_combo_ratio)
         opt_row.addSpacing(12)
+        opt_row.addWidget(QLabel("变体数量"))
+        self.script_spin_count = QSpinBox(); self.script_spin_count.setRange(1, 10); self.script_spin_count.setValue(5)
+        self.script_spin_count.setToolTip("服务端生成 N 个变体（不同风格/节奏），进化机制选最优 1 个输出")
+        opt_row.addWidget(self.script_spin_count)
+        opt_row.addSpacing(12)
         opt_row.addWidget(QLabel("平台"))
         self.script_combo_platform = QComboBox(); self.script_combo_platform.addItems(PLATFORMS)
         self.script_combo_platform.setFixedWidth(96)
@@ -532,7 +537,22 @@ class CompileVideoPage(BasePage):
             self.combo_script.addItem(label, s)
         self.combo_script.setCurrentIndex(0)
         self.combo_script.blockSignals(False)
-        self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+
+        if not scripts:
+            # 空状态引导：告诉用户脚本从哪来、默认目录、怎么生成
+            self.script_preview.setMarkdown(
+                f"## ⚠ 暂无可用的分镜脚本\n\n"
+                f"**脚本来源**：在「分镜脚本创作」页生成脚本后，保存时选择 **JSON 格式**即可在此选用。\n\n"
+                f"**默认扫描目录**：\n```\n{KNOWLEDGE_MEDIA_DIR}\\<选题名>\\storyboard\\*.json\n```\n\n"
+                f"**当前该目录下没有 JSON 脚本。** 请按以下步骤生成：\n"
+                f"1. 进入「分镜脚本创作」页\n"
+                f"2. 生成或编辑分镜（每镜头含画面描述 + 旁白文案 + 时长）\n"
+                f"3. 点「保存」→ 导出格式选 **JSON（.json，供脚本成片）**\n"
+                f"4. 回到本页点「刷新」即可看到脚本")
+            self.script_status.setText(f"未找到脚本（扫描目录：{KNOWLEDGE_MEDIA_DIR}）")
+        else:
+            self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+            self.script_status.setText(f"共 {len(scripts)} 个脚本")
 
     @staticmethod
     def _scan_storyboard_scripts():
@@ -634,6 +654,7 @@ class CompileVideoPage(BasePage):
             # 服务端 storyboard_montage 执行器识别的核心字段
             "shots": server_shots,
             "voice_settings": {"speaker": "default"},
+            "count": self.script_spin_count.value(),   # 变体数量（服务端进化选最优）
             # 客户端附加信息（服务端按需取用，不影响执行）
             "script_name": s.get("name", ""),
             "script_path": s.get("path", ""),

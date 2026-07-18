@@ -93,3 +93,36 @@ def delete_task(task_id, timeout=10):
     except Exception as e:
         log.warning(f"[定时任务] delete_task({task_id}) 失败: {e}")
         return False
+
+
+# ── 进化机制（变体打分）─────────────────────────────────────────────────────
+def evolution_feedback(task_id, feedback, timeout=10):
+    """POST /scheduled/tasks/evolution/feedback → 对某次成片（变体）的好坏反馈。
+
+    task_id: 成片任务 id（服务端用其字符串形式作 evolution_id）
+    feedback: 'good' 或 'bad'
+    返回 True 表示服务端已记录（status:updated）；False 表示 id 无效或失败。
+    """
+    try:
+        r = requests.post(f"{_server_url()}/scheduled/tasks/evolution/feedback",
+                          json={"evolution_id": str(task_id), "feedback": feedback},
+                          timeout=timeout)
+        if r.status_code == 200:
+            return r.json().get("status") == "updated"
+        log.warning(f"[定时任务] evolution_feedback HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        log.warning(f"[定时任务] evolution_feedback 失败: {e}")
+    return False
+
+
+def evolution_stats(timeout=10):
+    """GET /scheduled/tasks/evolution/stats → 进化统计 dict。
+    返回 {total_generations, strategies:[{script_style,pacing,count,avg_score,max_score}],
+          good_feedback, bad_feedback}。失败返回 {}。"""
+    try:
+        r = requests.get(f"{_server_url()}/scheduled/tasks/evolution/stats", timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        log.warning(f"[定时任务] evolution_stats 失败: {e}")
+    return {}

@@ -15,7 +15,7 @@ import threading
 import argparse
 import requests
 
-SERVER = "http://192.168.111.30:8000"
+SERVER = "http://192.168.111.19:8000"
 
 # ── 结果收集 ──
 errors = []

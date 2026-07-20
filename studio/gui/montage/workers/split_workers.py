@@ -4,6 +4,7 @@ import os
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 
 
@@ -239,8 +240,8 @@ class BestClipWorker(BaseWorker):
 
         creationflags = 0x08000000
         cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path,
-               "-t", f"{dur:.3f}", "-c:v", "libx264", "-preset", "veryfast",
-               "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+               "-t", f"{dur:.3f}", *get_video_encode_args(crf=18, preset="veryfast"),
+               "-pix_fmt", "yuv420p", "-c:a", "aac",
                "-movflags", "+faststart", out_path]
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                            errors="ignore", creationflags=creationflags)

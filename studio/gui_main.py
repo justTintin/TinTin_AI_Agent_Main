@@ -773,15 +773,25 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_dreamina_assets_page()
         self.content_stack.addWidget(self.page_dreamina_assets)
 
+        # 43: Scheduled Tasks (定时任务) Page —— 监控服务端定时任务
+        self.page_scheduled_tasks = QWidget()
+        self.setup_scheduled_tasks_page()
+        self.content_stack.addWidget(self.page_scheduled_tasks)
+
+        # 进入定时任务页时刷新（拉取最新服务端状态）
+        def _on_page_change(idx):
+            if idx == 43 and hasattr(self, "scheduled_tasks_tool"):
+                self.scheduled_tasks_tool.refresh()
+        self.content_stack.currentChanged.connect(_on_page_change)
+
 
     def trigger_page_logic(self, index):
         """Triggers data refresh or UI reset for specific pages"""
         if index == 9: # Task List
             self.refresh_server_tasks()
-            # _sync_server_tasks 异步执行（不在主线程阻塞）
-            QTimer.singleShot(100, self._sync_server_tasks_async)
             self.refresh_timer.start()
-        else:
+        elif hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
             self.refresh_timer.stop()
 
         # 热点页面：只在活跃时轮询，离开后立即停止（减少主线程常驻 2次/秒 事件回调）
@@ -825,6 +835,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 22: # 资源配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
+            if hasattr(self, "_load_lut_config"):
+                self._load_lut_config()
 
 
 

@@ -86,17 +86,10 @@ class CoverTextAIWorker(BaseWorker):
         self.ref_image = ref_image  # 模板或视频帧路径（可选）
 
     def do_work(self):
-        import requests
+        from utils.llm_proxy import llm_chat, llm_chat_messages
         use_vision = bool(self.ref_image and os.path.isfile(self.ref_image)
-                          and self.cfg.get("llm_vision_api_url") and self.cfg.get("llm_vision_model"))
-        if use_vision:
-            api_url = self.cfg.get("llm_vision_api_url"); model = self.cfg.get("llm_vision_model")
-            api_key = self.cfg.get("llm_vision_api_key") or self.cfg.get("llm_api_key", "")
-        else:
-            api_url = self.cfg.get("llm_api_url"); model = self.cfg.get("llm_model", "deepseek-chat")
-            api_key = self.cfg.get("llm_api_key", "")
-        if not api_url or not api_key:
-            raise RuntimeError("未配置大模型 API（或视觉模型）。请到『大模型配置』填写。")
+                          and self.cfg.get("llm_vision_model"))
+        model = self.cfg.get("llm_vision_model") if use_vision else self.cfg.get("llm_model", "deepseek-v4-flash")
 
         sys_prompt = ("你是短视频封面文案专家。根据提供的文案（以及参考封面/视频帧）"
                       "提炼封面用的【标题】与【副标题】：标题≤10字、强冲击；副标题≤16字、补充信息。"
@@ -109,22 +102,13 @@ class CoverTextAIWorker(BaseWorker):
                 {"type": "text", "text": user_text + "\n参考图见附件，可借鉴其风格与重点。"},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ]
+            text = llm_chat_messages(
+                [{"role": "system", "content": sys_prompt},
+                 {"role": "user", "content": content}],
+                model=model, temperature=0.6, timeout=90)
         else:
-            content = user_text
-        payload = {
-            "model": model,
-            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-            "messages": [{"role": "system", "content": sys_prompt},
-                         {"role": "user", "content": content}],
-            "temperature": 0.6,
-        }
-        url = f"{api_url.rstrip('/')}/v1/chat/completions"
-        res = requests.post(url, json=payload,
-                            headers={"Authorization": f"Bearer {api_key}",
-                                     "Content-Type": "application/json"}, timeout=90)
-        if res.status_code != 200:
-            raise RuntimeError(f"大模型请求失败 HTTP {res.status_code}")
-        text = res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            text = llm_chat(sys_prompt, user_text, model=model, temperature=0.6, timeout=90)
+
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):
@@ -148,11 +132,10 @@ class CoverLayoutAIWorker(BaseWorker):
         self.template_path = template_path
 
     def do_work(self):
-        import requests
-        api_url = self.cfg.get("llm_vision_api_url"); model = self.cfg.get("llm_vision_model")
-        api_key = self.cfg.get("llm_vision_api_key") or self.cfg.get("llm_api_key", "")
-        if not (api_url and model):
-            raise RuntimeError("构图复刻需要『视觉模型』。请到『大模型配置』填写视觉模型地址与名称。")
+        from utils.llm_proxy import llm_chat_messages
+        model = self.cfg.get("llm_vision_model", "")
+        if not model:
+            raise RuntimeError("构图复刻需要『视觉模型』。请到『大模型配置』填写视觉模型名称。")
         if not (self.template_path and os.path.isfile(self.template_path)):
             raise RuntimeError("请先上传封面模板。")
         with open(self.template_path, "rb") as f:
@@ -171,16 +154,10 @@ class CoverLayoutAIWorker(BaseWorker):
             {"type": "text", "text": "请分析此封面模板的 标题/副标题/主体/背景 构图（位置、大小、颜色）。"},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
         ]
-        payload = {"model": model, "temperature": 0.4,
-                   "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-                   "messages": [{"role": "system", "content": sys_prompt},
-                                {"role": "user", "content": content}]}
-        res = requests.post(f"{api_url.rstrip('/')}/v1/chat/completions", json=payload,
-                            headers={"Authorization": f"Bearer {api_key}",
-                                     "Content-Type": "application/json"}, timeout=120)
-        if res.status_code != 200:
-            raise RuntimeError(f"视觉模型请求失败 HTTP {res.status_code}")
-        text = res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        text = llm_chat_messages(
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": content}],
+            model=model, temperature=0.4, timeout=120)
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):

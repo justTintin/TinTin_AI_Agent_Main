@@ -59,20 +59,63 @@
    - 新增 _on_gen_script_clicked / _on_gen_script_finished / _on_gen_script_error 回调方法
    - 涉及文件：studio/gui/montage/step2_concat_view.py、studio/gui/video_montage_page.py
 
-11.镜头重组页面新增 AI 智能评分与筛选功能                                       完成
-   - 镜头列表表格新增「评分」列（位于"时间戳"和"描述文案"之间），显示 ⭐ + 分数
-   - 评分颜色编码：绿色(≥7分) / 黄色(4-6分) / 红色(<4分)，鼠标悬停显示评分理由
-   - 新增「🤖 AI 智能评分」按钮：调用大模型对所有镜头素材逐一评分（0-10分制）
-     · 评分维度：画面内容吸引力(40%) + 描述文案营销价值(30%) + 时长适配度(15%) + 整体质量(15%)
-     · 如描述文案为空，AI 会相应降低评分（视为过渡/空白片段）
-     · 时长过短(<1s)或过长(>30s)适当扣分
-   - 新增「最低评分筛选」下拉框：选项为"不过滤" / "≥1分" ~ "≥8分"
-     · 选择阈值后自动取消勾选低于该分数的镜头素材
-     · 选择"不过滤"时恢复全部勾选状态
-     · 过滤后可在状态栏看到过滤统计（如"筛选 ≥5分 | 已过滤 12/67 个镜头"）
-   - 评分完成后状态栏显示统计：均分 X.X | ⭐≥7: N | ⭐4-6: N | ⭐<4: N
-   - 新增 RateClipsWorker（BaseWorker 子类）：在后台线程调用 LLM 批量评分，输出 JSON 数组
-   - 评分结果缓存至 self.clip_ratings（dict: path → {score, reason}），重新扫描目录时自动恢复
-   - 新增 _rate_clips / _on_rate_finished / _on_rate_error / _apply_score_filter 回调方法
-   - 表格列数从 5 列扩展为 6 列，涉及 _scan_concat_src_dir / _preview_concat_table_item / _on_concat_table_cell_changed 的列索引同步更新
-   - 涉及文件：studio/gui/montage/step2_concat_view.py、studio/gui/video_montage_page.py
+11.LLM 调用 URL 修复：客户端 /llm/chat → 服务端 /llm/chat/completions              完成
+   - 根因：服务端实际端点为 /llm/chat/completions，客户端打 /llm/chat 返回 404
+   - 导致所有 LLM 调用（文案生成、挖掘、描述生成等）无响应且服务端无日志
+   - 修复：llm_proxy.py 两处 URL + 注释
+   - 涉及文件：studio/utils/llm_proxy.py
+
+12.视觉 LLM 全部迁移到服务端代理                                               完成
+   - 6个文件的视觉模型调用从直连 /v1/chat/completions → llm_chat_messages() 走代理
+   - cover_maker_page / hook_score_page / marketing_detect_page / video_ai_rename_page / video_indexer
+   - LocalVisionDescWorker: Ollama raw API → llm_chat_messages()
+   - main_window_aiconfig 视觉连接测试改为走代理
+   - 涉及文件：studio/gui/cover_maker_page.py、hook_score_page.py、marketing_detect_page.py
+              video_ai_rename_page.py、main_window_aiconfig.py、video_montage_page.py
+              studio/utils/video_indexer.py
+
+13.过时 api_url/api_key 校验清理 + NameError 修复                                  完成
+   - 多处代码读取 llm_api_url/llm_api_key 然后校验非空才放行 → 迁移后阻塞用户
+   - product_library_page 的 _on_mine() 引用未定义的 url/key 变量 → NameError
+   - video_montage_page 的 _batch_gen_copy_by_scene / _gen_copy_for_assembled 同样 NameError
+   - _run_batch_vision_descriptions / _trigger_vision_on_dir 同样阻塞/崩溃
+   - 修复：统一改为只检查 model 名称，api_url/api_key 传空串
+   - 涉及文件：product_library_page.py、video_montage_page.py、my_knowledge_page.py
+              product_script_page.py、storyboard_page.py
+
+14.镜头重组预览播放卡死修复                                                      完成
+   - 根因：_on_preview_media_status_changed 在 EndOfMedia 信号回调里直接调 setSource()
+   - 修复：QTimer.singleShot(50) 延迟到下一事件循环
+   - 同时新增 InvalidMedia 跳过处理
+   - 涉及文件：studio/gui/video_montage_page.py
+
+15.分割镜头综合评分系统                                                          完成
+   - 新增 _score_clip()：5维度 0~10分（清晰度/干净度/抖动/主体突出/曝光）
+   - 步骤1表格新增「评分」列，步骤2表格+预合成详情均显示
+   - 评分≥7分默认自动勾选，评分缓存复用避免重复计算
+   - 涉及文件：studio/gui/video_montage_page.py、studio/gui/montage/step1_split_view.py
+
+16.镜头去重择优                                                                 完成
+   - 新增 _compute_clip_hash()：帧哈希64-bit + 汉明距离
+   - 新增 _compute_clip_quality()：清晰度+对比度+音频 综合质量分
+   - _build_precompose_plans 中：相似镜头(距离<8)→高质量替换/低质量跳过
+   - 涉及文件：studio/gui/video_montage_page.py
+
+17.LUT 色彩还原配置                                                             完成
+   - 系统设置新增「资源配置」分区（独立于系统工具）
+   - 视频配置 tab：添加/删除 LUT 映射（名称→文件路径），存 video_config.json
+   - 镜头重组界面新增 LUT 还原下拉框（默认"无"，可选配置的还原文件）
+   - _concat_with_transition 拼接时应用 lut3d 滤镜
+   - 新增 video_config.example.json 模板
+   - 涉及文件：studio/config/paths.py、studio/gui/main_window_pages.py
+              studio/gui/video_montage_page.py、studio/gui/montage/step2_concat_view.py
+
+18.预合成列表文案显示优化                                                       完成
+   - 文案状态从图标(📄)改为文字预览(📝前30字)
+   - 双击预合成列表项弹窗显示完整文案
+   - 涉及文件：studio/gui/video_montage_page.py、studio/gui/montage/step2_concat_view.py
+
+19.灰片/Log 视频检测工具                                                       完成
+   - detect_log_video()：ffprobe色彩元数据 + 帧对比度分析
+   - probe_color_metadata()：读取 color_transfer/pix_fmt/color_space
+   - 涉及文件：studio/utils/video_indexer.py

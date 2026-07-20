@@ -19,6 +19,175 @@ from utils.logger_utils import log
 from PySide6.QtCore import Signal
 
 
+# ─── 灰片/Log 检测 ──────────────────────────────────────────────────
+
+# Log 色彩空间的 transfer characteristics
+_LOG_TRANSFERS = {
+    "arib-std-b67",   # HLG（Sony 部分 S-Log 使用）
+    "smpte2084",      # PQ（HDR / 部分 Log）
+    "smpte428",       # D-Cinema
+    "linear",         # 线性（ACES / 部分 Log）
+    "log",            # 通用 Log
+    "log100",
+    "log100-sqrt10",
+    "log316-sqrt10",
+}
+
+# 10-bit 像素格式（专业/Log 素材常见）
+_10BIT_PIX_FMTS = {
+    "yuv420p10le", "yuv422p10le", "yuv444p10le",
+    "yuv420p10be", "yuv422p10be", "yuv444p10be",
+    "gbrp10le", "gbrp10le",
+}
+
+
+def probe_color_metadata(video_path: str, ffprobe_path: str = "") -> dict:
+    """用 ffprobe 提取视频的色彩元数据。
+
+    Returns:
+        {"color_transfer": str, "color_primaries": str, "color_space": str,
+         "pix_fmt": str, "width": int, "height": int}
+        失败返回空 dict。
+    """
+    import subprocess
+    if not ffprobe_path:
+        from utils.platform_utils import find_ffprobe
+        ffprobe_path = find_ffprobe()
+        if not ffprobe_path or not os.path.isfile(ffprobe_path):
+            from utils.platform_utils import find_ffmpeg
+            ff = find_ffmpeg()
+            if ff:
+                ffprobe_path = ff.replace("ffmpeg", "ffprobe")
+    if not ffprobe_path or not os.path.isfile(ffprobe_path):
+        return {}
+
+    cmd = [
+        ffprobe_path, "-v", "error", "-select_streams", "v:0",
+        "-show_entries",
+        "stream=color_transfer,color_primaries,color_space,pix_fmt,width,height",
+        "-of", "json", video_path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                           creationflags=0x08000000)
+        if r.returncode != 0:
+            return {}
+        data = json.loads(r.stdout)
+        streams = data.get("streams", [])
+        return streams[0] if streams else {}
+    except Exception:
+        return {}
+
+
+def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
+    """检测视频是否为 Log/灰片，需要 LUT 还原。
+
+    两路判断：
+      1. ffprobe 色彩元数据：transfer 是否为 Log 类 / pix_fmt 是否为 10-bit
+      2. 采样帧直方图：对比度是否偏低（灰片特征）
+
+    Returns:
+        {
+            "is_log": bool,           # 是否为灰片
+            "confidence": float,       # 置信度 0.0 ~ 1.0
+            "reason": str,            # 判断理由
+            "color_metadata": dict,   # ffprobe 原始色彩元数据
+            "frame_stats": dict,      # 帧采样统计 {mean_brightness, contrast_std, ...}
+        }
+    """
+    import cv2
+    import numpy as np
+
+    result = {
+        "is_log": False,
+        "confidence": 0.0,
+        "reason": "",
+        "color_metadata": {},
+        "frame_stats": {},
+    }
+
+    # ── 1. 色彩元数据 ──
+    meta = probe_color_metadata(video_path)
+    result["color_metadata"] = meta
+
+    transfer = (meta.get("color_transfer") or "").strip().lower()
+    pix_fmt = (meta.get("pix_fmt") or "").strip().lower()
+    color_space = (meta.get("color_space") or "").strip().lower()
+
+    meta_score = 0.0
+    reasons = []
+
+    if transfer and transfer != "unknown":
+        if transfer in _LOG_TRANSFERS:
+            meta_score += 0.6
+            reasons.append(f"色彩传输函数为 {transfer}（Log/HDR 类）")
+        elif transfer == "bt709":
+            meta_score -= 0.3  # 标准 Rec.709，很可能不是灰片
+
+    if pix_fmt in _10BIT_PIX_FMTS:
+        meta_score += 0.25
+        reasons.append(f"10-bit 像素格式 {pix_fmt}（常见于 Log 素材）")
+
+    if color_space and color_space != "bt709" and color_space != "unknown":
+        if "bt2020" in color_space or "smpte" in color_space:
+            meta_score += 0.15
+            reasons.append(f"广色域 {color_space}")
+
+    # ── 2. 采样帧直方图分析 ──
+    try:
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+        else:
+            contrasts = []
+            brightnesses = []
+            # 在 5%~95% 区间均匀采样
+            positions = [int(total_frames * p) for p in
+                         [0.05, 0.25, 0.50, 0.75, 0.90][:sample_frames]]
+            for pos in positions:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                bright = float(np.mean(gray))
+                contrast = float(np.std(gray))
+                brightnesses.append(bright)
+                contrasts.append(contrast)
+            cap.release()
+
+            if brightnesses and contrasts:
+                avg_brightness = np.mean(brightnesses)
+                avg_contrast = np.mean(contrasts)
+                result["frame_stats"] = {
+                    "mean_brightness": round(avg_brightness, 1),
+                    "mean_contrast_std": round(avg_contrast, 1),
+                }
+                # 灰片特征：对比度偏低（像素集中在中间，标准差小）
+                # 正常 Rec.709 视频对比度通常 > 50；灰片往往 < 40
+                if avg_contrast < 35:
+                    meta_score += 0.4
+                    reasons.append(f"帧对比度偏低(std={avg_contrast:.0f})，典型灰片特征")
+                elif avg_contrast < 50:
+                    meta_score += 0.2
+                    reasons.append(f"帧对比度中等(std={avg_contrast:.0f})，可能为灰片")
+                else:
+                    meta_score -= 0.1  # 高对比度，不像灰片
+    except ImportError:
+        pass  # cv2 不可用，跳过帧分析
+    except Exception:
+        pass
+
+    meta_score = max(0.0, min(1.0, meta_score))
+    result["confidence"] = round(meta_score, 2)
+    result["is_log"] = meta_score >= 0.5
+    result["reason"] = "；".join(reasons) if reasons else (
+        "未检测到明显 Log 特征" if meta_score < 0.5 else "综合判断可能为灰片"
+    )
+    return result
+
+
 # ─── 抽帧（复用 video_ai_rename_page 的 cv2 方案）──────────────────────────
 
 def extract_frames_to_files(video_path: str, num_frames: int = 8,
@@ -77,15 +246,15 @@ def frame_to_b64(path: str) -> str:
 
 # ─── 视觉 LLM：提取 AI 标签（语义标签列表，区别于重命名页的品牌/型号）─────────
 
-def call_vision_for_tags(frames_b64: list[str], api_url: str,
-                         api_key: str, model: str) -> list[str]:
+def call_vision_for_tags(frames_b64: list[str], model: str) -> list[str]:
     """
     把多帧 base64 图片一次发给视觉模型，提取画面语义标签列表。
-    走服务端代理（不再直连 Ollama），api_url/api_key 参数保留兼容但不再使用。
+    返回 ["键盘", "机械轴", "俯拍", "客制化"] 格式。
     """
     if not frames_b64:
         return []
     try:
+        from utils.llm_proxy import llm_chat_messages
         system_prompt = (
             "你是专业的消费电子/产品视频标注专家。\n"
             "给你若干视频关键帧，请归纳画面中出现的所有语义标签。\n"
@@ -94,33 +263,15 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
             "[\"键盘\", \"机械轴\", \"客制化\", \"俯拍\", \"白色\", \"特写\"]"
         )
         content = [{"type": "text", "text": "请分析以下视频关键帧，返回语义标签数组："}]
-        for i, b64 in enumerate(frames_b64[:6]):
+        for i, b64 in enumerate(frames_b64[:6]):   # 最多 6 帧，防止 token 超限
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
-
-        # 走服务端代理
-        from utils.llm_proxy import _get_server_url
-        from utils.http_client import resilient_post
-        base = _get_server_url()
-        if not base:
-            base = api_url.rstrip("/")
-        url = f"{base}/llm/chat/completions"
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 300,
-        }
-        resp = resilient_post(url, json=payload, timeout=90, service="llm")
-        if resp.status_code != 200:
-            log.error(f"视觉 LLM 返回 {resp.status_code}: {resp.text[:200]}")
-            return []
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        raw = llm_chat_messages(
+            [{"role": "system", "content": system_prompt},
+             {"role": "user", "content": content}],
+            model=model, temperature=0.1, max_tokens=300, timeout=90)
         # 清除 markdown 代码块
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
         raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE).strip()
@@ -252,15 +403,13 @@ class VideoIndexWorker(BaseWorker):
             ai_cfg = {}
             with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 ai_cfg = json.load(f)
-            api_url = ai_cfg.get("llm_vision_api_url", "")
-            api_key = ai_cfg.get("llm_vision_api_key") or ai_cfg.get("llm_api_key", "")
             model = ai_cfg.get("llm_vision_model", "")
-            if api_url and model and frame_paths:
+            if model and frame_paths:
                 frames_b64 = [frame_to_b64(p) for p in frame_paths[:6]]
-                ai_tags = call_vision_for_tags(frames_b64, api_url, api_key, model)
+                ai_tags = call_vision_for_tags(frames_b64, model)
                 self._log(f"  标签: {ai_tags}")
             else:
-                self._log("  视觉 API 未配置，跳过标签提取")
+                self._log("  视觉模型未配置，跳过标签提取")
         except Exception as e:
             self._log(f"  标签提取失败（跳过）: {e}")
 

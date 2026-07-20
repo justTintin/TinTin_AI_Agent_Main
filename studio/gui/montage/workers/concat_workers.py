@@ -6,6 +6,7 @@ import subprocess
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 from gui.montage.utils_media import find_ffmpeg, get_media_duration
 
 
@@ -87,7 +88,7 @@ class VideoConcatWorker(BaseWorker):
         cmd = [
             ffmpeg_path, "-y", "-i", clip_abspath,
             "-vf", vf_filter,
-            "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
+            *get_video_encode_args(crf=23, preset="superfast"),
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             norm_out
         ]
@@ -128,7 +129,7 @@ class VideoConcatWorker(BaseWorker):
                 lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
                 vf = f"lut3d='{lut_esc}'"
                 cmd = [ffmpeg_path, "-y", "-i", clips[0], "-vf", vf,
-                       "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
+                       *get_video_encode_args(crf=23, preset="superfast"),
                        "-c:a", "aac", "-ar", "44100", "-ac", "2",
                        "-movflags", "+faststart", out_file]
             else:
@@ -201,7 +202,7 @@ class VideoConcatWorker(BaseWorker):
             "-filter_complex", filter_complex,
             "-map", f"[{final_vlabel}]",
             "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "superfast", "-crf", "23",
+            *get_video_encode_args(crf=23, preset="superfast"),
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             "-movflags", "+faststart",
             out_file
@@ -709,7 +710,7 @@ class VideoDubbingWorker(BaseWorker):
                         "-i", voice_wav_path,
                         "-filter_complex", filter_complex,
                         "-map", f"[{video_label}]", "-map", audio_map,
-                        "-c:v", "libx264", "-preset", "superfast", "-c:a", "aac",
+                        *get_video_encode_args(crf=23, preset="superfast"), "-c:a", "aac",
                     ]
                     # "以声音为准"时严格裁剪输出到音频时长：
                     #   audio > video → tpad 已把视频延长到 audio_dur，-t 再确认一次（无害）

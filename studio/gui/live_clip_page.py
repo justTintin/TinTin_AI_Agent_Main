@@ -22,6 +22,7 @@ from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 from config.paths import OUTPUTS_DIR, TMP_DIR
 
 
@@ -229,7 +230,7 @@ def embed_cover_to_video(cover_path, video_path, out_path, cover_duration=2):
         f"[v0][v1]concat=n=2:v=1:a=0[v];"
         f"[1:a]adelay={cover_duration*1000}:all=1[a]",
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        *get_video_encode_args(crf=23, preset="fast"),
         "-c:a", "aac", "-shortest",
         out_path,
     ]
@@ -536,7 +537,7 @@ class VideoClipWorker(BaseWorker):
                        "-i", abs_video,
                        "-ss", f"{remain_start:.3f}",
                        "-t", f"{duration:.3f}"] + vf_args + [
-                       "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                       *get_video_encode_args(crf=23, preset="fast"),
                        "-c:a", "aac", abs_out]
                        
                 r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 
 
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ class VideoLutWorker(BaseWorker):
                         cmd = [
                             ffmpeg, "-y", "-i", src,
                             "-vf", f"lut3d='{lut_esc}'",
-                            "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+                            *get_video_encode_args(crf=18, preset="superfast"),
                             "-c:a", "copy",
                             dst,
                         ]
@@ -100,7 +101,7 @@ class VideoLutWorker(BaseWorker):
                             ffmpeg, "-y", "-i", src,
                             "-filter_complex", fc,
                             "-map", "[out]", "-map", "0:a?",
-                            "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+                            *get_video_encode_args(crf=18, preset="superfast"),
                             "-c:a", "copy",
                             dst,
                         ]

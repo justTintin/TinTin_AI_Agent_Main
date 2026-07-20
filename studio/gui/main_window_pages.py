@@ -104,6 +104,16 @@ class PageSetupMixin:
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
         tabs.addTab(p1, "🎭 声音样本")
 
+        # Tab 2: 视频配置（LUT 还原）
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_video_config_tab(p2)
+        tabs.addTab(p2, "🎬 视频配置")
+
+        # Tab 3: 本地配置（缓存目录）
+        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_local_config_tab(p3)
+        tabs.addTab(p3, "📁 本地配置")
+
         layout.addWidget(tabs, 1)
 
     def setup_video_ocr_page(self):
@@ -176,6 +186,11 @@ class PageSetupMixin:
         from gui.compile_video_page import CompileVideoPage
         self.compile_video_tool = CompileVideoPage(self.page_compile_video, self)
         self.compile_video_tool.setup()
+
+    def setup_scheduled_tasks_page(self):
+        from gui.scheduled_tasks_page import ScheduledTasksPage
+        self.scheduled_tasks_tool = ScheduledTasksPage(self.page_scheduled_tasks, self)
+        self.scheduled_tasks_tool.setup()
 
     def setup_hook_score_page(self):
         from gui.hook_score_page import HookScorePage
@@ -1261,7 +1276,14 @@ class PageSetupMixin:
 
     def setup_backup_page(self):
         layout = QVBoxLayout(self.page_backup)
-        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
+        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(16)
+
+        # ── 系统工具 ──
+        sys_label = QLabel("🖥️ 系统工具")
+        sys_label.setObjectName("section_label")
+        sys_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #9ca3af; padding: 0;")
+        layout.addWidget(sys_label)
+
         tabs = QTabWidget()
         tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
@@ -1280,6 +1302,192 @@ class PageSetupMixin:
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
         tabs.addTab(p3, "💾 备份管理")
 
-        layout.addWidget(tabs, 1)
+        layout.addWidget(tabs)
 
-    # ── 素材资源配置 ──
+    def _setup_local_config_tab(self, parent_widget):
+        """本地配置 Tab：设置本地缓存/生成目录。"""
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("📁 本地缓存配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
+
+        hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(QLabel("缓存目录:"))
+        self.local_cache_dir_input = QLineEdit()
+        self.local_cache_dir_input.setPlaceholderText("默认为 outputs 目录，可自定义...")
+        dir_row.addWidget(self.local_cache_dir_input, 1)
+        btn_browse = QPushButton("浏览...")
+        btn_browse.clicked.connect(lambda: self._browse_local_cache_dir())
+        dir_row.addWidget(btn_browse)
+        layout.addLayout(dir_row)
+
+        self.local_cache_status = QLabel("")
+        self.local_cache_status.setObjectName("muted_text")
+        layout.addWidget(self.local_cache_status)
+
+        # 加载已有配置
+        if os.path.isfile(_LOCAL_CFG):
+            try:
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                self.local_cache_dir_input.setText(data.get("cache_dir", ""))
+                self.local_cache_status.setText("已加载配置")
+            except Exception:
+                pass
+
+        btn_save = QPushButton("💾 保存")
+        btn_save.setObjectName("primary_button")
+        btn_save.setFixedWidth(90)
+        btn_save.clicked.connect(lambda: self._save_local_config())
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
+        layout.addStretch()
+
+    def _browse_local_cache_dir(self):
+        d = QFileDialog.getExistingDirectory(self.local_cache_dir_input, "选择本地缓存目录")
+        if d:
+            self.local_cache_dir_input.setText(d)
+
+    def _save_local_config(self):
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        cache_dir = self.local_cache_dir_input.text().strip()
+        try:
+            with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
+                _json.dump({"cache_dir": cache_dir}, f, indent=2, ensure_ascii=False)
+            self.local_cache_status.setText("✅ 已保存")
+        except Exception as e:
+            self.local_cache_status.setText(f"❌ 保存失败: {e}")
+
+    def get_local_cache_dir(self):
+        """获取配置的本地缓存目录，未配置返回空。"""
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        try:
+            if os.path.isfile(_LOCAL_CFG):
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                d = data.get("cache_dir", "").strip()
+                if d and os.path.isdir(d):
+                    return d
+        except Exception:
+            pass
+        return ""
+
+    def _setup_video_config_tab(self, parent_widget):
+        """视频配置 Tab：管理 LUT 还原文件映射（文件名 → LUT 路径）。"""
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("🎬 视频 LUT 还原配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
+
+        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用。\n"
+                       "格式支持：.cube / .3dl / .lut")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        # 列表
+        self.lut_list = QListWidget()
+        self.lut_list.setAlternatingRowColors(True)
+        layout.addWidget(self.lut_list, 1)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("➕ 添加 LUT 文件")
+        btn_add.setObjectName("primary_button")
+        btn_add.clicked.connect(self._add_lut_entry)
+        btn_row.addWidget(btn_add)
+
+        btn_del = QPushButton("🗑 删除选中")
+        btn_del.setObjectName("secondary_button")
+        btn_del.clicked.connect(self._del_lut_entry)
+        btn_row.addWidget(btn_del)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        # 状态
+        self.lut_status = QLabel("")
+        self.lut_status.setObjectName("muted_text")
+        layout.addWidget(self.lut_status)
+
+        # 加载已有配置
+        self._load_lut_config()
+
+    def _load_lut_config(self):
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+        self.lut_list.clear()
+        if os.path.isfile(VIDEO_CONFIG_FILE):
+            try:
+                with open(VIDEO_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                for name, path in data.items():
+                    item = QListWidgetItem(f"{name}  →  {path}")
+                    item.setData(Qt.UserRole, {"name": name, "path": path})
+                    self.lut_list.addItem(item)
+                self.lut_status.setText(f"已加载 {self.lut_list.count()} 个 LUT 配置")
+            except Exception as e:
+                self.lut_status.setText(f"加载失败: {e}")
+
+    def _add_lut_entry(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self.lut_list, "选择 LUT 还原文件", "",
+            "LUT 文件 (*.cube *.3dl *.lut);;所有文件 (*.*)")
+        if not path:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        name, ok = QInputDialog.getText(self.lut_list, "LUT 名称",
+                                         "输入此 LUT 的显示名称（如 S-Log3、D-Log）：",
+                                         text=name)
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        # 写入列表
+        item = QListWidgetItem(f"{name}  →  {path}")
+        item.setData(Qt.UserRole, {"name": name, "path": path})
+        self.lut_list.addItem(item)
+        self._save_lut_config()
+
+    def _del_lut_entry(self):
+        for item in self.lut_list.selectedItems():
+            self.lut_list.takeItem(self.lut_list.row(item))
+        self._save_lut_config()
+
+    def _save_lut_config(self):
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+        data = {}
+        for i in range(self.lut_list.count()):
+            item = self.lut_list.item(i)
+            d = item.data(Qt.UserRole)
+            if d:
+                data[d["name"]] = d["path"]
+        try:
+            with open(VIDEO_CONFIG_FILE, "w", encoding="utf-8") as f:
+                _json.dump(data, f, indent=2, ensure_ascii=False)
+            self.lut_status.setText(f"已保存 {len(data)} 个 LUT 配置")
+        except Exception as e:
+            self.lut_status.setText(f"保存失败: {e}")

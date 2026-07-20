@@ -109,6 +109,65 @@ def llm_chat(
     return content
 
 
+def llm_chat_messages(
+    messages: list,
+    *,
+    model: str = "",
+    temperature: float = 0.4,
+    timeout: int = 120,
+    max_tokens: int = 0,
+) -> str:
+    """通过服务端代理调用 LLM（支持多模态 messages 格式）。
+
+    Args:
+        messages: OpenAI 格式的消息列表，例如：
+            [{"role": "system", "content": "..."},
+             {"role": "user", "content": "..."}]
+            支持多模态 content（text + image_url 列表）
+        model: 模型名（留空用 ai_config 中的 llm_model）
+        temperature: 温度
+        timeout: 超时秒数
+        max_tokens: 最大 token 数（0=不限制）
+
+    Returns:
+        LLM 回复文本
+
+    Raises:
+        RuntimeError: 服务端不可达或返回错误
+    """
+    base = _get_server_url()
+    if not base:
+        raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
+
+    if not model:
+        model = _get_default_model()
+
+    url = f"{base}/llm/chat/completions"
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if max_tokens > 0:
+        payload["max_tokens"] = max_tokens
+
+    log.info(f"[LLM代理] POST {url} model={model} 消息数={len(messages)}")
+    resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
+    if resp.status_code != 200:
+        err = resp.text[:300] if resp.text else ""
+        log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
+        raise RuntimeError(f"LLM 服务端返回 HTTP {resp.status_code}: {err}")
+
+    data = resp.json()
+    content = (
+        data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        or data.get("content", "")
+        or data.get("result", "")
+    )
+    log.info(f"[LLM代理] 返回 {len(content)} 字符")
+    return content
+
+
 def llm_chat_json(
     system: str,
     user: str,

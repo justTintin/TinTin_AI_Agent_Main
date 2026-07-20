@@ -320,18 +320,13 @@ class VideoAnalyzeWorker(BaseWorker):
     finished       = Signal()
     error          = Signal(str)
 
-    def __init__(self, video_files: list, api_url: str,
-                 api_key: str, model: str, num_frames: int = 4,
-                 folder_path: str = "", vision_model: str = "",
-                 vision_api_url: str = ""):
+    def __init__(self, video_files: list,
+                 model: str, num_frames: int = 4,
+                 folder_path: str = "", vision_model: str = ""):
         super().__init__()
         self.video_files     = video_files
-        self.api_url         = (api_url or "").rstrip("/")
-        self.api_key         = api_key or ""
         self.model           = model or ""
         self.vision_model    = (vision_model or "").strip()
-        # 视觉 API 地址：未填则回退到文本模型地址（兼容云端视觉模型）
-        self.vision_api_url  = (vision_api_url or api_url or "").rstrip("/")
         self.num_frames      = num_frames
         self._folder_path    = folder_path or ""
         self._abort          = False
@@ -393,11 +388,10 @@ class VideoAnalyzeWorker(BaseWorker):
         conf_info = {'brand_conf': 0.0, 'category_conf': 0.0, 'model_conf': 0.0,
                      'frame_count': 0, 'brand_votes': {}, 'category_votes': {}, 'model_votes': {}}
         self._emit_log(
-            f"  视觉API: {self.vision_api_url or '(未配置)'}  "
-            f"视觉模型: {self.vision_model or '(未选择)'}"
+            f"  视觉模型: {self.vision_model or '(未选择)'}"
         )
 
-        if self.vision_model and self.vision_api_url:
+        if self.vision_model:
             import requests as req
             vision_ok = False
             try:
@@ -411,7 +405,7 @@ class VideoAnalyzeWorker(BaseWorker):
                         if self._abort:
                             break
                         try:
-                            r = self._call_vision_llm_single(i + 1, len(kfs), kf, req)
+                            r = self._call_vision_llm_single(i + 1, len(kfs), kf)
                             frame_results.append(r)
                             self._emit_log(
                                 f"  帧{i+1:02d}/{len(kfs)}: "
@@ -450,7 +444,7 @@ class VideoAnalyzeWorker(BaseWorker):
             if not vision_ok:
                 self._emit_log("  视觉未识别，结果为 unknown")
         else:
-            self._emit_log("  ✗ 未配置视觉模型或API地址，跳过分析")
+            self._emit_log("  ✗ 未配置视觉模型，跳过分析")
 
         # 5. 生成新文件名
         new_name = _build_new_filename(ai_info, meta, parsed, fpath)
@@ -514,8 +508,9 @@ class VideoAnalyzeWorker(BaseWorker):
         }
 
     def _call_vision_llm_single(self, frame_num: int, total: int,
-                                kf_b64: str, req) -> dict:
+                                kf_b64: str) -> dict:
         """调用视觉模型分析单帧，返回 {'brand':..., 'category':..., 'model':...}。"""
+        from utils.llm_proxy import llm_chat_messages
         system_prompt = (
             "你是专业的消费电子产品视觉识别专家。\n"
             "这是视频中的一帧截图。通过产品外观特征（形状/轮廓/设计语言/LOGO/文字标识等）\n"
@@ -527,31 +522,19 @@ class VideoAnalyzeWorker(BaseWorker):
             "  \"model\": \"最可能的型号（G502/MX Master 3/iPhone 15 Pro等；无法判断填 unknown）\"\n"
             "}"
         )
-        url = f"{self.vision_api_url}/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.vision_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text",
-                     "text": f"这是视频第 {frame_num}/{total} 帧，请识别画面中的产品品牌、品类和型号："},
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}},
-                ]},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 200,
-        }
-        self._emit_log(f"    → 帧{frame_num}  POST {self.vision_api_url}")
-        res = req.post(url, json=payload, headers=headers, timeout=60)
-        self._emit_log(f"    ← HTTP {res.status_code}")
-        if res.status_code != 200:
-            self._emit_log(f"    ✗ 错误: {res.text[:150]}")
-            raise RuntimeError(f"HTTP {res.status_code}: {res.text[:200]}")
-        raw = res.json()["choices"][0]["message"]["content"].strip()
-        self._emit_log(f"    原始: {raw[:100]}")
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        self._emit_log(f"    → 帧{frame_num}  POST /llm/chat model={self.vision_model}")
+        text = llm_chat_messages(
+            [{"role": "system", "content": system_prompt},
+             {"role": "user", "content": [
+                 {"type": "text",
+                  "text": f"这是视频第 {frame_num}/{total} 帧，请识别画面中的产品品牌、品类和型号："},
+                 {"type": "image_url",
+                  "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}},
+             ]}],
+            model=self.vision_model, temperature=0.1, max_tokens=200, timeout=60)
+        self._emit_log(f"    ← 响应 {len(text)} 字符")
+        self._emit_log(f"    原始: {text[:100]}")
+        raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
         if m:
@@ -579,13 +562,11 @@ class FrameAnalysisThread(BaseWorker):
     log_ready    = Signal(str)
 
     def __init__(self, fpath: str, pos_ms: int,
-                 vision_model: str, vision_api_url: str, api_key: str):
+                 vision_model: str):
         super().__init__()
         self.fpath          = fpath
         self.pos_ms         = pos_ms
         self.vision_model   = vision_model
-        self.vision_api_url = (vision_api_url or "").rstrip("/")
-        self.api_key        = api_key or ""
 
     def run(self):
         import cv2
@@ -619,30 +600,20 @@ class FrameAnalysisThread(BaseWorker):
             self.result_ready.emit({'error': f'{type(e).__name__}: {e}'})
 
     def _call_vision(self, kf_b64: str, req) -> dict:
+        from utils.llm_proxy import llm_chat_messages
         system_prompt = (
             "你是专业的消费电子产品视觉识别专家。通过产品外观特征识别品牌、品类和型号。"
             "只返回 JSON，格式：{\"brand\":\"...\",\"category\":\"...\",\"model\":\"...\"}"
             "无法识别时对应字段填 unknown。"
         )
-        url = f"{self.vision_api_url}/v1/chat/completions"
-        payload = {
-            "model": self.vision_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "请识别这一帧中的产品品牌、品类和型号："},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}}
-                ]},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 300,
-        }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        res = req.post(url, json=payload, headers=headers, timeout=60)
-        if res.status_code != 200:
-            raise RuntimeError(f"HTTP {res.status_code}: {res.text[:200]}")
-        raw = res.json()["choices"][0]["message"]["content"].strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        text = llm_chat_messages(
+            [{"role": "system", "content": system_prompt},
+             {"role": "user", "content": [
+                 {"type": "text", "text": "请识别这一帧中的产品品牌、品类和型号："},
+                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}}
+             ]}],
+            model=self.vision_model, temperature=0.1, max_tokens=300, timeout=60)
+        raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
         if m:
@@ -713,14 +684,12 @@ class VideoPlayerDialog(QDialog):
     """
 
     def __init__(self, fpath: str, row_idx: int,
-                 vision_model: str, vision_api_url: str, api_key: str,
+                 vision_model: str,
                  page_ref, parent=None):
         super().__init__(parent)
         self.fpath           = fpath
         self.row_idx         = row_idx
         self.vision_model    = vision_model
-        self.vision_api_url  = vision_api_url
-        self.api_key         = api_key
         self.page_ref        = page_ref
         self._duration       = 0
         self._slider_dragging = False
@@ -788,11 +757,11 @@ class VideoPlayerDialog(QDialog):
         hint.setObjectName("videoPlayerHint")
         right_v.addWidget(hint)
 
-        can_analyze = bool(self.vision_model and self.vision_api_url)
+        can_analyze = bool(self.vision_model)
         self.btn_analyze_frame = QPushButton("🔍 分析这一帧")
         self.btn_analyze_frame.setEnabled(can_analyze)
         if not can_analyze:
-            self.btn_analyze_frame.setToolTip("请先在设置中配置视觉模型和 API 地址")
+            self.btn_analyze_frame.setToolTip("请先在设置中配置视觉模型")
         self.btn_analyze_frame.clicked.connect(self._analyze_current_frame)
         right_v.addWidget(self.btn_analyze_frame)
 
@@ -923,7 +892,7 @@ class VideoPlayerDialog(QDialog):
         self.lbl_frame_status.setText("抽帧中…")
 
         self._analysis_thread = FrameAnalysisThread(
-            self.fpath, pos_ms, self.vision_model, self.vision_api_url, self.api_key
+            self.fpath, pos_ms, self.vision_model
         )
         self._analysis_thread.result_ready.connect(self._on_frame_analyzed)
         self._analysis_thread.log_ready.connect(self.lbl_frame_status.setText)
@@ -1223,17 +1192,11 @@ class VideoAiRenamePage(BasePage):
     # ──────────────────────── 配置加载 ────────────────────────
     def _load_llm_config(self):
         """从主窗口 ai_config 加载 LLM 配置，并刷新 Ollama 模型列表。"""
-        self._api_url         = ""
-        self._api_key         = ""
         self._model           = ""
-        self._vision_api_url  = ""
         self._vision_model    = ""
         try:
             cfg = self.main_win.ai_config
-            self._api_url        = cfg.get("llm_api_url",       "").strip()
-            self._api_key        = cfg.get("llm_api_key",       "").strip()
             self._model          = cfg.get("llm_model",          "").strip()
-            self._vision_api_url = cfg.get("llm_vision_api_url","").strip()
             self._vision_model   = cfg.get("llm_vision_model",  "").strip()
             self.lbl_model_info.setText(f"🤖 文本: {self._model}" if self._model else "⚠ 未配置文本模型")
             self.lbl_model_info.setProperty("status", "" if self._model else "error")
@@ -1426,16 +1389,14 @@ class VideoAiRenamePage(BasePage):
         if not self.video_files:
             return
 
-        api_url      = self._api_url
-        api_key      = self._api_key
         model        = self._model
         vision_model = self._vision_model
         num_frames   = self.spin_frames.value()
 
-        if not api_url or not model:
+        if not model:
             reply = QMessageBox.question(
                 self.parent_widget, "未配置 AI",
-                "未配置 AI 接口地址或模型名称。\n"
+                "未配置 AI 模型名称。\n"
                 "将仅根据原文件名和视频元数据（分辨率/日期）生成新文件名，\n"
                 "品牌/品类/型号 将填写为 unknown。\n\n确认继续？",
                 QMessageBox.Yes | QMessageBox.No
@@ -1464,9 +1425,8 @@ class VideoAiRenamePage(BasePage):
                 item.setForeground(QColor("#fbbf24"))
 
         self.worker = VideoAnalyzeWorker(
-            self.video_files, api_url, api_key, model, num_frames,
-            folder_path=self._folder_path, vision_model=vision_model,
-            vision_api_url=self._vision_api_url
+            self.video_files, model, num_frames,
+            folder_path=self._folder_path, vision_model=vision_model
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.video_analyzed.connect(self._on_video_analyzed)
@@ -1481,7 +1441,7 @@ class VideoAiRenamePage(BasePage):
 
     def _reanalyze_single(self, row_idx: int, fpath: str):
         """单独重新分析一个视频。"""
-        if not self._api_url or not self._model:
+        if not self._model:
             QMessageBox.warning(self.parent_widget, "未配置 AI", "请先在设置中配置 AI 模型。")
             return
 
@@ -1509,10 +1469,9 @@ class VideoAiRenamePage(BasePage):
                         'brand':'unknown','category':'unknown','model':'unknown',
                         'new_name':'','resolution':'','orientation':'','date':'','model_name':'unknown'})
 
-        temp_worker = VideoAnalyzeWorker([fpath], self._api_url, self._api_key, self._model,
+        temp_worker = VideoAnalyzeWorker([fpath], self._model,
                                          self.spin_frames.value(), folder_path=self._folder_path,
-                                         vision_model=self._vision_model,
-                                         vision_api_url=self._vision_api_url)
+                                         vision_model=self._vision_model)
         temp_worker.log_sig.connect(self._append_log)
         temp_worker.log_row_sig.connect(
             lambda ridx, line, ri=row_idx: self._on_row_log(ri, line)
@@ -1633,8 +1592,6 @@ class VideoAiRenamePage(BasePage):
             fpath          = fpath,
             row_idx        = row,
             vision_model   = self._vision_model,
-            vision_api_url = self._vision_api_url,
-            api_key        = self._api_key,
             page_ref       = self,
             parent         = self.parent_widget,
         )

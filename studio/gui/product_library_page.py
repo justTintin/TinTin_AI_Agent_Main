@@ -60,21 +60,18 @@ class BulkMineWorker(BaseWorker):
     progress = Signal(int, int, str)   # done, total, current_name
     finished = Signal(int, int)        # success_count, skip_count
 
-    def __init__(self, manager, api_url, api_key, model, skip_mined=True):
+    def __init__(self, manager, model, skip_mined=True):
         super().__init__()
         self.manager = manager
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.skip_mined = skip_mined
 
     def run(self):
-        import requests, re, json as json_mod
+        from utils.llm_proxy import llm_chat_messages
+        import re, json as json_mod
         items = self.manager.all_items()
         total = len(items)
         success = skip = 0
-        url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         system_prompt = (
             '你是一个专业的产品规划与营销专家。根据用户提供的产品基本信息，'
             '整理出该产品的【性能参数】与【核心卖点】。\n'
@@ -96,16 +93,11 @@ class BulkMineWorker(BaseWorker):
                 f'备注：{item.get("notes","")}\n\n请挖掘该产品的【性能参数】与【核心卖点】。'
             )
             try:
-                res = requests.post(url, json={
-                    "model": self.model,
-                    "messages": [{"role": "system", "content": system_prompt},
-                                 {"role": "user", "content": user_prompt}],
-                    "temperature": 0.7
-                }, headers=headers, timeout=60)
-                if res.status_code != 200:
-                    self.progress.emit(i + 1, total, f"[失败] {name}: HTTP {res.status_code}")
-                    continue
-                content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = llm_chat_messages(
+                    [{"role": "system", "content": system_prompt},
+                     {"role": "user", "content": user_prompt}],
+                    model=self.model, temperature=0.7, timeout=60
+                )
                 c = content.strip()
                 m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", c, re.DOTALL)
                 c = m.group(1) if m else c[c.find('{'):c.rfind('}')+1] if '{' in c else ""
@@ -384,12 +376,10 @@ class ProductLibraryPage(BasePage):
     def _on_mine(self):
         # 1. 确保大模型配置存在
         ai = self.ai_config
-        url = ai.get("llm_api_url", "")
-        key = ai.get("llm_api_key", "")
-        model = ai.get("llm_model", "deepseek-chat")
-        if not url or not key:
+        model = ai.get("llm_model", "deepseek-v4-flash")
+        if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在“AI 设置 / 大模型配置”中填写并测试 API 地址与密钥。")
+                                "请先在“AI 设置 / 大模型配置”中选择模型名称。")
             return
 
         # 2. 收集当前界面的产品资料作为查询输入
@@ -430,7 +420,7 @@ class ProductLibraryPage(BasePage):
 
         from gui.ai_script_page import LLMWorker
 
-        self.mine_worker = LLMWorker(url, key, model, system_prompt, user_prompt)
+        self.mine_worker = LLMWorker("", "", model, system_prompt, user_prompt)
 
         def _on_mine_done(content):
             self.btn_mine.setEnabled(True)
@@ -659,12 +649,10 @@ class ProductLibraryPage(BasePage):
             self._set_sync_status("已请求停止…")
             return
         ai = self.ai_config
-        url = ai.get("llm_api_url", "")
-        key = ai.get("llm_api_key", "")
         model = ai.get("llm_model", "deepseek-chat")
-        if not url or not key:
+        if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                '请先在【AI 设置 / 大模型配置】中填写并测试 API 地址与密钥。')
+                                '请先在【AI 设置 / 大模型配置】中填写模型名称。')
             return
         total = len(self.manager.all_items())
         if total == 0:
@@ -684,7 +672,7 @@ class ProductLibraryPage(BasePage):
         self.btn_mine_all.setText("⏹ 停止挖掘")
         self.btn_mine_all.setToolTip("点击停止批量挖掘")
         self._set_sync_status(f"一键挖掘中…（0/{pending}）")
-        self.bulk_mine_worker = BulkMineWorker(self.manager, url, key, model, skip_mined=True)
+        self.bulk_mine_worker = BulkMineWorker(self.manager, model, skip_mined=True)
         self.bulk_mine_worker.progress.connect(self._on_mine_all_progress)
         self.bulk_mine_worker.finished.connect(self._on_mine_all_done)
         self.bulk_mine_worker.error.connect(self._on_mine_all_err)

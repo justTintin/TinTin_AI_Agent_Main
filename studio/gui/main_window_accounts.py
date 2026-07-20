@@ -116,6 +116,10 @@ class AccountsMixin:
                 if t['status'] == "已完成":
                     self.update_task_actions(pid)
 
+        # 防止并发刷新：上一个 Worker 还在跑就先中断
+        if hasattr(self, "worker") and self.worker and self.worker.isRunning():
+            self.worker.abort()
+            self.worker.wait(2000)
         self.worker = Worker(fetch)
         self.worker.finished.connect(on_done)
         self.worker.start()

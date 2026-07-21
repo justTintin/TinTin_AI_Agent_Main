@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QFrame, QListWidget, QTableWidget, QHeaderView, QAbstractItemView,
-                               QComboBox, QSpinBox, QWidget, QSlider, QTextEdit)
+                               QFrame, QListWidget, QComboBox, QSpinBox, QWidget, QSlider, QTextEdit)
 from PySide6.QtCore import Qt
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from gui.montage.base_step_view import BaseStepView
@@ -23,93 +22,29 @@ class Step2ConcatView(BaseStepView):
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(16)
 
-        # Loaded video clips list header with Select All/None controls
+        # Source split clips directory input (carried from Step 1, read-only)
+        row_src = QHBoxLayout()
+        row_src.addWidget(QLabel("待排列镜头目录:"))
+        self.main_page.concat_src_dir_input = QLineEdit()
+        self.main_page.concat_src_dir_input.setPlaceholderText("由上一步镜头分割自动带入...")
+        self.main_page.concat_src_dir_input.setReadOnly(True)
+        row_src.addWidget(self.main_page.concat_src_dir_input)
+        card_layout.addLayout(row_src)
+
+        # Loaded video clips count + re-select button
         list_header_row = QHBoxLayout()
         self.main_page.clip_count_info_lbl = QLabel("待排列镜头个数: 0  (已勾选: 0)")
         self.main_page.clip_count_info_lbl.setStyleSheet("font-weight: bold; font-size: 11pt; color: #f1c40f;")
         list_header_row.addWidget(self.main_page.clip_count_info_lbl)
+
+        list_header_row.addSpacing(12)
+        self.main_page.btn_reselect_clips = QPushButton("重新选择镜头")
+        self.main_page.btn_reselect_clips.setObjectName("secondary_button")
+        self.main_page.btn_reselect_clips.clicked.connect(self.main_page._open_clip_selection_dialog)
+        list_header_row.addWidget(self.main_page.btn_reselect_clips)
+
         list_header_row.addStretch()
-
-        # Source split clips directory input
-        row_src = QHBoxLayout()
-        row_src.addWidget(QLabel("待排列镜头目录:"))
-        self.main_page.concat_src_dir_input = QLineEdit()
-        self.main_page.concat_src_dir_input.setPlaceholderText("选择或输入排列视频片段所在的文件夹...")
-        self.main_page.concat_src_dir_input.editingFinished.connect(self.main_page._scan_concat_src_dir)
-        row_src.addWidget(self.main_page.concat_src_dir_input)
-        
-        self.main_page.btn_select_concat_src_dir = QPushButton("重新选择素材")
-        self.main_page.btn_select_concat_src_dir.setObjectName("secondary_button")
-        self.main_page.btn_select_concat_src_dir.clicked.connect(self.main_page._select_concat_src_dir)
-        row_src.addWidget(self.main_page.btn_select_concat_src_dir)
-        card_layout.addLayout(row_src)
-
-        btn_select_all = QPushButton("全选")
-        btn_select_all.setObjectName("secondary_button")
-        btn_select_all.setFixedWidth(50)
-        btn_select_all.clicked.connect(self.main_page._select_all_clips)
-        list_header_row.addWidget(btn_select_all)
-        
-        btn_deselect_all = QPushButton("取消全选")
-        btn_deselect_all.setObjectName("secondary_button")
-        btn_deselect_all.setFixedWidth(80)
-        btn_deselect_all.clicked.connect(self.main_page._deselect_all_clips)
-        list_header_row.addWidget(btn_deselect_all)
         card_layout.addLayout(list_header_row)
-
-        # ── AI 评分与筛选控制行 ──
-        rate_row = QHBoxLayout()
-        self.main_page.btn_rate_clips = mdi_button("🤖 AI 智能评分", "sparkles")
-        self.main_page.btn_rate_clips.setObjectName("primary_button")
-        self.main_page.btn_rate_clips.setFixedHeight(30)
-        self.main_page.btn_rate_clips.setToolTip(
-            "调用大模型对每条分割镜头进行质量评分（0-10分），\n"
-            "评分维度包括画面内容、信息量、视频节奏适配度等。")
-        self.main_page.btn_rate_clips.clicked.connect(self.main_page._rate_clips)
-        rate_row.addWidget(self.main_page.btn_rate_clips)
-
-        rate_row.addSpacing(15)
-        rate_row.addWidget(QLabel("最低评分筛选:"))
-        self.main_page.score_filter_combo = QComboBox()
-        self.main_page.score_filter_combo.addItem("不过滤", 0.0)
-        for s in [1, 2, 3, 4, 5, 6, 7, 8]:
-            self.main_page.score_filter_combo.addItem(f"≥ {s} 分", float(s))
-        self.main_page.score_filter_combo.setCurrentIndex(0)
-        self.main_page.score_filter_combo.setToolTip(
-            "自动取消勾选评分低于此阈值的镜头素材。\n"
-            "选择「不过滤」时恢复全部勾选状态。")
-        self.main_page.score_filter_combo.currentIndexChanged.connect(self.main_page._apply_score_filter)
-        rate_row.addWidget(self.main_page.score_filter_combo)
-
-        self.main_page.lbl_rate_status = QLabel("")
-        self.main_page.lbl_rate_status.setObjectName("muted_text")
-        self.main_page.lbl_rate_status.setStyleSheet("color: #f39c12; font-size: 11px;")
-        rate_row.addWidget(self.main_page.lbl_rate_status)
-        rate_row.addStretch()
-        card_layout.addLayout(rate_row)
-
-        self.main_page.concat_clips_list_widget = QTableWidget()
-        self.main_page.concat_clips_list_widget.setWordWrap(False)
-        self.main_page.concat_clips_list_widget.verticalHeader().setDefaultSectionSize(30)
-        self.main_page.concat_clips_list_widget.setColumnCount(6)
-        self.main_page.concat_clips_list_widget.setHorizontalHeaderLabels(["分割文件名", "时间戳", "评分", "描述文案", "文件目录", "操作"])
-        self.main_page.concat_clips_list_widget.setFixedHeight(180)
-        self.main_page.concat_clips_list_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.main_page.concat_clips_list_widget.itemDoubleClicked.connect(self.main_page._preview_concat_table_item)
-        self.main_page.concat_clips_list_widget.cellChanged.connect(self.main_page._on_concat_table_cell_changed)
-        
-        header = self.main_page.concat_clips_list_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)       # 分割文件名
-        self.main_page.concat_clips_list_widget.setColumnWidth(0, 160)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # 时间戳
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # 评分
-        self.main_page.concat_clips_list_widget.setColumnWidth(2, 70)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)           # 描述文案
-        header.setSectionResizeMode(4, QHeaderView.Interactive)       # 文件目录
-        self.main_page.concat_clips_list_widget.setColumnWidth(4, 120)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)             # 操作
-        self.main_page.concat_clips_list_widget.setColumnWidth(5, 30)
-        card_layout.addWidget(self.main_page.concat_clips_list_widget)
 
         # Parameters row 1
         row_params1 = QHBoxLayout()
@@ -131,45 +66,6 @@ class Step2ConcatView(BaseStepView):
         self.main_page.layout_combo.addItem("横屏 (1920x1080 宽屏)", "horizontal")
         self.main_page.layout_combo.setCurrentIndex(0)
         row_params1.addWidget(self.main_page.layout_combo)
-
-        row_params1.addSpacing(15)
-        self.main_page.lbl_clip_count = QLabel("排列镜头数量:")
-        row_params1.addWidget(self.main_page.lbl_clip_count)
-        self.main_page.clip_count_combo = QComboBox()
-        self.main_page.clip_count_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2c2c2e;
-                color: #ecf0f1;
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 13px;
-            }
-            QComboBox:hover { border: 1px solid #5a5a5c; }
-            QComboBox:focus { border: 1px solid #2ecc71; }
-            QComboBox QAbstractItemView {
-                background-color: #2c2c2e;
-                color: #ecf0f1;
-                selection-background-color: #3a3a3c;
-                border: 1px solid #3a3a3c;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #95a5a6;
-                margin-right: 5px;
-            }
-        """)
-        for i in [3, 5, 8, 10, 15, 20]:
-            self.main_page.clip_count_combo.addItem(f"{i} 个镜头", i)
-        self.main_page.clip_count_combo.setCurrentIndex(2)
-        self.main_page.clip_count_combo.currentIndexChanged.connect(self.main_page._update_batch_count_recommendation)
-        row_params1.addWidget(self.main_page.clip_count_combo)
 
         row_params1.addSpacing(15)
         self.main_page.lbl_duration_limit = QLabel("时长限制:")

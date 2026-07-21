@@ -43,32 +43,33 @@ def _get_server_url() -> str:
 class StockSyncWorker(BaseWorker):
     """后台线程：通过服务端产品资料库接口同步产品数据。
 
-    流程：
-      1. POST /api/product-library/sync        触发服务端从旺店通 ERP 全量同步
-      2. GET  /api/product-library/sync/status  轮询同步进度直至完成
-      3. GET  /api/product-library/client/products  分页拉取所有产品
-      4. 映射成本地 KB 字段 + 构建 goods_no→{category,brand} 品类映射
+    流程（所有存储逻辑均在服务端，按机器码隔离）：
+      1. POST /api/product-library/clients/{machine_id}/sync        触发服务端 ERP 同步
+      2. GET  /api/product-library/clients/{machine_id}/sync/status  轮询同步进度直至完成
+      服务端内部已完成：ERP 拉取 → 库存映射 → 品类归类 → 持久化存储
+      客户端只需在同步结束后刷新本地缓存。
     """
     phase = Signal(str)              # 阶段文字
     progress = Signal(int, int)      # fetched, total
-    finished = Signal(list, dict)    # mapped KB dicts, goods_no->{category,brand}
+    finished = Signal(int, int)      # added, updated
 
     def run(self):
         import time
         import requests
+        from utils.product_library_manager import _get_machine_id
         try:
             base = _get_server_url()
             if not base:
                 self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
                 return
-            api = base.rstrip("/") + "/api/product-library"
+            machine_id = _get_machine_id()
+            api = f"{base.rstrip('/')}/api/product-library/clients/{machine_id}"
 
-            # 1. 触发服务端 ERP 同步
+            # 1. 触发服务端 ERP 同步（服务端内部完成 ERP 拉取 + 存储 + 品类归类）
             self.phase.emit("正在触发服务端 ERP 同步...")
             try:
                 r = requests.post(f"{api}/sync", timeout=10)
                 if r.status_code == 409:
-                    # 已有同步任务在跑，直接进入轮询
                     self.phase.emit("服务端同步进行中，等待完成...")
                 elif r.status_code != 200:
                     self.error.emit(f"触发同步失败: HTTP {r.status_code} {r.text[:200]}")
@@ -89,65 +90,17 @@ class StockSyncWorker(BaseWorker):
                     if st.get("error"):
                         self.error.emit(f"服务端同步出错: {st['error']}")
                         return
-                    # 同步结束
-                    added = st.get("added", 0)
-                    updated = st.get("updated", 0)
-                    self.phase.emit(
-                        f"服务端同步完成（新增 {added}、更新 {updated}），开始拉取产品..."
-                    )
-                    break
+                    added = int(st.get("added", 0) or 0)
+                    updated = int(st.get("updated", 0) or 0)
+                    self.phase.emit(f"服务端同步完成（新增 {added}、更新 {updated}）")
+                    self.finished.emit(added, updated)
+                    return
                 phase_text = st.get("phase", "") or "同步中..."
                 fetched = int(st.get("fetched", 0) or 0)
                 total = int(st.get("total", 0) or 0)
                 self.phase.emit(phase_text)
                 self.progress.emit(fetched, total)
                 time.sleep(2)
-
-            # 3. 分页拉取全部产品
-            all_items = []
-            page = 1
-            page_size = 500
-            total = 0
-            while True:
-                try:
-                    r = requests.get(
-                        f"{api}/client/products",
-                        params={
-                            "updated_since": 0,
-                            "page": page,
-                            "page_size": page_size,
-                        },
-                        timeout=30,
-                    )
-                    if r.status_code != 200:
-                        self.error.emit(f"拉取产品失败: HTTP {r.status_code} {r.text[:200]}")
-                        return
-                    data = r.json()
-                except requests.exceptions.RequestException as e:
-                    self.error.emit(f"拉取产品时网络异常: {e}")
-                    return
-                batch = data.get("items", []) or []
-                all_items.extend(batch)
-                total = int(data.get("total", 0) or 0)
-                self.progress.emit(len(all_items), total)
-                if not batch or (total and len(all_items) >= total):
-                    break
-                page += 1
-
-            # 4. 映射成本地 KB 字段 + 构建 goods_map（品类/品牌已在服务端归类）
-            mapped = []
-            goods_map = {}
-            kb_keys = [k for k, _lbl, _ml in FIELDS]
-            for it in all_items:
-                item = {k: str(it.get(k, "") or "").strip() for k in kb_keys}
-                mapped.append(item)
-                gno = item.get("goods_no", "").strip()
-                if gno and gno not in goods_map:
-                    goods_map[gno] = {
-                        "category": item.get("category", ""),
-                        "brand": item.get("brand", ""),
-                    }
-            self.finished.emit(mapped, goods_map)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -709,7 +662,7 @@ class ProductLibraryPage(BasePage):
         if self.sync_worker and self.sync_worker.isRunning():
             return
         self.btn_sync.setEnabled(False)
-        self._set_sync_status("正在连接旺店通仓库...")
+        self._set_sync_status("正在连接服务端产品资料库...")
         self.sync_worker = StockSyncWorker()
         self.sync_worker.phase.connect(self._set_sync_status)
         self.sync_worker.progress.connect(self._on_sync_progress)
@@ -718,15 +671,15 @@ class ProductLibraryPage(BasePage):
         self.sync_worker.start()
 
     def _on_sync_progress(self, fetched, total):
-        self._set_sync_status(f"正在拉取库存：{fetched}/{total or '?'}")
+        self._set_sync_status(f"正在同步：{fetched}/{total or '?'}")
 
-    def _on_sync_done(self, mapped_items, goods_map):
+    def _on_sync_done(self, added, updated):
+        """服务端已内部完成 ERP 同步+存储+归类，客户端只需刷新缓存。"""
         self.btn_sync.setEnabled(True)
-        added, updated = self.manager.upsert_stocks(mapped_items)
-        categorized = self.manager.apply_categories(goods_map) if goods_map else 0
+        self.manager.load()  # 从服务端刷新本地缓存
+        total_items = len(self.manager.items)
         self._set_sync_status(
-            f"同步完成：新增 {added}、更新 {updated}、自动归类 {categorized}，"
-            f"共 {len(self.manager.all_items())} 条。"
+            f"同步完成：新增 {added}、更新 {updated}，共 {total_items} 条。"
         )
         self._refresh_combo_choices()
         self.refresh_tree()
@@ -836,9 +789,9 @@ class ProductLibraryPage(BasePage):
                                 f"模板已导出到：{path}\n\n请按表头格式填写数据，然后使用「导入表格」功能导入。")
 
     def _on_import_excel(self):
-        """从 Excel 导入产品数据。"""
+        """从 Excel 导入产品数据（通过服务端存储）。"""
         import openpyxl
-        from utils.product_library_manager import ProductLibraryManager, FIELDS
+        from utils.product_library_manager import FIELDS
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")
@@ -849,9 +802,8 @@ class ProductLibraryPage(BasePage):
             ws = wb.active
             rows = list(ws.iter_rows(min_row=2, values_only=True))
             field_keys = [f[0] for f in FIELDS]
-            imported = 0
+            valid_items = []
             errors = []
-            mgr = ProductLibraryManager()
             for i, row in enumerate(rows, 2):
                 if all(v is None or str(v).strip() == "" for v in row):
                     continue  # 跳过空行
@@ -859,16 +811,16 @@ class ProductLibraryPage(BasePage):
                 for col, key in enumerate(field_keys):
                     val = row[col] if col < len(row) else None
                     item[key] = str(val).strip() if val is not None else ""
-                # 至少要有分类+品牌
                 if not item.get("category") or not item.get("brand"):
                     errors.append(f"第 {i} 行：分类和品牌不能为空")
                     continue
-                mgr.upsert_stocks([item])
-                imported += 1
-            if imported > 0:
-                mgr.save()
+                valid_items.append(item)
+            # 批量 upsert 到服务端
+            added = updated = 0
+            if valid_items:
+                added, updated = self.manager.upsert_stocks(valid_items)
                 self.refresh_tree()
-            msg = f"导入完成：成功 {imported} 条"
+            msg = f"导入完成：成功 {added + updated} 条（新增 {added}、更新 {updated}）" if valid_items else "未导入任何数据。"
             if errors:
                 msg += f"\n失败 {len(errors)} 条：\n" + "\n".join(errors[:10])
                 if len(errors) > 10:

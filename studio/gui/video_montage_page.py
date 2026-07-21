@@ -3263,7 +3263,7 @@ class VideoMontagePage(BasePage):
 
         # 启动 worker
         self._gen_script_worker = GenScriptWorker(
-            api_url, api_key, model, clip_descriptions,
+            "", "", model, clip_descriptions,
             brand, product, model_name, extra, duration_limit
         )
         self._gen_script_worker.finished.connect(self._on_gen_script_finished)
@@ -3493,7 +3493,7 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("正在调用AI批量修改文案...")
         
         # 4. Start worker
-        self.batch_rewrite_worker = BatchAITextRewriteWorker(api_url, api_key, model, tasks, self.ai_rewrite_temperature)
+        self.batch_rewrite_worker = BatchAITextRewriteWorker("", "", model, tasks, self.ai_rewrite_temperature)
         self.batch_rewrite_worker.row_finished.connect(self._on_batch_rewrite_row_finished)
         self.batch_rewrite_worker.progress.connect(self.progress_bar.setValue)
         self.batch_rewrite_worker.finished.connect(self._on_batch_rewrite_finished)
@@ -4797,6 +4797,8 @@ class VideoMontagePage(BasePage):
             return round(max(0.0, min(10.0, avg)), 1)
         except Exception:
             return -1
+    # [5·拼接合成]  _build_precompose_plans
+    def _build_precompose_plans(self, clips, target_clip_count, batch_count, randomness, duration_limit_sec):
         base = [os.path.abspath(c) for c in clips if c]
         if not base:
             return []

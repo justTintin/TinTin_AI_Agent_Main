@@ -476,24 +476,7 @@ class BatchAITextRewriteWorker(BaseWorker):
             
             total = len(self.tasks)
             for index, (row_idx, input_text) in enumerate(self.tasks):
-                payload = {
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": input_text}
-                    ],
-                    "temperature": self.temperature
-                }
-                res = requests.post(url, json=payload, headers=headers, timeout=20)
-                if res.status_code != 200:
-                    raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-                
-                data = res.json()
-                choices = data.get("choices", [])
-                if not choices:
-                    raise RuntimeError("Empty response from LLM")
-                
-                content = choices[0].get("message", {}).get("content", "").strip()
+                content = llm_chat(system_prompt, input_text, model=self.model, timeout=20)
                 # Clean up markdown code blocks if any
                 if content.startswith("```"):
                     lines = content.split("\n")

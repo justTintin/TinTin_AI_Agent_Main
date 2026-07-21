@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QTableWidgetItem, QHeaderView, QAbstractItemView, QSlider, QDoubleSpinBox, QWidget, QStackedWidget,
                                QSpinBox, QListWidgetItem, QDialog, QPlainTextEdit, QScrollArea, QListView, QMenu)
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtGui import QAction, QColor, QBrush
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -43,8 +43,10 @@ from gui.base_page import BasePage
 from gui.montage.widgets import (DoubleClickLineEdit, ReadOnlyDoubleClickLineEdit,
                                  ReorderableClipsTable)
 from gui.montage.dialogs import (TextEditDialog, ScriptCompareDialog, DubbedVideosDialog,
-                                 FinalMixedVideosDialog, ProductCopyInputDialog, VoiceRowDetailWidget)
-from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker, ScoreClipsWorker)
+                                  FinalMixedVideosDialog, ProductCopyInputDialog, VoiceRowDetailWidget,
+                                  ClipSelectionDialog)
+from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker,
+                                               ServerClipAnalysisWorker, BeatDetectWorker)
 from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorker, VideoDubbingWorker)
 from gui.montage.workers.voice_workers import VoiceCloneWorker
 from gui.montage.workers.desc_workers import (BatchGenerateDescriptionsWorker, LocalVisionDescWorker)
@@ -93,6 +95,8 @@ class VideoMontagePage(BasePage):
         self.split_descriptions = {} # split video path -> description
         self.rewritten_script = []
         self.split_clips_list = []
+        self._available_concat_clips = []
+        self._step1_score_threshold = 6.0
         self.assembled_video_path = ""
         self.ai_rewrite_temperature = 0.5
         self.voice_audio_durations = {}
@@ -194,6 +198,7 @@ class VideoMontagePage(BasePage):
         from gui.montage.step2_concat_view import Step2ConcatView
         from gui.montage.step3_voice_view import Step3VoiceView
         from gui.montage.step4_final_view import Step4FinalView
+        from gui.montage.step_beat_view import StepBeatView
 
         self.step1 = Step1SplitView(self)
         self.stacked_widget.addWidget(self.step1)
@@ -227,6 +232,10 @@ class VideoMontagePage(BasePage):
 
         self.step4 = Step4FinalView(self)
         self.stacked_widget.addWidget(self.step4)
+
+        # 音乐卡点混剪页面（索引 4，从步骤1跳转）
+        self.step_beat = StepBeatView(self)
+        self.stacked_widget.addWidget(self.step_beat)
 
 
         # Progress bar & status display at the bottom (shared across pages)
@@ -285,6 +294,8 @@ class VideoMontagePage(BasePage):
                 self._populate_default_mix_videos()
             else:
                 self._update_final_inputs_label()
+        elif index == 4:
+            self._update_beat_clips_info()
     # [2·基础设施]  _on_enter_step_3
     def _on_enter_step_3(self):
         dir_path = ""
@@ -1402,7 +1413,8 @@ class VideoMontagePage(BasePage):
         scenes = []
         current_time = 0.0
         for f in files:
-            p = os.path.join(splits_dir, f)
+            # f 可能是文件名或完整路径
+            p = f if os.path.isabs(f) else os.path.join(splits_dir, f)
             cap = cv2.VideoCapture(p)
             duration = 0.0
             if cap.isOpened():
@@ -1610,13 +1622,24 @@ class VideoMontagePage(BasePage):
                 video_workspace_dir = os.path.join(video_dir, video_basename)
                 splits_dir = os.path.join(video_workspace_dir, "splits")
             else:
-                splits_dir = os.path.join(dir_path, "splits")
+                # 合并分割流程：扫描所有 per-video splits 目录
+                splits_dir = os.path.join(dir_path, "splits")  # 回退默认
 
-            # Read files in splits
+            # Read files in splits（支持多目录扫描）
             files = []
-            if os.path.exists(splits_dir):
+            merged_dirs = getattr(self, "_last_merged_splits_dirs", [])
+            if not video_path and merged_dirs:
+                # 从所有 per-video 目录收集片段
+                for md in sorted(merged_dirs):
+                    if os.path.isdir(md):
+                        for f in sorted(os.listdir(md)):
+                            if f.lower().endswith((".mp4", ".m4v")):
+                                files.append(os.path.join(md, f))
+                if files:
+                    splits_dir = merged_dirs[0]  # 主目录用于后续逻辑
+            elif os.path.exists(splits_dir):
                 files = sorted([f for f in os.listdir(splits_dir) if f.lower().endswith((".mp4", ".m4v"))])
-            log.info(f"[DIAG _check_split_clips_exist] splits_dir='{splits_dir}' exists={os.path.exists(splits_dir)} files_count={len(files)}")
+            log.info(f"[DIAG _check_split_clips_exist] splits_dir='{splits_dir}' files_count={len(files)}")
             
             # Try to restore split descriptions from the srt file if they are not in self.split_descriptions yet
             if files and video_path:
@@ -1645,11 +1668,17 @@ class VideoMontagePage(BasePage):
                 scenes = self._get_split_scenes_times(splits_dir, files)
                 initial_desc_lines = []
                 for idx, f in enumerate(files):
-                    p = os.path.join(splits_dir, f)
-                    norm_path = os.path.abspath(p)
+                    # f 可能是文件名（单目录）或完整路径（多目录）
+                    if os.path.isabs(f):
+                        norm_path = os.path.abspath(f)
+                        display_name = os.path.basename(f)
+                    else:
+                        p = os.path.join(splits_dir, f)
+                        norm_path = os.path.abspath(p)
+                        display_name = f
                     self.split_clips_list.append(norm_path)
                     
-                    parsed = self._parse_split_filename(f)
+                    parsed = self._parse_split_filename(display_name)
                     if parsed:
                         p_idx, start_str, end_str, desc = parsed
                         time_str = f"{start_str} --> {end_str}"
@@ -1669,7 +1698,7 @@ class VideoMontagePage(BasePage):
 
                     # 缓存先占位（后台异步评分）
                     self.split_clips_cache[norm_path] = {
-                        "filename": f, "time_str": time_str,
+                        "filename": display_name, "time_str": time_str,
                         "desc": desc, "duration": 0.0, "score": None,
                     }
 
@@ -1680,28 +1709,28 @@ class VideoMontagePage(BasePage):
                     self.split_result_table.setItem(idx, 0, idx_item)
 
                     # Col 1: Filename
-                    file_item = QTableWidgetItem(f)
+                    file_item = QTableWidgetItem(display_name)
                     file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable)
                     file_item.setData(Qt.UserRole, norm_path)
                     file_item.setToolTip(norm_path)
                     self.split_result_table.setItem(idx, 1, file_item)
 
-                    # Col 2: Timestamp
-                    time_item = QTableWidgetItem(time_str)
-                    time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable)
-                    time_item.setTextAlignment(Qt.AlignCenter)
-                    self.split_result_table.setItem(idx, 2, time_item)
-
-                    # Col 3: Scene Description
+                    # Col 2: Scene Description (editable)
                     desc_item = QTableWidgetItem(desc)
                     desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 3, desc_item)
+                    self.split_result_table.setItem(idx, 2, desc_item)
 
-                    # Col 4: Score — 先占位，后台异步评分后更新
-                    score_item = QTableWidgetItem("⏳")
+                    # Col 3: Score — 等待服务端分析后回填
+                    score_item = QTableWidgetItem("—")
                     score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
                     score_item.setTextAlignment(Qt.AlignCenter)
-                    self.split_result_table.setItem(idx, 4, score_item)
+                    self.split_result_table.setItem(idx, 3, score_item)
+
+                    # Col 4: Analysis details — 等待服务端分析后回填
+                    detail_item = QTableWidgetItem("")
+                    detail_item.setFlags(detail_item.flags() & ~Qt.ItemIsEditable)
+                    self.split_result_table.setItem(idx, 4, detail_item)
+
                     self._pending_score_rows.append((idx, norm_path))
                     initial_desc_lines.append(desc)
                 
@@ -1738,189 +1767,46 @@ class VideoMontagePage(BasePage):
                     
         self.split_result_table.blockSignals(False)
 
-        # 启动后台异步评分
-        if self._pending_score_rows:
-            # 停止上一次未完成的评分
-            if hasattr(self, "_score_worker") and self._score_worker and self._score_worker.isRunning():
-                self._score_worker.stop()
-                self._score_worker.wait(1000)
-            clip_paths = [norm_path for _, norm_path in self._pending_score_rows]
-            self._score_worker = ScoreClipsWorker(self, clip_paths)
-            self._score_worker.score_ready.connect(self._on_score_ready)
-            self._score_worker.all_done.connect(self._on_score_all_done)
-            self._score_worker.start()
-        else:
-            # 无镜头需评分，直接触发完成
-            self._on_score_all_done()
+        # 本地评分已移除，镜头分析统一通过“生成镜头分析”按钮调用服务端完成
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
 
         # Set default directory for Step 2 and scan it
         if splits_dir and os.path.exists(splits_dir):
             self.concat_src_dir_input.setText(splits_dir)
             self._scan_concat_src_dir()
         else:
-            self.concat_clips_list_widget.clearContents()
-            self.concat_clips_list_widget.setRowCount(0)
-    # [3·分割]  _on_score_ready
+            self._available_concat_clips = []
+            self._update_concat_count_lbl()
+    # [3·分割]  _on_score_ready (legacy: 本地评分已移除，保留兼容)
     def _on_score_ready(self, row_idx, score):
-        """后台评分完成一行，更新表格和缓存。"""
-        if row_idx < 0 or row_idx >= len(self._pending_score_rows):
-            return
-        _, norm_path = self._pending_score_rows[row_idx]
-        # 更新缓存
-        if norm_path in self.split_clips_cache:
-            self.split_clips_cache[norm_path]["score"] = score
-        # 更新表格
-        score_text = f"{score:.1f}" if score >= 0 else "—"
-        item = self.split_result_table.item(row_idx, 4)
-        if item:
-            item.setText(score_text)
-            if score >= 8.0:
-                item.setForeground(QColor("#2ecc71"))
-            elif score >= 6.0:
-                item.setForeground(QColor("#f1c40f"))
-            elif score >= 0:
-                item.setForeground(QColor("#e74c3c"))
-    # [3·分割]  _on_score_all_done
+        pass
+    # [3·分割]  _on_score_all_done (legacy: 本地评分已移除，保留兼容)
     def _on_score_all_done(self):
-        """所有后台评分完成。"""
-        log.info(f"[评分] 后台评分全部完成，共 {len(self._pending_score_rows)} 个镜头")
         self._pending_score_rows = []
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        # 评分完成后显示之前暂存的结果对话框
+        # 显示之前暂存的结果对话框
         pending = getattr(self, "_pending_dialog", None)
         if pending:
             title, detail = pending
             self._pending_dialog = None
             self.stage_label.setText(f"✅ {title}")
             QMessageBox.information(self.parent_widget, title, detail)
-            self.clip_count_info_lbl.setText("待排列镜头个数: 0  (已勾选: 0)")
-            self.btn_assemble_video.setEnabled(False)
-
         self.btn_next_to_step_2.setEnabled(True)
-    # [3·分割]  _rate_clips
+    # [3·分割]  _rate_clips (legacy: kept for compatibility, no UI now)
     def _rate_clips(self):
-        """对第 2 步「拼接镜头表」(concat_clips_list_widget) 中的所有镜头重新评分。
-
-        复用已有的 ScoreClipsWorker（OpenCV 启发式 0~10 分，已并行化）。
-        评分结果写入第 3 列（评分列）并更新 split_clips_cache 缓存；
-        进度/状态显示在 lbl_rate_status。
-        注：按钮 tooltip 提及「调用大模型」属后续增强项，当前先用启发式评分保证可用。
-        """
-        tbl = getattr(self, "concat_clips_list_widget", None)
-        if tbl is None or tbl.rowCount() == 0:
-            if hasattr(self, "lbl_rate_status"):
-                self.lbl_rate_status.setText("⚠ 请先扫描镜头目录")
-            return
-
-        # 收集每行对应的镜头路径（存在 col 0 的 UserRole）
-        clip_paths = []
-        row_paths = []  # row_idx -> norm_path（与 ScoreClipsWorker 的 idx 对齐）
-        for r in range(tbl.rowCount()):
-            file_item = tbl.item(r, 0)
-            if file_item is None:
-                row_paths.append("")
-                continue
-            norm_path = file_item.data(Qt.UserRole) or ""
-            row_paths.append(norm_path)
-            if norm_path and os.path.isfile(norm_path):
-                clip_paths.append((r, norm_path))
-
-        if not clip_paths:
-            if hasattr(self, "lbl_rate_status"):
-                self.lbl_rate_status.setText("⚠ 未找到可评分的视频文件")
-            return
-
-        # 停掉上一次未完成的评分（如有）
-        if hasattr(self, "_rate_worker") and self._rate_worker and self._rate_worker.isRunning():
-            self._rate_worker.stop()
-            self._rate_worker.wait(1000)
-
-        # 清掉这些镜头的旧评分缓存，强制重算
-        for _, p in clip_paths:
-            if p in self.split_clips_cache:
-                self.split_clips_cache[p]["score"] = None
-
-        # 记录 idx→表格行的映射，供回调定位（ScoreClipsWorker 的 idx 是 clip_paths 的下标）
-        self._rate_rows = clip_paths  # [(row, path), ...]
-        if hasattr(self, "lbl_rate_status"):
-            self.lbl_rate_status.setText(f"🤖 正在评分 {len(clip_paths)} 个镜头…")
-        self.btn_rate_clips.setEnabled(False)
-
-        worker = ScoreClipsWorker(self, [p for _, p in clip_paths])
-        worker.score_ready.connect(self._on_rate_ready)
-        worker.all_done.connect(self._on_rate_all_done)
-        self._rate_worker = worker
-        worker.start()
+        """对第 2 步的镜头列表进行重新评分（旧版入口，现无可视表格，直接返回）。"""
+        return
 
     def _on_rate_ready(self, idx, score):
-        """_rate_clips 后台评分完成一行的回调：更新 concat 表第 3 列 + 缓存。"""
-        if not hasattr(self, "_rate_rows") or idx < 0 or idx >= len(self._rate_rows):
-            return
-        row, norm_path = self._rate_rows[idx]
-        # 更新缓存
-        if norm_path in self.split_clips_cache:
-            self.split_clips_cache[norm_path]["score"] = score
-        # 更新表格第 3 列（评分列）
-        tbl = self.concat_clips_list_widget
-        item = tbl.item(row, 3)
-        if item:
-            item.setText(f"{score:.1f}" if score >= 0 else "—")
-            if score >= 8.0:
-                item.setForeground(QColor("#2ecc71"))
-            elif score >= 6.0:
-                item.setForeground(QColor("#f1c40f"))
-            elif score >= 0:
-                item.setForeground(QColor("#e74c3c"))
+        return
 
     def _on_rate_all_done(self):
-        """_rate_clips 全部评分完成。"""
-        n = len(getattr(self, "_rate_rows", []))
-        log.info(f"[评分] Step2 镜头评分完成，共 {n} 个")
-        self._rate_rows = []
-        if hasattr(self, "lbl_rate_status"):
-            self.lbl_rate_status.setText(f"✅ 已完成 {n} 个镜头评分")
-        if hasattr(self, "btn_rate_clips"):
-            self.btn_rate_clips.setEnabled(True)
+        return
 
-    # [3·分割]  _apply_score_filter
+    # [3·分割]  _apply_score_filter (legacy: kept for compatibility, no UI now)
     def _apply_score_filter(self):
-        """按 score_filter_combo 的阈值，取消勾选评分过低的镜头。
-        选择「不过滤」(阈值 0) 时恢复全部勾选。"""
-        tbl = getattr(self, "concat_clips_list_widget", None)
-        if tbl is None:
-            return
-        threshold = self.score_filter_combo.currentData() or 0.0
-        tbl.blockSignals(True)
-        try:
-            for r in range(tbl.rowCount()):
-                file_item = tbl.item(r, 0)
-                if file_item is None:
-                    continue
-                score_item = tbl.item(r, 3)
-                # 解析评分；未评分（—）视为 0
-                score = -1.0
-                if score_item:
-                    txt = score_item.text().strip()
-                    if txt and txt != "—":
-                        try:
-                            score = float(txt)
-                        except ValueError:
-                            score = -1.0
-                if threshold <= 0.0:
-                    # 不过滤：恢复勾选（保留未评分/高分；低分维持原状由用户决定，这里统一勾选）
-                    file_item.setCheckState(Qt.Checked)
-                else:
-                    # 评分缺失或低于阈值 → 取消勾选；达到阈值 → 勾选
-                    if score >= threshold:
-                        file_item.setCheckState(Qt.Checked)
-                    else:
-                        file_item.setCheckState(Qt.Unchecked)
-        finally:
-            tbl.blockSignals(False)
-        # 触发一次已勾选数量刷新
-        if hasattr(self, "_update_concat_count_lbl"):
-            self._update_concat_count_lbl()
+        return
+
     # [7·混音导出]  _select_bgm
     def _select_bgm(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2521,39 +2407,248 @@ class VideoMontagePage(BasePage):
     # --- Step 1 single video split ---
     # [3·分割]  _start_split
     def _start_split(self):
-        if self.worker and self.worker.isRunning():
+        """合并后的智能镜头分割入口：对列表中所有视频逐个处理。
+
+        每个视频：先做镜头分割；无法分割（无切点或分割失败）的，
+        自动挑取一段精华片段。全部片段统一写入共享 splits 目录。
+        """
+        if (self.worker and self.worker.isRunning()) or \
+           (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
+            QMessageBox.warning(self.parent_widget, "任务进行中",
+                                "上一个任务仍在运行中，请等待完成或先停止。")
             return
 
-        selected_item = self.video_list.currentItem()
-        if not selected_item:
-            QMessageBox.warning(self.parent_widget, "请选择视频", "请先在上方列表中选中一个视频文件。")
+        paths = []
+        for i in range(self.video_list.count()):
+            txt = self.video_list.item(i).text().strip()
+            if txt:
+                paths.append(txt)
+        if not paths:
+            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可处理的视频。")
             return
 
-        video_path = selected_item.text()
-        self.processing_video_path = video_path
-        base_dir = os.path.dirname(video_path)
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        output_dir = os.path.join(base_dir, video_basename, "splits")
+        dur = self.spin_highlight_sec.value()
+
+        # 确定共享根目录（用于界面显示）
+        shared_root = self.folder_path_input.text().strip()
+        if not shared_root or not os.path.isdir(shared_root):
+            try:
+                shared_root = os.path.commonpath([os.path.dirname(p) for p in paths])
+            except Exception:
+                shared_root = os.path.dirname(paths[0])
+            self.folder_path_input.setText(shared_root)
+
+        # 每个视频的分割输出到「视频目录/视频名/splits/」（与 _check_split_clips_exist 一致）
+        per_video_splits = []
+        for p in paths:
+            vdir = os.path.dirname(p)
+            vbase = os.path.splitext(os.path.basename(p))[0]
+            per_video_splits.append(os.path.join(vdir, vbase, "splits"))
+
+        # 显示摘要
+        if len(set(per_video_splits)) == 1:
+            out_summary = per_video_splits[0]
+        else:
+            out_summary = f"{len(per_video_splits)} 个视频各自工作目录\n(例: {per_video_splits[0]})"
+
+        reply = QMessageBox.question(
+            self.parent_widget, "智能镜头分割",
+            f"将对列表中全部 {len(paths)} 个视频逐个处理：\n"
+            f"· 能做镜头分割的，先做镜头分割；\n"
+            f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n\n"
+            f"输出目录：{out_summary}\n"
+            f"注意：会先清空各目录里已有的分镜片段。\n\n确认继续？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # 清空各 per-video splits 目录里旧的分镜片段
+        try:
+            for sp_dir in set(per_video_splits):
+                os.makedirs(sp_dir, exist_ok=True)
+                for f in os.listdir(sp_dir):
+                    if "_shot_" in f and f.lower().endswith((".mp4", ".m4v")):
+                        try:
+                            os.remove(os.path.join(sp_dir, f))
+                        except Exception:
+                            pass
+        except Exception as e:
+            QMessageBox.warning(self.parent_widget, "无法准备目录", f"创建/清理 splits 目录失败：\n{e}")
+            return
+
+        self._merged_queue = list(paths)
+        self._merged_total = len(paths)
+        self._merged_done = 0
+        self._merged_split_ok = 0
+        self._merged_hl_ok = 0
+        self._merged_fail = 0
+        self._merged_fail_msgs = []
+        self._merged_per_video_splits = per_video_splits  # 每个视频对应的 splits 目录
+        self._merged_hl_duration = dur
 
         self.btn_split.setEnabled(False)
+        if hasattr(self, "btn_gen_shot_analysis"):
+            self.btn_gen_shot_analysis.setEnabled(False)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
+        self._process_next_merged_video()
+    # [3·分割]  _process_next_merged_video
+    def _process_next_merged_video(self):
+        if not self._merged_queue:
+            self._on_merged_all_finished()
+            return
+
+        video_path = self._merged_queue.pop(0)
+        self._merged_cur_video = video_path
+        idx = self._merged_done + 1
+        fname = os.path.basename(video_path)
+
+        # 当前视频的 per-video splits 目录
+        cur_splits_dir = self._merged_per_video_splits[self._merged_done]
+        self._merged_cur_splits_dir = cur_splits_dir
+
+        if not os.path.exists(video_path):
+            self._merged_fail += 1
+            self._merged_fail_msgs.append(f"{fname}: 文件不存在")
+            self._merged_done += 1
+            self._process_next_merged_video()
+            return
+
+        self.stage_label.setText(f"智能镜头分割 ({idx}/{self._merged_total})：{fname}")
+        self.progress_bar.setValue(int(self._merged_done * 100 / max(1, self._merged_total)))
+
         self.worker = PySceneDetectWorker(
             video_path=video_path,
-            output_dir=output_dir,
+            output_dir=cur_splits_dir,
             threshold=self.threshold_spin.value(),
             min_scene_len=int(self.min_len_spin.value())
         )
         self.worker.stage.connect(lambda t: self.stage_label.setText(t))
-        self.worker.progress.connect(lambda v: self.progress_bar.setValue(v))
-        self.worker.finished.connect(self._on_split_finished)
-        self.worker.error.connect(self._on_split_error)
+        self.worker.finished.connect(self._on_merged_split_done)
+        self.worker.error.connect(self._on_merged_split_error)
         self.worker.start()
-    # [3·分割]  _on_split_finished
+    # [3·分割]  _on_merged_split_done
+    def _on_merged_split_done(self, out_dir, count, scenes):
+        video_path = getattr(self, "_merged_cur_video", "")
+        fname = os.path.basename(video_path) if video_path else ""
+        if count > 0:
+            self._merged_split_ok += 1
+            log.info(f"[合并分割] {fname} 分割出 {count} 个镜头")
+            self._rename_video_splits_with_metadata(self._merged_cur_splits_dir, video_path, scenes)
+            self._merged_done += 1
+            self._process_next_merged_video()
+        else:
+            log.info(f"[合并分割] {fname} 未检测到镜头切点，改为挑精华")
+            self._run_merged_highlight(video_path)
+    # [3·分割]  _on_merged_split_error
+    def _on_merged_split_error(self, err):
+        video_path = getattr(self, "_merged_cur_video", "")
+        fname = os.path.basename(video_path) if video_path else ""
+        log.warning(f"[合并分割] {fname} 镜头分割失败，改为挑精华: {err}")
+        self._run_merged_highlight(video_path)
+    # [3·分割]  _run_merged_highlight
+    def _run_merged_highlight(self, video_path):
+        fname = os.path.basename(video_path)
+        idx = self._merged_done + 1
+        self.stage_label.setText(f"无法分割，挑取精华 ({idx}/{self._merged_total})：{fname}")
+        self.highlight_worker = BestClipWorker(
+            video_path=video_path,
+            output_dir=self._merged_cur_splits_dir,
+            duration_sec=self._merged_hl_duration,
+            shot_index=1,
+            clear_dir=False,
+        )
+        self.highlight_worker.finished.connect(self._on_merged_highlight_done)
+        self.highlight_worker.error.connect(self._on_merged_highlight_error)
+        self.highlight_worker.start()
+    # [3·分割]  _on_merged_highlight_done
+    def _on_merged_highlight_done(self, out_path, start, end):
+        self._merged_hl_ok += 1
+        log.info(f"[合并分割] 精华片段已生成：{out_path} [{start:.2f}-{end:.2f}]")
+        self._merged_done += 1
+        self._process_next_merged_video()
+    # [3·分割]  _on_merged_highlight_error
+    def _on_merged_highlight_error(self, err):
+        video_path = getattr(self, "_merged_cur_video", "")
+        fname = os.path.basename(video_path) if video_path else ""
+        last_line = (err or "").strip().splitlines()[-1] if err else "未知错误"
+        self._merged_fail += 1
+        self._merged_fail_msgs.append(f"{fname}: {last_line[:100]}")
+        log.error(f"[合并分割] {fname} 挑精华也失败：{err}")
+        self._merged_done += 1
+        self._process_next_merged_video()
+    # [3·分割]  _on_merged_all_finished
+    def _on_merged_all_finished(self):
+        self.btn_split.setEnabled(True)
+        if hasattr(self, "btn_gen_shot_analysis"):
+            self.btn_gen_shot_analysis.setEnabled(True)
+            self.btn_gen_shot_analysis.setStyleSheet(
+                "background-color: #2d6a4f; color: #b7e4c7; font-weight: bold; "
+                "border: 1px solid #40916c; border-radius: 4px; padding: 4px 12px;")
+        if hasattr(self, "btn_transcribe_raw"):
+            self.btn_transcribe_raw.setEnabled(True)
+
+        # 让下方表格读取各 per-video splits 目录
+        self.processing_video_path = ""
+        self.video_list.setCurrentItem(None)
+        self.temp_scenes = []
+        # 保存所有 per-video splits 目录，供 _check_split_clips_exist 扫描
+        self._last_merged_splits_dirs = list(set(self._merged_per_video_splits))
+
+        msg = (f"处理完成：分割 {self._merged_split_ok} 个，挑精华 {self._merged_hl_ok} 个，"
+               f"失败 {self._merged_fail} 个（共 {self._merged_total} 个视频）。")
+        detail = msg
+        if self._merged_fail_msgs:
+            detail += "\n\n失败明细：\n" + "\n".join(self._merged_fail_msgs[:8])
+
+        self.stage_label.setText("✅ " + msg)
+        self.progress_bar.setRange(0, 0)
+        self._pending_dialog = ("智能镜头分割完成", detail)
+        self._check_split_clips_exist()
+    # [3·分割]  _rename_video_splits_with_metadata
+    def _rename_video_splits_with_metadata(self, splits_dir, video_path, scenes):
+        """重命名单个视频刚分割出的片段（写入时间戳元数据），仅处理该视频前缀的文件。"""
+        if not os.path.exists(splits_dir) or not video_path:
+            return
+        import re
+        basename = os.path.splitext(os.path.basename(video_path))[0]
+        prefix = f"{basename}_shot_"
+        files = [f for f in os.listdir(splits_dir)
+                 if f.startswith(prefix) and f.lower().endswith((".mp4", ".m4v"))]
+        def get_shot_idx(filename):
+            parsed = self._parse_split_filename(filename)
+            if parsed:
+                return parsed[0]
+            match = re.search(r"_shot_(\d+)", filename)
+            return int(match.group(1)) if match else 999
+        files.sort(key=get_shot_idx)
+        for idx_0, filename in enumerate(files):
+            idx = idx_0 + 1
+            old_path = os.path.abspath(os.path.join(splits_dir, filename))
+            if idx_0 < len(scenes):
+                start_sec, end_sec = scenes[idx_0]
+            else:
+                start_sec, end_sec = 0.0, 0.0
+            desc = ""
+            parsed = self._parse_split_filename(filename)
+            if parsed:
+                desc = parsed[3]
+            if not desc:
+                desc = self.split_descriptions.get(old_path, "")
+            new_path = self._get_renamed_path(old_path, idx, start_sec, end_sec, desc)
+            if old_path != new_path:
+                try:
+                    if os.path.exists(new_path) and new_path != old_path:
+                        os.remove(new_path)
+                    os.rename(old_path, new_path)
+                except Exception as e:
+                    log.warning(f"Failed to rename split file {filename}: {e}")
+    # [3·分割]  _on_split_finished（旧单视频入口保留，合并流程不再使用）
     def _on_split_finished(self, out_dir, count, scenes):
         self.btn_split.setEnabled(True)
         if hasattr(self, "btn_transcribe_raw"):
@@ -2858,7 +2953,7 @@ class VideoMontagePage(BasePage):
                 self._play_video(path)
     # [8·事件回调]  _on_table_cell_changed
     def _on_table_cell_changed(self, row, col):
-        if col == 3:
+        if col == 2:  # 画面描述列
             file_item = self.split_result_table.item(row, 1)
             desc_item = self.split_result_table.item(row, col)
             if file_item and desc_item:
@@ -2894,7 +2989,7 @@ class VideoMontagePage(BasePage):
                     if hasattr(self, "rewritten_srt_display"):
                         lines = []
                         for r in range(self.split_result_table.rowCount()):
-                            d_item = self.split_result_table.item(r, 3)
+                            d_item = self.split_result_table.item(r, 2)
                             if d_item:
                                 lines.append(d_item.text().strip())
                         self.rewritten_srt_display.setPlainText("\n".join(lines))
@@ -3094,16 +3189,8 @@ class VideoMontagePage(BasePage):
             self.script_match_worker.start()
             return
 
-        # ── 随机洗牌：先生成“预合成方案”，供人工删改/调序并确认后再正式合成 ──
-        target_clip_count = int(self.clip_count_combo.currentData())
-        if len(self.split_clips_list) < target_clip_count:
-            QMessageBox.warning(
-                self.parent_widget,
-                "可选镜头不足",
-                f"您勾选了 {len(self.split_clips_list)} 个镜头，但排列镜头数量配置为 {target_clip_count} 个。\n"
-                f"请再多勾选一些镜头，或者减小“排列镜头数量”配置。"
-            )
-            return
+        # ── 随机洗牌：使用全部已选镜头生成“预合成方案”，供人工删改/调序并确认后再正式合成 ──
+        target_clip_count = len(self.split_clips_list)
 
         batch_count = int(self.batch_count_spin.value())
         randomness_val = self.randomness_combo.currentData() if hasattr(self, "randomness_combo") else "medium"
@@ -3180,8 +3267,6 @@ class VideoMontagePage(BasePage):
         is_script = (logic == "script")
 
         # 智能匹配模式：镜头数量由文案行数决定；每批结果相同故固定生成 1 个
-        self.lbl_clip_count.setVisible(not is_script)
-        self.clip_count_combo.setVisible(not is_script)
         self.lbl_batch_count.setVisible(not is_script)
         self.batch_count_spin.setVisible(not is_script)
 
@@ -3207,7 +3292,6 @@ class VideoMontagePage(BasePage):
             self.btn_batch_scene_copy.setVisible(not is_script)
 
         if not is_script:
-            self.clip_count_combo.setEnabled(True)
             self.batch_count_spin.setEnabled(True)
             self.batch_count_spin.setValue(self._recommend_batch_count())
             if hasattr(self, "randomness_combo"):
@@ -3227,19 +3311,18 @@ class VideoMontagePage(BasePage):
         # 收集已勾选的镜头素材及其描述
         checked_clips = []
         clip_descriptions = []
-        for r in range(self.concat_clips_list_widget.rowCount()):
-            item = self.concat_clips_list_widget.item(r, 0)
-            if item and item.checkState() == Qt.Checked:
-                path = item.data(Qt.UserRole)
-                if path:
-                    norm_path = os.path.abspath(path)
-                    checked_clips.append(norm_path)
-                    # 获取描述：先查 split_descriptions，再查缓存
-                    desc = self.split_descriptions.get(norm_path, "").strip()
-                    if not desc:
-                        cache = self.split_clips_cache.get(norm_path, {})
-                        desc = cache.get("desc", "").strip() if isinstance(cache, dict) else ""
-                    clip_descriptions.append(desc if desc else f"（镜头片段 {os.path.basename(norm_path)}）")
+        # 收集已勾选的镜头素材及其描述
+        checked_clips = []
+        clip_descriptions = []
+        for path in self.split_clips_list:
+            norm_path = os.path.abspath(path)
+            checked_clips.append(norm_path)
+            # 获取描述：先查 split_descriptions，再查缓存
+            desc = self.split_descriptions.get(norm_path, "").strip()
+            if not desc:
+                cache = self.split_clips_cache.get(norm_path, {})
+                desc = cache.get("desc", "").strip() if isinstance(cache, dict) else ""
+            clip_descriptions.append(desc if desc else f"（镜头片段 {os.path.basename(norm_path)}）")
 
         if not checked_clips:
             QMessageBox.warning(self.parent_widget, "无素材",
@@ -4372,6 +4455,495 @@ class VideoMontagePage(BasePage):
             QMessageBox.information(
                 self.parent_widget, "描述生成完成",
                 f"已从字幕匹配到 {updated_count} 个镜头的文案描述。")
+    # [3·分割]  _gen_shot_analysis
+    def _gen_shot_analysis(self):
+        """生成镜头分析：调用服务端 /material/score_clip 逐条分析当前镜头，回填评分与描述。"""
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is None or tbl.rowCount() == 0:
+            QMessageBox.warning(self.parent_widget, "无镜头", "请先执行智能镜头分割，生成镜头片段。")
+            return
+
+        clips = []
+        for r in range(tbl.rowCount()):
+            file_item = tbl.item(r, 1)
+            if file_item:
+                path = file_item.data(Qt.UserRole)
+                if path and os.path.isfile(path):
+                    clips.append(path)
+        if not clips:
+            QMessageBox.warning(self.parent_widget, "无镜头文件", "表格中没有可用的镜头片段文件。")
+            return
+
+        server_url = self._get_compute_server_url()
+        if not server_url:
+            QMessageBox.warning(self.parent_widget, "未配置服务端",
+                                "请先在「环境配置」中配置算力服务端地址（compute_server_url）。")
+            return
+
+        if getattr(self, "_analysis_worker", None) and self._analysis_worker.isRunning():
+            return
+
+        self._analysis_paths = clips
+        self.btn_gen_shot_analysis.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText(f"🤖 正在调用服务端分析 {len(clips)} 个镜头...")
+        log.info(f"[镜头分析] 开始分析 {len(clips)} 个镜头，服务端地址: {server_url}/material/score_clip")
+
+        self._analysis_worker = ServerClipAnalysisWorker(clips, server_url)
+        self._analysis_worker.item_ready.connect(self._on_analysis_item_ready)
+        self._analysis_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
+        self._analysis_worker.finished.connect(self._on_analysis_all_done)
+        self._analysis_worker.error.connect(self._on_analysis_error)
+        self._analysis_worker.start()
+    # [2·基础设施]  _get_compute_server_url
+    def _get_compute_server_url(self):
+        try:
+            cfg = getattr(self.main_window, "ai_config", {}) or {}
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+        except Exception:
+            pass
+        try:
+            from config.paths import AI_CONFIG_FILE
+            import json as _json
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = _json.load(f)
+                return (cfg.get("compute_server_url") or "").strip().rstrip("/")
+        except Exception:
+            pass
+        return ""
+    # [3·分割]  _on_analysis_item_ready
+    def _on_analysis_item_ready(self, idx, result):
+        """服务端分析完成一个镜头，回填表格。result = {score, desc, extra}"""
+        paths = getattr(self, "_analysis_paths", [])
+        if idx < 0 or idx >= len(paths):
+            return
+        path = paths[idx]
+        score = result.get("score", -1.0)
+        desc = result.get("desc", "")
+        extra = result.get("extra", {})
+
+        if path in self.split_clips_cache:
+            self.split_clips_cache[path]["score"] = score
+            if desc:
+                self.split_clips_cache[path]["desc"] = desc
+        if desc:
+            self.split_descriptions[path] = desc
+
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is not None:
+            tbl.blockSignals(True)
+            try:
+                # Col 2: 画面描述
+                if desc:
+                    desc_item = tbl.item(idx, 2)
+                    if desc_item:
+                        desc_item.setText(desc)
+                # Col 3: 评分
+                score_item = tbl.item(idx, 3)
+                if score_item:
+                    score_item.setText(f"{score:.1f}" if score >= 0 else "—")
+                    if score >= 8.0:
+                        score_item.setForeground(QColor("#2ecc71"))
+                    elif score >= 6.0:
+                        score_item.setForeground(QColor("#f1c40f"))
+                    elif score >= 0:
+                        score_item.setForeground(QColor("#e74c3c"))
+                # Col 4: 分析详情（服务端返回的其他重要数据）
+                if extra:
+                    detail_text = " | ".join(f"{k}: {v}" for k, v in extra.items())
+                    detail_item = tbl.item(idx, 4)
+                    if detail_item:
+                        detail_item.setText(detail_text)
+                        detail_item.setToolTip(detail_text)
+            finally:
+                tbl.blockSignals(False)
+
+        # 同步到下一步的镜头数据
+        for clip in getattr(self, "_available_concat_clips", []):
+            if clip.get("path") == path:
+                clip["score"] = score
+                if desc:
+                    clip["desc"] = desc
+
+        self._refresh_step1_row_visual(idx)
+    # [3·分割]  _on_analysis_all_done
+    def _on_analysis_all_done(self, ok, fail):
+        if hasattr(self, "btn_gen_shot_analysis"):
+            self.btn_gen_shot_analysis.setEnabled(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self._save_split_srt()
+        self._apply_step1_score_filter()
+        if ok == 0 and fail > 0:
+            self.stage_label.setText(f"❌ 镜头分析失败：{fail} 个镜头全部失败，服务端未返回有效数据")
+            QMessageBox.warning(
+                self.parent_widget, "镜头分析失败",
+                f"服务端镜头分析全部失败（{fail} 个镜头）。\n\n"
+                f"可能原因：\n"
+                f"· 服务端 /material/score_clip 接口未部署或未启动\n"
+                f"· 服务端地址配置错误\n"
+                f"· 服务端返回了 HTTP 200 但未包含 score/description 字段\n\n"
+                f"请查看日志（帮助 → 系统日志）中的 [镜头分析] 详细记录。")
+        else:
+            self.stage_label.setText(f"✅ 镜头分析完成：成功 {ok} 个，失败 {fail} 个")
+            QMessageBox.information(
+                self.parent_widget, "镜头分析完成",
+                f"服务端镜头分析完成：成功 {ok} 个，失败 {fail} 个。\n"
+                f"评分与描述已回填到镜头表格。")
+    # [3·分割]  _on_analysis_error
+    def _on_analysis_error(self, err):
+        if hasattr(self, "btn_gen_shot_analysis"):
+            self.btn_gen_shot_analysis.setEnabled(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("❌ 镜头分析失败")
+        QMessageBox.critical(self.parent_widget, "镜头分析失败",
+                             f"调用服务端镜头分析接口失败：\n{err}")
+
+    # ==================== 音乐卡点混剪 ====================
+    # [音乐卡点]  _beat_browse_music
+    def _beat_browse_music(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self.parent_widget, "选择卡点音乐",
+            "", "Audio Files (*.mp3 *.wav *.m4a *.aac *.flac *.ogg);;All Files (*)")
+        if path:
+            self.beat_music_path.setText(path)
+            self.btn_beat_detect.setEnabled(True)
+            self.beat_status_lbl.setText(f"已选择: {os.path.basename(path)}")
+            # 加载到播放器
+            if hasattr(self, "step_beat"):
+                self.step_beat.load_music(path)
+    # [音乐卡点]  _update_beat_clips_info
+    def _update_beat_clips_info(self):
+        """刷新卡点页面顶部的已选分割镜头数量。"""
+        if not hasattr(self, "beat_clips_info_lbl"):
+            return
+        checked = [c for c in getattr(self, "_available_concat_clips", []) if c.get("checked")]
+        self.beat_clips_info_lbl.setText(f"已选分割镜头: {len(checked)} 个")
+    # [音乐卡点]  _beat_start_detect
+    def _beat_start_detect(self):
+        music_path = self.beat_music_path.text().strip()
+        if not music_path or not os.path.isfile(music_path):
+            QMessageBox.warning(self.parent_widget, "未选择音乐", "请先选择音乐文件。")
+            return
+        server_url = self._get_compute_server_url()
+        if not server_url:
+            QMessageBox.warning(self.parent_widget, "未配置服务端",
+                                "音乐卡点需要服务端节拍检测接口。\n"
+                                "请先在「环境配置」中配置算力服务端地址。")
+            return
+
+        self.btn_beat_detect.setEnabled(False)
+        self.btn_beat_auto_assign.setEnabled(False)
+        self.btn_beat_confirm.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.beat_status_lbl.setText("🎵 正在上传音乐并检测节拍...")
+        self.stage_label.setText("🎵 正在检测音乐节拍...")
+        log.info(f"[音乐卡点] 开始: {music_path}, 服务端: {server_url}")
+
+        self._beat_worker = BeatDetectWorker(music_path, server_url)
+        self._beat_worker.beats_ready.connect(self._beat_on_beats_ready)
+        self._beat_worker.error.connect(self._beat_on_detect_error)
+        self._beat_worker.start()
+    # [音乐卡点]  _beat_on_beats_ready
+    def _beat_on_beats_ready(self, beats):
+        self.btn_beat_detect.setEnabled(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.progress_bar.setVisible(False)
+
+        if not beats or len(beats) < 2:
+            self.beat_status_lbl.setText("❌ 节拍点不足，无法卡点")
+            QMessageBox.warning(self.parent_widget, "节拍不足",
+                                "服务端返回的节拍点少于 2 个，无法进行卡点混剪。")
+            return
+
+        self._beat_data = beats
+        music_path = self.beat_music_path.text().strip()
+        duration = beats[-1] + 1.0  # 估算时长
+
+        # 尝试获取音乐真实时长
+        try:
+            from gui.montage.utils_media import get_media_duration
+            real_dur = get_media_duration(music_path)
+            if real_dur and real_dur > 0:
+                duration = real_dur
+        except Exception:
+            pass
+
+        # 设置节拍时间轴（横向排列）
+        self.beat_waveform.set_beats(beats, duration)
+
+        n_slots = len(beats) - 1
+        self.beat_status_lbl.setText(
+            f"✅ 检测到 {len(beats)} 个节拍，共 {n_slots} 个镜头槽位，"
+            f"音乐时长 {duration:.1f}s")
+        self.btn_beat_auto_assign.setEnabled(True)
+        self.btn_beat_confirm.setEnabled(False)  # 等分配完镜头后才启用
+
+        # 初始化槽位详情列表
+        self._beat_init_slot_list(n_slots, beats)
+        log.info(f"[音乐卡点] 节拍检测完成: {len(beats)} 拍, {n_slots} 槽")
+    # [音乐卡点]  _beat_on_detect_error
+    def _beat_on_detect_error(self, err):
+        self.btn_beat_detect.setEnabled(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        self.beat_status_lbl.setText("❌ 节拍检测失败")
+        self.stage_label.setText("❌ 音乐节拍检测失败")
+        QMessageBox.critical(self.parent_widget, "卡点检测失败",
+                             f"服务端节拍检测失败：\n{err}\n\n"
+                             f"可能原因：\n"
+                             f"· 服务端 /audio/beatmap 接口未部署\n"
+                             f"· 服务端地址配置错误\n"
+                             f"· 音乐文件格式不支持")
+    # [音乐卡点]  _beat_generate_waveform
+    def _beat_generate_waveform(self, music_path, duration, num_samples=800):
+        """从音频文件生成简化波形数据（归一化 0~1）。"""
+        import random
+        import struct
+        try:
+            # 尝试读取 WAV 文件
+            if music_path.lower().endswith(".wav"):
+                import wave
+                with wave.open(music_path, 'r') as wf:
+                    n_frames = wf.getnframes()
+                    n_channels = wf.getnchannels()
+                    sampwidth = wf.getsampwidth()
+                    raw = wf.readframes(n_frames)
+                # 采样简化
+                step = max(1, n_frames // num_samples)
+                samples = []
+                for i in range(0, n_frames, step):
+                    offset = i * n_channels * sampwidth
+                    if offset + sampwidth <= len(raw):
+                        if sampwidth == 2:
+                            val = struct.unpack_from('<h', raw, offset)[0]
+                            samples.append(abs(val) / 32768.0)
+                        elif sampwidth == 4:
+                            val = struct.unpack_from('<i', raw, offset)[0]
+                            samples.append(abs(val) / 2147483648.0)
+                        else:
+                            samples.append(raw[offset] / 255.0)
+                if samples:
+                    # 归一化
+                    mx = max(samples) or 1.0
+                    return [s / mx for s in samples[:num_samples]]
+        except Exception as e:
+            log.warning(f"[音乐卡点] 读取WAV失败: {e}")
+
+        # 非WAV或读取失败：生成模拟波形（基于随机+平滑）
+        random.seed(42)
+        raw = [random.random() * 0.6 + 0.2 for _ in range(num_samples)]
+        # 简单平滑
+        smoothed = []
+        for i in range(num_samples):
+            window = raw[max(0, i-2):i+3]
+            smoothed.append(sum(window) / len(window))
+        mx = max(smoothed) or 1.0
+        return [s / mx for s in smoothed]
+    # [音乐卡点]  _beat_init_slot_list
+    def _beat_init_slot_list(self, n_slots, beats):
+        """初始化槽位详情UI列表。"""
+        # 清空旧内容
+        while self.beat_slots_layout.count():
+            item = self.beat_slots_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._beat_slot_labels = []
+        for i in range(n_slots):
+            start_t = beats[i]
+            end_t = beats[i + 1]
+            dur = end_t - start_t
+            row = QHBoxLayout()
+            lbl = QLabel(f"节拍 {i+1}: {start_t:.2f}s ~ {end_t:.2f}s ({dur:.2f}s)")
+            lbl.setFixedWidth(220)
+            lbl.setStyleSheet("color: #aaa; font-size: 11px;")
+            row.addWidget(lbl)
+            clip_lbl = QLabel("← 未分配镜头")
+            clip_lbl.setStyleSheet("color: #666; font-size: 11px;")
+            row.addWidget(clip_lbl, 1)
+            self.beat_slots_layout.addLayout(row)
+            self._beat_slot_labels.append(clip_lbl)
+
+        self.beat_slots_layout.addStretch()
+    # [音乐卡点]  _beat_on_slot_clicked
+    def _beat_on_slot_clicked(self, slot_idx):
+        """点击声波图上的槽位，弹出镜头选择。"""
+        clips = self._beat_get_available_clips()
+        if not clips:
+            QMessageBox.information(self.parent_widget, "无镜头",
+                                    "没有可用的镜头片段，请先在步骤1分割镜头。")
+            return
+        # 简单循环分配：用当前已分配数量 mod 镜头数
+        current_count = sum(1 for l in self._beat_slot_labels
+                           if "←" not in l.text())
+        clip_path = clips[current_count % len(clips)]
+        fname = os.path.basename(clip_path)
+        self._beat_assign_slot(slot_idx, clip_path, fname)
+    # [音乐卡点]  _beat_auto_assign
+    def _beat_auto_assign(self):
+        """自动将镜头按评分顺序分配到各槽位。"""
+        clips = self._beat_get_available_clips()
+        if not clips:
+            QMessageBox.information(self.parent_widget, "无镜头",
+                                    "没有可用的镜头片段，请先在步骤1分割镜头。")
+            return
+
+        beats = getattr(self, "_beat_data", [])
+        n_slots = len(beats) - 1 if beats else 0
+        if n_slots <= 0:
+            return
+
+        # 按评分排序
+        scored = []
+        for c in clips:
+            norm = os.path.abspath(c)
+            cache = self.split_clips_cache.get(norm, {})
+            score = cache.get("score", 0) if isinstance(cache, dict) else 0
+            scored.append((score if score and score > 0 else 0, c))
+        scored.sort(key=lambda x: -x[0])
+        sorted_clips = [c for _, c in scored]
+
+        # 循环分配
+        self._beat_clip_assignments = [None] * n_slots
+        for i in range(n_slots):
+            clip = sorted_clips[i % len(sorted_clips)]
+            fname = os.path.basename(clip)
+            self._beat_assign_slot(i, clip, fname)
+
+        self.btn_beat_confirm.setEnabled(True)
+        self.beat_status_lbl.setText(
+            f"✅ 已自动分配 {n_slots} 个镜头到节拍槽位，可点击声波图槽位手动调整")
+    # [音乐卡点]  _beat_assign_slot
+    def _beat_assign_slot(self, slot_idx, clip_path, fname):
+        """分配镜头到指定槽位。"""
+        if not hasattr(self, "_beat_clip_assignments"):
+            beats = getattr(self, "_beat_data", [])
+            self._beat_clip_assignments = [None] * max(0, len(beats) - 1)
+        if slot_idx < len(self._beat_clip_assignments):
+            self._beat_clip_assignments[slot_idx] = clip_path
+        # 更新声波图
+        self.beat_waveform.set_clip_slot(slot_idx, fname)
+        # 更新详情列表
+        if hasattr(self, "_beat_slot_labels") and slot_idx < len(self._beat_slot_labels):
+            self._beat_slot_labels[slot_idx].setText(f"🎬 {fname}")
+            self._beat_slot_labels[slot_idx].setStyleSheet(
+                "color: #2ecc71; font-size: 11px; font-weight: bold;")
+        # 检查是否所有槽位都已分配
+        if all(self._beat_clip_assignments):
+            self.btn_beat_confirm.setEnabled(True)
+    # [音乐卡点]  _beat_get_available_clips
+    def _beat_get_available_clips(self):
+        """获取当前可用的镜头列表（已勾选的）。"""
+        if hasattr(self, "split_clips_list") and self.split_clips_list:
+            return list(self.split_clips_list)
+        return []
+    # [音乐卡点]  _beat_confirm_compose
+    def _beat_confirm_compose(self):
+        """确认卡点合成：根据节拍点拼接镜头+转场。"""
+        assignments = getattr(self, "_beat_clip_assignments", [])
+        if not assignments or not all(assignments):
+            QMessageBox.warning(self.parent_widget, "未分配完",
+                                "还有节拍槽位未分配镜头，请先完成分配。")
+            return
+
+        beats = getattr(self, "_beat_data", [])
+        music_path = self.beat_music_path.text().strip()
+
+        # 构建预合成方案，交给已有的合成流程
+        dir_path = self.concat_src_dir_input.text().strip() if hasattr(self, "concat_src_dir_input") else ""
+        if not dir_path:
+            dir_path = self.folder_path_input.text().strip() if hasattr(self, "folder_path_input") else ""
+        out_montage_dir = self._get_out_montage_dir(dir_path) if dir_path else ""
+        if out_montage_dir:
+            os.makedirs(out_montage_dir, exist_ok=True)
+
+        clips = list(assignments)
+        descriptions = [self.split_descriptions.get(os.path.abspath(c), "") for c in clips]
+
+        plan = [{
+            "clips": clips,
+            "deleted_flags": [False] * len(clips),
+            "descriptions": descriptions,
+            "mode": "beat",
+            "beat_times": beats,
+            "music_path": music_path,
+        }]
+
+        self._load_precompose_plans(plan, out_montage_dir)
+        self.stage_label.setText(
+            f"🎵 卡点方案已生成：{len(clips)} 个镜头 @ {len(beats)} 个节拍")
+
+        # 直接开始合成，不跳转页面
+        self._confirm_precompose(0)
+        self.beat_status_lbl.setText(
+            f"🎬 正在合成：{len(clips)} 个镜头 + 音乐卡点...")
+    # [3·分割]  _on_step1_score_filter_changed
+    def _on_step1_score_filter_changed(self):
+        combo = getattr(self, "step1_score_filter_combo", None)
+        if combo is None:
+            return
+        try:
+            self._step1_score_threshold = float(combo.currentData() or 0.0)
+        except (TypeError, ValueError):
+            self._step1_score_threshold = 0.0
+        self._apply_step1_score_filter()
+    # [3·分割]  _apply_step1_score_filter
+    def _apply_step1_score_filter(self):
+        """按评分阈值刷新：步骤1表格置灰未达标行；步骤2镜头勾选状态同步为过滤结果。"""
+        threshold = float(getattr(self, "_step1_score_threshold", 6.0) or 0.0)
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is not None:
+            for r in range(tbl.rowCount()):
+                self._refresh_step1_row_visual(r)
+        if getattr(self, "_available_concat_clips", None):
+            for clip in self._available_concat_clips:
+                score = clip.get("score", -1)
+                clip["checked"] = (threshold <= 0 or score is None
+                                   or score < 0 or score >= threshold)
+            self._update_concat_count_lbl()
+    # [3·分割]  _refresh_step1_row_visual
+    def _refresh_step1_row_visual(self, row):
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is None or row < 0 or row >= tbl.rowCount():
+            return
+        file_item = tbl.item(row, 1)
+        if not file_item:
+            return
+        path = file_item.data(Qt.UserRole)
+        cache = self.split_clips_cache.get(path, {}) if path else {}
+        score = cache.get("score", None) if isinstance(cache, dict) else None
+        threshold = float(getattr(self, "_step1_score_threshold", 6.0) or 0.0)
+        passed = (threshold <= 0 or score is None or score < 0 or score >= threshold)
+        for c in range(tbl.columnCount()):
+            it = tbl.item(row, c)
+            if not it:
+                continue
+            if not passed:
+                it.setForeground(QColor("#6b7280"))
+            elif c == 3 and score is not None and score >= 0:
+                if score >= 8.0:
+                    it.setForeground(QColor("#2ecc71"))
+                elif score >= 6.0:
+                    it.setForeground(QColor("#f1c40f"))
+                else:
+                    it.setForeground(QColor("#e74c3c"))
+            else:
+                it.setForeground(QBrush())
+    # [2·基础设施]  _go_next_to_step2
+    def _go_next_to_step2(self):
+        """点击下一步：先按评分过滤刷新选中镜头，再进入镜头重组。"""
+        self._apply_step1_score_filter()
+        self._go_to_step(1)
     # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):
         selected_item = self.video_list.currentItem()
@@ -4425,12 +4997,13 @@ class VideoMontagePage(BasePage):
     # [5·拼接合成]  _scan_concat_src_dir
     def _scan_concat_src_dir(self):
         dir_path = self.concat_src_dir_input.text().strip()
-        
-        self.concat_clips_list_widget.blockSignals(True)
-        self.concat_clips_list_widget.clearContents()
-        self.concat_clips_list_widget.setRowCount(0)
-        self.concat_clips_list_widget.blockSignals(False)
-        
+
+        if not hasattr(self, "_available_concat_clips"):
+            self._available_concat_clips = []
+
+        old_checked = {c["path"] for c in self._available_concat_clips if c.get("checked")}
+        self._available_concat_clips = []
+
         if dir_path and os.path.exists(dir_path):
             files = []
             if hasattr(self, "selected_concat_clips_files") and self.selected_concat_clips_files:
@@ -4438,17 +5011,15 @@ class VideoMontagePage(BasePage):
                 current_dir = os.path.abspath(dir_path)
                 if first_parent == current_dir:
                     files = self.selected_concat_clips_files
-            
+
             if not files:
                 for f in os.listdir(dir_path):
                     if f.lower().endswith((".mp4", ".m4v", ".mov", ".avi", ".mkv", ".flv", ".webm",
                                             ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp")):
                         files.append(os.path.join(dir_path, f))
-            
-            # Sort naturally
+
             files.sort(key=lambda x: os.path.basename(x).lower())
-            
-            # Try to find a companion srt file to retrieve precise timestamps and descriptions
+
             srt_scenes = {}
             srt_descs = {}
             parent_dir = os.path.dirname(dir_path)
@@ -4489,32 +5060,25 @@ class VideoMontagePage(BasePage):
                 except Exception as e:
                     log.warning(f"Step 2 scan: Failed to read SRT {best_srt}: {e}")
 
-            # Retrieve timestamps fallback
             scenes = self._get_split_scenes_times(dir_path, [os.path.basename(f) for f in files])
-            
-            self.concat_clips_list_widget.blockSignals(True)
-            self.concat_clips_list_widget.setRowCount(len(files))
-            
-            # 保留旧缓存中的评分，避免重复计算
+
             _old_cache = getattr(self, "split_clips_cache", {}) or {}
             self.split_clips_cache = {}
+
             for idx, filepath in enumerate(files):
                 filename = os.path.basename(filepath)
                 file_dir = os.path.dirname(filepath)
                 norm_path = os.path.abspath(filepath)
-                
-                # Parse from filename first
+
                 parsed = self._parse_split_filename(filename)
                 if parsed:
                     p_idx, start_str, end_str, desc = parsed
                     time_str = f"{start_str} --> {end_str}"
                 else:
-                    # Get description
                     desc = srt_descs.get(idx, "")
                     if not desc:
                         desc = self.split_descriptions.get(norm_path, "")
-                    
-                    # Col 1: 时间戳 (ReadOnly)
+
                     if idx in srt_scenes:
                         start_sec, end_sec = srt_scenes[idx]
                     else:
@@ -4525,13 +5089,12 @@ class VideoMontagePage(BasePage):
                     start_str = format_seconds_to_srt_timestamp(start_sec)
                     end_str = format_seconds_to_srt_timestamp(end_sec)
                     time_str = f"{start_str} --> {end_str}"
-                
+
                 if desc:
                     self.split_descriptions[norm_path] = desc
-                
+
                 clip_dur = get_media_duration(norm_path)
 
-                # 评分：优先读缓存（含旧缓存），否则计算
                 cached = self.split_clips_cache.get(norm_path, {})
                 score = cached.get("score", None)
                 if score is None and norm_path in _old_cache:
@@ -4549,107 +5112,84 @@ class VideoMontagePage(BasePage):
                     "score": score,
                 }
 
-                # Col 0: 分割文件名 (Checkable) — 高分自动选中
-                file_item = QTableWidgetItem(filename)
-                file_item.setFlags(file_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                auto_check = (score >= 0 and score >= 7.0) or score < 0  # 未评分/高分 → 默认勾选
-                file_item.setCheckState(Qt.Checked if auto_check else Qt.Unchecked)
-                file_item.setData(Qt.UserRole, norm_path)
-                file_item.setToolTip(norm_path)
-                self.concat_clips_list_widget.setItem(idx, 0, file_item)
+                threshold = float(getattr(self, "_step1_score_threshold", 6.0) or 0.0)
+                if threshold <= 0:
+                    auto_check = True
+                else:
+                    auto_check = (score >= 0 and score >= threshold) or score < 0
+                checked = norm_path in old_checked or auto_check
 
-                # Col 1: 时间戳
-                time_item = QTableWidgetItem(time_str)
-                time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable)
-                time_item.setTextAlignment(Qt.AlignCenter)
-                self.concat_clips_list_widget.setItem(idx, 1, time_item)
+                self._available_concat_clips.append({
+                    "path": norm_path,
+                    "filename": filename,
+                    "time_str": time_str,
+                    "desc": desc,
+                    "duration": clip_dur,
+                    "score": score,
+                    "checked": checked,
+                })
 
-                # Col 2: 描述文案
-                desc_item = QTableWidgetItem(desc)
-                desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                desc_item.setToolTip(desc if desc else "（双击可编辑/查看完整文案）")
-                self.concat_clips_list_widget.setItem(idx, 2, desc_item)
-
-                # Col 3: 评分
-                score_text = f"{score:.1f}" if score >= 0 else "—"
-                score_item = QTableWidgetItem(score_text)
-                score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
-                score_item.setTextAlignment(Qt.AlignCenter)
-                if score >= 8.0:
-                    score_item.setForeground(QColor("#2ecc71"))
-                elif score >= 6.0:
-                    score_item.setForeground(QColor("#f1c40f"))
-                elif score >= 0:
-                    score_item.setForeground(QColor("#e74c3c"))
-                self.concat_clips_list_widget.setItem(idx, 3, score_item)
-
-                # Col 4: 文件目录
-                dir_item = QTableWidgetItem(file_dir)
-                dir_item.setFlags(dir_item.flags() & ~Qt.ItemIsEditable)
-                dir_item.setToolTip(norm_path)
-                self.concat_clips_list_widget.setItem(idx, 4, dir_item)
-
-                # Col 5: 播放按钮
-                play_btn = mdi_button("", "play")
-                play_btn.setToolTip("播放该镜头")
-                play_btn.setFixedWidth(28)
-                play_btn.setFixedHeight(20)
-                play_btn.setStyleSheet("border: none; color: #9ca3af; font-size: 12px; padding: 0;")
-                play_btn.clicked.connect(self._make_play_slot(norm_path))
-                self.concat_clips_list_widget.setCellWidget(idx, 5, play_btn)
-                
-            self.concat_clips_list_widget.blockSignals(False)
-        
         self._update_concat_count_lbl()
+
+    # [9·其他]  _open_clip_selection_dialog
+    def _open_clip_selection_dialog(self):
+        if not self._available_concat_clips:
+            QMessageBox.information(self.parent_widget, "无可用镜头", "当前目录下没有可选择的镜头片段。")
+            return
+
+        selected_paths = [c["path"] for c in self._available_concat_clips if c.get("checked")]
+        dialog_clips = [dict(c) for c in self._available_concat_clips]
+        dialog = ClipSelectionDialog(
+            clips=dialog_clips,
+            selected_paths=selected_paths,
+            parent=self.parent_widget,
+            play_callback=self._play_video,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self._available_concat_clips = dialog.get_clips()
+            for clip in self._available_concat_clips:
+                path = clip.get("path")
+                desc = clip.get("desc", "")
+                if path and desc:
+                    self.split_descriptions[path] = desc
+                    if path in self.split_clips_cache:
+                        self.split_clips_cache[path]["desc"] = desc
+            self._save_split_srt()
+            self._update_concat_count_lbl()
+            self._update_beat_clips_info()
+
     # [9·其他]  _select_all_clips
     def _select_all_clips(self):
-        self.concat_clips_list_widget.blockSignals(True)
-        for r in range(self.concat_clips_list_widget.rowCount()):
-            item = self.concat_clips_list_widget.item(r, 0)
-            if item:
-                item.setCheckState(Qt.Checked)
-        self.concat_clips_list_widget.blockSignals(False)
+        for clip in self._available_concat_clips:
+            clip["checked"] = True
         self._update_concat_count_lbl()
+
     # [9·其他]  _deselect_all_clips
     def _deselect_all_clips(self):
-        self.concat_clips_list_widget.blockSignals(True)
-        for r in range(self.concat_clips_list_widget.rowCount()):
-            item = self.concat_clips_list_widget.item(r, 0)
-            if item:
-                item.setCheckState(Qt.Unchecked)
-        self.concat_clips_list_widget.blockSignals(False)
+        for clip in self._available_concat_clips:
+            clip["checked"] = False
         self._update_concat_count_lbl()
+
     # [5·拼接合成]  _update_concat_count_lbl
     def _update_concat_count_lbl(self):
         self.split_clips_list = []
         checked_count = 0
-        total = self.concat_clips_list_widget.rowCount()
-        for r in range(total):
-            item = self.concat_clips_list_widget.item(r, 0)
-            if item and item.checkState() == Qt.Checked:
+        total = len(self._available_concat_clips)
+        for clip in self._available_concat_clips:
+            if clip.get("checked"):
                 checked_count += 1
-                path = item.data(Qt.UserRole)
+                path = clip.get("path")
                 if path:
                     self.split_clips_list.append(path)
-        
+
         self.clip_count_info_lbl.setText(f"待排列镜头个数: {total}  (已勾选: {checked_count})")
-        
-        # Update clip_count_combo to include total as default option
-        if total > 0:
-            self.clip_count_combo.blockSignals(True)
-            self.clip_count_combo.clear()
-            self.clip_count_combo.addItem(f"全部 ({total} 个镜头)", total)
-            for i in [3, 5, 8, 10, 15, 20]:
-                if i != total:
-                    self.clip_count_combo.addItem(f"{i} 个镜头", i)
-            self.clip_count_combo.setCurrentIndex(0)
-            self.clip_count_combo.blockSignals(False)
         self._update_batch_count_recommendation()
-        
-        if checked_count > 0:
+
+        if checked_count > 0 and hasattr(self, "btn_assemble_video"):
             self.btn_assemble_video.setEnabled(True)
         else:
             self.btn_assemble_video.setEnabled(False)
+
     # [5·拼接合成]  _recommend_batch_count
     def _recommend_batch_count(self):
         checked = max(1, len(self.split_clips_list))
@@ -4657,18 +5197,15 @@ class VideoMontagePage(BasePage):
         if recommended <= 0:
             recommended = 1
         return max(1, min(10, recommended))
+
     # [5·拼接合成]  _update_batch_count_recommendation
     def _update_batch_count_recommendation(self):
         if not hasattr(self, "batch_count_spin"):
             return
         rec = self._recommend_batch_count()
         if hasattr(self, "batch_count_hint_lbl"):
-            self.batch_count_hint_lbl.setText(f"推荐: {rec} (中等重复度)")
-        cur = int(self.batch_count_spin.value())
-        if cur > 10:
-            self.batch_count_spin.setValue(10)
-        if cur != rec:
-            self.batch_count_spin.setValue(rec)
+            self.batch_count_hint_lbl.setText(f"推荐: {rec}")
+        self.batch_count_spin.setValue(rec)
     # [9·其他]  _get_clip_duration
     def _get_clip_duration(self, clip_path):
         """获取镜头时长（秒），优先从缓存读取。"""
@@ -4712,91 +5249,9 @@ class VideoMontagePage(BasePage):
         if not hasattr(self, "lut_combo"):
             return ""
         return self.lut_combo.currentData() or ""
-    # [3·分割]  _score_clip
+    # [3·分割]  _score_clip (已移除：本地OpenCV评分已删除，统一使用服务端分析)
     def _score_clip(self, clip_path):
-        """综合评分镜头质量（0~10 分）。
-        维度：清晰度、干净度（噪点）、抖动、主体突出、曝光。
-        失败返回 -1。
-        """
-        import cv2
-        import numpy as np
-        try:
-            cap = cv2.VideoCapture(clip_path)
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if total < 3:
-                cap.release()
-                return -1
-            # 采样 3 帧：前 1/4、中间、后 3/4
-            positions = [total // 4, total // 2, total * 3 // 4]
-            frames = []
-            for pos in positions:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-                ret, frame = cap.read()
-                if ret:
-                    frames.append(frame)
-            cap.release()
-            if not frames:
-                return -1
-
-            scores = []
-            for frame in frames:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                h, w = gray.shape
-
-                # 1. 清晰度：Laplacian 方差（0~500+），映射到 0-3 分
-                lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-                sharpness = min(3.0, max(0.0, lap_var / 150.0))
-
-                # 2. 干净度（噪点）：高斯滤波后与原图的 SSIM 近似
-                #    用滤波前后差的 std 做反比：差值越大 → 噪点多
-                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-                noise_diff = np.std(gray.astype(float) - blurred.astype(float))
-                # noise_diff: 干净 ~2-5, 噪点多 ~10-20
-                cleanliness = max(0.0, min(2.0, 2.0 - (noise_diff - 2.0) / 5.0))
-
-                # 3. 抖动：当前帧和下一帧的差异
-                #    取下一帧（如果有），算帧间变化
-                shake_score = 2.0  # 默认满分
-                # 用 frame vs 其相邻帧（如果有）
-
-                # 4. 主体突出：中心区域清晰度 / 边缘清晰度比值
-                ch, cw = h // 2, w // 2
-                center = gray[ch - h//6 : ch + h//6, cw - w//6 : cw + w//6]
-                center_lap = cv2.Laplacian(center, cv2.CV_64F).var()
-                edge_lap = max(1.0, lap_var - center_lap * (center.size / gray.size))
-                subject_ratio = min(2.0, max(0.0, center_lap / max(1.0, edge_lap) * 0.8))
-
-                # 5. 曝光：均值偏离 128 越远越差，理想 90~160
-                mean_bright = gray.mean()
-                if 90 <= mean_bright <= 160:
-                    exposure = 1.0
-                elif 60 <= mean_bright <= 200:
-                    exposure = 0.6
-                else:
-                    exposure = 0.2
-
-                frame_score = sharpness + cleanliness + shake_score + subject_ratio + exposure
-                scores.append(frame_score)
-
-            # 帧间抖动：相邻帧的光流变化
-            if len(frames) >= 2:
-                prev_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
-                curr_gray = cv2.cvtColor(frames[1], cv2.COLOR_BGR2GRAY)
-                flow_diff = np.mean(np.abs(curr_gray.astype(float) - prev_gray.astype(float)))
-                # flow_diff: 静止 < 5, 微抖 5-15, 严重 > 20
-                if flow_diff > 20:
-                    shake_penalty = 1.5
-                elif flow_diff > 10:
-                    shake_penalty = 0.5
-                else:
-                    shake_penalty = 0.0
-                avg = np.mean(scores) - shake_penalty
-            else:
-                avg = np.mean(scores)
-
-            return round(max(0.0, min(10.0, avg)), 1)
-        except Exception:
-            return -1
+        return -1
         base = [os.path.abspath(c) for c in clips if c]
         if not base:
             return []
@@ -5881,6 +6336,8 @@ class VideoMontagePage(BasePage):
         return lambda: self._play_video(filepath)
     # [5·拼接合成]  _preview_concat_table_item
     def _preview_concat_table_item(self, item):
+        if not getattr(self, "concat_clips_list_widget", None):
+            return
         row = item.row()
         col = item.column()
         
@@ -5946,6 +6403,8 @@ class VideoMontagePage(BasePage):
                 self._play_video(path)
     # [5·拼接合成]  _on_concat_table_cell_changed
     def _on_concat_table_cell_changed(self, row, col):
+        if not getattr(self, "concat_clips_list_widget", None):
+            return
         if col == 0:
             self._update_concat_count_lbl()
         elif col == 2:

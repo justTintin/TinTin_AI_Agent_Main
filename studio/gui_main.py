@@ -1299,6 +1299,21 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.log_viewer.verticalScrollBar().maximum()
         )
 
+    def _log_viewer_context_menu(self, pos):
+        """系统日志右键菜单：清空 / 复制 / 全选"""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act_clear = menu.addAction("🗑️ 清空日志")
+        act_copy = menu.addAction("📋 复制选中")
+        act_select_all = menu.addAction("✅ 全选")
+        chosen = menu.exec(self.log_viewer.mapToGlobal(pos))
+        if chosen == act_clear:
+            self.log_viewer.clear()
+        elif chosen == act_copy:
+            self.log_viewer.copy()
+        elif chosen == act_select_all:
+            self.log_viewer.selectAll()
+
 
 
 

@@ -873,6 +873,7 @@ class SubtitleRemovalPage(BasePage):
                 self.xmax = xmax
 
             def do_work(self):
+                import time as _time
                 try:
                     from config.paths import AI_CONFIG_FILE
                     import json as _json
@@ -884,13 +885,14 @@ class SubtitleRemovalPage(BasePage):
                         if url:
                             base_url = url
 
-                    # 上传文件
+                    # 上传文件（服务端文档: docs/SERVER_API.md §VSR）
+                    # sub_areas 格式: [[ymin,ymax,xmin,xmax], ...]
+                    sub_areas = _json.dumps([[self.ymin, self.ymax, self.xmin, self.xmax]])
                     with open(self.path, "rb") as f:
                         files = {"file": (os.path.basename(self.path), f, "video/mp4")}
                         data = {
                             "inpaint_mode": self.mode,
-                            "ymin": str(self.ymin), "ymax": str(self.ymax),
-                            "xmin": str(self.xmin), "xmax": str(self.xmax),
+                            "sub_areas": sub_areas,
                         }
                         r = _req.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=600)
                         if r.status_code != 200:
@@ -899,7 +901,33 @@ class SubtitleRemovalPage(BasePage):
                     task_id = result.get("task_id", "")
                     if not task_id:
                         raise RuntimeError("服务端未返回任务 ID")
-                    self.finished.emit(f"{base_url}/vsr/download/{task_id}.mp4")
+
+                    # 轮询 GET /tasks/unified/{task_id} 等待完成（统一接口）
+                    poll_url = f"{base_url}/tasks/unified/{task_id}"
+                    deadline = _time.time() + 600  # 去字幕耗时较长，等待10分钟
+                    while _time.time() < deadline:
+                        _time.sleep(3)
+                        try:
+                            pr = _req.get(poll_url, timeout=15)
+                        except Exception:
+                            continue
+                        if pr.status_code != 200:
+                            continue
+                        pdata = pr.json()
+                        status = str(pdata.get("status") or "").lower()
+                        if status in ("completed", "done", "success"):
+                            # 从结果中取下载文件名
+                            filename = (pdata.get("filename") or pdata.get("output")
+                                        or pdata.get("result", {}).get("filename") or "")
+                            if filename:
+                                self.finished.emit(f"{base_url}/vsr/download/{filename}")
+                            else:
+                                self.finished.emit(f"{base_url}/vsr/download/{task_id}.mp4")
+                            return
+                        if status in ("failed", "error"):
+                            err = pdata.get("error") or pdata.get("message") or "未知错误"
+                            raise RuntimeError(f"去字幕任务失败: {err}")
+                    raise RuntimeError("去字幕任务超时(600s)")
                 except Exception as e:
                     self.error.emit(str(e))
 

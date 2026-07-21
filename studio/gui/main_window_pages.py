@@ -1015,6 +1015,9 @@ class PageSetupMixin:
         frow.addWidget(self.btn_server_log)
         frow.addStretch()
         self.log_viewer = QTextEdit(); self.log_viewer.setReadOnly(True); self.log_viewer.setObjectName("log_viewer"); l1.addWidget(self.log_viewer, 1)
+        # 右键菜单：清空日志
+        self.log_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_viewer.customContextMenuRequested.connect(self._log_viewer_context_menu)
         l1.addWidget(QLabel("完整日志: .runtime/logs/app.log"))
         tabs.addTab(p1, "📊 日志")
 

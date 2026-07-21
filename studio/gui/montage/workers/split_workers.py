@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """智能混剪 - 分割阶段 Worker：场景检测、挑精华、镜头评分。"""
 import os
+import subprocess
+import traceback
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -252,56 +254,348 @@ class BestClipWorker(BaseWorker):
 
 
 
-class ScoreClipsWorker(BaseWorker):
-    """后台并行评分分割镜头，完成时通过信号通知主线程刷新表格。
 
-    用线程池并发执行 _score_clip()，比串行循环快数倍。
-    _score_clip() 每次调用自建 cv2.VideoCapture、无共享状态，线程安全。
+
+class ServerClipAnalysisWorker(BaseWorker):
+    """调用服务端 /material/score_clip 对每个镜头做 AI 分析，返回评分与描述。
+
+    接口为异步任务模式（服务端文档: docs/SERVER_API.md §1.2）：
+      1. POST /material/score_clip 上传文件 → 返回 task_id
+      2. GET  /tasks/unified/{task_id} 轮询 → status: pending/running/completed/failed
+      3. status==completed 后从 result 字段取 score + description
+
+    逐条上传镜头片段到服务端，线程池并发（IO 密集），每条完成即 emit item_ready。
     """
-    score_ready = Signal(int, float)  # row_index, score
-    all_done = Signal()
+    item_ready = Signal(int, dict)        # row_index, result_dict{score,desc,...}
+    progress = Signal(int)                 # 0-100
+    finished = Signal(int, int)            # ok_count, fail_count
 
-    # 评分是 IO(抽帧)+轻 CPU(Laplacian/SSIM) 混合，并发数取 CPU 核心数的一半，
-    # 上限 6，避免 OpenCV 后端在高并发下偶发解码错误。
-    _MAX_WORKERS = max(2, min(6, (os.cpu_count() or 4) // 2))
+    _MAX_WORKERS = 4
+    _POLL_INTERVAL = 2.0       # 轮询间隔（秒）
+    _POLL_TIMEOUT = 300.0      # 单条镜头最大等待时间（秒）
 
-    def __init__(self, page_ref, clip_paths):
+    def __init__(self, clip_paths, server_url):
         super().__init__()
-        self.page_ref = page_ref
-        self.clip_paths = clip_paths
+        self.clip_paths = list(clip_paths)
+        self.server_url = (server_url or "").strip().rstrip("/")
         self._should_stop = False
 
     def stop(self):
         self._should_stop = True
 
-    def run(self):
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+    def _analyze_one(self, clip_path):
+        """提交 → 轮询 → 返回完整 result dict。"""
+        import requests
+        import time as _time
 
-        if not self.clip_paths:
-            self.all_done.emit()
-            return
+        fname = os.path.basename(clip_path)
+        fsize = os.path.getsize(clip_path) if os.path.isfile(clip_path) else 0
+        submit_url = f"{self.server_url}/material/score_clip"
 
-        with ThreadPoolExecutor(max_workers=self._MAX_WORKERS,
-                                thread_name_prefix="score") as pool:
-            # 提交全部任务，记录 future→行号 映射
-            future_to_idx = {
-                pool.submit(self.page_ref._score_clip, clip_path): idx
-                for idx, clip_path in enumerate(self.clip_paths)
-            }
+        # ── 第 1 步：提交文件，获取 task_id ──
+        log.info(f"[镜头分析] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url}")
+        with open(clip_path, "rb") as f:
+            resp = requests.post(
+                submit_url,
+                files={"file": (fname, f, "video/mp4")},
+                timeout=60,
+            )
+        log.info(f"[镜头分析] {fname} 提交响应: HTTP {resp.status_code}, body={resp.text[:300]}")
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(f"提交失败 HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            submit_data = resp.json()
+        except Exception:
+            raise RuntimeError(f"提交响应非 JSON: {resp.text[:200]}")
+
+        # 兼容多种 task_id 字段名
+        task_id = (submit_data.get("task_id") or submit_data.get("id")
+                   or submit_data.get("job_id") or "")
+        if not task_id:
+            # 如果响应里直接包含结果（同步模式兼容），直接解析
+            result = self._parse_result(submit_data, fname)
+            if result.get("score", -1) >= 0 or result.get("desc"):
+                return result
+            raise RuntimeError(
+                f"服务端未返回 task_id 也无有效结果。"
+                f"响应: {str(submit_data)[:250]}")
+
+        log.info(f"[镜头分析] {fname} 获得 task_id={task_id}，开始轮询...")
+
+        # ── 第 2 步：轮询任务状态直到完成（统一接口: GET /tasks/unified/{id}）──
+        poll_url = f"{self.server_url}/tasks/unified/{task_id}"
+        deadline = _time.time() + self._POLL_TIMEOUT
+        last_status = ""
+
+        while _time.time() < deadline:
+            if self._should_stop:
+                raise RuntimeError("用户取消")
+            _time.sleep(self._POLL_INTERVAL)
             try:
-                for fut in as_completed(future_to_idx):
+                pr = requests.get(poll_url, timeout=15)
+            except Exception as e:
+                log.warning(f"[镜头分析] {fname} 轮询请求异常: {e}")
+                continue
+            if pr.status_code != 200:
+                log.warning(f"[镜头分析] {fname} 轮询 HTTP {pr.status_code}")
+                continue
+            try:
+                pdata = pr.json()
+            except Exception:
+                continue
+
+            # 兼容嵌套 data 结构
+            task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
+            status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
+            if status != last_status:
+                log.info(f"[镜头分析] {fname} task={task_id} status={status}")
+                last_status = status
+
+            if status in ("completed", "done", "success", "finished"):
+                # ── 第 3 步：从 result 取分析数据 ──
+                raw_result = task_obj.get("result") or task_obj
+                result = self._parse_result(raw_result, fname)
+                if result.get("score", -1) < 0 and not result.get("desc"):
+                    raise RuntimeError(
+                        f"任务完成但 result 无有效数据。"
+                        f"task_obj: {str(task_obj)[:250]}")
+                log.info(f"[镜头分析] {fname} 完成: score={result.get('score', -1):.1f}, "
+                         f"desc={str(result.get('desc', ''))[:50]}")
+                return result
+
+            if status in ("failed", "error", "cancelled"):
+                err_msg = (task_obj.get("error_msg") or task_obj.get("error")
+                           or task_obj.get("message") or "未知错误")
+                raise RuntimeError(f"服务端任务失败: {err_msg}")
+
+            # pending / running / 其他 → 继续轮询
+
+        raise RuntimeError(
+            f"轮询超时（{self._POLL_TIMEOUT:.0f}s），task_id={task_id}，"
+            f"最后状态: {last_status or '无响应'}")
+
+    @staticmethod
+    def _parse_result(payload, fname=""):
+        """从 result dict 中提取所有有用字段，返回标准化 dict。
+
+        服务端实际返回结构（/scheduled/tasks/{id} 的 result 字段）：
+        {
+          "filename": "...",
+          "aesthetic_score": {
+            "total": 7.1, "clarity": 7.7, "texture": 4.5,
+            "aesthetics": 5.0, "composition": 7.5, "color_quality": 10.0,
+            "figure_quality": 5.0, "subject_prominence": 10.0, "engine": "laion+opencv"
+          }
+        }
+        """
+        result = {"score": -1.0, "desc": "", "extra": {}}
+        if not isinstance(payload, dict):
+            return result
+        # 兼容嵌套 data
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+        # ── 评分：优先从 aesthetic_score.total 取 ──
+        aes = inner.get("aesthetic_score")
+        if isinstance(aes, dict):
+            raw_score = aes.get("total", aes.get("score", -1))
+            try:
+                result["score"] = float(raw_score)
+            except (TypeError, ValueError):
+                result["score"] = -1.0
+            # 将各维度评分放入 extra
+            for k, v in aes.items():
+                if k in ("total", "engine"):
+                    continue
+                if isinstance(v, (int, float)):
+                    result["extra"][k] = v
+            if aes.get("engine"):
+                result["extra"]["engine"] = aes["engine"]
+        else:
+            # 回退：直接在顶层找 score
+            raw_score = inner.get("score", inner.get("total_score", inner.get("value", -1)))
+            try:
+                result["score"] = float(raw_score)
+            except (TypeError, ValueError):
+                result["score"] = -1.0
+
+        # ── 描述 ──
+        desc = (inner.get("description") or inner.get("desc")
+                or inner.get("analysis") or inner.get("text") or "")
+        result["desc"] = str(desc).strip()
+
+        # ── 收集其他有意义的字段 ──
+        _skip_keys = {"score", "total_score", "value", "description", "desc",
+                      "analysis", "text", "data", "status", "state", "task_id",
+                      "id", "job_id", "error", "error_msg", "message",
+                      "aesthetic_score", "filename"}
+        for k, v in inner.items():
+            if k in _skip_keys or v is None:
+                continue
+            if isinstance(v, (str, int, float, bool)) and str(v).strip():
+                result["extra"][k] = v
+            elif isinstance(v, list) and v:
+                result["extra"][k] = ", ".join(str(x) for x in v[:5])
+        return result
+
+    def do_work(self):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        total = len(self.clip_paths)
+        if total == 0:
+            self.finished.emit(0, 0)
+            return
+        ok = 0
+        fail = 0
+        done = 0
+        with ThreadPoolExecutor(max_workers=self._MAX_WORKERS,
+                                thread_name_prefix="clip_analysis") as pool:
+            futures = {pool.submit(self._analyze_one, p): i
+                       for i, p in enumerate(self.clip_paths)}
+            try:
+                for fut in as_completed(futures):
                     if self._should_stop:
                         break
-                    idx = future_to_idx[fut]
+                    idx = futures[fut]
                     try:
-                        score = fut.result()
-                    except Exception:
-                        score = -1
-                    # 信号通过 Qt 队列连接自动排到主线程，安全更新表格
-                    self.score_ready.emit(idx, score)
+                        result_dict = fut.result()
+                        self.item_ready.emit(idx, result_dict)
+                        ok += 1
+                    except Exception as e:
+                        fail += 1
+                        log.warning(f"[镜头分析] {os.path.basename(self.clip_paths[idx])} 分析失败: {e}")
+                    done += 1
+                    self.progress.emit(int(done * 100 / total))
             finally:
-                # 中途 stop() 时取消尚未开始的 future，避免无谓计算
-                for fut in future_to_idx:
+                for fut in futures:
                     if not fut.done():
                         fut.cancel()
-        self.all_done.emit()
+        self.finished.emit(ok, fail)
+
+
+class BeatDetectWorker(BaseWorker):
+    """调用服务端 POST /audio/beatmap 检测音乐节拍点。
+
+    异步任务模式（服务端文档: docs/SERVER_API.md §1.3）：
+      1. POST /audio/beatmap 上传音频 → 返回 task_id
+      2. GET  /tasks/unified/{task_id} 轮询 → status: pending/running/completed/failed
+      3. completed 后从 result 取节拍时间戳列表
+
+    信号: beats_ready(list[float]), error(str)
+    """
+    beats_ready = Signal(list)
+    error = Signal(str)
+
+    _POLL_INTERVAL = 2.0
+    _POLL_TIMEOUT = 120.0
+
+    def __init__(self, music_path, server_url):
+        super().__init__()
+        self.music_path = music_path
+        self.server_url = (server_url or "").strip().rstrip("/")
+        self._should_stop = False
+
+    def stop(self):
+        self._should_stop = True
+
+    def do_work(self):
+        import requests
+        import time as _time
+
+        fname = os.path.basename(self.music_path)
+        fsize = os.path.getsize(self.music_path) if os.path.isfile(self.music_path) else 0
+        submit_url = f"{self.server_url}/audio/beatmap"
+
+        try:
+            # ── 第 1 步：提交音频文件，获取 task_id ──
+            log.info(f"[音乐卡点] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url}")
+            with open(self.music_path, "rb") as f:
+                resp = requests.post(submit_url,
+                                     files={"file": (fname, f, "audio/mpeg")},
+                                     timeout=60)
+            log.info(f"[音乐卡点] 响应: HTTP {resp.status_code}, body={resp.text[:300]}")
+            if resp.status_code not in (200, 201, 202):
+                raise RuntimeError(f"提交失败 HTTP {resp.status_code}: {resp.text[:200]}")
+            try:
+                submit_data = resp.json()
+            except Exception:
+                raise RuntimeError(f"响应非 JSON: {resp.text[:200]}")
+
+            # 兼容：如果服务端直接返回结果（同步兼容模式）
+            task_id = (submit_data.get("task_id") or submit_data.get("id")
+                       or submit_data.get("job_id") or "")
+            if not task_id:
+                beats = self._extract_beats(submit_data)
+                if beats:
+                    self.beats_ready.emit(beats)
+                    return
+                raise RuntimeError(f"未返回 task_id 也无节拍数据: {str(submit_data)[:250]}")
+
+            # ── 第 2 步：轮询 GET /tasks/unified/{task_id} ──
+            log.info(f"[音乐卡点] task_id={task_id}，轮询中...")
+            poll_url = f"{self.server_url}/tasks/unified/{task_id}"
+            deadline = _time.time() + self._POLL_TIMEOUT
+            last_status = ""
+
+            while _time.time() < deadline:
+                if self._should_stop:
+                    raise RuntimeError("用户取消")
+                _time.sleep(self._POLL_INTERVAL)
+                try:
+                    pr = requests.get(poll_url, timeout=15)
+                except Exception as e:
+                    log.warning(f"[音乐卡点] 轮询异常: {e}")
+                    continue
+                if pr.status_code != 200:
+                    continue
+                try:
+                    pdata = pr.json()
+                except Exception:
+                    continue
+
+                task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
+                status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
+                if status != last_status:
+                    log.info(f"[音乐卡点] status={status}")
+                    last_status = status
+
+                if status in ("completed", "done", "success", "finished"):
+                    result = task_obj.get("result") or task_obj
+                    beats = self._extract_beats(result)
+                    if not beats:
+                        raise RuntimeError(f"任务完成但无节拍: {str(task_obj)[:250]}")
+                    log.info(f"[音乐卡点] 完成: {len(beats)} 个节拍, "
+                             f"{beats[0]:.2f}s~{beats[-1]:.2f}s")
+                    self.beats_ready.emit(beats)
+                    return
+
+                if status in ("failed", "error", "cancelled"):
+                    err = (task_obj.get("error_msg") or task_obj.get("error")
+                           or task_obj.get("message") or "未知")
+                    raise RuntimeError(f"任务失败: {err}")
+
+            raise RuntimeError(f"轮询超时({self._POLL_TIMEOUT:.0f}s), task={task_id}")
+        except Exception as e:
+            log.error(f"[音乐卡点] 失败: {e}")
+            self.error.emit(str(e))
+
+    @staticmethod
+    def _extract_beats(payload):
+        if not isinstance(payload, dict):
+            return []
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        beats = (inner.get("beats") or inner.get("beat_times")
+                 or inner.get("timestamps") or inner.get("beat_points") or [])
+        if isinstance(beats, list) and beats:
+            try:
+                return sorted(float(b) for b in beats if b is not None)
+            except (TypeError, ValueError):
+                return []
+        result = inner.get("result")
+        if isinstance(result, dict):
+            beats = (result.get("beats") or result.get("beat_times")
+                     or result.get("timestamps") or [])
+            if isinstance(beats, list) and beats:
+                try:
+                    return sorted(float(b) for b in beats if b is not None)
+                except (TypeError, ValueError):
+                    pass
+        return []

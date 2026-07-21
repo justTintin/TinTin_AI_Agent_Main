@@ -3,11 +3,12 @@
 产品资料管理页。
 
 把鼠标 / 键盘等外设按「品类 → 品牌 → 型号」统一归类管理：
-- 基础数据从旺店通 ERP 仓库（库存接口 stock_query）一键同步
+- 基础数据通过服务端产品资料库接口（/api/product-library）一键同步
+  （服务端统一持有旺店通 ERP 凭据并完成 ERP 拉取/归类，客户端不再直连旺店通）
 - 左侧树状浏览 + 关键词搜索
 - 右侧表单可对单条做手工归类 / 补充（品类、备注等）/ 删除
 
-数据层见 utils/product_library_manager.py，仓库客户端见 utils/wdt_client.py。
+数据层见 utils/product_library_manager.py。
 文案创作对接为后续步骤（manager.to_prompt_text 已预留）。
 """
 from PySide6.QtWidgets import (
@@ -20,33 +21,132 @@ from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
 from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS
-from utils.wdt_client import WdtClient, map_stocks_to_kb
+
+
+def _get_server_url() -> str:
+    """读取 ai_config.json 中的统一服务端地址（与 llm_proxy / compile_video_page 一致）。"""
+    try:
+        import json
+        from config.paths import AI_CONFIG_FILE
+        import os
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return ""
 
 
 class StockSyncWorker(BaseWorker):
-    """后台线程：从旺店通仓库拉取库存 + 货品品类，映射成产品资料条目。"""
+    """后台线程：通过服务端产品资料库接口同步产品数据。
+
+    流程：
+      1. POST /api/product-library/sync        触发服务端从旺店通 ERP 全量同步
+      2. GET  /api/product-library/sync/status  轮询同步进度直至完成
+      3. GET  /api/product-library/client/products  分页拉取所有产品
+      4. 映射成本地 KB 字段 + 构建 goods_no→{category,brand} 品类映射
+    """
     phase = Signal(str)              # 阶段文字
     progress = Signal(int, int)      # fetched, total
     finished = Signal(list, dict)    # mapped KB dicts, goods_no->{category,brand}
 
     def run(self):
+        import time
+        import requests
         try:
-            client = WdtClient()
-            self.phase.emit("正在拉取库存...")
-            records, err = client.fetch_all_stocks(
-                progress_cb=lambda f, t: self.progress.emit(f, t)
-            )
-            if err:
-                self.error.emit(err)
+            base = _get_server_url()
+            if not base:
+                self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
                 return
-            mapped = map_stocks_to_kb(records)
-            # 自动归类：按本次涉及的 goods_no 拉取品类映射
-            needed = {m.get("goods_no", "").strip() for m in mapped if m.get("goods_no", "").strip()}
-            self.phase.emit("正在获取品类（货品档案）...")
-            goods_map, _ = client.fetch_goods_class_map(
-                needed_goods_no=needed,
-                progress_cb=lambda n: self.phase.emit(f"正在获取品类... 已识别 {n} 个货品"),
-            )
+            api = base.rstrip("/") + "/api/product-library"
+
+            # 1. 触发服务端 ERP 同步
+            self.phase.emit("正在触发服务端 ERP 同步...")
+            try:
+                r = requests.post(f"{api}/sync", timeout=10)
+                if r.status_code == 409:
+                    # 已有同步任务在跑，直接进入轮询
+                    self.phase.emit("服务端同步进行中，等待完成...")
+                elif r.status_code != 200:
+                    self.error.emit(f"触发同步失败: HTTP {r.status_code} {r.text[:200]}")
+                    return
+            except requests.exceptions.RequestException as e:
+                self.error.emit(f"无法连接服务端: {e}")
+                return
+
+            # 2. 轮询同步状态
+            self.phase.emit("正在等待服务端同步完成...")
+            while True:
+                try:
+                    sr = requests.get(f"{api}/sync/status", timeout=10)
+                    st = sr.json() if sr.status_code == 200 else {}
+                except Exception:
+                    st = {}
+                if not st.get("running", False):
+                    if st.get("error"):
+                        self.error.emit(f"服务端同步出错: {st['error']}")
+                        return
+                    # 同步结束
+                    added = st.get("added", 0)
+                    updated = st.get("updated", 0)
+                    self.phase.emit(
+                        f"服务端同步完成（新增 {added}、更新 {updated}），开始拉取产品..."
+                    )
+                    break
+                phase_text = st.get("phase", "") or "同步中..."
+                fetched = int(st.get("fetched", 0) or 0)
+                total = int(st.get("total", 0) or 0)
+                self.phase.emit(phase_text)
+                self.progress.emit(fetched, total)
+                time.sleep(2)
+
+            # 3. 分页拉取全部产品
+            all_items = []
+            page = 1
+            page_size = 500
+            total = 0
+            while True:
+                try:
+                    r = requests.get(
+                        f"{api}/client/products",
+                        params={
+                            "updated_since": 0,
+                            "page": page,
+                            "page_size": page_size,
+                        },
+                        timeout=30,
+                    )
+                    if r.status_code != 200:
+                        self.error.emit(f"拉取产品失败: HTTP {r.status_code} {r.text[:200]}")
+                        return
+                    data = r.json()
+                except requests.exceptions.RequestException as e:
+                    self.error.emit(f"拉取产品时网络异常: {e}")
+                    return
+                batch = data.get("items", []) or []
+                all_items.extend(batch)
+                total = int(data.get("total", 0) or 0)
+                self.progress.emit(len(all_items), total)
+                if not batch or (total and len(all_items) >= total):
+                    break
+                page += 1
+
+            # 4. 映射成本地 KB 字段 + 构建 goods_map（品类/品牌已在服务端归类）
+            mapped = []
+            goods_map = {}
+            kb_keys = [k for k, _lbl, _ml in FIELDS]
+            for it in all_items:
+                item = {k: str(it.get(k, "") or "").strip() for k in kb_keys}
+                mapped.append(item)
+                gno = item.get("goods_no", "").strip()
+                if gno and gno not in goods_map:
+                    goods_map[gno] = {
+                        "category": item.get("category", ""),
+                        "brand": item.get("brand", ""),
+                    }
             self.finished.emit(mapped, goods_map)
         except Exception as e:
             self.error.emit(str(e))
@@ -634,11 +734,12 @@ class ProductLibraryPage(BasePage):
     def _on_sync_err(self, err):
         self.btn_sync.setEnabled(True)
         self._set_sync_status(f"同步失败：{err}")
-        log.error(f"仓库库存同步失败: {err}")
+        log.error(f"产品资料库同步失败: {err}")
         QMessageBox.critical(self.parent_widget, "同步失败",
-                             f"从旺店通仓库同步库存失败：\n{err}\n\n"
-                             "请检查 config/erp_config.json 中的 appkey/sid/密钥，"
-                             "以及当前网络出口 IP 是否在旺店通白名单内。")
+                             f"从服务端同步产品资料失败：\n{err}\n\n"
+                             "请检查：\n"
+                             "1. 系统设置中「统一服务端地址」是否正确且服务端已启动；\n"
+                             "2. 服务端是否已配置旺店通 ERP 凭据（由服务端统一持有，客户端无需本地 erp_config.json）。")
 
     # ---------------- 一键挖掘 ----------------
     def _on_mine_all(self):

@@ -50,7 +50,7 @@ def _get_server_url():
                 return url
     except Exception:
         pass
-    return "http://192.168.111.30:8000"
+    return "http://192.168.111.19:8000"
 
 
 class TTSWorker(BaseWorker):

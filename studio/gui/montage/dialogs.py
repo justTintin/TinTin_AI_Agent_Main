@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """智能混剪 - 对话框：文本编辑、脚本对比、配音成品、合成成品、产品文案输入、配音行详情。"""
+import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
-                               QListWidget, QListWidgetItem, QDialogButtonBox, QPlainTextEdit, QWidget)
+                               QListWidget, QListWidgetItem, QDialogButtonBox, QPlainTextEdit, QWidget,
+                               QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox)
 from PySide6.QtCore import Qt
 from gui.montage.widgets import ReadOnlyDoubleClickLineEdit
 
@@ -476,3 +478,169 @@ class VoiceRowDetailWidget(QWidget):
         self.lbl_voice_duration.setFixedWidth(60)
         row_edit.addWidget(self.lbl_voice_duration)
         layout.addLayout(row_edit)
+
+
+
+class ClipSelectionDialog(QDialog):
+    """步骤2重新选择镜头的对话框，表格样式与步骤1的镜头列表保持一致。"""
+
+    def __init__(self, clips, selected_paths, parent=None, play_callback=None):
+        super().__init__(parent)
+        self.clips = clips
+        self.selected_paths = set(selected_paths)
+        self.play_callback = play_callback
+        self.setWindowTitle("重新选择镜头")
+        self.setMinimumSize(900, 500)
+        self.resize(1000, 600)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        header_lbl = QLabel("请勾选要用于镜头重组的镜头片段（双击视频片段可播放预览，双击描述可编辑）：")
+        header_lbl.setStyleSheet("font-size: 13px; color: #e2e8f0;")
+        layout.addWidget(header_lbl)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["选择", "序号", "视频片段", "时间戳", "画面文案描述", "评分"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setMinimumHeight(300)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.cellChanged.connect(self._on_cell_changed)
+        self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
+
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 50)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        self.table.setColumnWidth(1, 50)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        self.table.setColumnWidth(2, 200)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.table.setColumnWidth(5, 60)
+
+        self._populate_table()
+        layout.addWidget(self.table, 1)
+
+        btn_row = QHBoxLayout()
+        btn_select_all = QPushButton("全选")
+        btn_select_all.setObjectName("secondary_button")
+        btn_select_all.clicked.connect(self._select_all)
+        btn_deselect_all = QPushButton("取消全选")
+        btn_deselect_all.setObjectName("secondary_button")
+        btn_deselect_all.clicked.connect(self._deselect_all)
+        btn_row.addWidget(btn_select_all)
+        btn_row.addWidget(btn_deselect_all)
+        btn_row.addStretch()
+
+        btn_ok = QPushButton("确定")
+        btn_ok.setObjectName("primary_button")
+        btn_ok.clicked.connect(self.accept)
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setObjectName("secondary_button")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+
+        layout.addLayout(btn_row)
+
+    def _populate_table(self):
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(self.clips))
+        for idx, clip in enumerate(self.clips):
+            path = clip.get("path", "")
+            filename = clip.get("filename", os.path.basename(path) if path else "")
+            time_str = clip.get("time_str", "")
+            desc = clip.get("desc", "")
+            score = clip.get("score", -1.0)
+
+            chk_item = QTableWidgetItem()
+            chk_item.setFlags(chk_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk_item.setCheckState(Qt.Checked if path in self.selected_paths else Qt.Unchecked)
+            chk_item.setData(Qt.UserRole, path)
+            self.table.setItem(idx, 0, chk_item)
+
+            idx_item = QTableWidgetItem(str(idx + 1))
+            idx_item.setFlags(idx_item.flags() & ~Qt.ItemIsEditable)
+            idx_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(idx, 1, idx_item)
+
+            file_item = QTableWidgetItem(filename)
+            file_item.setFlags(file_item.flags() & ~Qt.ItemIsEditable)
+            file_item.setData(Qt.UserRole, path)
+            file_item.setToolTip(path)
+            self.table.setItem(idx, 2, file_item)
+
+            time_item = QTableWidgetItem(time_str)
+            time_item.setFlags(time_item.flags() & ~Qt.ItemIsEditable)
+            time_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(idx, 3, time_item)
+
+            desc_item = QTableWidgetItem(desc)
+            desc_item.setToolTip(desc if desc else "双击可编辑描述")
+            self.table.setItem(idx, 4, desc_item)
+
+            score_text = f"{score:.1f}" if score >= 0 else "—"
+            score_item = QTableWidgetItem(score_text)
+            score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
+            score_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(idx, 5, score_item)
+
+        self.table.blockSignals(False)
+
+    def _on_cell_changed(self, row, col):
+        if col == 0:
+            item = self.table.item(row, 0)
+            if item:
+                path = item.data(Qt.UserRole)
+                if item.checkState() == Qt.Checked:
+                    self.selected_paths.add(path)
+                else:
+                    self.selected_paths.discard(path)
+        elif col == 4:
+            file_item = self.table.item(row, 2)
+            desc_item = self.table.item(row, 4)
+            if file_item and desc_item and 0 <= row < len(self.clips):
+                path = file_item.data(Qt.UserRole)
+                if path:
+                    self.clips[row]["desc"] = desc_item.text().strip()
+
+    def _on_item_double_clicked(self, item):
+        row = item.row()
+        col = item.column()
+        if col == 4:
+            return
+        file_item = self.table.item(row, 2)
+        if file_item and self.play_callback:
+            path = file_item.data(Qt.UserRole)
+            if path:
+                self.play_callback(path)
+
+    def _select_all(self):
+        self.table.blockSignals(True)
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(Qt.Checked)
+                self.selected_paths.add(item.data(Qt.UserRole))
+        self.table.blockSignals(False)
+
+    def _deselect_all(self):
+        self.table.blockSignals(True)
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(Qt.Unchecked)
+                self.selected_paths.discard(item.data(Qt.UserRole))
+        self.table.blockSignals(False)
+
+    def get_selected_paths(self):
+        return list(self.selected_paths)
+
+    def get_clips(self):
+        return self.clips
+

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
                                QProgressBar, QMessageBox, QFrame, QListWidget, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QAbstractItemView, QDoubleSpinBox, QWidget)
+                               QTableWidgetItem, QHeaderView, QAbstractItemView, QDoubleSpinBox, QWidget,
+                               QComboBox)
 from PySide6.QtCore import Qt
 from gui.montage.base_step_view import BaseStepView
 from utils.gui_icons import mdi_button
@@ -63,6 +64,18 @@ class Step1SplitView(BaseStepView):
         self.main_page.min_len_spin.setRange(5, 100)
         self.main_page.min_len_spin.setValue(15)
         split_row.addWidget(self.main_page.min_len_spin)
+
+        split_row.addSpacing(12)
+        split_row.addWidget(QLabel("精华时长:"))
+        self.main_page.spin_highlight_sec = QDoubleSpinBox()
+        self.main_page.spin_highlight_sec.setRange(1.0, 30.0)
+        self.main_page.spin_highlight_sec.setValue(3.0)
+        self.main_page.spin_highlight_sec.setSingleStep(1.0)
+        self.main_page.spin_highlight_sec.setSuffix(" 秒")
+        self.main_page.spin_highlight_sec.setFixedWidth(80)
+        self.main_page.spin_highlight_sec.setToolTip("无法分割的视频，自动挑出多长的精华片段")
+        split_row.addWidget(self.main_page.spin_highlight_sec)
+
         split_row.addStretch()
 
         # Dependencies auto check in UI
@@ -88,41 +101,47 @@ class Step1SplitView(BaseStepView):
             
         split_row.addWidget(self.main_page.dep_status_widget)
 
-        # 单视频镜头分割
+        # 单视频镜头分割（合并挑精华：可分割的先分割，无法分割的自动挑精华）
         self.main_page.btn_split = mdi_button("开始智能镜头分割", "cut")
         self.main_page.btn_split.setObjectName("action_button")
         self.main_page.btn_split.setFixedHeight(35)
+        self.main_page.btn_split.setToolTip(
+            "对列表中所有视频逐个处理：能做镜头分割的先做镜头分割，\n"
+            "无法分割的视频自动挑出一段精华片段，统一写入 splits 目录。")
         self.main_page.btn_split.clicked.connect(self.main_page._start_split)
         split_row.addWidget(self.main_page.btn_split)
 
-        split_row.addSpacing(12)
-        split_row.addWidget(QLabel("精华时长:"))
-        self.main_page.spin_highlight_sec = QDoubleSpinBox()
-        self.main_page.spin_highlight_sec.setRange(1.0, 30.0)
-        self.main_page.spin_highlight_sec.setValue(3.0)
-        self.main_page.spin_highlight_sec.setSingleStep(1.0)
-        self.main_page.spin_highlight_sec.setSuffix(" 秒")
-        self.main_page.spin_highlight_sec.setFixedWidth(80)
-        self.main_page.spin_highlight_sec.setToolTip("从每个视频里挑出多长的精华片段")
-        split_row.addWidget(self.main_page.spin_highlight_sec)
-
-        self.main_page.btn_pick_highlights = mdi_button("批量选精华", "star")
-        self.main_page.btn_pick_highlights.setObjectName("secondary_button")
-        self.main_page.btn_pick_highlights.setFixedHeight(35)
-        self.main_page.btn_pick_highlights.setToolTip(
-            "对列表中所有视频，各挑出一段最佳（清晰+适度运动）片段，"
-            "写入 splits 作为混剪拼接素材")
-        self.main_page.btn_pick_highlights.clicked.connect(self.main_page._start_pick_highlights)
-        split_row.addWidget(self.main_page.btn_pick_highlights)
+        self.main_page.btn_gen_shot_analysis = mdi_button("生成镜头分析", "sparkles")
+        self.main_page.btn_gen_shot_analysis.setObjectName("secondary_button")
+        self.main_page.btn_gen_shot_analysis.setFixedHeight(35)
+        self.main_page.btn_gen_shot_analysis.setToolTip(
+            "调用服务端 /material/score_clip 对每个镜头做 AI 分析，\n"
+            "返回的评分与画面描述自动填入下方表格。")
+        self.main_page.btn_gen_shot_analysis.clicked.connect(self.main_page._gen_shot_analysis)
+        split_row.addWidget(self.main_page.btn_gen_shot_analysis)
         card_layout.addLayout(split_row)
 
-        # Split results table view
-        card_layout.addWidget(QLabel("已分割出的最小单位镜头片段 (双击可播放预览，双击画面描述列可手动修改):"))
+        # Split results table view (with score filter row above)
+        table_header_row = QHBoxLayout()
+        table_header_row.addWidget(QLabel("已分割出的最小单位镜头片段 (双击可播放预览，双击画面描述列可手动修改):"), 1)
+        table_header_row.addStretch()
+        table_header_row.addWidget(QLabel("评分过滤:"))
+        self.main_page.step1_score_filter_combo = QComboBox()
+        self.main_page.step1_score_filter_combo.addItem("不过滤", 0.0)
+        for s in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
+            self.main_page.step1_score_filter_combo.addItem(f"≥ {s} 分", float(s))
+        self.main_page.step1_score_filter_combo.setCurrentIndex(6)  # 默认 ≥ 6 分
+        self.main_page.step1_score_filter_combo.setToolTip(
+            "按评分筛选镜头：达到阈值的镜头才会作为选中素材带入下一步镜头重组。")
+        self.main_page.step1_score_filter_combo.currentIndexChanged.connect(
+            self.main_page._on_step1_score_filter_changed)
+        table_header_row.addWidget(self.main_page.step1_score_filter_combo)
+        card_layout.addLayout(table_header_row)
         self.main_page.split_result_table = QTableWidget()
         self.main_page.split_result_table.setWordWrap(False)
         self.main_page.split_result_table.verticalHeader().setDefaultSectionSize(30)
         self.main_page.split_result_table.setColumnCount(5)
-        self.main_page.split_result_table.setHorizontalHeaderLabels(["序号", "视频片段", "时间戳", "画面文案描述", "评分"])
+        self.main_page.split_result_table.setHorizontalHeaderLabels(["序号", "视频片段", "画面描述", "评分", "分析详情"])
         self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.main_page.split_result_table.setMinimumHeight(180)
         self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)
@@ -132,10 +151,11 @@ class Step1SplitView(BaseStepView):
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Interactive)
         self.main_page.split_result_table.setColumnWidth(1, 180)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.Fixed)
-        self.main_page.split_result_table.setColumnWidth(4, 50)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        self.main_page.split_result_table.setColumnWidth(3, 50)
+        header.setSectionResizeMode(4, QHeaderView.Interactive)
+        self.main_page.split_result_table.setColumnWidth(4, 200)
         header.setStretchLastSection(False)
         
         card_layout.addWidget(self.main_page.split_result_table)
@@ -148,17 +168,18 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)
         nav_row.addWidget(self.main_page.btn_open_splits_dir)
 
-        self.main_page.btn_gen_split_descriptions = mdi_button("生成画面文案描述", "pencil")
-        self.main_page.btn_gen_split_descriptions.setObjectName("secondary_button")
-        self.main_page.btn_gen_split_descriptions.setToolTip(
-            "为每个分割镜头生成文案描述：有字幕的从字幕匹配，无字幕的用视觉AI分析画面")
-        self.main_page.btn_gen_split_descriptions.clicked.connect(self.main_page._gen_split_descriptions)
-        nav_row.addWidget(self.main_page.btn_gen_split_descriptions)
-        
         nav_row.addStretch()
         self.main_page.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.main_page.btn_next_to_step_2.setObjectName("primary_button")
         self.main_page.btn_next_to_step_2.setEnabled(True)
-        self.main_page.btn_next_to_step_2.clicked.connect(lambda: self.main_page._go_to_step(1))
+        self.main_page.btn_next_to_step_2.clicked.connect(self.main_page._go_next_to_step2)
         nav_row.addWidget(self.main_page.btn_next_to_step_2)
+
+        nav_row.addSpacing(12)
+        self.main_page.btn_next_to_beat = mdi_button("🎵 音乐卡点混剪", "music")
+        self.main_page.btn_next_to_beat.setObjectName("action_button")
+        self.main_page.btn_next_to_beat.setEnabled(True)
+        self.main_page.btn_next_to_beat.setToolTip("根据音乐节拍卡点混剪镜头")
+        self.main_page.btn_next_to_beat.clicked.connect(lambda: self.main_page._go_to_step(4))
+        nav_row.addWidget(self.main_page.btn_next_to_beat)
         layout.addLayout(nav_row)

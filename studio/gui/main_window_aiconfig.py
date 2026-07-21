@@ -131,7 +131,10 @@ class AIConfigMixin:
         c = getattr(self, "clip_api_url_input", None)
         if c:
             c.setText(url)
-        # VoxCPM — 不自动填充，保留手动维护（需加 /voxcpm/tts 后缀）
+        # VoxCPM — 追加 /voxcpm/tts 后缀后同步
+        v = getattr(self, "vox_api_url_input", None)
+        if v:
+            v.setText(url + "/voxcpm/tts")
 
     def refresh_llm_page_status(self):
         if not hasattr(self, "env_config_tool"):
@@ -181,9 +184,9 @@ class AIConfigMixin:
             "llm_api_key": "",
             "llm_api_url": "https://api.deepseek.com",
             "llm_model": "deepseek-v4-flash",
-            "llm_vision_api_url": "http://192.168.111.18:8000",
+            "llm_vision_api_url": "http://192.168.111.19:8000",
             "llm_vision_model": "",
-            "compute_server_url": "http://192.168.111.18:8000",
+            "compute_server_url": "http://192.168.111.19:8000",
             "whisper_api_url": "",
             "clip_api_url": "",
             "vox_api_url": "",

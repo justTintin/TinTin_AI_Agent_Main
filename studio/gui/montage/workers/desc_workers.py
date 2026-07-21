@@ -280,3 +280,23 @@ class LocalVisionDescWorker(BaseWorker):
         except Exception as e:
             log.exception("LocalVisionDescWorker 运行发生异常")
             self.error.emit(str(e))
+
+
+class ServerDescribeWorker(BaseWorker):
+    """调用服务端 /material/score_clip 接口生成镜头画面描述文案。"""
+
+    finished = Signal(object)
+
+    def __init__(self, clip_paths):
+        super().__init__()
+        self.clip_paths = clip_paths
+
+    def run(self):
+        try:
+            from utils.montage_client import describe_shots
+            log.info(f"ServerDescribeWorker - 请求服务端分析: {len(self.clip_paths)} 个镜头")
+            result = describe_shots(self.clip_paths)
+            self.finished.emit(result)
+        except Exception as e:
+            log.exception("ServerDescribeWorker 运行发生异常")
+            self.error.emit(str(e))

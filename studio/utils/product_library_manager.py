@@ -1,79 +1,183 @@
 # -*- coding: utf-8 -*-
 """
-产品资料数据层。
+产品资料数据层（服务端存储，通过机器码隔离）。
 
-把鼠标 / 键盘等外设按「品类 → 品牌 → 型号」统一归类，作为后续 AI 文案创作的
-基础数据。基础数据从旺店通 ERP 仓库（库存接口 stock_query）同步而来，
-仅保留基础 + 库存字段（暂不含营销字段）。
+- 所有数据持久化到服务端，客户端不再写本地 JSON。
+- 每台客户端通过机器码（MAC+主机名+CPU 哈希）作为唯一标识。
+- 服务端按机器码隔离每台客户端的产品资料数据。
+- 读操作优先使用服务端响应；服务端不可达时降级到本地缓存。
+- 写操作全部走 HTTP，成功后刷新缓存。
 
-存储：JSON 文件（config.paths.PRODUCT_LIBRARY_FILE），沿用本项目
-account_manager 的「Manager 类 + JSON」持久化模式，不引入数据库。
+保留的常量：FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS（驱动 GUI 表单与字段归一化）。
 """
 import os
 import json
 import time
 
-from config.paths import PRODUCT_LIBRARY_FILE
 from utils.logger_utils import log
 
-# 每个型号条目的字段（基础 + 库存）。FIELDS 同时驱动 GUI 表单与仓库同步映射。
-# key = 内部字段名，label = 中文显示名，multiline = 是否多行文本。
+# ── 字段常量（驱动 GUI 表单与字段归一化） ──────────────────────────────────
 FIELDS = [
-    ("category", "品类", False),         # 鼠标 / 键盘 ...（仓库库存接口无此字段，手动归类）
-    ("brand", "品牌", False),            # ← stock_query.brand_name
-    ("model", "型号/货品名称", False),    # ← stock_query.goods_name
-    ("goods_no", "商家编码", False),      # ← stock_query.goods_no
-    ("spec_no", "规格编码", False),       # ← stock_query.spec_no（SKU 唯一键）
-    ("spec_name", "规格名称", False),     # ← stock_query.spec_name
-    ("barcode", "条形码", False),         # ← stock_query.barcode
-    ("stock_num", "库存量", False),       # ← Σ stock_query.stock_num
-    ("available_num", "可用库存", False), # ← Σ stock_query.avaliable_num
-    ("warehouse", "仓库", False),         # ← stock_query.warehouse_name（多仓汇总）
-    ("notes", "备注", True),              # 手动
-    ("features", "性能参数", True),        # AI挖掘/手动
-    ("selling_points", "核心卖点", True),   # AI挖掘/手动
+    ("category", "品类", False),
+    ("brand", "品牌", False),
+    ("model", "型号/货品名称", False),
+    ("goods_no", "商家编码", False),
+    ("spec_no", "规格编码", False),
+    ("spec_name", "规格名称", False),
+    ("barcode", "条形码", False),
+    ("stock_num", "库存量", False),
+    ("available_num", "可用库存", False),
+    ("warehouse", "仓库", False),
+    ("notes", "备注", True),
+    ("features", "性能参数", True),
+    ("selling_points", "核心卖点", True),
 ]
 
-# 必填字段（手动新增时）
 REQUIRED_FIELDS = ("brand", "model")
 
-# 由仓库同步覆盖的字段。其余字段保留用户手工编辑、再同步不清掉：
-#   category（品类，手工/自动归类）、notes（备注）、model（商品名称/型号，允许手工改名）。
-# 注意：本项目只从仓库读取，绝不回写仓库——这些本地编辑不会同步给 ERP。
 WAREHOUSE_FIELDS = (
     "brand", "goods_no", "spec_no", "spec_name",
     "barcode", "stock_num", "available_num", "warehouse",
 )
 
 
+# ── 配置工具 ────────────────────────────────────────────────────────────────
+
+def _get_server_url() -> str:
+    """读取 ai_config.json 中的统一服务端地址。"""
+    try:
+        from config.paths import AI_CONFIG_FILE
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return ""
+
+
+def _get_machine_id() -> str:
+    """获取机器唯一标识（复用 license 模块的机器码算法）。"""
+    try:
+        from utils.license import get_machine_id
+        return get_machine_id()
+    except Exception:
+        # 降级：用 socket 名哈希
+        import hashlib, socket
+        return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
+
+
+# ── 数据层 ──────────────────────────────────────────────────────────────────
+
 class ProductLibraryManager:
-    def __init__(self, file_path=None):
-        self.file_path = file_path or PRODUCT_LIBRARY_FILE
-        self.items = []
+    """产品资料 HTTP 客户端。
+
+    所有数据由服务端存储，客户端通过机器码标识身份。
+    读操作：优先服务端，降级到本地缓存。
+    写操作：全部走 HTTP，成功后刷新缓存。
+    """
+
+    def __init__(self, machine_id=None, file_path=None):
+        # file_path 参数为兼容保留，不再使用
+        self.machine_id = machine_id or _get_machine_id()
+        self.items: list[dict] = []
+        self._cache_time: float = 0
         self.load()
 
-    # ---------- 持久化 ----------
-    def load(self):
-        if os.path.exists(self.file_path):
+    # ── HTTP 底层 ──────────────────────────────────────────────────────────
+
+    def _base(self) -> str:
+        return f"{_get_server_url().rstrip('/')}/api/product-library/clients/{self.machine_id}"
+
+    def _headers(self) -> dict:
+        return {"X-Machine-ID": self.machine_id, "Content-Type": "application/json"}
+
+    def _http_get(self, path: str, params=None, timeout=10):
+        import requests
+        url = f"{self._base()}{path}"
+        try:
+            r = requests.get(url, headers=self._headers(), params=params, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+            log.warning(f"[ProductLib] GET {url} → HTTP {r.status_code}: {r.text[:150]}")
+        except Exception as e:
+            log.error(f"[ProductLib] GET {url} 失败: {e}")
+        return None
+
+    def _http_post(self, path: str, json_data=None, timeout=15):
+        import requests
+        url = f"{self._base()}{path}"
+        try:
+            r = requests.post(url, headers=self._headers(), json=json_data, timeout=timeout)
+            if r.status_code in (200, 201):
+                return r.json()
+            log.error(f"[ProductLib] POST {url} → HTTP {r.status_code}: {r.text[:200]}")
+            # 把服务端错误消息返回给调用方
             try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    self.items = json.load(f)
-            except Exception as e:
-                log.error(f"加载产品资料失败: {e}")
+                err = r.json()
+                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}
+            except Exception:
+                return {"ok": False, "message": f"HTTP {r.status_code}"}
+        except Exception as e:
+            log.error(f"[ProductLib] POST {url} 失败: {e}")
+            return {"ok": False, "message": f"网络异常: {e}"}
+
+    def _http_put(self, path: str, json_data: dict, timeout=10):
+        import requests
+        url = f"{self._base()}{path}"
+        try:
+            r = requests.put(url, headers=self._headers(), json=json_data, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+            log.error(f"[ProductLib] PUT {url} → HTTP {r.status_code}: {r.text[:200]}")
+            try:
+                err = r.json()
+                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}
+            except Exception:
+                return {"ok": False, "message": f"HTTP {r.status_code}"}
+        except Exception as e:
+            log.error(f"[ProductLib] PUT {url} 失败: {e}")
+            return {"ok": False, "message": f"网络异常: {e}"}
+
+    def _http_delete(self, path: str, timeout=10) -> bool:
+        import requests
+        url = f"{self._base()}{path}"
+        try:
+            r = requests.delete(url, headers=self._headers(), timeout=timeout)
+            if r.status_code == 200:
+                return True
+            log.warning(f"[ProductLib] DELETE {url} → HTTP {r.status_code}")
+        except Exception as e:
+            log.error(f"[ProductLib] DELETE {url} 失败: {e}")
+        return False
+
+    # ── 持久化 ─────────────────────────────────────────────────────────────
+
+    def load(self):
+        """从服务端拉取全量数据到本地缓存。"""
+        data = self._http_get("/items", timeout=15)
+        if data is not None:
+            if isinstance(data, list):
+                self.items = data
+            elif isinstance(data, dict) and isinstance(data.get("items"), list):
+                self.items = data["items"]
+            else:
                 self.items = []
+            self._cache_time = time.time()
         else:
-            self.items = []
+            log.warning("[ProductLib] 服务端不可达，本地缓存为空或保留旧缓存")
+            if self._cache_time == 0:
+                self.items = []
         return self.items
 
     def save(self):
-        try:
-            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                json.dump(self.items, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            log.error(f"保存产品资料失败: {e}")
+        """服务端在每次写操作后自动持久化，此方法为兼容保留（不执行任何操作）。"""
+        pass
 
-    # ---------- 工具 ----------
+    # ── 工具 ───────────────────────────────────────────────────────────────
+
     @staticmethod
     def _normalize(data):
         """把任意 dict 规整成只含已知字段的条目（缺失字段补空字符串）。"""
@@ -83,124 +187,105 @@ class ProductLibraryManager:
     def _norm(s):
         return str(s or "").strip().lower()
 
-    # ---------- 增删改查（手动） ----------
+    # ── 增删改（HTTP） ────────────────────────────────────────────────────
+
     def add_item(self, data):
-        """手动新增型号。返回 (ok, msg, item)。"""
+        """新增型号。返回 (ok, msg, item)。"""
         item = self._normalize(data)
         missing = [lbl for k, lbl, _ in FIELDS if k in REQUIRED_FIELDS and not item[k]]
         if missing:
             return False, f"必填项不能为空：{'、'.join(missing)}", None
-        if self._find_existing(item):
-            return False, "已存在相同 规格编码 或 品牌+型号 的条目，请改用编辑。", None
-        item["id"] = os.urandom(8).hex()
-        item["created_at"] = item["updated_at"] = int(time.time())
-        self.items.append(item)
-        self.save()
-        return True, "已添加。", item
+        result = self._http_post("/items", json_data=item)
+        if result and result.get("ok"):
+            new_item = result.get("item", item)
+            self.items.append(new_item)
+            return True, result.get("message", "已添加。"), new_item
+        return False, result.get("message", "添加失败（服务端错误）。") if result else "服务端不可达。", None
 
     def update_item(self, item_id, data):
-        target = self.get(item_id)
-        if not target:
-            return False, "未找到该条目。", None
+        """修改已有条目。返回 (ok, msg, item)。"""
         new = self._normalize(data)
         missing = [lbl for k, lbl, _ in FIELDS if k in REQUIRED_FIELDS and not new[k]]
         if missing:
             return False, f"必填项不能为空：{'、'.join(missing)}", None
-        dup = self._find_existing(new)
-        if dup and dup["id"] != item_id:
-            return False, "已存在相同 规格编码 或 品牌+型号 的其它条目。", None
-        target.update(new)
-        target["updated_at"] = int(time.time())
-        self.save()
-        return True, "已保存。", target
+        result = self._http_put(f"/items/{item_id}", json_data=new)
+        if result and result.get("ok"):
+            target = self.get(item_id)
+            if target:
+                target.update(new)
+                target["updated_at"] = result.get("updated_at", int(time.time()))
+            return True, result.get("message", "已保存。"), target
+        return False, result.get("message", "保存失败（服务端错误）。") if result else "服务端不可达。", None
 
     def remove_item(self, item_id):
-        before = len(self.items)
-        self.items = [it for it in self.items if it.get("id") != item_id]
-        if len(self.items) != before:
-            self.save()
-            return True
-        return False
+        """删除条目。返回 True/False。"""
+        ok = self._http_delete(f"/items/{item_id}")
+        if ok:
+            self.items = [it for it in self.items if it.get("id") != item_id]
+        return ok
 
     def get(self, item_id):
+        """按 id 查找。"""
         return next((it for it in self.items if it.get("id") == item_id), None)
 
-    def _find_existing(self, item):
-        """按 规格编码（优先）或 品牌+型号 定位已有条目。"""
-        spec = self._norm(item.get("spec_no"))
-        if spec:
-            hit = next((it for it in self.items if self._norm(it.get("spec_no")) == spec), None)
-            if hit:
-                return hit
-        bm = (self._norm(item.get("brand")), self._norm(item.get("model")))
-        return next(
-            (it for it in self.items
-             if (self._norm(it.get("brand")), self._norm(it.get("model"))) == bm
-             and not self._norm(it.get("spec_no"))),
-            None,
-        )
+    # ── 仓库同步（HTTP） ──────────────────────────────────────────────────
 
-    # ---------- 仓库同步 ----------
     def upsert_stocks(self, mapped_items):
-        """
-        批量 upsert 仓库同步来的条目（已映射成 KB 字段的 dict 列表）。
-        以 spec_no 为唯一键：已存在则只刷新 WAREHOUSE_FIELDS（保留手工填的 category/notes），
-        不存在则新增。返回 (added, updated)。
-        """
-        added = updated = 0
-        now = int(time.time())
-        for raw in mapped_items:
-            data = self._normalize(raw)
-            existing = self._find_existing(data)
-            if existing:
-                for k in WAREHOUSE_FIELDS:
-                    existing[k] = data.get(k, existing.get(k, ""))
-                existing["updated_at"] = now
-                updated += 1
-            else:
-                data["id"] = os.urandom(8).hex()
-                data["created_at"] = data["updated_at"] = now
-                self.items.append(data)
-                added += 1
-        self.save()
-        return added, updated
+        """批量 upsert 仓库同步来的条目（服务端执行）。返回 (added, updated)。"""
+        if not mapped_items:
+            return 0, 0
+        result = self._http_post("/upsert", json_data={"items": mapped_items}, timeout=60)
+        if result and result.get("ok"):
+            added = int(result.get("added", 0))
+            updated = int(result.get("updated", 0))
+            self.load()  # 刷新缓存
+            return added, updated
+        return 0, 0
 
     def apply_categories(self, goods_map, fill_brand_if_empty=True):
-        """
-        用 goods_no -> {"category", "brand"} 映射补全品类（仅填空的 category，不覆盖手工值）。
-        返回更新条数。
-        """
-        now = int(time.time())
-        updated = 0
-        for it in self.items:
-            no = self._norm(it.get("goods_no"))
-            if not no:
-                continue
-            info = goods_map.get(it.get("goods_no", "").strip()) or goods_map.get(no)
-            if not info:
-                continue
-            changed = False
-            if not it.get("category", "").strip() and info.get("category"):
-                it["category"] = info["category"]
-                changed = True
-            if fill_brand_if_empty and not it.get("brand", "").strip() and info.get("brand"):
-                it["brand"] = info["brand"]
-                changed = True
-            if changed:
-                it["updated_at"] = now
-                updated += 1
-        if updated:
-            self.save()
-        return updated
+        """批量补全品类（服务端执行）。返回更新条数。"""
+        if not goods_map:
+            return 0
+        result = self._http_post(
+            "/apply-categories",
+            json_data={"goods_map": goods_map, "fill_brand_if_empty": fill_brand_if_empty},
+            timeout=30,
+        )
+        if result and result.get("ok"):
+            updated = int(result.get("updated", 0))
+            self.load()  # 刷新缓存
+            return updated
+        return 0
 
-    # ---------- 检索 / 归类（供文案创作调用） ----------
+    # ── 检索 / 归类 ──────────────────────────────────────────────────────
+
     def all_items(self):
+        """返回所有条目（优先服务端，降级缓存）。"""
+        # 尝试从服务端刷新
+        data = self._http_get("/items", timeout=8)
+        if data is not None:
+            if isinstance(data, list):
+                self.items = data
+            elif isinstance(data, dict) and isinstance(data.get("items"), list):
+                self.items = data["items"]
+            self._cache_time = time.time()
         return list(self.items)
 
     def categories(self):
+        """品类列表。"""
+        result = self._http_get("/categories", timeout=5)
+        if result and isinstance(result.get("categories"), list):
+            return result["categories"]
+        # 本地降级
         return sorted({it.get("category", "").strip() for it in self.items if it.get("category", "").strip()})
 
     def brands(self, category=None):
+        """品牌列表。"""
+        params = {"category": category or ""}
+        result = self._http_get("/brands", params=params, timeout=5)
+        if result and isinstance(result.get("brands"), list):
+            return result["brands"]
+        # 本地降级
         return sorted({
             it.get("brand", "").strip()
             for it in self.items
@@ -208,6 +293,11 @@ class ProductLibraryManager:
         })
 
     def search(self, keyword):
+        """关键词搜索（优先服务端）。"""
+        result = self._http_get("/search", params={"q": keyword}, timeout=8)
+        if result and isinstance(result.get("items"), list):
+            return result["items"]
+        # 本地降级
         kw = self._norm(keyword)
         if not kw:
             return self.all_items()
@@ -219,7 +309,11 @@ class ProductLibraryManager:
         return out
 
     def grouped(self):
-        """返回 {品类: {品牌: [条目...]}}，供 UI 树状展示。"""
+        """返回 {品类: {品牌: [条目...]}} 树状结构（优先服务端）。"""
+        result = self._http_get("/grouped", timeout=8)
+        if result and isinstance(result.get("tree"), dict):
+            return result["tree"]
+        # 本地降级
         tree = {}
         for it in self.items:
             cat = it.get("category", "").strip() or "未归类"
@@ -228,7 +322,7 @@ class ProductLibraryManager:
         return tree
 
     def to_prompt_text(self, item):
-        """把一个型号条目格式化成可注入 LLM prompt 的产品资料文本。"""
+        """本地格式化（纯字符串拼接，无需服务端）。"""
         if not item:
             return ""
         lines = []

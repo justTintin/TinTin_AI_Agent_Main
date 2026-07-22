@@ -3,11 +3,12 @@
 产品资料管理页。
 
 把鼠标 / 键盘等外设按「品类 → 品牌 → 型号」统一归类管理：
-- 基础数据从旺店通 ERP 仓库（库存接口 stock_query）一键同步
+- 基础数据通过服务端产品资料库接口（/api/product-library）一键同步
+  （服务端统一持有旺店通 ERP 凭据并完成 ERP 拉取/归类，客户端不再直连旺店通）
 - 左侧树状浏览 + 关键词搜索
 - 右侧表单可对单条做手工归类 / 补充（品类、备注等）/ 删除
 
-数据层见 utils/product_library_manager.py，仓库客户端见 utils/wdt_client.py。
+数据层见 utils/product_library_manager.py。
 文案创作对接为后续步骤（manager.to_prompt_text 已预留）。
 """
 from PySide6.QtWidgets import (
@@ -20,34 +21,86 @@ from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
 from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS
-from utils.wdt_client import WdtClient, map_stocks_to_kb
+
+
+def _get_server_url() -> str:
+    """读取 ai_config.json 中的统一服务端地址（与 llm_proxy / compile_video_page 一致）。"""
+    try:
+        import json
+        from config.paths import AI_CONFIG_FILE
+        import os
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return ""
 
 
 class StockSyncWorker(BaseWorker):
-    """后台线程：从旺店通仓库拉取库存 + 货品品类，映射成产品资料条目。"""
+    """后台线程：通过服务端产品资料库接口同步产品数据。
+
+    流程（所有存储逻辑均在服务端，按机器码隔离）：
+      1. POST /api/product-library/clients/{machine_id}/sync        触发服务端 ERP 同步
+      2. GET  /api/product-library/clients/{machine_id}/sync/status  轮询同步进度直至完成
+      服务端内部已完成：ERP 拉取 → 库存映射 → 品类归类 → 持久化存储
+      客户端只需在同步结束后刷新本地缓存。
+    """
     phase = Signal(str)              # 阶段文字
     progress = Signal(int, int)      # fetched, total
-    finished = Signal(list, dict)    # mapped KB dicts, goods_no->{category,brand}
+    finished = Signal(int, int)      # added, updated
 
     def run(self):
+        import time
+        import requests
+        from utils.product_library_manager import _get_machine_id
         try:
-            client = WdtClient()
-            self.phase.emit("正在拉取库存...")
-            records, err = client.fetch_all_stocks(
-                progress_cb=lambda f, t: self.progress.emit(f, t)
-            )
-            if err:
-                self.error.emit(err)
+            base = _get_server_url()
+            if not base:
+                self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
                 return
-            mapped = map_stocks_to_kb(records)
-            # 自动归类：按本次涉及的 goods_no 拉取品类映射
-            needed = {m.get("goods_no", "").strip() for m in mapped if m.get("goods_no", "").strip()}
-            self.phase.emit("正在获取品类（货品档案）...")
-            goods_map, _ = client.fetch_goods_class_map(
-                needed_goods_no=needed,
-                progress_cb=lambda n: self.phase.emit(f"正在获取品类... 已识别 {n} 个货品"),
-            )
-            self.finished.emit(mapped, goods_map)
+            machine_id = _get_machine_id()
+            api = f"{base.rstrip('/')}/api/product-library/clients/{machine_id}"
+
+            # 1. 触发服务端 ERP 同步（服务端内部完成 ERP 拉取 + 存储 + 品类归类）
+            self.phase.emit("正在触发服务端 ERP 同步...")
+            try:
+                r = requests.post(f"{api}/sync", timeout=10)
+                if r.status_code == 409:
+                    self.phase.emit("服务端同步进行中，等待完成...")
+                elif r.status_code != 200:
+                    self.error.emit(f"触发同步失败: HTTP {r.status_code} {r.text[:200]}")
+                    return
+            except requests.exceptions.RequestException as e:
+                self.error.emit(f"无法连接服务端: {e}")
+                return
+
+            # 2. 轮询同步状态
+            self.phase.emit("正在等待服务端同步完成...")
+            while True:
+                try:
+                    sr = requests.get(f"{api}/sync/status", timeout=10)
+                    st = sr.json() if sr.status_code == 200 else {}
+                except Exception:
+                    st = {}
+                if not st.get("running", False):
+                    if st.get("error"):
+                        self.error.emit(f"服务端同步出错: {st['error']}")
+                        return
+                    added = int(st.get("added", 0) or 0)
+                    updated = int(st.get("updated", 0) or 0)
+                    self.phase.emit(f"服务端同步完成（新增 {added}、更新 {updated}）")
+                    self.finished.emit(added, updated)
+                    return
+                phase_text = st.get("phase", "") or "同步中..."
+                fetched = int(st.get("fetched", 0) or 0)
+                total = int(st.get("total", 0) or 0)
+                self.phase.emit(phase_text)
+                self.progress.emit(fetched, total)
+                time.sleep(2)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -609,7 +662,7 @@ class ProductLibraryPage(BasePage):
         if self.sync_worker and self.sync_worker.isRunning():
             return
         self.btn_sync.setEnabled(False)
-        self._set_sync_status("正在连接旺店通仓库...")
+        self._set_sync_status("正在连接服务端产品资料库...")
         self.sync_worker = StockSyncWorker()
         self.sync_worker.phase.connect(self._set_sync_status)
         self.sync_worker.progress.connect(self._on_sync_progress)
@@ -618,15 +671,15 @@ class ProductLibraryPage(BasePage):
         self.sync_worker.start()
 
     def _on_sync_progress(self, fetched, total):
-        self._set_sync_status(f"正在拉取库存：{fetched}/{total or '?'}")
+        self._set_sync_status(f"正在同步：{fetched}/{total or '?'}")
 
-    def _on_sync_done(self, mapped_items, goods_map):
+    def _on_sync_done(self, added, updated):
+        """服务端已内部完成 ERP 同步+存储+归类，客户端只需刷新缓存。"""
         self.btn_sync.setEnabled(True)
-        added, updated = self.manager.upsert_stocks(mapped_items)
-        categorized = self.manager.apply_categories(goods_map) if goods_map else 0
+        self.manager.load()  # 从服务端刷新本地缓存
+        total_items = len(self.manager.items)
         self._set_sync_status(
-            f"同步完成：新增 {added}、更新 {updated}、自动归类 {categorized}，"
-            f"共 {len(self.manager.all_items())} 条。"
+            f"同步完成：新增 {added}、更新 {updated}，共 {total_items} 条。"
         )
         self._refresh_combo_choices()
         self.refresh_tree()
@@ -634,11 +687,12 @@ class ProductLibraryPage(BasePage):
     def _on_sync_err(self, err):
         self.btn_sync.setEnabled(True)
         self._set_sync_status(f"同步失败：{err}")
-        log.error(f"仓库库存同步失败: {err}")
+        log.error(f"产品资料库同步失败: {err}")
         QMessageBox.critical(self.parent_widget, "同步失败",
-                             f"从旺店通仓库同步库存失败：\n{err}\n\n"
-                             "请检查 config/erp_config.json 中的 appkey/sid/密钥，"
-                             "以及当前网络出口 IP 是否在旺店通白名单内。")
+                             f"从服务端同步产品资料失败：\n{err}\n\n"
+                             "请检查：\n"
+                             "1. 系统设置中「统一服务端地址」是否正确且服务端已启动；\n"
+                             "2. 服务端是否已配置旺店通 ERP 凭据（由服务端统一持有，客户端无需本地 erp_config.json）。")
 
     # ---------------- 一键挖掘 ----------------
     def _on_mine_all(self):
@@ -735,9 +789,9 @@ class ProductLibraryPage(BasePage):
                                 f"模板已导出到：{path}\n\n请按表头格式填写数据，然后使用「导入表格」功能导入。")
 
     def _on_import_excel(self):
-        """从 Excel 导入产品数据。"""
+        """从 Excel 导入产品数据（通过服务端存储）。"""
         import openpyxl
-        from utils.product_library_manager import ProductLibraryManager, FIELDS
+        from utils.product_library_manager import FIELDS
         path, _ = QFileDialog.getOpenFileName(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")
@@ -748,9 +802,8 @@ class ProductLibraryPage(BasePage):
             ws = wb.active
             rows = list(ws.iter_rows(min_row=2, values_only=True))
             field_keys = [f[0] for f in FIELDS]
-            imported = 0
+            valid_items = []
             errors = []
-            mgr = ProductLibraryManager()
             for i, row in enumerate(rows, 2):
                 if all(v is None or str(v).strip() == "" for v in row):
                     continue  # 跳过空行
@@ -758,16 +811,16 @@ class ProductLibraryPage(BasePage):
                 for col, key in enumerate(field_keys):
                     val = row[col] if col < len(row) else None
                     item[key] = str(val).strip() if val is not None else ""
-                # 至少要有分类+品牌
                 if not item.get("category") or not item.get("brand"):
                     errors.append(f"第 {i} 行：分类和品牌不能为空")
                     continue
-                mgr.upsert_stocks([item])
-                imported += 1
-            if imported > 0:
-                mgr.save()
+                valid_items.append(item)
+            # 批量 upsert 到服务端
+            added = updated = 0
+            if valid_items:
+                added, updated = self.manager.upsert_stocks(valid_items)
                 self.refresh_tree()
-            msg = f"导入完成：成功 {imported} 条"
+            msg = f"导入完成：成功 {added + updated} 条（新增 {added}、更新 {updated}）" if valid_items else "未导入任何数据。"
             if errors:
                 msg += f"\n失败 {len(errors)} 条：\n" + "\n".join(errors[:10])
                 if len(errors) > 10:

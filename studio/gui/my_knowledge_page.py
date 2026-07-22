@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import time as _time
+from functools import partial
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
@@ -521,6 +522,7 @@ class MyKnowledgePage(BasePage):
         filter_row = QHBoxLayout()
         filter_row.setSpacing(4)
         self._style_filter_btns = {}
+        self._style_filter_updating = False   # 防止编程式 setChecked 递归触发
         _filter_opts = [
             ("全部", None), ("账号风格", "account"), ("内容类型", "content_type"),
             ("产品品类", "product_cat"), ("行业垂类", "industry"),
@@ -532,7 +534,9 @@ class MyKnowledgePage(BasePage):
             btn.setChecked(dim is None)
             btn.setFixedHeight(28)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _chk, d=dim: self._set_style_filter(d))
+            # 用 toggled（无重载信号）+ functools.partial 替代 clicked+lambda，
+            # 规避 PySide6 6.6 重载信号解析及 lambda GC 导致槽函数失效的问题
+            btn.toggled.connect(partial(self._on_style_filter_toggled, dim))
             filter_row.addWidget(btn)
             self._style_filter_btns[dim] = btn
         filter_row.addStretch()
@@ -1105,10 +1109,29 @@ class MyKnowledgePage(BasePage):
 
     # ══════════════ 风格化过滤 ══════════════
 
+    def _on_style_filter_toggled(self, dim, checked):
+        """过滤按钮 toggled 回调：仅在按钮被选中时切换过滤维度。"""
+        if self._style_filter_updating:
+            return
+        if not checked:
+            # 用户点击了已选中的按钮 → 恢复选中（始终保留一个激活标签）
+            if dim == self._style_filter_dim:
+                self._style_filter_updating = True
+                try:
+                    self._style_filter_btns[dim].setChecked(True)
+                finally:
+                    self._style_filter_updating = False
+            return
+        self._set_style_filter(dim)
+
     def _set_style_filter(self, dim):
         self._style_filter_dim = dim
-        for d, btn in self._style_filter_btns.items():
-            btn.setChecked(d == dim)
+        self._style_filter_updating = True
+        try:
+            for d, btn in self._style_filter_btns.items():
+                btn.setChecked(d == dim)
+        finally:
+            self._style_filter_updating = False
         self.refresh_stylization_list()
 
     # ══════════════ 批量转文字 ══════════════

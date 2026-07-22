@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
-"""步骤 5（独立分支）: 音乐卡点混剪界面
+"""卡点成片界面（一键成片 → 卡点成片 tab）
 
-流程：选择音乐 → 播放预览 → 服务端检测节拍 → 显示声波波形图(含节拍线) → 分配镜头 → 确认合成
+流程：选择音乐 + 镜头素材目录 → 检测卡点（/audio/beatmap 返回片段）→ 按片段生成 N 个波形卡片
+      → 服务端 /montage/beat 逐段生成视频并下载 → 播放片段即播放对应卡点视频（右侧视频预览）→ 导出视频
+本界面控件挂载到 BeatMontageController（充当 main_page 角色）。
 """
 import os
 import struct
 import subprocess
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QFrame, QComboBox, QWidget, QScrollArea, QSizePolicy, QSlider)
-from PySide6.QtCore import Qt, Signal, QRectF, QThread
+                               QFrame, QComboBox, QWidget, QScrollArea, QSizePolicy, QSpinBox,
+                               QProgressBar)
+from PySide6.QtCore import Qt, Signal, QRectF, QThread, QUrl, QPointF
 from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QFont,
-                           QLinearGradient, QPolygonF)
+                           QLinearGradient, QPolygonF, QPixmap)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtCore import QUrl, QPointF
+from PySide6.QtMultimediaWidgets import QVideoWidget
 from gui.montage.base_step_view import BaseStepView
 from utils.gui_icons import mdi_button
 from utils.logger_utils import log
@@ -74,118 +77,93 @@ class WaveformPeakWorker(QThread):
 
 
 # ═══════════════════════════════════════════════════════════
-# 声波波形图控件（青色振幅 + 白色节拍线 + 播放游标）
+# 片段波形控件（青色振幅 + 白色节拍线 + 可拖拽红色游标把手）
 # ═══════════════════════════════════════════════════════════
 
-class WaveformBeatWidget(QWidget):
-    """真实声波波形图控件。
+class SegmentWaveformWidget(QWidget):
+    """单个音乐片段的波形控件。
 
-    视觉样式（参照专业音频编辑器）：
-    - 青色(cyan)填充振幅波形，上下对称
-    - 白色细横线为波形边界
-    - 白色竖线标记节拍点
-    - 红色竖线 + 三角为当前播放位置
-    - 音乐过长时显示局部窗口，随播放位置/滑块自动滚动
+    - 青色渐变填充振幅波形（从整轨峰值按片段时间范围切片渲染）
+    - 白色竖线标记片段内节拍点 + 底部槽位标签
+    - 红色加高游标 + 顶部把手，可拖动作为进度条定位
+    - 点击槽位（非游标）触发镜头分配
     """
-    slot_clicked = Signal(int)  # 用户点击某个节拍区间
+    slot_clicked = Signal(int)        # 点击某个槽位（全局槽位索引）
+    seek_requested = Signal(float)    # 拖动游标请求定位（绝对时间秒）
 
-    # 可视窗口时长（秒），超过此时长的音乐将滚动显示
-    VIEW_WINDOW_SEC = 30.0
+    HANDLE_HIT = 14  # 游标把手命中容差(px)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(140)
-        self.setMaximumHeight(180)
+        self.setMinimumHeight(96)
+        self.setMaximumHeight(120)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMouseTracking(True)
 
-        self._peaks = []          # 整轨峰值列表 (0~1)
-        self._duration = 0.0      # 音频总时长(秒)
-        self._beats = []          # 节拍时间戳(秒)
-        self._clip_slots = []     # 每个节拍间隔对应的镜头文件名
-        self._play_pos = 0.0      # 当前播放位置(秒)
-        self._view_start = 0.0    # 可视窗口起始时间(秒)
+        self._full_peaks = []       # 整轨峰值 (0~1)
+        self._full_duration = 0.0   # 整轨时长(秒)
+        self._seg_start = 0.0       # 片段起始(秒)
+        self._seg_end = 0.0         # 片段结束(秒)
+        self._beats = []            # 片段内节拍绝对时间(秒)
+        self._slot_start = 0        # 片段首个槽位的全局索引
+        self._slot_names = []       # 各槽位已分配镜头文件名
+        self._play_pos = 0.0        # 当前播放位置(绝对秒)
+        self._dragging = False
+        self._slots_enabled = True  # 是否启用槽位标签与点击分配
 
     # ─── 数据接口 ───
 
-    def set_peaks(self, peaks, duration):
-        """设置波形峰值数据和总时长。"""
-        self._peaks = peaks
-        self._duration = duration
-        self._view_start = 0.0
+    def set_data(self, full_peaks, full_duration, seg_start, seg_end, beats_abs, slot_start):
+        self._full_peaks = list(full_peaks or [])
+        self._full_duration = float(full_duration or 0.0)
+        self._seg_start = float(seg_start)
+        self._seg_end = float(seg_end)
+        self._beats = sorted(float(b) for b in (beats_abs or []))
+        self._slot_start = int(slot_start)
+        self._slot_names = [""] * max(0, len(self._beats) - 1)
+        self._play_pos = self._seg_start
         self.update()
 
-    def set_beats(self, beats, duration=0):
-        """设置节拍时间戳列表。"""
-        self._beats = sorted(beats)
-        if duration and duration > 0:
-            self._duration = duration
-        elif not self._duration and beats:
-            self._duration = beats[-1] + 1.0
-        self._clip_slots = [""] * max(0, len(self._beats) - 1)
-        self.update()
-
-    def set_clip_slot(self, slot_idx, clip_name):
-        if 0 <= slot_idx < len(self._clip_slots):
-            self._clip_slots[slot_idx] = clip_name
+    def set_slot_name(self, local_idx, name):
+        if 0 <= local_idx < len(self._slot_names):
+            self._slot_names[local_idx] = name or ""
             self.update()
 
-    def set_all_clip_slots(self, names):
-        self._clip_slots = list(names)
+    def set_all_slot_names(self, names):
+        self._slot_names = list(names or [])
         self.update()
 
-    def set_play_position(self, pos_sec):
-        """设置播放位置并自动滚动可视窗口。"""
-        self._play_pos = pos_sec
-        self._ensure_visible(pos_sec)
+    def set_play_pos(self, abs_sec):
+        self._play_pos = float(abs_sec)
         self.update()
 
-    def seek_view(self, pos_sec):
-        """滑块拖动时定位视图中心。"""
-        self._ensure_visible(pos_sec)
+    def set_slots_enabled(self, enabled):
+        """启用/禁用槽位标签显示与点击分配（整体预览卡片禁用）。"""
+        self._slots_enabled = bool(enabled)
         self.update()
 
-    def _ensure_visible(self, t):
-        """确保时间 t 在可视窗口内，必要时滚动。"""
-        view_w = min(self.VIEW_WINDOW_SEC, self._duration) if self._duration > 0 else self.VIEW_WINDOW_SEC
-        if self._duration <= view_w:
-            self._view_start = 0.0
-            return
-        margin = view_w * 0.15
-        if t < self._view_start + margin:
-            self._view_start = max(0.0, t - view_w * 0.5)
-        elif t > self._view_start + view_w - margin:
-            self._view_start = min(t - view_w * 0.5, self._duration - view_w)
-        self._view_start = max(0.0, self._view_start)
-
-    def _view_window(self):
-        """返回 (start_sec, end_sec) 可视时间窗口。"""
-        if self._duration <= 0:
-            return 0.0, 1.0
-        view_w = min(self.VIEW_WINDOW_SEC, self._duration)
-        start = max(0.0, min(self._view_start, self._duration - view_w))
-        return start, start + view_w
+    # ─── 坐标换算 ───
 
     def _time_to_x(self, t, w):
-        start, end = self._view_window()
-        span = end - start
+        span = self._seg_end - self._seg_start
         if span <= 0:
             return 0
-        return (t - start) / span * w
+        return (t - self._seg_start) / span * w
 
     def _x_to_time(self, x, w):
-        start, end = self._view_window()
+        span = self._seg_end - self._seg_start
         if w <= 0:
-            return start
-        return start + x / w * (end - start)
+            return self._seg_start
+        t = self._seg_start + x / w * span
+        return max(self._seg_start, min(self._seg_end, t))
 
-    def _x_to_slot(self, x, w):
-        """根据 x 坐标返回节拍槽位索引。"""
+    def _x_to_global_slot(self, x, w):
         if len(self._beats) < 2:
             return -1
         t = self._x_to_time(x, w)
         for i in range(len(self._beats) - 1):
             if self._beats[i] <= t < self._beats[i + 1]:
-                return i
+                return self._slot_start + i
         return -1
 
     # ─── 绘制 ───
@@ -195,55 +173,36 @@ class WaveformBeatWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, False)
         w, h = self.width(), self.height()
 
-        # 深色背景
         painter.fillRect(0, 0, w, h, QColor("#141422"))
 
-        pad_top, pad_bottom = 8, 24  # 底部留空给槽位标签
+        pad_top, pad_bottom = 12, 18
         wave_top = pad_top
         wave_bottom = h - pad_bottom
         wave_h = wave_bottom - wave_top
         mid_y = wave_top + wave_h / 2
 
-        if not self._peaks and not self._beats:
-            painter.setPen(QColor("#666"))
-            painter.setFont(QFont("Microsoft YaHei", 10))
-            painter.drawText(self.rect(), Qt.AlignCenter, "选择音乐后自动加载波形，检测节拍后显示节拍线")
-            painter.end()
-            return
-
-        # ── 白色边界线（上下） ──
-        painter.setPen(QPen(QColor(255, 255, 255, 180), 1))
+        # 白色边界线
+        painter.setPen(QPen(QColor(255, 255, 255, 160), 1))
         painter.drawLine(0, wave_top, w, wave_top)
         painter.drawLine(0, wave_bottom, w, wave_bottom)
 
-        # ── 青色波形填充 ──
-        if self._peaks:
-            start_t, end_t = self._view_window()
-            n_peaks = len(self._peaks)
-            # 峰值索引范围
-            idx_start = int(start_t / self._duration * n_peaks) if self._duration > 0 else 0
-            idx_end = int(end_t / self._duration * n_peaks) + 1 if self._duration > 0 else n_peaks
+        # 青色波形（从整轨峰值按片段范围切片）
+        if self._full_peaks and self._full_duration > 0 and self._seg_end > self._seg_start:
+            n_peaks = len(self._full_peaks)
+            idx_start = int(self._seg_start / self._full_duration * n_peaks)
+            idx_end = int(self._seg_end / self._full_duration * n_peaks) + 1
             idx_start = max(0, min(idx_start, n_peaks - 1))
             idx_end = max(idx_start + 1, min(idx_end, n_peaks))
-
-            visible_peaks = self._peaks[idx_start:idx_end]
-            n_vis = len(visible_peaks)
+            vis = self._full_peaks[idx_start:idx_end]
+            n_vis = len(vis)
             if n_vis > 0:
-                # 构建波形多边形（上半部分从左到右，下半部分从右到左）
                 poly = QPolygonF()
                 half_h = wave_h / 2 - 2
                 step_x = w / max(1, n_vis - 1) if n_vis > 1 else w
-
-                for i, p in enumerate(visible_peaks):
-                    x = i * step_x
-                    amp = p * half_h
-                    poly.append(QPointF(x, mid_y - amp))
+                for i, p in enumerate(vis):
+                    poly.append(QPointF(i * step_x, mid_y - p * half_h))
                 for i in range(n_vis - 1, -1, -1):
-                    x = i * step_x
-                    amp = visible_peaks[i] * half_h
-                    poly.append(QPointF(x, mid_y + amp))
-
-                # 青色渐变填充
+                    poly.append(QPointF(i * step_x, mid_y + vis[i] * half_h))
                 gradient = QLinearGradient(0, wave_top, 0, wave_bottom)
                 gradient.setColorAt(0.0, QColor(0, 220, 220, 220))
                 gradient.setColorAt(0.5, QColor(0, 180, 200, 255))
@@ -251,57 +210,322 @@ class WaveformBeatWidget(QWidget):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QBrush(gradient))
                 painter.drawPolygon(poly)
-
-                # 中线
-                painter.setPen(QPen(QColor(0, 255, 255, 100), 1))
+                painter.setPen(QPen(QColor(0, 255, 255, 90), 1))
                 painter.drawLine(0, int(mid_y), w, int(mid_y))
 
-        # ── 白色节拍竖线 ──
+        # 白色节拍竖线 + 底部槽位标签
         if self._beats:
             painter.setPen(QPen(QColor(255, 255, 255, 200), 1))
             for bt in self._beats:
                 x = self._time_to_x(bt, w)
                 if 0 <= x <= w:
                     painter.drawLine(int(x), wave_top, int(x), wave_bottom)
+            if self._slots_enabled:
+                painter.setFont(QFont("Consolas", 7))
+                for i in range(len(self._beats) - 1):
+                    x1 = self._time_to_x(self._beats[i], w)
+                    x2 = self._time_to_x(self._beats[i + 1], w)
+                    if x2 < 0 or x1 > w or (x2 - x1) < 18:
+                        continue
+                    name = self._slot_names[i] if i < len(self._slot_names) else ""
+                    label = (name[:8] if name else str(self._slot_start + i + 1))
+                    painter.setPen(QColor("#2ecc71") if name else QColor("#888"))
+                    cx = (max(0, x1) + min(w, x2)) / 2
+                    painter.drawText(QRectF(cx - 30, wave_bottom + 2, 60, 14),
+                                     Qt.AlignCenter, label)
 
-            # 底部节拍间隔标签（镜头槽位）
-            painter.setFont(QFont("Consolas", 7))
-            for i in range(len(self._beats) - 1):
-                x1 = self._time_to_x(self._beats[i], w)
-                x2 = self._time_to_x(self._beats[i + 1], w)
-                if x2 < 0 or x1 > w or (x2 - x1) < 20:
-                    continue
-                name = self._clip_slots[i] if i < len(self._clip_slots) else ""
-                label = name[:8] if name else str(i + 1)
-                color = QColor("#2ecc71") if name else QColor("#888")
-                painter.setPen(color)
-                cx = (max(0, x1) + min(w, x2)) / 2
-                painter.drawText(QRectF(cx - 30, wave_bottom + 4, 60, 16),
-                                 Qt.AlignCenter, label)
-
-        # ── 红色播放游标 ──
-        if self._duration > 0:
+        # 红色播放游标（加粗 + 大号顶部把手，可拖动）
+        if self._seg_end > self._seg_start:
             px = self._time_to_x(self._play_pos, w)
             if 0 <= px <= w:
-                painter.setPen(QPen(QColor("#e74c3c"), 2))
-                painter.drawLine(int(px), wave_top - 4, int(px), wave_bottom + 4)
-                # 顶部三角
-                painter.setBrush(QBrush(QColor("#e74c3c")))
+                handle_top = 1
+                handle_bottom = h - 1
+                painter.setPen(QPen(QColor("#e74c3c"), 3))
+                painter.drawLine(int(px), handle_top + 12, int(px), handle_bottom)
+                # 顶部把手（大三角 + 圆点）
                 painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(QColor("#e74c3c")))
                 painter.drawPolygon([
-                    QPointF(px - 5, wave_top - 8),
-                    QPointF(px + 5, wave_top - 8),
-                    QPointF(px, wave_top - 1),
+                    QPointF(px - 9, handle_top),
+                    QPointF(px + 9, handle_top),
+                    QPointF(px, handle_top + 13),
                 ])
+                painter.drawEllipse(QPointF(px, handle_top), 4, 4)
 
         painter.end()
 
+    # ─── 鼠标交互：拖动游标定位 / 点击槽位分配 ───
+
     def mousePressEvent(self, event):
-        idx = self._x_to_slot(int(event.position().x()), self.width())
-        if idx >= 0:
-            self.slot_clicked.emit(idx)
+        x = int(event.position().x())
+        w = self.width()
+        px = self._time_to_x(self._play_pos, w)
+        if abs(x - px) <= self.HANDLE_HIT:
+            self._dragging = True
+            self.seek_requested.emit(self._x_to_time(x, w))
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging:
+            self._dragging = False
+            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))
+            return
+        if self._slots_enabled:
+            idx = self._x_to_global_slot(int(event.position().x()), self.width())
+            if idx >= 0:
+                self.slot_clicked.emit(idx)
+        super().mouseReleaseEvent(event)
+
+
+# ═══════════════════════════════════════════════════════════
+# 片段卡片（波形 + 播放按钮 + 进度条 + 内置播放器）
+# ═══════════════════════════════════════════════════════════
+
+class BeatSegmentCard(QFrame):
+    """单个音乐片段卡片：波形图 + 播放控制 + 进度条，内置独立 QMediaPlayer。
+
+    播放时仅播放本片段 [seg_start, seg_end] 区间，超出自动暂停并回退到起点。
+    """
+    slot_clicked = Signal(int)             # 全局槽位索引
+    play_started = Signal(object)          # 本卡片开始播放（card）
+    position_changed = Signal(object, float)  # 播放进度（card, 绝对秒）
+    finished = Signal(object)              # 播放到片段末尾（card）
+
+    def __init__(self, index, seg_start, seg_end, beats_abs, slot_start, music_path,
+                 is_full_track=False, parent=None):
+        super().__init__(parent)
+        self.index = index
+        self.seg_start = float(seg_start)
+        self.seg_end = float(seg_end)
+        self.beats = list(beats_abs or [])
+        self.slot_start = int(slot_start)
+        self.music_path = music_path
+        self.is_full_track = is_full_track
+        # 服务端下载的卡点视频（有则优先播放视频，否则回退播放音乐）
+        self._video_path = None
+        self._in_video_mode = False
+        self._current_src = None
+
+        self.setObjectName("segment_card")
+        self.setStyleSheet(
+            "#segment_card { border: 1px solid #33334d; border-radius: 6px; background: #1b1b28; }")
+
+        vbox = QVBoxLayout(self)
+        vbox.setContentsMargins(8, 6, 8, 6)
+        vbox.setSpacing(4)
+
+        # 标题行
+        if is_full_track:
+            n_bp = max(0, len(self.beats) - 1)
+            if n_bp > 0:
+                title_text = (f"🎵 整体卡点（全曲 {self.seg_start:.1f}s ~ {self.seg_end:.1f}s，"
+                              f"共 {n_bp} 个卡点）")
+            else:
+                title_text = f"🎵 全曲预览（{self.seg_start:.1f}s ~ {self.seg_end:.1f}s）"
         else:
-            super().mousePressEvent(event)
+            title_text = (f"🎬 片段 {index + 1}：{self.seg_start:.1f}s ~ {self.seg_end:.1f}s  "
+                          f"({self.seg_end - self.seg_start:.1f}s) → 将生成视频 {index + 1}")
+        title = QLabel(title_text)
+        title.setStyleSheet("color: #f9c74f; font-weight: bold; font-size: 12px;")
+        vbox.addWidget(title)
+
+        # 主体：左侧按钮列 + 右侧（波形 + 时间）
+        body = QHBoxLayout()
+        body.setSpacing(8)
+
+        left_col = QVBoxLayout()
+        left_col.setSpacing(6)
+        left_col.addStretch()
+        self.btn_play = QPushButton("▶")
+        self.btn_play.setObjectName("secondary_button")
+        if is_full_track:
+            self.btn_play.setFixedSize(64, 64)
+            self.btn_play.setStyleSheet("font-size: 22px;")
+        else:
+            self.btn_play.setFixedSize(56, 42)
+            self.btn_play.setStyleSheet("font-size: 16px;")
+        self.btn_play.clicked.connect(self.toggle_play)
+        left_col.addWidget(self.btn_play)
+
+        left_col.addStretch()
+        body.addLayout(left_col)
+
+        right_col = QVBoxLayout()
+        right_col.setSpacing(1)
+        self.waveform = SegmentWaveformWidget()
+        if is_full_track:
+            self.waveform.set_slots_enabled(False)
+        self.waveform.slot_clicked.connect(lambda gi: self.slot_clicked.emit(gi))
+        self.waveform.seek_requested.connect(self._on_seek_requested)
+        right_col.addWidget(self.waveform, 1)
+
+        # 时间刻度条（波形图最下方，一行字高度，黄色字体）
+        self.time_lbl = QLabel(self._fmt_range(self.seg_start))
+        self.time_lbl.setFixedHeight(18)
+        self.time_lbl.setAlignment(Qt.AlignCenter)
+        self.time_lbl.setStyleSheet(
+            "background: #2d2d44; color: #f9c74f; font-family: Consolas; "
+            "font-size: 9pt; font-weight: bold; border-radius: 3px;")
+        right_col.addWidget(self.time_lbl)
+        body.addLayout(right_col, 1)
+
+        vbox.addLayout(body, 1)
+
+        # 内置播放器
+        self._audio_output = QAudioOutput()
+        self._audio_output.setVolume(0.8)
+        self._player = QMediaPlayer()
+        self._player.setAudioOutput(self._audio_output)
+        self._player.positionChanged.connect(self._on_position)
+        self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._player.errorOccurred.connect(
+            lambda e, s: log.warning(f"[音乐卡点] 片段{index + 1}播放错误: {s}"))
+        if music_path and os.path.isfile(music_path):
+            self._player.setSource(QUrl.fromLocalFile(music_path))
+            self._current_src = music_path
+
+    # ─── 视频支持（服务端下载的卡点视频）───
+
+    def set_video(self, path):
+        """设置本片段已下载的卡点视频，播放时优先使用该视频。"""
+        self._video_path = path
+
+    def set_video_output(self, video_widget):
+        """将播放器视频输出路由到共享预览控件（QVideoWidget）。"""
+        try:
+            self._player.setVideoOutput(video_widget)
+        except Exception as e:
+            log.warning(f"[音乐卡点] 设置视频输出失败: {e}")
+
+    # ─── 播放控制 ───
+
+    def toggle_play(self):
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self.pause()
+        else:
+            self.play()
+
+    def play(self):
+        use_video = bool(self._video_path and os.path.isfile(self._video_path))
+        self._in_video_mode = use_video
+        if use_video:
+            # 视频模式：播放服务端下载的卡点视频（含画面+音乐），
+            # 视频时间轴 0 对应波形 seg_start
+            if self._current_src != self._video_path:
+                self._player.setSource(QUrl.fromLocalFile(self._video_path))
+                self._current_src = self._video_path
+                self._player.setPosition(0)
+                self.waveform.set_play_pos(self.seg_start)
+                self.time_lbl.setText(self._fmt_range(self.seg_start))
+        else:
+            # 音乐模式：播放整轨音乐的 [seg_start, seg_end] 区间，
+            # 游标不在本片段内（初始 0 / 已到片段末尾）先回到片段起点
+            pos = self._player.position() / 1000.0
+            if pos < self.seg_start - 0.05 or pos >= self.seg_end - 0.05:
+                self._player.setPosition(int(self.seg_start * 1000))
+                self.waveform.set_play_pos(self.seg_start)
+                self.time_lbl.setText(self._fmt_range(self.seg_start))
+        self._player.play()
+        self.btn_play.setText("⏸")
+        self.play_started.emit(self)
+
+    def pause(self):
+        self._player.pause()
+        self.btn_play.setText("▶")
+
+    def stop(self):
+        self._player.stop()
+        self.btn_play.setText("▶")
+
+    def is_playing(self):
+        return self._player.playbackState() == QMediaPlayer.PlayingState
+
+    def seek(self, abs_sec):
+        abs_sec = max(self.seg_start, min(self.seg_end, float(abs_sec)))
+        if self._in_video_mode:
+            # 视频模式：播放器位置是相对值（0 = seg_start）
+            self._player.setPosition(int((abs_sec - self.seg_start) * 1000))
+        else:
+            self._player.setPosition(int(abs_sec * 1000))
+        self.waveform.set_play_pos(abs_sec)
+        self.time_lbl.setText(self._fmt_range(abs_sec))
+
+    def position(self):
+        return self._player.position() / 1000.0
+
+    # ─── 槽位 ───
+
+    def set_slot(self, local_idx, clip_name):
+        self.waveform.set_slot_name(local_idx, clip_name)
+
+    def refresh_slots_from_assignments(self, assignments):
+        n = max(0, len(self.beats) - 1)
+        names = []
+        for j in range(n):
+            gi = self.slot_start + j
+            path = assignments[gi] if gi < len(assignments) else None
+            names.append(os.path.basename(path) if path else "")
+        self.waveform.set_all_slot_names(names)
+
+    # ─── 内部回调 ───
+
+    def _on_position(self, pos_ms):
+        if self._in_video_mode:
+            # 视频模式：pos 是相对值（0 = seg_start），映射回波形绝对时间
+            rel = pos_ms / 1000.0
+            seg_dur = self.seg_end - self.seg_start
+            if rel >= seg_dur - 0.05:
+                self._player.pause()
+                self._player.setPosition(0)
+                self.btn_play.setText("▶")
+                self.waveform.set_play_pos(self.seg_start)
+                self.time_lbl.setText(self._fmt_range(self.seg_start))
+                self.finished.emit(self)
+                return
+            abs_sec = self.seg_start + rel
+            self.waveform.set_play_pos(abs_sec)
+            self.time_lbl.setText(self._fmt_range(abs_sec))
+            self.position_changed.emit(self, abs_sec)
+            return
+        # 音乐模式：pos 是整轨绝对时间
+        abs_sec = pos_ms / 1000.0
+        if abs_sec >= self.seg_end:
+            self._player.pause()
+            self._player.setPosition(int(self.seg_start * 1000))
+            self.btn_play.setText("▶")
+            self.waveform.set_play_pos(self.seg_start)
+            self.time_lbl.setText(self._fmt_range(self.seg_start))
+            self.finished.emit(self)
+            return
+        self.waveform.set_play_pos(abs_sec)
+        self.time_lbl.setText(self._fmt_range(abs_sec))
+        self.position_changed.emit(self, abs_sec)
+
+    def _on_media_status(self, status):
+        if status == QMediaPlayer.EndOfMedia:
+            self.btn_play.setText("▶")
+            self.finished.emit(self)
+
+    def _on_seek_requested(self, abs_sec):
+        self.seek(abs_sec)
+        self.position_changed.emit(self, abs_sec)
+
+    def _fmt_range(self, abs_sec):
+        rel = max(0.0, abs_sec - self.seg_start)
+        total = self.seg_end - self.seg_start
+        return f"{self._fmt(rel)} / {self._fmt(total)}"
+
+    @staticmethod
+    def _fmt(sec):
+        s = int(sec)
+        return f"{s // 60}:{s % 60:02d}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -314,37 +538,23 @@ class StepBeatView(BaseStepView):
     def __init__(self, main_page):
         super().__init__(main_page)
         self._peak_worker = None
+        self._full_peaks = []
+        self._full_duration = 0.0
+        self._music_path = ""
+        self.segment_cards = []
+        self._active_card = None
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(8)
 
         card = QFrame()
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(14)
-
-        # ── 标题 ──
-        title_row = QHBoxLayout()
-        title_lbl = QLabel("🎵 音乐卡点混剪")
-        title_lbl.setStyleSheet("font-size: 14pt; font-weight: bold; color: #f9c74f;")
-        title_row.addWidget(title_lbl)
-        title_row.addStretch()
-        card_layout.addLayout(title_row)
-
-        # ── 已选分割镜头行（顶部，可重新选择）──
-        clips_row = QHBoxLayout()
-        self.main_page.beat_clips_info_lbl = QLabel("已选分割镜头: 0 个")
-        self.main_page.beat_clips_info_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
-        clips_row.addWidget(self.main_page.beat_clips_info_lbl)
-        clips_row.addStretch()
-        self.main_page.btn_beat_reselect = mdi_button("重新选择镜头", "refresh")
-        self.main_page.btn_beat_reselect.setObjectName("secondary_button")
-        self.main_page.btn_beat_reselect.clicked.connect(self.main_page._open_clip_selection_dialog)
-        clips_row.addWidget(self.main_page.btn_beat_reselect)
-        card_layout.addLayout(clips_row)
+        card_layout.setSpacing(6)
+        card_layout.setContentsMargins(12, 8, 12, 10)
 
         # ── 音乐选择行 ──
         music_row = QHBoxLayout()
@@ -353,131 +563,151 @@ class StepBeatView(BaseStepView):
         self.main_page.beat_music_path.setPlaceholderText("选择音乐文件（mp3/wav/m4a/aac/flac）...")
         self.main_page.beat_music_path.setReadOnly(True)
         music_row.addWidget(self.main_page.beat_music_path, 1)
-
         self.main_page.btn_beat_browse = QPushButton("选择音乐")
         self.main_page.btn_beat_browse.setObjectName("secondary_button")
         self.main_page.btn_beat_browse.clicked.connect(self.main_page._beat_browse_music)
         music_row.addWidget(self.main_page.btn_beat_browse)
+        card_layout.addLayout(music_row)
 
-        self.main_page.btn_beat_detect = mdi_button("检测节拍", "audio")
+        # ── 镜头素材 + 导出目录行 ──
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(QLabel("镜头素材:"))
+        self.main_page.beat_materials_input = QLineEdit()
+        self.main_page.beat_materials_input.setPlaceholderText("选择一个或多个视频素材（服务端自动分割并指派）...")
+        self.main_page.beat_materials_input.setReadOnly(True)
+        dir_row.addWidget(self.main_page.beat_materials_input, 1)
+        btn_sel_materials = QPushButton("选择素材")
+        btn_sel_materials.setObjectName("secondary_button")
+        btn_sel_materials.clicked.connect(self.main_page._beat_select_materials)
+        dir_row.addWidget(btn_sel_materials)
+        dir_row.addSpacing(16)
+        dir_row.addWidget(QLabel("导出目录:"))
+        self.main_page.beat_out_dir_input = QLineEdit()
+        self.main_page.beat_out_dir_input.setPlaceholderText("可选，导出时选择")
+        self.main_page.beat_out_dir_input.setReadOnly(True)
+        dir_row.addWidget(self.main_page.beat_out_dir_input, 1)
+        btn_browse_out = QPushButton("选择目录")
+        btn_browse_out.setObjectName("secondary_button")
+        btn_browse_out.clicked.connect(self.main_page._beat_browse_out_dir)
+        dir_row.addWidget(btn_browse_out)
+        card_layout.addLayout(dir_row)
+
+        # ── 参数设置行（已选镜头 + 时长 → 转场 → 视频个数 → 检测卡点，设置整体右移）──
+        settings_row = QHBoxLayout()
+        self.main_page.beat_clips_info_lbl = QLabel("镜头素材: 0 个")
+        self.main_page.beat_clips_info_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        settings_row.addWidget(self.main_page.beat_clips_info_lbl)
+        settings_row.addStretch()
+        settings_row.addWidget(QLabel("时长:"))
+        self.main_page.beat_duration_combo = QComboBox()
+        for _sec in (15, 30, 45, 60, 90, 120, 180):
+            self.main_page.beat_duration_combo.addItem(f"{_sec} 秒", _sec)
+        self.main_page.beat_duration_combo.setCurrentIndex(1)  # 默认 30 秒
+        self.main_page.beat_duration_combo.setFixedWidth(80)
+        self.main_page.beat_duration_combo.setToolTip("每个卡点片段的时长（检测时传给服务端）")
+        settings_row.addWidget(self.main_page.beat_duration_combo)
+
+        settings_row.addSpacing(12)
+        settings_row.addWidget(QLabel("转场:"))
+        self.main_page.beat_transition_combo = QComboBox()
+        self.main_page.beat_transition_combo.addItem("淡入淡出", "fade")
+        self.main_page.beat_transition_combo.addItem("溶解", "dissolve")
+        self.main_page.beat_transition_combo.addItem("左擦除", "wipeleft")
+        self.main_page.beat_transition_combo.addItem("右擦除", "wiperight")
+        self.main_page.beat_transition_combo.addItem("上滑动", "slideup")
+        self.main_page.beat_transition_combo.addItem("下滑动", "slidedown")
+        self.main_page.beat_transition_combo.addItem("径向扫过", "radial")
+        self.main_page.beat_transition_combo.addItem("随机", "random")
+        self.main_page.beat_transition_combo.addItem("硬切", "none")
+        self.main_page.beat_transition_combo.setFixedWidth(100)
+        settings_row.addWidget(self.main_page.beat_transition_combo)
+
+        settings_row.addSpacing(12)
+        settings_row.addWidget(QLabel("视频个数:"))
+        self.main_page.beat_video_count_spin = QSpinBox()
+        self.main_page.beat_video_count_spin.setRange(1, 10)
+        self.main_page.beat_video_count_spin.setValue(3)
+        self.main_page.beat_video_count_spin.setFixedWidth(60)
+        self.main_page.beat_video_count_spin.setToolTip("要生成的卡点视频数量（服务端返回对应片段数）")
+        settings_row.addWidget(self.main_page.beat_video_count_spin)
+
+        settings_row.addSpacing(12)
+        self.main_page.btn_beat_detect = mdi_button("检测卡点", "audio")
         self.main_page.btn_beat_detect.setObjectName("primary_button")
         self.main_page.btn_beat_detect.setEnabled(False)
         self.main_page.btn_beat_detect.clicked.connect(self.main_page._beat_start_detect)
-        music_row.addWidget(self.main_page.btn_beat_detect)
-        card_layout.addLayout(music_row)
+        settings_row.addWidget(self.main_page.btn_beat_detect)
+        card_layout.addLayout(settings_row)
 
-        # ── 声波波形图（含节拍线）──
-        self.main_page.beat_waveform = WaveformBeatWidget()
-        self.main_page.beat_waveform.slot_clicked.connect(self.main_page._beat_on_slot_clicked)
-        card_layout.addWidget(self.main_page.beat_waveform)
+        # ── 全曲预览（单独一行，占满整行宽度）──
+        self.full_card_container = QWidget()
+        self.full_card_layout = QVBoxLayout(self.full_card_container)
+        self.full_card_layout.setContentsMargins(0, 0, 0, 0)
+        self.full_card_layout.setSpacing(0)
+        card_layout.addWidget(self.full_card_container)
 
-        # ── 播放控制行（波形下方）──
-        player_row = QHBoxLayout()
-        self.main_page.btn_beat_play = QPushButton("▶")
-        self.main_page.btn_beat_play.setObjectName("secondary_button")
-        self.main_page.btn_beat_play.setFixedSize(40, 32)
-        self.main_page.btn_beat_play.setEnabled(False)
-        self.main_page.btn_beat_play.clicked.connect(self._toggle_play)
-        player_row.addWidget(self.main_page.btn_beat_play)
+        # ── 主体：左侧片段卡片滚动区 + 右侧播放器面板 ──
+        body = QHBoxLayout()
+        body.setSpacing(10)
 
-        self.main_page.beat_time_lbl = QLabel("0:00")
-        self.main_page.beat_time_lbl.setFixedWidth(45)
-        self.main_page.beat_time_lbl.setStyleSheet("font-family: Consolas; font-size: 10pt;")
-        player_row.addWidget(self.main_page.beat_time_lbl)
+        # 片段卡片滚动区
+        self.cards_scroll = QScrollArea()
+        self.cards_scroll.setWidgetResizable(True)
+        self.cards_scroll.setStyleSheet(
+            "QScrollArea { border: 1px solid #333; border-radius: 4px; background: #16161f; }")
+        self.cards_container = QWidget()
+        self.cards_layout = QVBoxLayout(self.cards_container)
+        self.cards_layout.setContentsMargins(8, 8, 8, 8)
+        self.cards_layout.setSpacing(10)
+        self.cards_layout.addStretch()
+        self.cards_scroll.setWidget(self.cards_container)
+        body.addWidget(self.cards_scroll, 1)
 
-        self.main_page.beat_duration_lbl = QLabel("/ 0:00")
-        self.main_page.beat_duration_lbl.setFixedWidth(55)
-        self.main_page.beat_duration_lbl.setObjectName("muted_text")
-        self.main_page.beat_duration_lbl.setStyleSheet("font-family: Consolas;")
-        player_row.addWidget(self.main_page.beat_duration_lbl)
-        player_row.addStretch()
-        card_layout.addLayout(player_row)
+        # 右侧：播放器面板（幻灯片预览，位于三个片段右侧）
+        preview_panel = QFrame()
+        preview_panel.setObjectName("preview_panel")
+        preview_panel.setFixedWidth(300)
+        preview_panel.setStyleSheet(
+            "#preview_panel { border: 1px solid #333; border-radius: 4px; background: #16161f; }")
+        pvbox = QVBoxLayout(preview_panel)
+        pvbox.setContentsMargins(8, 8, 8, 8)
+        pvbox.setSpacing(6)
+        self.main_page.beat_preview_title = QLabel("预览播放器")
+        self.main_page.beat_preview_title.setStyleSheet("color: #f9c74f; font-weight: bold;")
+        pvbox.addWidget(self.main_page.beat_preview_title)
+        # 视频预览（播放服务端下载的卡点视频）
+        self.main_page.beat_preview_video = QVideoWidget()
+        self.main_page.beat_preview_video.setMinimumSize(280, 360)
+        self.main_page.beat_preview_video.setStyleSheet("background: #000;")
+        pvbox.addWidget(self.main_page.beat_preview_video, 1)
+        body.addWidget(preview_panel)
 
-        # ── 大定位滑动条（快速定位当前播放点）──
-        self.main_page.beat_progress_slider = QSlider(Qt.Horizontal)
-        self.main_page.beat_progress_slider.setRange(0, 1000)
-        self.main_page.beat_progress_slider.setValue(0)
-        self.main_page.beat_progress_slider.setEnabled(False)
-        self.main_page.beat_progress_slider.setMinimumHeight(30)
-        self.main_page.beat_progress_slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 10px; background: #2d2d44; border-radius: 5px; }
-            QSlider::handle:horizontal { width: 20px; height: 20px; margin: -5px 0;
-                                         background: #00d4dc; border-radius: 10px; }
-            QSlider::sub-page:horizontal { background: #00a8b0; border-radius: 5px; }
-        """)
-        self.main_page.beat_progress_slider.sliderPressed.connect(self._on_slider_pressed)
-        self.main_page.beat_progress_slider.sliderReleased.connect(self._on_slider_released)
-        self.main_page.beat_progress_slider.sliderMoved.connect(self._on_slider_moved)
-        card_layout.addWidget(self.main_page.beat_progress_slider)
+        card_layout.addLayout(body, 1)
 
-        # 初始化播放器
-        self._audio_output = QAudioOutput()
-        self._audio_output.setVolume(0.8)
-        self._player = QMediaPlayer()
-        self._player.setAudioOutput(self._audio_output)
-        self._player.positionChanged.connect(self._on_player_position)
-        self._player.durationChanged.connect(self._on_player_duration)
-        self._player.mediaStatusChanged.connect(self._on_media_status)
-        self._player.errorOccurred.connect(self._on_player_error)
-        self._slider_pressed = False
-
-        # ── 镜头槽位详情列表 ──
-        self.main_page.beat_slots_scroll = QScrollArea()
-        self.main_page.beat_slots_scroll.setWidgetResizable(True)
-        self.main_page.beat_slots_scroll.setFixedHeight(160)
-        self.main_page.beat_slots_scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #333; border-radius: 4px; background: #1e1e2e; }")
-        self.main_page.beat_slots_container = QWidget()
-        self.main_page.beat_slots_layout = QVBoxLayout(self.main_page.beat_slots_container)
-        self.main_page.beat_slots_layout.setContentsMargins(8, 8, 8, 8)
-        self.main_page.beat_slots_layout.setSpacing(4)
-        self.main_page.beat_slots_scroll.setWidget(self.main_page.beat_slots_container)
-        card_layout.addWidget(self.main_page.beat_slots_scroll)
+        # ── 进度条（服务端生成视频时显示）──
+        self.main_page.progress_bar = QProgressBar()
+        self.main_page.progress_bar.setVisible(False)
+        self.main_page.progress_bar.setRange(0, 100)
+        self.main_page.progress_bar.setValue(0)
+        card_layout.addWidget(self.main_page.progress_bar)
 
         # ── 状态信息 ──
-        self.main_page.beat_status_lbl = QLabel("请先选择音乐文件，然后点击「检测节拍」")
+        self.main_page.beat_status_lbl = QLabel("请先选择音乐文件，然后点击「检测卡点」")
         self.main_page.beat_status_lbl.setObjectName("muted_text")
         card_layout.addWidget(self.main_page.beat_status_lbl)
 
-        # ── 镜头分配工具栏 ──
-        assign_row = QHBoxLayout()
-        self.main_page.btn_beat_auto_assign = mdi_button("自动分配镜头", "refresh")
-        self.main_page.btn_beat_auto_assign.setObjectName("secondary_button")
-        self.main_page.btn_beat_auto_assign.setEnabled(False)
-        self.main_page.btn_beat_auto_assign.setToolTip("将已勾选的镜头按评分顺序自动填入各节拍槽位")
-        self.main_page.btn_beat_auto_assign.clicked.connect(self.main_page._beat_auto_assign)
-        assign_row.addWidget(self.main_page.btn_beat_auto_assign)
+        layout.addWidget(card, 1)
 
-        assign_row.addSpacing(12)
-        assign_row.addWidget(QLabel("转场:"))
-        self.main_page.beat_transition_combo = QComboBox()
-        self.main_page.beat_transition_combo.addItem("淡入淡出", "dissolve")
-        self.main_page.beat_transition_combo.addItem("模糊", "fade")
-        self.main_page.beat_transition_combo.addItem("左移", "slideleft")
-        self.main_page.beat_transition_combo.addItem("右移", "slideright")
-        self.main_page.beat_transition_combo.addItem("推进", "zoomin")
-        self.main_page.beat_transition_combo.setFixedWidth(100)
-        assign_row.addWidget(self.main_page.beat_transition_combo)
-
-        assign_row.addStretch()
-
-        self.main_page.btn_beat_confirm = mdi_button("确认卡点合成", "check")
+        # ── 导航行（导出视频靠右）──
+        nav_row = QHBoxLayout()
+        nav_row.addStretch()
+        self.main_page.btn_beat_confirm = mdi_button("导出视频", "check")
         self.main_page.btn_beat_confirm.setObjectName("action_button")
         self.main_page.btn_beat_confirm.setFixedHeight(35)
         self.main_page.btn_beat_confirm.setEnabled(False)
-        self.main_page.btn_beat_confirm.clicked.connect(self.main_page._beat_confirm_compose)
-        assign_row.addWidget(self.main_page.btn_beat_confirm)
-        card_layout.addLayout(assign_row)
-
-        layout.addWidget(card, 1)
-
-        # ── 导航行 ──
-        nav_row = QHBoxLayout()
-        btn_back = mdi_button("上一步：镜头分割", "left")
-        btn_back.setObjectName("secondary_button")
-        btn_back.clicked.connect(lambda: self.main_page._go_to_step(0))
-        nav_row.addWidget(btn_back)
-        nav_row.addStretch()
+        self.main_page.btn_beat_confirm.setToolTip("将生成的卡点视频导出到目录并打开")
+        self.main_page.btn_beat_confirm.clicked.connect(self.main_page._beat_export_videos)
+        nav_row.addWidget(self.main_page.btn_beat_confirm)
         layout.addLayout(nav_row)
 
     # ──────────────── 波形提取 ────────────────
@@ -489,82 +719,144 @@ class StepBeatView(BaseStepView):
             self._peak_worker.wait(2000)
         self._peak_worker = WaveformPeakWorker(path, self)
         self._peak_worker.peaks_ready.connect(self._on_peaks_ready)
-        self._peak_worker.error.connect(
-            lambda e: log.warning(f"[音乐卡点] {e}"))
+        self._peak_worker.error.connect(lambda e: log.warning(f"[音乐卡点] {e}"))
         self._peak_worker.start()
 
     def _on_peaks_ready(self, peaks, duration):
-        """波形数据就绪，更新波形图。"""
-        self.main_page.beat_waveform.set_peaks(peaks, duration)
-        if duration > 0:
-            self.main_page.beat_duration_lbl.setText(f"/ {self._fmt_time(int(duration * 1000))}")
+        """波形数据就绪：缓存整轨峰值，未检测卡点时构建单张整体预览卡片。"""
+        self._full_peaks = peaks
+        self._full_duration = duration
+        # 尚未检测卡点（无片段）→ 构建一张整体预览卡片用于音乐试听
+        if not getattr(self.main_page, "_beat_segments", []):
+            self.build_segment_cards([], peaks, duration, full_beats=[])
 
-    # ──────────────── 音乐播放控制 ────────────────
+    # ──────────────── 片段卡片管理 ────────────────
+
+    def build_segment_cards(self, segments, full_peaks, full_duration, full_beats=None):
+        """根据片段列表重建波形卡片（检测完成后调用）。
+
+        full_beats: 若不为 None，则额外在最上方生成一张「整体卡点」全曲预览卡片
+                    （仅音乐播放，红色游标可拖动定位，不可分配槽位）。
+        """
+        self._full_peaks = list(full_peaks or [])
+        self._full_duration = float(full_duration or 0.0)
+        # 清空旧卡片（全曲预览行 + 片段滚动区）
+        for c in list(self.segment_cards):
+            c.stop()
+            c.deleteLater()
+        self.segment_cards = []
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        while self.full_card_layout.count():
+            item = self.full_card_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        # 整体卡点卡片（全曲预览，单独一行，仅音乐播放，不可分配槽位）
+        if full_beats is not None:
+            full_end = self._full_duration if self._full_duration > 0 else (
+                full_beats[-1] + 1.0 if full_beats else 0.0)
+            full_card = BeatSegmentCard(
+                index=-1,
+                seg_start=0.0,
+                seg_end=full_end,
+                beats_abs=full_beats,
+                slot_start=0,
+                music_path=self._music_path,
+                is_full_track=True,
+            )
+            full_card.waveform.set_data(
+                self._full_peaks, self._full_duration, 0.0, full_end, full_beats, 0)
+            full_card.play_started.connect(self._on_card_play_started)
+            full_card.position_changed.connect(self._on_card_position)
+            self.full_card_layout.addWidget(full_card)
+            self.segment_cards.append(full_card)
+
+        for i, seg in enumerate(segments):
+            card = BeatSegmentCard(
+                index=i,
+                seg_start=seg.get("start", 0.0),
+                seg_end=seg.get("end", 0.0),
+                beats_abs=seg.get("beats", []),
+                slot_start=seg.get("slot_start", 0),
+                music_path=self._music_path,
+            )
+            # 素材由服务端自动指派：槽位仅显示节拍线，不可点击分配
+            card.waveform.set_slots_enabled(False)
+            card.waveform.set_data(
+                self._full_peaks, self._full_duration,
+                seg.get("start", 0.0), seg.get("end", 0.0),
+                seg.get("beats", []), seg.get("slot_start", 0))
+            card.play_started.connect(self._on_card_play_started)
+            card.position_changed.connect(self._on_card_position)
+            self.cards_layout.addWidget(card)
+            self.segment_cards.append(card)
+        self.cards_layout.addStretch()
+
+    def update_slot(self, global_idx, clip_name):
+        """某全局槽位分配变化时，刷新对应卡片。"""
+        for c in self.segment_cards:
+            if c.is_full_track:
+                continue
+            n = max(0, len(c.beats) - 1)
+            local = global_idx - c.slot_start
+            if 0 <= local < n:
+                c.set_slot(local, clip_name)
+                return
+
+    def refresh_all_slots(self, assignments):
+        for c in self.segment_cards:
+            if not c.is_full_track:
+                c.refresh_slots_from_assignments(assignments)
+
+    def _on_card_play_started(self, card):
+        """同一时刻只允许一个卡片播放。"""
+        self._active_card = card
+        for c in self.segment_cards:
+            if c is not card and c.is_playing():
+                c.pause()
+        self.main_page._beat_on_card_play_started(card)
+
+    def _on_card_position(self, card, abs_sec):
+        if self._active_card is card:
+            self.main_page._beat_on_card_position(card, abs_sec)
+
+    # ──────────────── 音乐加载 ────────────────
 
     def load_music(self, path):
-        """加载音乐文件到播放器并提取波形。"""
+        """加载音乐文件并提取波形。"""
         if not path or not os.path.isfile(path):
             return
-        self._player.setSource(QUrl.fromLocalFile(path))
-        self.main_page.btn_beat_play.setEnabled(True)
-        self.main_page.beat_progress_slider.setEnabled(True)
+        self._music_path = path
+        # 新音乐：重置上一首的节拍数据、片段
+        self.main_page._beat_data_full = []
+        self.main_page._beat_data = []
+        self.main_page._beat_clips = []
+        self.main_page._beat_segments = []
+        self.main_page._beat_clip_assignments = []
+        self.main_page._beat_music_range = (0.0, 0.0)
+        self.main_page.btn_beat_confirm.setEnabled(False)
+        self.main_page.btn_beat_detect.setEnabled(True)
+        self.main_page.beat_status_lbl.setText(f"已选择: {os.path.basename(path)}，点击「检测卡点」")
+        # 清空旧卡片（待波形/节拍就绪后重建）
+        for c in list(self.segment_cards):
+            c.stop()
+            c.deleteLater()
+        self.segment_cards = []
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self.cards_layout.addStretch()
+        while self.full_card_layout.count():
+            item = self.full_card_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
         # 后台提取波形
         self.extract_waveform(path)
-
-    def _toggle_play(self):
-        """播放/暂停切换。"""
-        if self._player.playbackState() == QMediaPlayer.PlayingState:
-            self._player.pause()
-            self.main_page.btn_beat_play.setText("▶")
-        else:
-            self._player.play()
-            self.main_page.btn_beat_play.setText("⏸")
-
-    def _on_player_position(self, pos_ms):
-        """播放进度更新。"""
-        if self._slider_pressed:
-            return
-        dur = self._player.duration() or 1
-        self.main_page.beat_progress_slider.setValue(int(pos_ms / dur * 1000))
-        self.main_page.beat_time_lbl.setText(self._fmt_time(pos_ms))
-        # 更新波形图播放游标（自动滚动视图）
-        self.main_page.beat_waveform.set_play_position(pos_ms / 1000.0)
-
-    def _on_player_duration(self, dur_ms):
-        """总时长更新。"""
-        self.main_page.beat_duration_lbl.setText(f"/ {self._fmt_time(dur_ms)}")
-
-    def _on_media_status(self, status):
-        """播放结束处理。"""
-        if status == QMediaPlayer.EndOfMedia:
-            self.main_page.btn_beat_play.setText("▶")
-            self.main_page.beat_progress_slider.setValue(0)
-            self.main_page.beat_waveform.set_play_position(0)
-
-    def _on_player_error(self, error, error_string):
-        """播放器错误处理。"""
-        log.error(f"[音乐卡点] 播放器错误: {error} - {error_string}")
-        self.main_page.btn_beat_play.setText("▶")
-        self.main_page.beat_status_lbl.setText(f"❌ 播放失败: {error_string}")
-
-    def _on_slider_pressed(self):
-        self._slider_pressed = True
-
-    def _on_slider_moved(self, value):
-        """拖动滑块时实时预览定位（波形视图跟随）。"""
-        dur = self._player.duration() or 1
-        pos_sec = value / 1000 * dur / 1000.0
-        self.main_page.beat_time_lbl.setText(self._fmt_time(int(value / 1000 * dur)))
-        self.main_page.beat_waveform.seek_view(pos_sec)
-
-    def _on_slider_released(self):
-        self._slider_pressed = False
-        dur = self._player.duration() or 1
-        pos = int(self.main_page.beat_progress_slider.value() / 1000 * dur)
-        self._player.setPosition(pos)
-
-    @staticmethod
-    def _fmt_time(ms):
-        """毫秒转 m:ss 格式。"""
-        s = int(ms / 1000)
-        return f"{s // 60}:{s % 60:02d}"

@@ -31,30 +31,24 @@ class Step2ConcatView(BaseStepView):
         row_src.addWidget(self.main_page.concat_src_dir_input)
         card_layout.addLayout(row_src)
 
-        # Loaded video clips count + re-select button
-        list_header_row = QHBoxLayout()
-        self.main_page.clip_count_info_lbl = QLabel("待排列镜头个数: 0  (已勾选: 0)")
-        self.main_page.clip_count_info_lbl.setStyleSheet("font-weight: bold; font-size: 11pt; color: #f1c40f;")
-        list_header_row.addWidget(self.main_page.clip_count_info_lbl)
 
-        list_header_row.addSpacing(12)
-        self.main_page.btn_reselect_clips = QPushButton("重新选择镜头")
-        self.main_page.btn_reselect_clips.setObjectName("secondary_button")
-        self.main_page.btn_reselect_clips.clicked.connect(self.main_page._open_clip_selection_dialog)
-        list_header_row.addWidget(self.main_page.btn_reselect_clips)
-
-        list_header_row.addStretch()
-        card_layout.addLayout(list_header_row)
+        # ── 参数设置组（统一边框背景）──
+        params_group = QFrame()
+        params_group.setStyleSheet(
+            "QFrame { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); "
+            "border-radius: 6px; }")
+        params_group_layout = QVBoxLayout(params_group)
+        params_group_layout.setContentsMargins(12, 10, 12, 10)
+        params_group_layout.setSpacing(10)
 
         # Parameters row 1
         row_params1 = QHBoxLayout()
         row_params1.addWidget(QLabel("排列逻辑:"))
         self.main_page.logic_combo = QComboBox()
-        self.main_page.logic_combo.addItem("随机洗牌", "random")
-        self.main_page.logic_combo.addItem("🎯 按文案智能匹配", "script")
+        self.main_page.logic_combo.addItem("智能重排", "random")
+        # self.main_page.logic_combo.addItem("🎯 按文案智能匹配", "script")  # 暂时隐藏
         self.main_page.logic_combo.setToolTip(
-            "随机洗牌：镜头随机排列组合。\n"
-            "按文案智能匹配：粘贴口播文案（每行一句），LLM 为每行挑选画面最贴合的镜头并按行序排列。")
+            "智能重排：镜头智能排列组合。")
         self.main_page.logic_combo.currentIndexChanged.connect(self.main_page._on_logic_combo_changed)
         row_params1.addWidget(self.main_page.logic_combo)
 
@@ -79,6 +73,18 @@ class Step2ConcatView(BaseStepView):
         row_params1.addWidget(self.main_page.duration_limit_combo)
 
         row_params1.addSpacing(15)
+        self.main_page.lbl_batch_count = QLabel("生成视频数量 (1-10):")
+        row_params1.addWidget(self.main_page.lbl_batch_count)
+        self.main_page.batch_count_spin = QSpinBox()
+        self.main_page.batch_count_spin.setRange(1, 10)
+        self.main_page.batch_count_spin.setValue(3)
+        self.main_page.batch_count_spin.setFixedWidth(60)
+        row_params1.addWidget(self.main_page.batch_count_spin)
+        self.main_page.batch_count_hint_lbl = QLabel("推荐: 1")
+        self.main_page.batch_count_hint_lbl.setObjectName("muted_text")
+        row_params1.addWidget(self.main_page.batch_count_hint_lbl)
+
+        row_params1.addSpacing(15)
         self.main_page.lbl_randomness = QLabel("混编随机度:")
         row_params1.addWidget(self.main_page.lbl_randomness)
         self.main_page.randomness_combo = QComboBox()
@@ -91,24 +97,10 @@ class Step2ConcatView(BaseStepView):
         self.main_page.randomness_combo.setVisible(False)
 
         row_params1.addStretch()
-        card_layout.addLayout(row_params1)
+        params_group_layout.addLayout(row_params1)
 
         # Parameters row 2
         row_params2 = QHBoxLayout()
-        self.main_page.lbl_batch_count = QLabel("生成视频数量 (1-10):")
-        row_params2.addWidget(self.main_page.lbl_batch_count)
-        self.main_page.batch_count_spin = QSpinBox()
-        self.main_page.batch_count_spin.setRange(1, 10)
-        self.main_page.batch_count_spin.setValue(3)
-        self.main_page.batch_count_spin.setFixedWidth(60)
-        row_params2.addWidget(self.main_page.batch_count_spin)
-
-        self.main_page.batch_count_hint_lbl = QLabel("推荐: 1")
-        self.main_page.batch_count_hint_lbl.setObjectName("muted_text")
-        row_params2.addWidget(self.main_page.batch_count_hint_lbl)
-        row_params2.addStretch()
-
-        row_params2.addSpacing(15)
         row_params2.addWidget(QLabel("转场动画:"))
         self.main_page.transition_combo = QComboBox()
         self.main_page.transition_combo.addItem("模糊", "fade")
@@ -124,9 +116,9 @@ class Step2ConcatView(BaseStepView):
         self.main_page.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
         row_params2.addWidget(self.main_page.transition_combo)
         row_params2.addStretch()
-        row_params2.addStretch()
+        params_group_layout.addLayout(row_params2)
 
-        card_layout.addLayout(row_params2)
+        card_layout.addWidget(params_group)
 
         # 智能匹配模式的口播文案输入框
         self.main_page.match_script_edit = QTextEdit()
@@ -138,8 +130,12 @@ class Step2ConcatView(BaseStepView):
         self.main_page.match_script_edit.setVisible(False)
         card_layout.addWidget(self.main_page.match_script_edit)
 
-        # ── 脚本工具栏：AI 生成文案 + 镜头重组（两种模式共用）──
+        # ── 脚本工具栏：待排列镜头个数 + AI 生成文案 + 镜头重组（两种模式共用）──
         script_toolbar = QHBoxLayout()
+        self.main_page.clip_count_info_lbl = QLabel("待排列镜头个数: 0  (已勾选: 0)")
+        self.main_page.clip_count_info_lbl.setStyleSheet("font-weight: bold; font-size: 11pt; color: #f1c40f;")
+        script_toolbar.addWidget(self.main_page.clip_count_info_lbl)
+        script_toolbar.addSpacing(20)
         self.main_page.btn_gen_script = mdi_button("🤖 AI 生成文案", "sparkles")
         self.main_page.btn_gen_script.setObjectName("primary_button")
         self.main_page.btn_gen_script.setFixedHeight(35)
@@ -174,7 +170,7 @@ class Step2ConcatView(BaseStepView):
         left_vbox.addLayout(assembled_header)
 
         self.main_page.assembled_clips_list_widget = QListWidget()
-        self.main_page.assembled_clips_list_widget.setFixedHeight(120)
+        self.main_page.assembled_clips_list_widget.setMinimumHeight(180)
         self.main_page.assembled_clips_list_widget.setTextElideMode(Qt.ElideRight)
         self.main_page.assembled_clips_list_widget.itemDoubleClicked.connect(self.main_page._on_assembled_double_clicked)
         self.main_page.assembled_clips_list_widget.itemClicked.connect(self.main_page._on_assembled_item_clicked)

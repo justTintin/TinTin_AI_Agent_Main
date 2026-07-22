@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """智能混剪 - 拼接/合成阶段 Worker：标准化转码拼接、配音烧字幕、最终混音。"""
 import os
+import random
 import shutil
 import subprocess
+import traceback
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -22,7 +24,7 @@ class VideoConcatWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)  # Emits list of generated files absolute paths
 
-    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade"):
+    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade", beat_times=None, music_path="", music_range=None):
         super().__init__()
         self.selected_clips = selected_clips
         self.output_dir = output_dir
@@ -34,6 +36,10 @@ class VideoConcatWorker(BaseWorker):
         self.randomness = randomness
         self.selected_descriptions_list = selected_descriptions_list
         self.transition = transition or "fade"
+        # 音乐卡点模式参数：beat_times=相对裁剪后音频的节拍点，music_range=[起始,结束]绝对时间
+        self.beat_times = list(beat_times or [])
+        self.music_path = music_path or ""
+        self.music_range = list(music_range or [])
 
     def _probe_resolution(self, clip):
         """用 ffprobe 读取视频显示分辨率（已考虑旋转），失败返回 None。"""
@@ -210,6 +216,77 @@ class VideoConcatWorker(BaseWorker):
         return subprocess.run(cmd, capture_output=True, text=True,
                               creationflags=subprocess.CREATE_NO_WINDOW)
 
+    def _compose_beat_video(self, ffmpeg_path, norm_clips, out_file, temp_dir):
+        """音乐卡点合成：每个镜头裁剪到对应节拍区间时长，硬切拼接（保证卡点精准），
+        再叠加裁剪后的音乐片段（替换原声）。
+
+        beat_times: 相对裁剪后音频的节拍点（第一个为 0），相邻节拍形成一个镜头槽位。
+        music_range: [起始秒, 结束秒] 绝对时间，从原音乐裁剪出对应片段。
+        """
+        beats = self.beat_times
+        n_slots = max(0, len(beats) - 1)
+        if n_slots <= 0 or not norm_clips:
+            raise RuntimeError("卡点合成失败：节拍点或镜头为空")
+
+        # 镜头数与槽位数对齐（不足循环填充，多余截断）
+        seq = []
+        for i in range(n_slots):
+            seq.append(norm_clips[i % len(norm_clips)])
+
+        # 1) 每个镜头裁剪到节拍区间时长（硬切，不加转场以保证卡点精准）
+        cut_paths = []
+        total_dur = 0.0
+        for i in range(n_slots):
+            dur = max(0.1, beats[i + 1] - beats[i])
+            src = seq[i]
+            cut = os.path.join(temp_dir, f"beatcut_{i:04d}.mp4")
+            cmd = [ffmpeg_path, "-y", "-i", src,
+                   "-t", f"{dur:.3f}",
+                   "-an",  # 去除原声，后续统一叠加音乐
+                   *get_video_encode_args(crf=20, preset="veryfast"),
+                   "-pix_fmt", "yuv420p",
+                   cut]
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            if r.returncode != 0 or not os.path.isfile(cut):
+                log.warning(f"卡点裁剪镜头失败: {r.stderr[-200:]}")
+                raise RuntimeError(f"卡点裁剪第 {i+1} 个镜头失败")
+            cut_paths.append(cut)
+            total_dur += dur
+
+        # 2) concat 拼接（硬切）
+        concat_txt = os.path.join(temp_dir, "beat_concat.txt")
+        with open(concat_txt, "w", encoding="utf-8") as f:
+            for c in cut_paths:
+                f.write(f"file '{c.replace(chr(92), '/')}'\n")
+        noaudio = os.path.join(temp_dir, "beat_noaudio.mp4")
+        cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
+               "-c", "copy", noaudio]
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        if r.returncode != 0 or not os.path.isfile(noaudio):
+            raise RuntimeError(f"卡点拼接失败：{(r.stderr or '')[-200:]}")
+
+        # 3) 叠加裁剪后的音乐片段（替换原声）
+        if self.music_path and os.path.isfile(self.music_path):
+            m_start = float(self.music_range[0]) if len(self.music_range) >= 1 else 0.0
+            m_end = float(self.music_range[1]) if len(self.music_range) >= 2 else 0.0
+            m_dur = max(0.1, m_end - m_start) if m_end > m_start else total_dur
+            cmd = [ffmpeg_path, "-y",
+                   "-i", noaudio,
+                   "-ss", f"{m_start:.3f}", "-t", f"{m_dur:.3f}", "-i", self.music_path,
+                   "-map", "0:v:0", "-map", "1:a:0",
+                   "-c:v", "copy", "-c:a", "aac", "-shortest",
+                   out_file]
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            if r.returncode != 0 or not os.path.isfile(out_file):
+                log.warning(f"卡点叠加音乐失败，输出无音乐版本: {(r.stderr or '')[-200:]}")
+                shutil.copyfile(noaudio, out_file)
+        else:
+            shutil.copyfile(noaudio, out_file)
+        return out_file
+
     def run(self):
         try:
             ffmpeg_path = find_ffmpeg()
@@ -301,6 +378,29 @@ class VideoConcatWorker(BaseWorker):
                 raise RuntimeError("所有镜头文件均损坏或转码失败，无法合成视频。请重新进行镜头分割。")
             if skipped_clips:
                 self.stage.emit(f"⚠ 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(normalized_list)} 个镜头")
+
+            # ── 音乐卡点模式：按节拍裁剪镜头 + 叠加音乐片段，生成单个卡点视频 ──
+            if self.recombine_mode == "beat" and self.beat_times:
+                self.stage.emit("🎵 正在按音乐节拍合成卡点视频...")
+                out_file = os.path.join(
+                    self.output_dir, f"montage_beat_{random.randint(1000, 9999)}.mp4")
+                self._compose_beat_video(ffmpeg_path, normalized_list, out_file, temp_dir)
+                # 保存源镜头列表
+                try:
+                    sources_file = os.path.splitext(out_file)[0] + "_sources.txt"
+                    with open(sources_file, "w", encoding="utf-8") as sf:
+                        for src in self.selected_clips:
+                            sf.write(src + "\n")
+                except Exception as e:
+                    log.warning(f"保存卡点视频源镜头列表失败: {e}")
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
+                self.stage.emit("🎵 音乐卡点视频合成完成！")
+                self.progress.emit(100)
+                self.finished.emit([out_file])
+                return
 
             # Step 2: Batch generate fast concatenations
             generated_paths = []

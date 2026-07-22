@@ -243,6 +243,11 @@ QPushButton#action_button:hover {
     background-color: #059669;
 }
 
+QPushButton#action_button:disabled {
+    background-color: #d1d1d6;
+    color: #8e8e93;
+}
+
 QCheckBox { color: #3a3a3f; spacing: 8px; }
 
 QCheckBox::indicator {

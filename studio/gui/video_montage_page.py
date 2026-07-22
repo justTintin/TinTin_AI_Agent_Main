@@ -3154,7 +3154,10 @@ class VideoMontagePage(BasePage):
             return
 
         if not self.split_clips_list:
-            QMessageBox.warning(self.parent_widget, "无可排列镜头", "请先在待排列镜头视频列表中勾选要用于排列的镜头片段。")
+            QMessageBox.warning(self.parent_widget, "无可排列镜头",
+                                "当前没有勾选任何镜头，无法执行镜头重组。\n\n"
+                                "可能原因：镜头评分低于筛选阈值，已被自动取消勾选。\n"
+                                "解决方法：在上方镜头列表中手动勾选镜头，或降低评分筛选阈值后重新过滤。")
             return
 
         dir_path = self.concat_src_dir_input.text().strip()
@@ -5013,10 +5016,8 @@ class VideoMontagePage(BasePage):
         self.clip_count_info_lbl.setText(f"待排列镜头个数: {total}  (已勾选: {checked_count})")
         self._update_batch_count_recommendation()
 
-        if checked_count > 0 and hasattr(self, "btn_assemble_video"):
-            self.btn_assemble_video.setEnabled(True)
-        else:
-            self.btn_assemble_video.setEnabled(False)
+        # 不再根据勾选数禁用按钮（禁用后无视觉反馈，用户误以为按钮坏了）
+        # 0 勾选时点击按钮会弹出引导提示（见 _start_assemble_video）
 
     # [5·拼接合成]  _recommend_batch_count
     def _recommend_batch_count(self):

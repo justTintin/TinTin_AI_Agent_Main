@@ -2,15 +2,14 @@
 """卡点成片控制器（一键成片 → 卡点成片 tab）。
 
 自包含业务逻辑：选音乐 + 多选镜头素材 → 检测卡点（/audio/beatmap 返回片段用于波形显示）
-→ 按片段裁剪音乐并逐段提交服务端 POST /montage/beat 生成视频 → 轮询并下载成片
-→ 片段卡片播放下载的对应视频（右侧 QVideoWidget 预览）→ 导出视频并打开目录。
+→ 一次上传音乐+全部素材，用 variant_count 提交服务端 POST /montage/beat 一次生成多个成片
+→ 轮询并逐个下载变体成片 → 片段卡片播放对应变体视频（右侧 QVideoWidget 预览）→ 导出并打开目录。
 
 本类充当 StepBeatView 的 "main_page" 角色：StepBeatView 会把界面控件挂载到本类实例上，
 并把按钮/卡片信号连接到本类的 _beat_* 方法（与旧版挂载到 VideoMontagePage 的模式一致）。
 """
 import os
 import shutil
-import subprocess
 import tempfile
 
 from PySide6.QtCore import QObject
@@ -299,31 +298,11 @@ class BeatMontageController(QObject):
                              f"· 音乐文件格式不支持")
 
     # ═══════════════════════════════════════════════════════════
-    #  服务端逐段生成视频（/montage/beat）
+    #  服务端一次上传生成多视频（/montage/beat + variant_count）
     # ═══════════════════════════════════════════════════════════
 
-    def _trim_music(self, music_path, start, end, tag):
-        """用 ffmpeg 裁剪音乐 [start, end] 为 wav（服务端 /montage/beat 接受 wav）。"""
-        from utils.platform_utils import find_ffmpeg, create_no_window_flag
-        ffmpeg_exe = find_ffmpeg()
-        dur = max(0.1, float(end) - float(start))
-        os.makedirs(self._beat_work_dir, exist_ok=True)
-        out = os.path.join(self._beat_work_dir, f"trim_{tag}_{start:.1f}s.wav")
-        cmd = [ffmpeg_exe, "-y", "-i", music_path,
-               "-ss", f"{float(start):.3f}", "-t", f"{dur:.3f}", "-ac", "2", out]
-        try:
-            r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                               creationflags=create_no_window_flag(), timeout=120)
-            if r.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 0:
-                return out
-            log.warning(f"[卡点成片] 音乐裁剪失败 rc={r.returncode}: "
-                        f"{(r.stderr or b'')[-200:].decode('utf-8', 'ignore')}")
-        except Exception as e:
-            log.warning(f"[卡点成片] 音乐裁剪异常: {e}")
-        return None
-
     def _beat_submit_generation(self):
-        """按片段裁剪音乐并逐段提交 /montage/beat，启动生成 Worker。"""
+        """一次上传音乐+全部素材，用 variant_count 提交 /montage/beat 一次生成多个成片。"""
         segments = getattr(self, "_beat_segments", [])
         music_path = self.beat_music_path.text().strip()
         clips = self._beat_clips_list
@@ -335,35 +314,34 @@ class BeatMontageController(QObject):
         if hasattr(self, "beat_transition_combo"):
             transition = self.beat_transition_combo.currentData() or "fade"
 
-        specs = []
-        for si, seg in enumerate(segments):
-            s, e = seg["start"], seg["end"]
-            seg_dur = max(0.5, e - s)
-            trimmed = self._trim_music(music_path, s, e, tag=f"seg{si + 1}")
-            if not trimmed:
-                # 裁剪失败时回退用整段音乐（仍按 time_limit 出片），保证 specs 与片段索引一一对应
-                log.warning(f"[卡点成片] 片段{si + 1} 音乐裁剪失败，回退用整段音乐")
-                trimmed = music_path
-            specs.append({
-                "music": trimmed,
-                "videos": clips,
-                "time_limit": round(seg_dur, 2),
-                "transition": transition,
-                "min_duration": 0.8,
-                "max_duration": 3.0,
-            })
+        n_variants = len(segments)  # 与波形卡片数一致：第 i 个卡片播放第 i 个变体
+        # 成片时长：取「时长」下拉值（0 表示完整有效区间）
+        time_limit = 0.0
+        if hasattr(self, "beat_duration_combo"):
+            try:
+                time_limit = float(self.beat_duration_combo.currentData() or 0)
+            except (TypeError, ValueError):
+                time_limit = 0.0
 
-        if not specs:
-            self.beat_status_lbl.setText("❌ 没有可生成的片段")
-            return
+        spec = {
+            "music": music_path,            # 整段音乐，仅上传一次
+            "videos": clips,                # 全部素材，仅上传一次
+            "variant_count": n_variants,    # 一次生成 N 个完整成片变体
+            "time_limit": round(time_limit, 2) if time_limit > 0 else 0,
+            "transition": transition,
+            "min_duration": 0.8,
+            "max_duration": 3.0,
+        }
 
+        self._beat_video_files = [None] * n_variants
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.beat_status_lbl.setText(f"🎬 正在上传镜头并生成 {len(specs)} 个卡点视频...")
-        log.info(f"[卡点成片] 提交 {len(specs)} 个 /montage/beat 任务, 转场={transition}")
+        self.beat_status_lbl.setText(f"🎬 正在上传素材并生成 {n_variants} 个卡点视频...")
+        log.info(f"[卡点成片] 提交 1 个 /montage/beat 任务, variant_count={n_variants}, "
+                 f"转场={transition}, time_limit={time_limit}")
 
-        self._beat_gen_worker = BeatVideoGenWorker(server_url, specs, self._beat_work_dir)
+        self._beat_gen_worker = BeatVideoGenWorker(server_url, spec, self._beat_work_dir)
         self._beat_gen_worker.progress.connect(self._beat_on_gen_progress)
         self._beat_gen_worker.video_ready.connect(self._beat_on_video_ready)
         self._beat_gen_worker.all_done.connect(self._beat_on_gen_done)
@@ -376,17 +354,17 @@ class BeatMontageController(QObject):
         if msg and hasattr(self, "beat_status_lbl"):
             self.beat_status_lbl.setText(f"🎬 {msg}")
 
-    def _beat_on_video_ready(self, spec_index, local_path):
-        """某片段视频下载完成：挂到对应卡片并准备播放。"""
-        # spec_index 是 specs 中的序号；specs 与 segments 一一对应（跳过裁剪失败的除外）
-        if spec_index < len(self._beat_video_files):
-            self._beat_video_files[spec_index] = local_path
-        card = self._get_segment_card(spec_index)
+    def _beat_on_video_ready(self, variant_index, local_path):
+        """某个变体视频下载完成：挂到对应卡片并准备播放。"""
+        # variant_index 为 0 基变体序号，与波形卡片索引一一对应
+        if variant_index < len(self._beat_video_files):
+            self._beat_video_files[variant_index] = local_path
+        card = self._get_segment_card(variant_index)
         if card:
             card.set_video(local_path)
             if hasattr(self, "beat_preview_video"):
                 card.set_video_output(self.beat_preview_video)
-        log.info(f"[卡点成片] 片段{spec_index + 1} 视频就绪: {local_path}")
+        log.info(f"[卡点成片] 变体{variant_index + 1} 视频就绪: {local_path}")
 
     def _beat_on_gen_done(self, results):
         ok = sum(1 for r in results if r.get("ok"))

@@ -672,17 +672,18 @@ class BeatDetectWorker(BaseWorker):
 # ═══════════════════════════════════════════════════════════
 
 class BeatVideoGenWorker(BaseWorker):
-    """调用服务端 POST /montage/beat 为每个卡点片段生成视频（服务端契约见 /guide §2.9）。
+    """调用服务端 POST /montage/beat 一次上传生成多个卡点成片（服务端契约见 /guide §2.9）。
 
-    每个片段一个任务：上传该段裁剪后的音乐 + 全部镜头视频（multipart），
-    服务端自动镜头分割→卡点检测→素材指派→xfade 转场→混音，产出单个成片。
+    一次任务：上传整段音乐 + 全部镜头视频（multipart，仅上传一次），
+    通过 variant_count 指定生成个数，服务端自动镜头分割→卡点检测→素材指派→
+    xfade 转场→混音，一次产出 N 个完整成片变体（各自随机排位/入点/转场）。
       1. POST /montage/beat  → {id, status}
-      2. GET  /tasks/unified/{id} 轮询 → result.file
-      3. GET  /montage/result/{task_id}（即 result.file）下载成片
+      2. GET  /tasks/unified/{id} 轮询 → result.variants / result.file
+      3. GET  /montage/result/{task_id}/{variant_index} 逐个下载变体成片
 
     信号:
         progress(int, str)      生成进度（百分比, 描述）
-        video_ready(int, str)   某片段视频下载完成（片段索引, 本地路径）
+        video_ready(int, str)   某个变体视频下载完成（0 基变体索引, 本地路径）
         all_done(list)          全部结束 [{index, ok, path, error}, ...]
     """
     progress = Signal(int, str)
@@ -699,10 +700,10 @@ class BeatVideoGenWorker(BaseWorker):
         ".mkv": "video/x-matroska", ".webm": "video/webm", ".flv": "video/x-flv",
     }
 
-    def __init__(self, server_url, tasks_spec, download_dir):
+    def __init__(self, server_url, spec, download_dir):
         super().__init__()
         self.server_url = (server_url or "").strip().rstrip("/")
-        self.tasks_spec = list(tasks_spec or [])
+        self.spec = dict(spec or {})
         self.download_dir = download_dir
         self._should_stop = False
 
@@ -717,82 +718,92 @@ class BeatVideoGenWorker(BaseWorker):
         import requests
         import time as _time
 
-        total = len(self.tasks_spec)
-        if total == 0:
-            self.all_done.emit([])
-            return
+        spec = self.spec
+        n_variants = max(1, int(spec.get("variant_count") or 1))
+        results = [{"index": i, "ok": False, "path": "", "error": ""} for i in range(n_variants)]
 
-        # ── 第 1 步：逐段提交 /montage/beat，收集 task_id ──
-        task_ids = [None] * total
-        results = [{"index": i, "ok": False, "path": "", "error": ""} for i in range(total)]
-        for i, spec in enumerate(self.tasks_spec):
-            if self._should_stop:
-                raise RuntimeError("用户取消")
-            self.progress.emit(int(i / (total * 2) * 100), f"正在上传片段 {i + 1}/{total} ...")
-            try:
-                task_ids[i] = self._submit_one(spec)
-                log.info(f"[卡点成片] 片段{i + 1} 已提交 task_id={task_ids[i]}")
-            except Exception as e:
-                log.error(f"[卡点成片] 片段{i + 1} 提交失败: {e}")
-                results[i]["error"] = f"提交失败: {e}"
-
-        pending = {i: tid for i, tid in enumerate(task_ids) if tid}
-        if not pending:
+        # ── 第 1 步：提交单个 /montage/beat 任务（音乐+素材仅上传一次）──
+        self.progress.emit(5, "正在上传音乐与素材...")
+        try:
+            tid = self._submit_one(spec)
+        except Exception as e:
+            log.error(f"[卡点成片] 提交失败: {e}")
+            for r in results:
+                r["error"] = f"提交失败: {e}"
             self.all_done.emit(results)
             return
+        log.info(f"[卡点成片] 已提交 task_id={tid}, variant_count={n_variants}")
 
-        # ── 第 2 步：轮询所有任务 + 下载成片 ──
+        # ── 第 2 步：轮询任务直到完成 ──
+        self.progress.emit(20, "服务端生成中...")
         deadline = _time.time() + self._POLL_TIMEOUT
-        done_count = total - len(pending)  # 提交失败的计为已处理
-        while pending and _time.time() < deadline:
+        result = None
+        while _time.time() < deadline:
             if self._should_stop:
                 raise RuntimeError("用户取消")
             _time.sleep(self._POLL_INTERVAL)
-            for i in list(pending.keys()):
-                tid = pending[i]
+            try:
+                pr = requests.get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
+            except Exception as e:
+                log.warning(f"[卡点成片] 轮询异常: {e}")
+                continue
+            if pr.status_code != 200:
+                continue
+            try:
+                pdata = pr.json()
+            except Exception:
+                continue
+            task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
+            status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
+            if status in ("completed", "done", "success", "finished"):
+                result = task_obj.get("result") or task_obj
+                break
+            elif status in ("failed", "error", "cancelled"):
+                err = (task_obj.get("error_msg") or task_obj.get("error")
+                       or task_obj.get("message") or "未知")
+                for r in results:
+                    r["error"] = f"服务端生成失败: {err}"
+                log.error(f"[卡点成片] 生成失败: {err}")
+                self.all_done.emit(results)
+                return
+
+        if result is None:
+            for r in results:
+                r["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）"
+            self.all_done.emit(results)
+            return
+
+        # ── 第 3 步：逐个下载变体成片 ──
+        variants = result.get("variants") or []
+        if variants:
+            total_v = len(variants)
+            for i, v in enumerate(variants):
+                if self._should_stop:
+                    raise RuntimeError("用户取消")
+                file_ref = v.get("file") or f"/montage/result/{tid}/{v.get('variant', i + 1)}"
                 try:
-                    pr = requests.get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
+                    local = self._download(tid, file_ref, i)
+                    results[i]["ok"] = True
+                    results[i]["path"] = local
+                    log.info(f"[卡点成片] 变体{i + 1} 下载完成: {local}")
+                    self.video_ready.emit(i, local)
                 except Exception as e:
-                    log.warning(f"[卡点成片] 片段{i + 1} 轮询异常: {e}")
-                    continue
-                if pr.status_code != 200:
-                    continue
-                try:
-                    pdata = pr.json()
-                except Exception:
-                    continue
-                task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
-                status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
-
-                if status in ("completed", "done", "success", "finished"):
-                    result = task_obj.get("result") or task_obj
-                    file_ref = result.get("file") or result.get("video_url") or ""
-                    try:
-                        local = self._download(tid, file_ref, i)
-                        results[i]["ok"] = True
-                        results[i]["path"] = local
-                        log.info(f"[卡点成片] 片段{i + 1} 下载完成: {local}")
-                        self.video_ready.emit(i, local)
-                    except Exception as e:
-                        log.error(f"[卡点成片] 片段{i + 1} 下载失败: {e}")
-                        results[i]["error"] = f"下载失败: {e}"
-                    del pending[i]
-                    done_count += 1
-                    self.progress.emit(int(50 + done_count / total * 50),
-                                       f"片段 {i + 1} 已完成（{done_count}/{total}）")
-                elif status in ("failed", "error", "cancelled"):
-                    err = (task_obj.get("error_msg") or task_obj.get("error")
-                           or task_obj.get("message") or "未知")
-                    results[i]["error"] = f"服务端生成失败: {err}"
-                    log.error(f"[卡点成片] 片段{i + 1} 生成失败: {err}")
-                    del pending[i]
-                    done_count += 1
-                    self.progress.emit(int(50 + done_count / total * 50),
-                                       f"片段 {i + 1} 失败")
-
-        # 超时仍在排队的任务标记失败
-        for i in list(pending.keys()):
-            results[i]["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）"
+                    log.error(f"[卡点成片] 变体{i + 1} 下载失败: {e}")
+                    results[i]["error"] = f"下载失败: {e}"
+                self.progress.emit(int(50 + (i + 1) / total_v * 50),
+                                   f"下载视频 {i + 1}/{total_v}")
+        else:
+            # variant_count=1 时服务端仅返回 result.file
+            file_ref = result.get("file") or f"/montage/result/{tid}"
+            try:
+                local = self._download(tid, file_ref, 0)
+                results[0]["ok"] = True
+                results[0]["path"] = local
+                log.info(f"[卡点成片] 成片下载完成: {local}")
+                self.video_ready.emit(0, local)
+            except Exception as e:
+                log.error(f"[卡点成片] 成片下载失败: {e}")
+                results[0]["error"] = f"下载失败: {e}"
 
         self.progress.emit(100, "全部完成")
         self.all_done.emit(results)
@@ -810,7 +821,7 @@ class BeatVideoGenWorker(BaseWorker):
 
         # 组装表单参数（仅传非空项）
         data = {}
-        for key in ("count", "time_limit", "min_duration", "max_duration",
+        for key in ("count", "time_limit", "variant_count", "min_duration", "max_duration",
                     "width", "height", "fps", "crf", "transition", "transition_duration"):
             v = spec.get(key)
             if v is None or v == "":

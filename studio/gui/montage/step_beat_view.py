@@ -450,12 +450,16 @@ class BeatSegmentCard(QFrame):
     def seek(self, abs_sec):
         abs_sec = max(self.seg_start, min(self.seg_end, float(abs_sec)))
         if self._in_video_mode:
-            # 视频模式：播放器位置是相对值（0 = seg_start）
-            self._player.setPosition(int((abs_sec - self.seg_start) * 1000))
+            # 视频模式：把片段绝对位置等比映射到变体视频自身时间轴
+            span = self.seg_end - self.seg_start
+            vdur = self._player.duration() / 1000.0
+            ratio = ((abs_sec - self.seg_start) / span) if span > 0 else 0.0
+            self._player.setPosition(int(ratio * vdur * 1000))
+            self.time_lbl.setText(f"{self._fmt(ratio * vdur)} / {self._fmt(vdur)}")
         else:
             self._player.setPosition(int(abs_sec * 1000))
+            self.time_lbl.setText(self._fmt_range(abs_sec))
         self.waveform.set_play_pos(abs_sec)
-        self.time_lbl.setText(self._fmt_range(abs_sec))
 
     def position(self):
         return self._player.position() / 1000.0
@@ -478,20 +482,23 @@ class BeatSegmentCard(QFrame):
 
     def _on_position(self, pos_ms):
         if self._in_video_mode:
-            # 视频模式：pos 是相对值（0 = seg_start），映射回波形绝对时间
+            # 视频模式：变体视频是整段音乐成片，按视频自身时长播放（0..vdur），
+            # 游标按视频进度在片段波形 [seg_start, seg_end] 上等比移动（仅作可视化反馈）
             rel = pos_ms / 1000.0
-            seg_dur = self.seg_end - self.seg_start
-            if rel >= seg_dur - 0.05:
+            vdur = self._player.duration() / 1000.0
+            if vdur > 0.1 and rel >= vdur - 0.05:
                 self._player.pause()
                 self._player.setPosition(0)
                 self.btn_play.setText("▶")
                 self.waveform.set_play_pos(self.seg_start)
-                self.time_lbl.setText(self._fmt_range(self.seg_start))
+                self.time_lbl.setText(f"{self._fmt(0.0)} / {self._fmt(vdur)}")
                 self.finished.emit(self)
                 return
-            abs_sec = self.seg_start + rel
+            ratio = (rel / vdur) if vdur > 0.1 else 0.0
+            span = self.seg_end - self.seg_start
+            abs_sec = self.seg_start + ratio * span
             self.waveform.set_play_pos(abs_sec)
-            self.time_lbl.setText(self._fmt_range(abs_sec))
+            self.time_lbl.setText(f"{self._fmt(rel)} / {self._fmt(vdur if vdur > 0.1 else rel)}")
             self.position_changed.emit(self, abs_sec)
             return
         # 音乐模式：pos 是整轨绝对时间
@@ -604,7 +611,7 @@ class StepBeatView(BaseStepView):
             self.main_page.beat_duration_combo.addItem(f"{_sec} 秒", _sec)
         self.main_page.beat_duration_combo.setCurrentIndex(1)  # 默认 30 秒
         self.main_page.beat_duration_combo.setFixedWidth(80)
-        self.main_page.beat_duration_combo.setToolTip("每个卡点片段的时长（检测时传给服务端）")
+        self.main_page.beat_duration_combo.setToolTip("每个成片的时长上限（传给服务端 time_limit）")
         settings_row.addWidget(self.main_page.beat_duration_combo)
 
         settings_row.addSpacing(12)
@@ -625,10 +632,10 @@ class StepBeatView(BaseStepView):
         settings_row.addSpacing(12)
         settings_row.addWidget(QLabel("视频个数:"))
         self.main_page.beat_video_count_spin = QSpinBox()
-        self.main_page.beat_video_count_spin.setRange(1, 10)
+        self.main_page.beat_video_count_spin.setRange(1, 5)
         self.main_page.beat_video_count_spin.setValue(3)
         self.main_page.beat_video_count_spin.setFixedWidth(60)
-        self.main_page.beat_video_count_spin.setToolTip("要生成的卡点视频数量（服务端返回对应片段数）")
+        self.main_page.beat_video_count_spin.setToolTip("要生成的卡点视频数量（一次上传，服务端 variant_count 上限 5）")
         settings_row.addWidget(self.main_page.beat_video_count_spin)
 
         settings_row.addSpacing(12)

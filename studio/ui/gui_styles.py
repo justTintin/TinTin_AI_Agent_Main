@@ -330,6 +330,11 @@ QPushButton#action_button:hover {
     background-color: #059669;
 }
 
+QPushButton#action_button:disabled {
+    background-color: #3a3a46;
+    color: #7a7a88;
+}
+
 QPushButton#pill_button {
     background-color: #383844;
     border: none;

@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
+from gui.montage.beat_montage_controller import BeatMontageController
+from gui.montage.step_beat_view import StepBeatView
 from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
@@ -239,6 +241,25 @@ class CompileVideoPage(BasePage):
         tab_script = QWidget()
         self._setup_script_tab(tab_script)
         self.tabs.addTab(tab_script, "📜 脚本成片")
+
+        # tab3：卡点成片（音乐卡点 + 服务端逐段生成视频）
+        tab_beat = QWidget()
+        self._setup_beat_tab(tab_beat)
+        self.tabs.addTab(tab_beat, "🎵 卡点成片")
+
+    # ════════════════════════════════════════════════════════════
+    #  卡点成片 tab（独立控制器 + StepBeatView）
+    # ════════════════════════════════════════════════════════════
+    def _setup_beat_tab(self, container):
+        root = QVBoxLayout(container)
+        root.setContentsMargins(0, 8, 0, 0)
+        root.setSpacing(12)
+
+        # 自包含控制器（充当 StepBeatView 的 main_page 角色）
+        self.beat_controller = BeatMontageController(self.parent_widget, self.main_window)
+        beat_view = StepBeatView(self.beat_controller)
+        self.beat_controller.step_beat = beat_view
+        root.addWidget(beat_view, 1)
 
     # ════════════════════════════════════════════════════════════════════════
     #  产品成片 tab（原有界面，整体挂到 container）

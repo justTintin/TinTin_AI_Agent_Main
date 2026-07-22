@@ -68,7 +68,12 @@ class SidebarMixin:
         
         self.nav_buttons = []
 
-
+        # 素材浏览器（菜单最顶部，直接打开外部 Electron 应用，非页面切换）
+        btn_browser = QPushButton("🌐 素材浏览器")
+        btn_browser.setObjectName("nav_button")
+        btn_browser.setCursor(Qt.PointingHandCursor)
+        btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
+        scroll_layout.addWidget(btn_browser)
 
         # 3. 账户平台 Section (暂时隐藏)
         # account_card = QFrame()
@@ -149,12 +154,6 @@ class SidebarMixin:
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             media_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        # 直接打开素材浏览器（外部 Electron 应用，非页面切换）
-        btn_browser = QPushButton("🌐 素材浏览器")
-        btn_browser.setObjectName("nav_button")
-        btn_browser.setCursor(Qt.PointingHandCursor)
-        btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
-        media_layout.addWidget(btn_browser)
         scroll_layout.addWidget(media_card)
 
         # 成片制作 Section

@@ -95,6 +95,8 @@ frame_at: 0.5
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | file | binary | ✅ | — | 音频文件（mp3/wav/m4a 等，multipart/form-data） |
+| count | int | ❌ | 0 | 要返回的卡点片段个数（>0 时服务端从音乐中挑选 N 个片段，每段生成一个视频） |
+| segment_duration | float | ❌ | 0.0 | 每个片段的时长（秒），与 count 配合使用 |
 
 **请求示例**：
 ```
@@ -102,6 +104,8 @@ POST /audio/beatmap
 Content-Type: multipart/form-data
 
 file: <music.mp3>
+count: 3
+segment_duration: 30
 ```
 
 **响应**（提交成功）：
@@ -119,11 +123,20 @@ file: <music.mp3>
 {
   "beats": [0.52, 1.04, 1.56, 2.08, ...],
   "bpm": 120.0,
-  "duration": 180.5
+  "duration": 180.5,
+  "clips": [
+    {"start": 0.0,  "end": 30.0, "strength": 0.85},
+    {"start": 30.0, "end": 60.0, "strength": 0.78},
+    {"start": 60.0, "end": 90.0, "strength": 0.72}
+  ],
+  "clip_count": 3,
+  "segment_duration": 30.0
 }
 ```
 
-> 客户端应兼容 `beats` / `beat_times` / `timestamps` / `beat_points` 等字段名。
+> - `beats`：全曲节拍时间戳（绝对时间）。客户端应兼容 `beats` / `beat_times` / `timestamps` / `beat_points` 等字段名。
+> - `clips`：当 `count>0` 时返回的卡点片段列表，每个片段 `{start, end, strength}` 对应一个视频；
+>   客户端将落在每个片段区间内的 `beats` 作为该视频的卡点槽位，并用 `[start, end]` 裁剪对应音乐片段。
 
 ---
 

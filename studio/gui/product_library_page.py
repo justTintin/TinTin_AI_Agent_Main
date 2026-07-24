@@ -108,71 +108,118 @@ class StockSyncWorker(BaseWorker):
 from gui.base_page import BasePage
 
 
-class BulkMineWorker(BaseWorker):
-    """后台线程：遍历所有产品，逐条调用大模型挖掘性能参数与核心卖点。"""
-    progress = Signal(int, int, str)   # done, total, current_name
-    finished = Signal(int, int)        # success_count, skip_count
 
-    def __init__(self, manager, model, skip_mined=True):
+class SingleMineWorker(BaseWorker):
+    """后台线程：调用服务端 mine-single 接口，挖掘+持久化一步到位。
+
+    与「一键成片」共享同一套数据源（服务端 product_items 表），
+    挖掘完成后自动持久化，无需客户端再手动保存。
+    """
+    result_ready = Signal(dict)   # {ok, features, selling_points, persisted, item_id}
+
+    def __init__(self, server_url, machine_id, item_id, category, brand,
+                 model_name, spec_name, notes, llm_model):
         super().__init__()
-        self.manager = manager
-        self.model = model
-        self.skip_mined = skip_mined
+        self.server_url = server_url
+        self.machine_id = machine_id
+        self.item_id = item_id
+        self.category = category
+        self.brand = brand
+        self.model_name = model_name
+        self.spec_name = spec_name
+        self.notes = notes
+        self.llm_model = llm_model
 
     def run(self):
-        from utils.llm_proxy import llm_chat_messages
-        import re, json as json_mod
-        items = self.manager.all_items()
-        total = len(items)
-        success = skip = 0
-        system_prompt = (
-            '你是一个专业的产品规划与营销专家。根据用户提供的产品基本信息，'
-            '整理出该产品的【性能参数】与【核心卖点】。\n'
-            '严格以纯 JSON 格式输出，不要 Markdown 包装：\n'
-            '{"features": "性能参数（Markdown 列表/表格）",'
-            ' "selling_points": "核心卖点（3-5点，Markdown 列表）"}'
-        )
-        for i, item in enumerate(items):
-            if self._should_stop:
-                break
-            name = f"{item.get('brand','')} {item.get('model','')}".strip() or item.get('goods_no','')
-            if self.skip_mined and item.get("features", "").strip() and item.get("selling_points", "").strip():
-                skip += 1
-                self.progress.emit(i + 1, total, f"[跳过] {name}")
-                continue
-            user_prompt = (
-                f'品类：{item.get("category","")}\n品牌：{item.get("brand","")}\n'
-                f'型号/货品名称：{item.get("model","")}\n规格名称：{item.get("spec_name","")}\n'
-                f'备注：{item.get("notes","")}\n\n请挖掘该产品的【性能参数】与【核心卖点】。'
-            )
-            try:
-                content = llm_chat_messages(
-                    [{"role": "system", "content": system_prompt},
-                     {"role": "user", "content": user_prompt}],
-                    model=self.model, temperature=0.7, timeout=60
-                )
-                c = content.strip()
-                m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", c, re.DOTALL)
-                c = m.group(1) if m else c[c.find('{'):c.rfind('}')+1] if '{' in c else ""
-                parsed = json_mod.loads(c) if c else None
-                if parsed and isinstance(parsed, dict):
-                    updated = dict(item)
-                    updated["features"] = parsed.get("features", "").strip()
-                    updated["selling_points"] = parsed.get("selling_points", "").strip()
-                    self.manager.update_item(item["id"], updated)
-                    success += 1
-                    self.progress.emit(i + 1, total, f"[完成] {name}")
-                else:
-                    self.progress.emit(i + 1, total, f"[解析失败] {name}")
-            except Exception as e:
-                self.progress.emit(i + 1, total, f"[错误] {name}: {e}")
-        self.finished.emit(success, skip)
+        import requests
+        url = (f"{self.server_url.rstrip('/')}/api/product-library"
+               f"/clients/{self.machine_id}/mine-single")
+        payload = {
+            "item_id": self.item_id,
+            "category": self.category,
+            "brand": self.brand,
+            "model_name": self.model_name,
+            "spec_name": self.spec_name,
+            "notes": self.notes,
+            "llm_model": self.llm_model,
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=120)
+            if r.status_code == 200:
+                self.result_ready.emit(r.json())
+            else:
+                try:
+                    err = r.json().get("detail", r.text[:200])
+                except Exception:
+                    err = r.text[:200]
+                self.error.emit(f"服务端返回错误 (HTTP {r.status_code}): {err}")
+        except Exception as e:
+            self.error.emit(f"请求服务端失败: {e}")
 
-    _should_stop = False
+
+class BulkMineWorker(BaseWorker):
+    """后台线程：触发服务端批量挖掘并轮询进度。
+
+    服务端内部逐条调用 LLM + 写入 DB，客户端只需触发 + 轮询状态。
+    """
+    progress = Signal(int, int, str)   # done, total, phase_text
+    finished = Signal(int, int)        # done_count, total
+
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+        self._should_stop = False
 
     def stop(self):
         self._should_stop = True
 
+    def run(self):
+        import time
+        import requests
+        from utils.product_library_manager import _get_machine_id
+        base = _get_server_url()
+        if not base:
+            self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
+            return
+        machine_id = _get_machine_id()
+        api = f"{base.rstrip('/')}/api/product-library/clients/{machine_id}"
+
+        # 1. 触发服务端批量挖掘
+        try:
+            r = requests.post(f"{api}/mine",
+                              json={"item_ids": [], "model": self.model},
+                              timeout=10)
+            if r.status_code == 409:
+                pass  # 已在运行中，直接轮询
+            elif r.status_code != 200:
+                self.error.emit(f"触发批量挖掘失败: HTTP {r.status_code} {r.text[:200]}")
+                return
+        except Exception as e:
+            self.error.emit(f"无法连接服务端: {e}")
+            return
+
+        # 2. 轮询挖掘进度
+        while not self._should_stop:
+            try:
+                sr = requests.get(f"{api}/mine/status", timeout=10)
+                st = sr.json() if sr.status_code == 200 else {}
+            except Exception:
+                st = {}
+            if not st.get("running", False):
+                if st.get("error"):
+                    self.error.emit(f"服务端批量挖掘出错: {st['error']}")
+                    return
+                done = int(st.get("done", 0) or 0)
+                total = int(st.get("total", 0) or 0)
+                self.progress.emit(done, total, "挖掘完成")
+                self.finished.emit(done, total)
+                return
+            done = int(st.get("done", 0) or 0)
+            total = int(st.get("total", 0) or 0)
+            self.progress.emit(done, total, f"服务端挖掘中 {done}/{total}")
+            time.sleep(2)
+        # 用户手动停止
+        self.finished.emit(0, 0)
 
 class ProductLibraryPage(BasePage):
     def __init__(self, parent_widget, main_window):
@@ -427,15 +474,20 @@ class ProductLibraryPage(BasePage):
         return container
 
     def _on_mine(self):
-        # 1. 确保大模型配置存在
+        """智能挖掘：调用服务端 mine-single，挖掘即持久化。
+
+        与「一键成片」共享同一套数据源（服务端 product_items 表），
+        挖掘完成后自动持久化，无需手动保存。
+        """
+        # 1. 模型配置
         ai = self.ai_config
         model = ai.get("llm_model", "deepseek-v4-flash")
         if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在“AI 设置 / 大模型配置”中选择模型名称。")
+                                "请先在\u201cAI 设置 / 大模型配置\u201d中选择模型名称。")
             return
 
-        # 2. 收集当前界面的产品资料作为查询输入
+        # 2. 收集表单
         category = self._get_widget_value(self.inputs.get("category"))
         brand = self._get_widget_value(self.inputs.get("brand"))
         model_name = self._get_widget_value(self.inputs.get("model"))
@@ -443,83 +495,74 @@ class ProductLibraryPage(BasePage):
         notes = self._get_widget_value(self.inputs.get("notes"))
 
         if not brand or not model_name:
-            QMessageBox.warning(self.parent_widget, "信息不足", "请确保产品“品牌”和“型号/货品名称”已填写！")
+            QMessageBox.warning(self.parent_widget, "信息不足",
+                                "请确保产品\u201c品牌\u201d和\u201c型号/货品名称\u201d已填写！")
             return
 
-        # 构建 Prompt
-        system_prompt = (
-            "你是一个专业的产品规划与营销专家。你的任务是根据用户提供的产品基本信息，进行深度挖掘，整理出该产品的“性能参数”与“核心卖点”。\n"
-            "请严格以 JSON 格式输出，不要包含任何 Markdown 格式块包装（如 ```json ... ``` 这种标记，只输出纯 JSON 字符串）。\n"
-            "JSON 格式要求如下：\n"
-            "{\n"
-            "  \"features\": \"产品的性能参数、技术指标、主要材质、规格尺寸等，使用清晰易读的格式（如 Markdown 列表或表格）\",\n"
-            "  \"selling_points\": \"核心卖点（针对受众的痛点、核心竞争优势、购买理由，建议列出 3-5 点，使用 Markdown 列表格式）\"\n"
-            "}"
-        )
+        # 3. 服务端地址 + 机器码
+        server_url = _get_server_url()
+        if not server_url:
+            QMessageBox.warning(self.parent_widget, "服务端未配置",
+                                "请先在系统设置中配置统一计算节点地址。")
+            return
+        from utils.product_library_manager import _get_machine_id
+        machine_id = _get_machine_id()
 
-        user_prompt = (
-            f"产品基本信息如下：\n"
-            f"品类：{category}\n"
-            f"品牌：{brand}\n"
-            f"型号/货品名称：{model_name}\n"
-            f"规格名称：{spec_name}\n"
-            f"备注：{notes}\n\n"
-            f"请帮我挖掘并整理该产品的“性能参数”与“核心卖点”。"
-        )
-
-        self.btn_mine.setEnabled(False)
-        self.btn_mine.setText("⏳ 正在挖掘...")
-        self._set_status("正在调用大模型挖掘产品性能参数与核心卖点...")
-
-        from gui.ai_script_page import LLMWorker
-
-        self.mine_worker = LLMWorker("", "", model, system_prompt, user_prompt)
-
-        def _on_mine_done(content):
-            self.btn_mine.setEnabled(True)
-            self.btn_mine.setText("🪄 智能挖掘")
-            
-            # 解析 JSON
-            import re
-            import json
-            parsed = None
-            content_clean = content.strip()
-            # 兼容带有 ```json 开头的情况
-            match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content_clean, re.DOTALL)
-            if match:
-                content_clean = match.group(1)
+        # 4. 新增模式 → 先自动保存获得 item_id（持久化前提）
+        item_id = self.current_id or ""
+        if not item_id:
+            data = self._collect_form()
+            ok, msg, item = self.manager.add_item(data)
+            if ok and item:
+                self.current_id = item["id"]
+                item_id = item["id"]
+                self.btn_save.setText("\U0001f4be 保存修改")
+                self._set_status("已自动保存新产品，正在挖掘...")
+                self.refresh_tree()
             else:
-                start = content_clean.find('{')
-                end = content_clean.rfind('}')
-                if start != -1 and end != -1:
-                    content_clean = content_clean[start:end+1]
-            try:
-                parsed = json.loads(content_clean)
-            except Exception as e:
-                log.error(f"解析挖掘结果 JSON 失败: {e}, 原始返回: {content}")
+                self._set_status(f"自动保存失败({msg})，挖掘结果将不会持久化...")
 
-            if parsed and isinstance(parsed, dict):
-                features = parsed.get("features", "").strip()
-                selling_points = parsed.get("selling_points", "").strip()
-                
+        # 5. 发起服务端挖掘
+        self.btn_mine.setEnabled(False)
+        self.btn_mine.setText("\u23f3 正在挖掘...")
+        self._set_status("正在调用服务端 AI 挖掘（挖掘即持久化）...")
+
+        self.mine_worker = SingleMineWorker(
+            server_url, machine_id, item_id,
+            category, brand, model_name, spec_name, notes, model
+        )
+
+        def _on_mine_done(data):
+            self.btn_mine.setEnabled(True)
+            self.btn_mine.setText("\U0001fa84 智能挖掘")
+            features = data.get("features", "").strip()
+            selling_points = data.get("selling_points", "").strip()
+            persisted = data.get("persisted", False)
+
+            if features or selling_points:
                 self._set_widget_value(self.inputs["features"], features)
                 self._set_widget_value(self.inputs["selling_points"], selling_points)
-                self._set_status("AI 挖掘成功！请检查并点击“保存修改”保存。")
+                # 刷新本地缓存，确保一键成片页能立即读取到最新数据
+                self.manager.load()
+                if persisted:
+                    self._set_status("\u2705 AI 挖掘成功，已自动持久化（一键成片可直接使用）。")
+                else:
+                    self._set_status("\u2705 AI 挖掘成功！请点击\u201c保存修改\u201d以持久化数据。")
             else:
-                # 解析失败，把原文填充到性能参数中，并给提示
-                self._set_widget_value(self.inputs["features"], content)
-                self._set_status("AI 挖掘返回格式非标准 JSON，已将原文填入性能参数栏中。")
+                self._set_status("AI 挖掘未返回有效结果，请重试或手动填写。")
 
         def _on_mine_err(err_msg):
             self.btn_mine.setEnabled(True)
-            self.btn_mine.setText("🪄 智能挖掘")
+            self.btn_mine.setText("\U0001fa84 智能挖掘")
             self._set_status(f"挖掘失败：{err_msg}")
-            QMessageBox.critical(self.parent_widget, "挖掘失败", f"大模型请求失败：\n{err_msg}")
+            QMessageBox.critical(self.parent_widget, "挖掘失败",
+                                 f"服务端 AI 挖掘请求失败：\n{err_msg}")
 
-        self.track_worker(self.mine_worker)
-        self.mine_worker.finished.connect(_on_mine_done)
+        self.mine_worker.result_ready.connect(_on_mine_done)
         self.mine_worker.error.connect(_on_mine_err)
+        self.track_worker(self.mine_worker)
         self.mine_worker.start()
+
 
     # ---------------- 控件读写 ----------------
     def _get_widget_value(self, w):
@@ -698,15 +741,20 @@ class ProductLibraryPage(BasePage):
     def _on_mine_all(self):
         if self.bulk_mine_worker and self.bulk_mine_worker.isRunning():
             self.bulk_mine_worker.stop()
-            self.btn_mine_all.setText("⚡ 一键挖掘")
+            self.btn_mine_all.setText("\u26a1 一键挖掘")
             self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
-            self._set_sync_status("已请求停止…")
+            self._set_sync_status("已请求停止\u2026")
             return
         ai = self.ai_config
         model = ai.get("llm_model", "deepseek-chat")
         if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
                                 '请先在【AI 设置 / 大模型配置】中填写模型名称。')
+            return
+        server_url = _get_server_url()
+        if not server_url:
+            QMessageBox.warning(self.parent_widget, "服务端未配置",
+                                "请先在系统设置中配置统一计算节点地址。")
             return
         total = len(self.manager.all_items())
         if total == 0:
@@ -718,15 +766,15 @@ class ProductLibraryPage(BasePage):
         reply = QMessageBox.question(
             self.parent_widget, "一键挖掘确认",
             f"共 {total} 个产品，其中 {already} 个已有挖掘数据（将跳过），"
-            f"即将为 {pending} 个产品调用大模型挖掘性能参数与核心卖点。\n\n确认开始？",
+            f"即将为 {pending} 个产品调用服务端大模型挖掘性能参数与核心卖点。\n\n确认开始？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
-        self.btn_mine_all.setText("⏹ 停止挖掘")
+        self.btn_mine_all.setText("\u23f9 停止挖掘")
         self.btn_mine_all.setToolTip("点击停止批量挖掘")
-        self._set_sync_status(f"一键挖掘中…（0/{pending}）")
-        self.bulk_mine_worker = BulkMineWorker(self.manager, model, skip_mined=True)
+        self._set_sync_status(f"一键挖掘中\u2026（0/{pending}）")
+        self.bulk_mine_worker = BulkMineWorker(model)
         self.bulk_mine_worker.progress.connect(self._on_mine_all_progress)
         self.bulk_mine_worker.finished.connect(self._on_mine_all_done)
         self.bulk_mine_worker.error.connect(self._on_mine_all_err)
@@ -734,12 +782,13 @@ class ProductLibraryPage(BasePage):
         self.bulk_mine_worker.start()
 
     def _on_mine_all_progress(self, done, total, msg):
-        self._set_sync_status(f"一键挖掘中…（{done}/{total}）{msg}")
+        self._set_sync_status(f"一键挖掘中\u2026（{done}/{total}）{msg}")
 
-    def _on_mine_all_done(self, success, skipped):
-        self.btn_mine_all.setText("⚡ 一键挖掘")
+    def _on_mine_all_done(self, done_count, total):
+        self.btn_mine_all.setText("\u26a1 一键挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
-        self._set_sync_status(f"一键挖掘完成：成功 {success} 条，跳过 {skipped} 条（已有数据）。")
+        self._set_sync_status(f"一键挖掘完成：处理 {done_count}/{total} 条。")
+        self.manager.load()  # 刷新本地缓存
         self.refresh_tree()
         if self.current_id:
             record = self.manager.get(self.current_id)
@@ -747,9 +796,10 @@ class ProductLibraryPage(BasePage):
                 self._fill_form(record)
 
     def _on_mine_all_err(self, err):
-        self.btn_mine_all.setText("⚡ 一键挖掘")
+        self.btn_mine_all.setText("\u26a1 一键挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
         self._set_sync_status(f"一键挖掘出错：{err}")
+
 
     # ---------------- Excel 导入导出 ----------------
 

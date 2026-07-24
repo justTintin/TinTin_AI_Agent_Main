@@ -544,41 +544,6 @@ class AIConfigMixin:
         except Exception as e:
             self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
 
-    # ── 旺店通 ERP 配置 ──
-
-    def _save_erp_platform_cfg(self):
-        from config.paths import CONFIG_DIR
-        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
-        try:
-            cfg = {
-                "base_url": self.erp_url_input.text().strip(),
-                "appkey": self.erp_appkey_input.text().strip(),
-                "appsecret": self.erp_appsecret_input.text().strip(),
-                "sid": self.erp_sid_input.text().strip(),
-            }
-            os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            self.lbl_erp_status.setText("✅ 配置已保存")
-            self.lbl_erp_status.setStyleSheet("color: #4ade80;")
-        except Exception as e:
-            self.lbl_erp_status.setText(f"❌ 保存失败: {e}")
-            self.lbl_erp_status.setStyleSheet("color: #f87171;")
-
-    def load_erp_platform_cfg(self):
-        from config.paths import CONFIG_DIR
-        cfg_path = os.path.join(CONFIG_DIR, "erp_config.json")
-        try:
-            if os.path.isfile(cfg_path):
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = json.load(f)
-                self.erp_url_input.setText(cfg.get("base_url", ""))
-                self.erp_appkey_input.setText(cfg.get("appkey", ""))
-                self.erp_appsecret_input.setText(cfg.get("appsecret", ""))
-                self.erp_sid_input.setText(cfg.get("sid", ""))
-        except Exception as e:
-            print(f"加载 ERP 配置失败: {e}")
-
     # ── 飞书配置 ──
 
     def load_feishu_config(self):

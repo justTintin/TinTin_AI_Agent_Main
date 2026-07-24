@@ -653,4 +653,3 @@ class EnvConfigPage(BasePage):
         icon = "✅" if ok else "❌"
         self.lbl_rustfs_status.setText(f"<font color='{color}'>{icon} {msg}</font>")
 
-    # ── 旺店通 ERP 配置 ──

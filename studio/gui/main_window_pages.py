@@ -655,28 +655,11 @@ class PageSetupMixin:
         r4.addStretch(); l4.addLayout(r4)
         l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
 
-        # ── Tab 5: 旺店通 ERP ──
-        p5 = QWidget(); l5 = QVBoxLayout(p5); l5.setContentsMargins(30,30,30,30)
-        l5.addWidget(QLabel("旺店通 ERP 配置。产品资料从仓库同步时使用，留空则不启用。"))
-        l5.addSpacing(10)
-        _inp("API 地址:", "erp_url_input", "https://api.wangdian.cn/openapi2/", l5)
-        _inp("AppKey:", "erp_appkey_input", "旺店通 appkey", l5)
-        _inp("AppSecret:", "erp_appsecret_input", "旺店通 appsecret", l5, echo=QLineEdit.Password)
-        _inp("SID:", "erp_sid_input", "旺店通商家编码", l5)
-        r5 = QHBoxLayout(); r5.addStretch()
-        b_save_erp = mdi_button("保存配置", "save"); b_save_erp.setObjectName("primary_button")
-        b_save_erp.clicked.connect(self._save_erp_platform_cfg)
-        r5.addWidget(b_save_erp)
-        self.lbl_erp_status = QLabel(""); self.lbl_erp_status.setObjectName("muted_text"); r5.addWidget(self.lbl_erp_status)
-        r5.addStretch(); l5.addLayout(r5)
-        l5.addStretch(); tabs.addTab(p5, "🏪 旺店通")
+        # ── Tab 5: 旺店通 ERP（已移除，ERP 配置由服务端统一管理）──
 
         layout.addWidget(tabs, 1)
         # Load feishu config
         self.load_feishu_config()
-        # Load ERP config
-        try: self.load_erp_platform_cfg()
-        except Exception: pass
 
     def setup_digital_human_page(self):
             layout = QVBoxLayout(self.page_digital_human)

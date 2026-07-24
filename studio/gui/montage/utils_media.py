@@ -40,9 +40,9 @@ def get_media_duration(filepath):
             return 0.0
         cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
                "-of", "csv=p=0", filepath]
-        r = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags, timeout=10)
-        if r.returncode == 0 and r.stdout.strip():
-            return float(r.stdout.strip())
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags, timeout=10)
+        if r.returncode == 0 and (r.stdout or "").strip():
+            return float((r.stdout or "").strip())
     except Exception:
         pass
     return 0.0
@@ -188,7 +188,7 @@ def compute_clip_quality(clip_path):
                 r = subprocess.run(
                     [ffprobe, "-v", "error", "-select_streams", "a",
                      "-show_entries", "stream=codec_type", "-of", "csv=p=0", clip_path],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, text=True, errors="replace", timeout=10,
                     creationflags=0x08000000)
                 if "audio" in (r.stdout or ""):
                     audio_score = 20

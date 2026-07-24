@@ -52,10 +52,10 @@ def _detect():
         ffmpeg_path = find_ffmpeg()
         r = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, errors="replace", timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        out = r.stdout + r.stderr
+        out = (r.stdout or "") + (r.stderr or "")
         for name in ("h264_nvenc", "h264_amf", "h264_qsv"):
             if name in out:
                 result["encoder"] = name

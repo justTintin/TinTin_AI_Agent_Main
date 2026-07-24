@@ -53,7 +53,7 @@ class VideoConcatWorker(BaseWorker):
             cf = subprocess.CREATE_NO_WINDOW
             cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
                    "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", clip]
-            r = subprocess.run(cmd, capture_output=True, text=True,
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                                creationflags=cf, timeout=15)
             m = _re.search(r"(\d+)x(\d+)", (r.stdout or "").strip())
             if m:
@@ -79,28 +79,44 @@ class VideoConcatWorker(BaseWorker):
         probe_cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
                      "-of", "csv=p=0", clip_abspath]
         try:
-            probe_r = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15,
+            probe_r = subprocess.run(probe_cmd, capture_output=True, text=True, errors="replace", timeout=15,
                                      creationflags=subprocess.CREATE_NO_WINDOW)
-            if probe_r.returncode != 0 or not probe_r.stdout.strip():
+            if probe_r.returncode != 0 or not (probe_r.stdout or "").strip():
                 raise _TranscodeSkip(f"⚠ 跳过无法读取的文件: {name}")
         except _TranscodeSkip:
             raise
         except Exception:
             raise _TranscodeSkip(f"⚠ 跳过探测失败的文件: {name}")
 
-        # 2) 转码：缩放/填充黑边/统一 30fps，软编 libx264 superfast crf23
+        # 2) 转码：缩放/填充黑边/统一 30fps
         norm_out = os.path.join(temp_dir, f"norm_{i:04d}.mp4")
         vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30"
+        try:
+            encode_args = get_video_encode_args(crf=23, preset="superfast")
+        except Exception:
+            encode_args = ["-c:v", "libx264", "-preset", "superfast", "-crf", "23"]
         cmd = [
             ffmpeg_path, "-y", "-i", clip_abspath,
             "-vf", vf_filter,
-            *get_video_encode_args(crf=23, preset="superfast"),
+            *encode_args,
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             norm_out
         ]
-        r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
+        if r.returncode != 0 and "-c:v" in cmd and "libx264" not in cmd:
+            # GPU 编码器（nvenc/amf/qsv）可能检测到但实际不可用，回退软编 libx264 重试
+            log.warning(f"GPU 编码失败，回退 libx264 重试: {name}\n{(r.stderr or '')[-300:]}")
+            fallback_args = ["-c:v", "libx264", "-preset", "superfast", "-crf", "23"]
+            cmd = [
+                ffmpeg_path, "-y", "-i", clip_abspath,
+                "-vf", vf_filter,
+                *fallback_args,
+                "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                norm_out
+            ]
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
         if r.returncode != 0:
-            log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
+            log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{(r.stderr or '')[-300:]}")
             raise _TranscodeSkip(f"⚠ 转码失败，跳过: {name}")
         return norm_out
 
@@ -140,7 +156,7 @@ class VideoConcatWorker(BaseWorker):
                        "-movflags", "+faststart", out_file]
             else:
                 cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
-            return subprocess.run(cmd, capture_output=True, text=True,
+            return subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                                   creationflags=subprocess.CREATE_NO_WINDOW)
 
         xfade_type = self._XFADE_MAP.get(self.transition, "fade")
@@ -153,10 +169,10 @@ class VideoConcatWorker(BaseWorker):
             try:
                 cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
                        "-of", "csv=p=0", clip]
-                pr = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                pr = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=10,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
-                if pr.returncode == 0 and pr.stdout.strip():
-                    dur = float(pr.stdout.strip())
+                if pr.returncode == 0 and (pr.stdout or "").strip():
+                    dur = float((pr.stdout or "").strip())
             except Exception:
                 pass
             if dur <= 0:
@@ -213,7 +229,7 @@ class VideoConcatWorker(BaseWorker):
             "-movflags", "+faststart",
             out_file
         ]
-        return subprocess.run(cmd, capture_output=True, text=True,
+        return subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                               creationflags=subprocess.CREATE_NO_WINDOW)
 
     def _compose_beat_video(self, ffmpeg_path, norm_clips, out_file, temp_dir):
@@ -246,10 +262,10 @@ class VideoConcatWorker(BaseWorker):
                    *get_video_encode_args(crf=20, preset="veryfast"),
                    "-pix_fmt", "yuv420p",
                    cut]
-            r = subprocess.run(cmd, capture_output=True, text=True,
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                                creationflags=subprocess.CREATE_NO_WINDOW)
             if r.returncode != 0 or not os.path.isfile(cut):
-                log.warning(f"卡点裁剪镜头失败: {r.stderr[-200:]}")
+                log.warning(f"卡点裁剪镜头失败: {(r.stderr or '')[-200:]}")
                 raise RuntimeError(f"卡点裁剪第 {i+1} 个镜头失败")
             cut_paths.append(cut)
             total_dur += dur
@@ -262,7 +278,7 @@ class VideoConcatWorker(BaseWorker):
         noaudio = os.path.join(temp_dir, "beat_noaudio.mp4")
         cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
                "-c", "copy", noaudio]
-        r = subprocess.run(cmd, capture_output=True, text=True,
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                            creationflags=subprocess.CREATE_NO_WINDOW)
         if r.returncode != 0 or not os.path.isfile(noaudio):
             raise RuntimeError(f"卡点拼接失败：{(r.stderr or '')[-200:]}")
@@ -278,7 +294,7 @@ class VideoConcatWorker(BaseWorker):
                    "-map", "0:v:0", "-map", "1:a:0",
                    "-c:v", "copy", "-c:a", "aac", "-shortest",
                    out_file]
-            r = subprocess.run(cmd, capture_output=True, text=True,
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                                creationflags=subprocess.CREATE_NO_WINDOW)
             if r.returncode != 0 or not os.path.isfile(out_file):
                 log.warning(f"卡点叠加音乐失败，输出无音乐版本: {(r.stderr or '')[-200:]}")
@@ -460,16 +476,16 @@ class VideoConcatWorker(BaseWorker):
                 r = self._concat_with_transition(ffmpeg_path, ffprobe_path, batch_clips, out_file, temp_dir, batch_idx)
                 if r.returncode != 0:
                     # 转场拼接失败，回退到无损 concat
-                    log.warning(f"转场拼接失败，回退到普通拼接: {r.stderr[-200:]}")
+                    log.warning(f"转场拼接失败，回退到普通拼接: {(r.stderr or '')[-200:]}")
                     concat_txt = os.path.join(temp_dir, f"concat_{batch_idx}.txt")
                     with open(concat_txt, "w", encoding="utf-8") as f:
                         for n_clip in batch_clips:
                             safe_path = n_clip.replace("\\", "/")
                             f.write(f"file '{safe_path}'\n")
                     cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
-                    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
                     if r.returncode != 0:
-                        raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
+                        raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{(r.stderr or '')[-500:]}")
                 
                 # Save the combined script to a companion .txt file next to the video
                 txt_file = os.path.splitext(out_file)[0] + ".txt"
@@ -554,8 +570,8 @@ class FinalMixWorker(BaseWorker):
                             "ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
                             "-of", "csv=p=0", video_path
                         ]
-                        p_probe = subprocess.run(ffprobe_cmd, capture_output=True, text=True, creationflags=creationflags)
-                        if "audio" in p_probe.stdout:
+                        p_probe = subprocess.run(ffprobe_cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags)
+                        if "audio" in (p_probe.stdout or ""):
                             has_audio = True
                     except Exception:
                         has_audio = True
@@ -599,9 +615,9 @@ class FinalMixWorker(BaseWorker):
                         output_path
                     ]
                 
-                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags)
+                r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags)
                 if r.returncode != 0:
-                    raise RuntimeError(f"最后合成视频失败：\n{r.stderr}")
+                    raise RuntimeError(f"最后合成视频失败：\n{(r.stderr or '')[-500:]}")
                     
                 results.append(output_path)
                 
@@ -826,7 +842,7 @@ class VideoDubbingWorker(BaseWorker):
                     ]
                 cmd.append(output_video_path)
                 
-                r = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=subprocess.CREATE_NO_WINDOW)
                 if r.returncode != 0:
                     err = r.stderr or r.stdout or "(无输出)"
                     raise RuntimeError(f"视频原声替换配音失败：\n{err}\n命令: {' '.join(cmd)}")

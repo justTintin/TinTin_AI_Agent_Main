@@ -119,10 +119,14 @@ class AIConfigMixin:
 
     def _on_server_url_changed(self, url):
         """统一服务端地址变更时，联动更新各Tab的API地址。
-        Whisper/CLIP/PaddleOCR 直接使用统一地址，VoxCPM 需要手动加后缀不自动覆盖。"""
+        视觉模型/Whisper/CLIP 直接使用统一地址，VoxCPM 追加后缀。"""
         url = url.strip()
         if not url:
             return
+        # 视觉模型（Ollama 远程）— 始终与统一地址同步
+        vm = getattr(self, "llm_vision_api_url_input", None)
+        if vm:
+            vm.setText(url)
         # Whisper — 始终与统一地址同步
         w = getattr(self, "whisper_api_url_input", None)
         if w:

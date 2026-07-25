@@ -690,6 +690,11 @@ body {
   color: #fca5a5;
 }
 
+.download-status-badge.paused {
+  background-color: rgba(251, 191, 36, 0.15);
+  color: #fcd34d;
+}
+
 .progress-track {
   width: 100%;
   height: 5px;
@@ -736,6 +741,41 @@ body {
 .download-action-btn.cancel:hover {
   background-color: rgba(239, 68, 68, 0.1);
   color: #fda4af;
+}
+
+.download-action-btn.pause {
+  color: #fcd34d;
+}
+
+.download-action-btn.pause:hover {
+  background-color: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
+.download-action-btn.resume {
+  color: #34d399;
+}
+
+.download-action-btn.resume:hover {
+  background-color: rgba(52, 211, 153, 0.1);
+  color: #6ee7b7;
+}
+
+.download-action-btn.log {
+  color: #fbbf24;
+}
+
+.download-action-btn.log:hover {
+  background-color: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+}
+
+/* Download context menu */
+#download-context-menu {
+  font-family: var(--font-family);
+}
+#download-context-menu div:hover {
+  background: #333 !important;
 }
 
 /* Path Settings bottom panel */
@@ -1271,3 +1311,48 @@ body {
 .material-badge.image { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
 .material-badge.text { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
 .material-badge.file { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }
+
+/* ── 代理配置弹窗 ── */
+.proxy-input-tab {
+  background: #2a2a3e; border: 1px solid #444; border-radius: 6px;
+  padding: 5px 12px; color: #aaa; cursor: pointer; font-size: 0.75rem;
+  font-family: var(--font-family); transition: all 0.2s;
+}
+.proxy-input-tab:hover { background: #333; color: #fff; }
+.proxy-input-tab.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+#proxy-node-list .proxy-node-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px; background: #2a2a3e;
+  font-size: 0.75rem; cursor: pointer; transition: background 0.2s;
+}
+#proxy-node-list .proxy-node-item:hover { background: #333; }
+#proxy-node-list .proxy-node-item.selected { border: 1px solid var(--color-primary); }
+#proxy-node-list .proxy-node-item .node-latency {
+  margin-left: auto; font-size: 0.65rem; padding: 2px 6px;
+  border-radius: 4px; background: #1a1a2a; white-space: nowrap;
+}
+#proxy-node-list .proxy-node-item .node-latency.good { color: #34d399; }
+#proxy-node-list .proxy-node-item .node-latency.bad { color: #f87171; }
+#proxy-node-list .proxy-node-item .node-latency.testing { color: #fbbf24; }
+
+.proxy-mode-radio {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 12px; border-radius: 6px; border: 1px solid #444;
+  cursor: pointer; font-size: 0.78rem; background: #2a2a3e;
+  transition: all 0.2s;
+}
+.proxy-mode-radio:has(input:checked) {
+  border-color: var(--color-primary); background: rgba(99,102,241,0.1);
+}
+.proxy-mode-radio input { display: none; }
+
+/* ── 左侧底部状态栏按钮 ── */
+.statusbar-btn {
+  display: flex; align-items: center; gap: 4px;
+  background: none; border: none; color: var(--text-secondary);
+  cursor: pointer; padding: 2px 8px; border-radius: 4px;
+  font-size: 0.7rem; font-family: var(--font-family);
+  transition: all 0.2s;
+}
+.statusbar-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }

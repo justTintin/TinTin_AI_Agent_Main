@@ -28,7 +28,7 @@ from PySide6.QtCore import Qt, Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager
+from utils.gui_icons import mdi_button, mdi_icon
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
 
 CANVAS_SIZES = {"16:9（横版）": (1280, 720), "9:16（竖版）": (720, 1280), "1:1（方形）": (1080, 1080)}
@@ -86,17 +86,10 @@ class CoverTextAIWorker(BaseWorker):
         self.ref_image = ref_image  # 模板或视频帧路径（可选）
 
     def do_work(self):
-        import requests
+        from utils.llm_proxy import llm_chat, llm_chat_messages
         use_vision = bool(self.ref_image and os.path.isfile(self.ref_image)
-                          and self.cfg.get("llm_vision_api_url") and self.cfg.get("llm_vision_model"))
-        if use_vision:
-            api_url = self.cfg.get("llm_vision_api_url"); model = self.cfg.get("llm_vision_model")
-            api_key = self.cfg.get("llm_vision_api_key") or self.cfg.get("llm_api_key", "")
-        else:
-            api_url = self.cfg.get("llm_api_url"); model = self.cfg.get("llm_model", "deepseek-chat")
-            api_key = self.cfg.get("llm_api_key", "")
-        if not api_url or not api_key:
-            raise RuntimeError("未配置大模型 API（或视觉模型）。请到『大模型配置』填写。")
+                          and self.cfg.get("llm_vision_model"))
+        model = self.cfg.get("llm_vision_model") if use_vision else self.cfg.get("llm_model", "deepseek-v4-flash")
 
         sys_prompt = ("你是短视频封面文案专家。根据提供的文案（以及参考封面/视频帧）"
                       "提炼封面用的【标题】与【副标题】：标题≤10字、强冲击；副标题≤16字、补充信息。"
@@ -109,22 +102,13 @@ class CoverTextAIWorker(BaseWorker):
                 {"type": "text", "text": user_text + "\n参考图见附件，可借鉴其风格与重点。"},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
             ]
+            text = llm_chat_messages(
+                [{"role": "system", "content": sys_prompt},
+                 {"role": "user", "content": content}],
+                model=model, temperature=0.6, timeout=90)
         else:
-            content = user_text
-        payload = {
-            "model": model,
-            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-            "messages": [{"role": "system", "content": sys_prompt},
-                         {"role": "user", "content": content}],
-            "temperature": 0.6,
-        }
-        url = f"{api_url.rstrip('/')}/v1/chat/completions"
-        res = requests.post(url, json=payload,
-                            headers={"Authorization": f"Bearer {api_key}",
-                                     "Content-Type": "application/json"}, timeout=90)
-        if res.status_code != 200:
-            raise RuntimeError(f"大模型请求失败 HTTP {res.status_code}")
-        text = res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            text = llm_chat(sys_prompt, user_text, model=model, temperature=0.6, timeout=90)
+
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):
@@ -148,11 +132,10 @@ class CoverLayoutAIWorker(BaseWorker):
         self.template_path = template_path
 
     def do_work(self):
-        import requests
-        api_url = self.cfg.get("llm_vision_api_url"); model = self.cfg.get("llm_vision_model")
-        api_key = self.cfg.get("llm_vision_api_key") or self.cfg.get("llm_api_key", "")
-        if not (api_url and model):
-            raise RuntimeError("构图复刻需要『视觉模型』。请到『大模型配置』填写视觉模型地址与名称。")
+        from utils.llm_proxy import llm_chat_messages
+        model = self.cfg.get("llm_vision_model", "")
+        if not model:
+            raise RuntimeError("构图复刻需要『视觉模型』。请到『大模型配置』填写视觉模型名称。")
         if not (self.template_path and os.path.isfile(self.template_path)):
             raise RuntimeError("请先上传封面模板。")
         with open(self.template_path, "rb") as f:
@@ -171,16 +154,10 @@ class CoverLayoutAIWorker(BaseWorker):
             {"type": "text", "text": "请分析此封面模板的 标题/副标题/主体/背景 构图（位置、大小、颜色）。"},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
         ]
-        payload = {"model": model, "temperature": 0.4,
-                   "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-                   "messages": [{"role": "system", "content": sys_prompt},
-                                {"role": "user", "content": content}]}
-        res = requests.post(f"{api_url.rstrip('/')}/v1/chat/completions", json=payload,
-                            headers={"Authorization": f"Bearer {api_key}",
-                                     "Content-Type": "application/json"}, timeout=120)
-        if res.status_code != 200:
-            raise RuntimeError(f"视觉模型请求失败 HTTP {res.status_code}")
-        text = res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        text = llm_chat_messages(
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": content}],
+            model=model, temperature=0.4, timeout=120)
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):
@@ -192,7 +169,6 @@ class CoverLayoutAIWorker(BaseWorker):
 class CoverMakerPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.media = MediaLibraryManager()
         self.layers = []            # [{name, type, item, source, geom{ratio:{x,y,scale,font,visible}}}]
         self.current_video = ""
         self.template_path = ""
@@ -247,13 +223,13 @@ class CoverMakerPage(BasePage):
         lay.addWidget(self.chk_safe)
         self.lbl_src = QLabel("（未选模板/视频）"); self.lbl_src.setObjectName("muted_text")
         lay.addWidget(self.lbl_src, 1)
-        b3 = QPushButton("🤖 文案→标题/副标题"); b3.setObjectName("secondary_button"); b3.clicked.connect(self._ai_suggest)
+        b3 = mdi_button("文案→标题/副标题", "robot"); b3.setObjectName("secondary_button"); b3.clicked.connect(self._ai_suggest)
         lay.addWidget(b3)
-        b5 = QPushButton("🎯 模板→复刻构图"); b5.setObjectName("secondary_button"); b5.clicked.connect(self._replicate_layout)
+        b5 = mdi_button("模板→复刻构图", "search"); b5.setObjectName("secondary_button"); b5.clicked.connect(self._replicate_layout)
         lay.addWidget(b5)
-        b4 = QPushButton("💾 导出当前"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._export)
+        b4 = mdi_button("导出当前", "save"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._export)
         lay.addWidget(b4)
-        b6 = QPushButton("💾 导出横+竖"); b6.setObjectName("primary_button"); b6.clicked.connect(self._export_both)
+        b6 = mdi_button("导出横+竖", "save"); b6.setObjectName("primary_button"); b6.clicked.connect(self._export_both)
         lay.addWidget(b6)
         return card
 
@@ -265,9 +241,9 @@ class CoverMakerPage(BasePage):
         self.layer_list.currentRowChanged.connect(self._on_layer_selected)
         lay.addWidget(self.layer_list, 1)
         r1 = QHBoxLayout()
-        ba = QPushButton("➕图片"); ba.setObjectName("secondary_button"); ba.clicked.connect(lambda: self._add_layer("image"))
+        ba = mdi_button("图片", "plus"); ba.setObjectName("secondary_button"); ba.clicked.connect(lambda: self._add_layer("image"))
         r1.addWidget(ba)
-        bt = QPushButton("➕文字"); bt.setObjectName("secondary_button"); bt.clicked.connect(lambda: self._add_layer("text"))
+        bt = mdi_button("文字", "plus"); bt.setObjectName("secondary_button"); bt.clicked.connect(lambda: self._add_layer("text"))
         r1.addWidget(bt)
         lay.addLayout(r1)
         r2 = QHBoxLayout()
@@ -816,8 +792,6 @@ class CoverMakerPage(BasePage):
         out = os.path.join(COVER_OUTPUT_DIR, datetime.now().strftime("cover_%Y%m%d_%H%M%S.png"))
         if img.save(out, "PNG"):
             self.status.setText(f"已导出：{out}")
-            if self.confirm(f"封面已导出：\n{out}\n\n是否把输出目录加入素材管理？", "导出成功"):
-                self.media.add_mount(COVER_OUTPUT_DIR, kind="项目", group="封面", tags=["封面", "导出"])
         else:
             self.show_error("导出失败。")
 
@@ -854,7 +828,5 @@ class CoverMakerPage(BasePage):
         self._update_safe_rect()
         if outs:
             self.status.setText("已导出：" + "、".join(os.path.basename(o) for o in outs))
-            if self.confirm("已导出横/竖两版封面，是否把输出目录加入素材管理？", "导出成功"):
-                self.media.add_mount(COVER_OUTPUT_DIR, kind="项目", group="封面", tags=["封面", "导出"])
         else:
             self.show_error("导出失败。")

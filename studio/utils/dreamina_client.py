@@ -4,7 +4,7 @@ import shutil
 import subprocess
 
 from config.paths import get_bin
-from utils.platform_utils import IS_WIN, create_no_window_flag
+from utils.platform_utils import create_no_window_flag
 
 DREAMINA_EXE = get_bin("dreamina")
 
@@ -33,7 +33,7 @@ class DreaminaClient:
         if os.path.isfile(DREAMINA_EXE):
             return DREAMINA_EXE
         found = shutil.which("dreamina")
-        if not found and IS_WIN:
+        if not found:
             found = shutil.which("dreamina.exe")
         return found or DREAMINA_EXE
 
@@ -46,8 +46,7 @@ class DreaminaClient:
         cmd = [self.exe] + list(args)
         kwargs = dict(capture_output=True, text=True, encoding="utf-8",
                       errors="replace", timeout=timeout)
-        if IS_WIN:
-            kwargs["creationflags"] = create_no_window_flag()
+        kwargs["creationflags"] = create_no_window_flag()
         try:
             r = subprocess.run(cmd, **kwargs)
             out = _strip_noise((r.stdout or "") + ("\n" + r.stderr if r.stderr else ""))

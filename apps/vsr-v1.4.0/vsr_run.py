@@ -40,6 +40,9 @@ def main():
     parser.add_argument("--h264", action="store_true")      # Compatibility placeholder
     parser.add_argument("--preview_path", default="")
     parser.add_argument("--output", default="")
+    parser.add_argument("--max_load_num", type=int, default=0,
+                        help="Override STTN max frames per batch (0=use config default). "
+                             "Lower values reduce GPU memory usage for high-resolution videos.")
     args = parser.parse_args()
 
     # Determine inpaint mode based on skip_detect and mode args
@@ -62,6 +65,11 @@ def main():
     if not is_video_or_image(video_path):
         print(f"Error: {video_path} is not supported or corrupted.", flush=True)
         sys.exit(-1)
+
+    # Override STTN batch size if specified (helps with high-resolution / large memory videos)
+    if args.max_load_num > 0:
+        config.sttnMaxLoadNum.value = args.max_load_num
+        print(f"[INFO] STTN max load num overridden to: {args.max_load_num}", flush=True)
 
     sr = backend.main.SubtitleRemover(video_path, gui_mode=True)
 

@@ -60,11 +60,9 @@ class VideoOcrWorker(BaseWorker):
         self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")
         self.log_received.emit(f"[INFO] 执行后端命令: {' '.join(cmd)}")
 
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         try:
             self.process = subprocess.Popen(
@@ -127,8 +125,16 @@ class VideoOcrWorker(BaseWorker):
         self.is_aborted = True
         if self.process:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
+                # 异步运行 taskkill 防止 GUI 主线程卡死
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0 # SW_HIDE
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=startupinfo
+                )
             except Exception:
                 try:
                     self.process.kill()
@@ -297,12 +303,9 @@ class VideoOcrPage(BasePage):
 
     def setup(self):
         tmp_dir = TMP_DIR
-        os.makedirs(tmp_dir, exist_ok=True)
-        self.preview_img_path = os.path.join(tmp_dir, "ocr_roi_preview.jpg")
-
         # Main Page layout
         main_layout = QVBoxLayout(self.parent_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(16)
 
         # Title Header
@@ -314,23 +317,18 @@ class VideoOcrPage(BasePage):
         splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
         main_layout.addWidget(splitter, 1)
 
-        # --- Left Panel: Controls & Options ---
+        # ─── Left Panel (Video Picker & Preview) ───
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 10, 0)
-        left_layout.setSpacing(14)
-        
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(0, 20, 0, 20)
-        card_layout.setSpacing(14)
+        left_layout.setSpacing(16)
 
-        # Video picker
-        inp_container = QWidget()
-        inp_container_layout = QVBoxLayout(inp_container)
-        inp_container_layout.setContentsMargins(24, 0, 24, 0)
-        inp_container_layout.setSpacing(14)
+        # Card 1: Video Picker
+        inp_card = QFrame()
+        inp_card.setObjectName("card")
+        inp_layout = QVBoxLayout(inp_card)
+        inp_card.setContentsMargins(16, 16, 16, 16)
+        inp_layout.setSpacing(10)
 
         inp_row = QHBoxLayout()
         inp_row.addWidget(QLabel("选择输入视频:"))
@@ -342,24 +340,144 @@ class VideoOcrPage(BasePage):
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_video)
         inp_row.addWidget(btn_sel)
-        inp_container_layout.addLayout(inp_row)
-        card_layout.addWidget(inp_container)
+        inp_layout.addLayout(inp_row)
+        left_layout.addWidget(inp_card, 0)
 
-        # Bounding box selection controls
-        box_manage_group = QFrame()
-        box_manage_group.setObjectName("box_manage_group")
-        box_manage_group.setStyleSheet("#box_manage_group { background-color: #26262a; border-top: 1px solid #2e2e32; border-bottom: 1px solid #2e2e32; border-radius: 0px; }")
-        box_manage_layout = QVBoxLayout(box_manage_group)
-        box_manage_layout.setContentsMargins(24, 16, 24, 16)
-        box_manage_layout.setSpacing(14)
+        # Card 2: Interactive Preview Card (Expanding to bottom)
+        preview_card = QFrame()
+        preview_card.setObjectName("card")
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout = QVBoxLayout(preview_card)
+        p_layout.setContentsMargins(16, 16, 16, 16)
+        p_layout.setSpacing(10)
+
+        p_title = QLabel("🖼️ 实时预览画面 (在画面上拖拽选择需要 OCR 的框):")
+        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        p_layout.addWidget(p_title, 0)
+
+        self.preview_label = InteractivePreviewLabelOCR()
+        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
+        self.preview_label.resized.connect(self.update_preview)
+        self.preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout.addWidget(self.preview_label, 1)
+
+        # Video progress slider for scrubbing
+        seek_row = QHBoxLayout()
+        seek_row.setSpacing(8)
         
-        box_manage_title = QLabel("📦 OCR 识别区域坐标设置:")
-        box_manage_title.setStyleSheet("font-weight: bold; color: #ffffff;")
-        box_manage_layout.addWidget(box_manage_title)
+        button_style = """
+            QPushButton {
+                background-color: #1a1a24;
+                color: #a1a1aa;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2e2e38;
+                color: #ffffff;
+                border-color: #3b82f6;
+            }
+            QPushButton:disabled {
+                background-color: #13131a;
+                color: #4b5563;
+                border-color: #1f2937;
+            }
+        """
 
-        # Coordinate Sliders
-        sliders_layout = QVBoxLayout()
-        sliders_layout.setSpacing(14)
+        self.btn_prev_frame = QPushButton("◀")
+        self.btn_prev_frame.setFixedWidth(30)
+        self.btn_prev_frame.setStyleSheet(button_style)
+        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
+        seek_row.addWidget(self.btn_prev_frame)
+        
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0, 1000)
+        self.seek_slider.setValue(0)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3b82f6;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #3b82f6;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #3b82f6;
+                border: 2px solid #ffffff;
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
+        seek_row.addWidget(self.seek_slider)
+        
+        self.btn_next_frame = QPushButton("▶")
+        self.btn_next_frame.setFixedWidth(30)
+        self.btn_next_frame.setStyleSheet(button_style)
+        self.btn_next_frame.clicked.connect(self._step_next_frame)
+        seek_row.addWidget(self.btn_next_frame)
+        
+        self.lbl_seek_time = QLabel("00:00 / 00:00")
+        self.lbl_seek_time.setFixedWidth(90)
+        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
+        self.lbl_seek_time.setStyleSheet("""
+            QLabel {
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                color: #3b82f6;
+                background-color: #16161e;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        """)
+        seek_row.addWidget(self.lbl_seek_time)
+        p_layout.addLayout(seek_row)
+
+        left_layout.addWidget(preview_card, 1)
+        splitter.addWidget(left_widget)
+
+        # ─── Right Panel (Controls Card & Logs Card) ───
+        right_widget = QWidget()
+        right_widget.setMinimumWidth(380)
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_layout.setSpacing(16)
+
+        # Card 1: Controls Card
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(0, 16, 0, 16)
+        controls_layout.setSpacing(14)
+
+        # Title
+        c_title = QLabel("📦 OCR 模板识别选区及设置")
+        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
+        controls_layout.addWidget(c_title)
+
+        # Bounding Box Sliders Group
+        box_group = QWidget()
+        box_layout = QVBoxLayout(box_group)
+        box_layout.setContentsMargins(20, 0, 20, 0)
+        box_layout.setSpacing(12)
 
         def create_slider_row(label_text, slider, val_lbl):
             row = QHBoxLayout()
@@ -373,38 +491,40 @@ class VideoOcrPage(BasePage):
             row.addWidget(val_lbl)
             return row
 
-        # X Slider
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
+        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
 
-        # W Slider
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
 
-        # Y Slider
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
+        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
 
-        # H Slider
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
 
-        box_manage_layout.addLayout(sliders_layout)
-        card_layout.addWidget(box_manage_group)
+        controls_layout.addWidget(box_group)
 
-        # Options Container
-        bottom_container = QWidget()
-        bottom_container_layout = QVBoxLayout(bottom_container)
-        bottom_container_layout.setContentsMargins(24, 0, 24, 0)
-        bottom_container_layout.setSpacing(14)
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        sep.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
+        controls_layout.addWidget(sep)
+
+        # Options layout
+        options_widget = QWidget()
+        options_layout = QVBoxLayout(options_widget)
+        options_layout.setContentsMargins(20, 0, 20, 0)
+        options_layout.setSpacing(12)
 
         # OCR Filter Options
         filter_row = QHBoxLayout()
@@ -413,7 +533,7 @@ class VideoOcrPage(BasePage):
         self.filter_combo.addItem("识别区域内所有文本 (All)", "all")
         self.filter_combo.addItem("仅提取数字与数值 (如温度、计数等)", "numeric")
         filter_row.addWidget(self.filter_combo)
-        bottom_container_layout.addLayout(filter_row)
+        options_layout.addLayout(filter_row)
 
         # Sample rate selection
         rate_row = QHBoxLayout()
@@ -426,7 +546,7 @@ class VideoOcrPage(BasePage):
         self.rate_combo.addItem("每隔 30 帧扫描 (最快)", 30)
         self.rate_combo.setCurrentIndex(2) # Default 5 frames
         rate_row.addWidget(self.rate_combo)
-        bottom_container_layout.addLayout(rate_row)
+        options_layout.addLayout(rate_row)
 
         # Excel output info details
         out_row = QHBoxLayout()
@@ -434,18 +554,33 @@ class VideoOcrPage(BasePage):
         self.output_path_input = QLineEdit()
         self.output_path_input.setPlaceholderText("默认输出到 outputs 目录...")
         out_row.addWidget(self.output_path_input)
-        bottom_container_layout.addLayout(out_row)
+        options_layout.addLayout(out_row)
 
         # Status & Progress bar
         self.status_lbl = QLabel("状态: 就绪")
         self.status_lbl.setObjectName("muted_text")
-        bottom_container_layout.addWidget(self.status_lbl)
+        options_layout.addWidget(self.status_lbl)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        bottom_container_layout.addWidget(self.progress_bar)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #15151e;
+                text-align: center;
+                color: #ffffff;
+                font-weight: bold;
+                height: 16px;
+            }
+            QProgressBar::chunk {
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                border-radius: 5px;
+            }
+        """)
+        options_layout.addWidget(self.progress_bar)
 
         # Start / Stop Buttons
         btn_action_layout = QHBoxLayout()
@@ -458,68 +593,15 @@ class VideoOcrPage(BasePage):
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_ocr_scan)
         btn_action_layout.addWidget(self.btn_stop)
-        bottom_container_layout.addLayout(btn_action_layout)
+        options_layout.addLayout(btn_action_layout)
 
-        card_layout.addWidget(bottom_container, 1)
-        left_layout.addWidget(card)
-        left_widget.setMaximumWidth(450)
-        splitter.addWidget(left_widget)
+        controls_layout.addWidget(options_widget)
+        right_layout.addWidget(controls_card, 0)
 
-        # --- Right Panel: Video preview + Log Viewer ---
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(10, 0, 0, 0)
-        right_layout.setSpacing(14)
-
-        # Preview Label Card
-        preview_card = QFrame()
-        preview_card.setObjectName("card")
-        p_layout = QVBoxLayout(preview_card)
-        p_layout.setContentsMargins(16, 16, 16, 16)
-        
-        p_title = QLabel("🖼️ 实时预览画面 (在画面上拖拽选择需要 OCR 的框):")
-        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
-        p_layout.addWidget(p_title)
-
-        self.preview_label = InteractivePreviewLabelOCR()
-        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
-        self.preview_label.resized.connect(self.update_preview)
-        p_layout.addWidget(self.preview_label)
-
-        # Video progress slider for scrubbing / previewing frames
-        seek_row = QHBoxLayout()
-        self.btn_prev_frame = QPushButton("◀")
-        self.btn_prev_frame.setFixedWidth(30)
-        self.btn_prev_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
-        seek_row.addWidget(self.btn_prev_frame)
-        
-        self.seek_slider = QSlider(Qt.Horizontal)
-        self.seek_slider.setRange(0, 1000)
-        self.seek_slider.setValue(0)
-        self.seek_slider.setEnabled(False)
-        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
-        self.seek_slider.sliderReleased.connect(self._on_seek_released)
-        seek_row.addWidget(self.seek_slider)
-        
-        self.btn_next_frame = QPushButton("▶")
-        self.btn_next_frame.setFixedWidth(30)
-        self.btn_next_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-        self.btn_next_frame.clicked.connect(self._step_next_frame)
-        seek_row.addWidget(self.btn_next_frame)
-        
-        self.lbl_seek_time = QLabel("00:00 / 00:00")
-        self.lbl_seek_time.setFixedWidth(90)
-        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
-        self.lbl_seek_time.setStyleSheet("color: #9ca3af; font-size: 11px;")
-        seek_row.addWidget(self.lbl_seek_time)
-        
-        p_layout.addLayout(seek_row)
-        right_layout.addWidget(preview_card)
-
-        # Console logs output card
+        # Card 2: Logs Viewer
         log_card = QFrame()
         log_card.setObjectName("card")
+        log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout = QVBoxLayout(log_card)
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
@@ -528,9 +610,9 @@ class VideoOcrPage(BasePage):
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(180)
+        self.log_view.setMinimumHeight(150)
         log_layout.addWidget(self.log_view)
-        right_layout.addWidget(log_card)
+        right_layout.addWidget(log_card, 1)
 
         # System model prompt
         help_card = QFrame()
@@ -549,6 +631,8 @@ class VideoOcrPage(BasePage):
         right_layout.addWidget(help_card)
 
         splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 7)
+        splitter.setStretchFactor(1, 3)
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -798,11 +882,12 @@ class VideoOcrPage(BasePage):
     def stop_ocr_scan(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.worker.wait()
-        self.btn_stop.setEnabled(False)
+            self.status_lbl.setText("状态: 正在终止中，请稍候...")
+            self._append_log("\n[WARN] 已发出停止指令，等待引擎退出...")
+            # 不调用 wait()，避免主线程阻塞；由 worker 的 finished 信号统一恢复 UI
 
     def on_scan_finished(self, success, result):
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.video_path_input.setEnabled(True)
@@ -831,6 +916,10 @@ class VideoOcrPage(BasePage):
             except Exception:
                 pass
         else:
+            if self.worker and self.worker.is_aborted:
+                self.status_lbl.setText("状态: 已被用户终止。")
+                return
+
             self.status_lbl.setText(f"状态: OCR 识别中断或出错。")
             QMessageBox.critical(self.parent_widget, "扫描失败", f"OCR 扫描失败：\n{result}")
 
@@ -860,12 +949,11 @@ class VideoOcrPage(BasePage):
                 frame_found = True
                 break
                 
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
             
             if frame_found:
                 self.update_preview()
-                
-                total_sec = container.duration / 1000000.0 if container.duration else 0.0
                 curr_sec = ratio * total_sec
                 self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
                 

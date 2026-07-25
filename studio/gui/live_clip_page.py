@@ -20,7 +20,9 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 from config.paths import OUTPUTS_DIR, TMP_DIR
 
 
@@ -35,11 +37,9 @@ HOT_KEYWORDS_CN = [
 
 
 def _startupinfo():
-    si = None
-    if sys.platform == "win32":
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
     return si
 
 
@@ -51,24 +51,6 @@ def _ffmpeg():
     if not p:
         raise RuntimeError("未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH")
     return p
-
-
-def extract_audio_streaming(video_path, audio_path):
-    ffmpeg = _ffmpeg()
-    cmd = [ffmpeg, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
-           "-ar", "16000", "-ac", "1", "-progress", "pipe:1", "-nostats", audio_path]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
-    for line in proc.stdout:
-        line = line.strip()
-        if line.startswith("out_time_ms="):
-            try:
-                yield int(line.split("=")[1]) / 1_000_000
-            except ValueError:
-                pass
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"音频提取失败:\n{proc.stderr.read() if proc.stderr else ''}")
 
 
 def extract_frame(video_path, out_image, time_sec=1.0):
@@ -248,7 +230,7 @@ def embed_cover_to_video(cover_path, video_path, out_path, cover_duration=2):
         f"[v0][v1]concat=n=2:v=1:a=0[v];"
         f"[1:a]adelay={cover_duration*1000}:all=1[a]",
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        *get_video_encode_args(crf=23, preset="fast"),
         "-c:a", "aac", "-shortest",
         out_path,
     ]
@@ -269,18 +251,57 @@ class AudioExtractWorker(BaseWorker):
         super().__init__()
         self.video_path = video_path
         self.audio_path = audio_path
+        self._ffmpeg_proc = None
 
     def run(self):
         try:
             self.stage.emit("正在流式提取音频...")
+            log.info(f"[AudioExtractWorker] 开始提取音频: {self.video_path}")
             last = -1
-            for sec in extract_audio_streaming(self.video_path, self.audio_path):
+            count = 0
+            for sec in self._extract():
+                if self.isInterruptionRequested():
+                    return
+                count += 1
                 pct = min(99, int(sec / 10 if sec < 1000 else sec / 60))
                 if pct > last:
                     self.progress.emit(pct)
                     last = pct
+            if self.isInterruptionRequested():
+                return
+            log.info(f"[AudioExtractWorker] 提取完成, 进度更新{count}次")
             self.progress.emit(100)
             self.finished.emit(self.audio_path)
+        except Exception:
+            log.exception("[AudioExtractWorker] 提取异常")
+            self.error.emit(traceback.format_exc())
+
+    def _extract(self):
+        ffmpeg = _ffmpeg()
+        cmd = [ffmpeg, "-y", "-threads", "0", "-i", self.video_path, "-vn",
+               "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+               "-progress", "pipe:1", "-nostats", self.audio_path]
+        log.info(f"[AudioExtractWorker] ffmpeg: {' '.join(cmd)}")
+        self._ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                              bufsize=0, startupinfo=_startupinfo())
+        for line in iter(self._ffmpeg_proc.stdout.readline, b""):
+            if self.isInterruptionRequested():
+                self._ffmpeg_proc.kill()
+                return
+            if line.startswith(b"out_time_ms="):
+                try:
+                    yield int(line.split(b"=")[1]) / 1_000_000
+                except ValueError:
+                    pass
+        self._ffmpeg_proc.wait()
+        if self._ffmpeg_proc.returncode != 0:
+            raise RuntimeError("音频提取失败")
+
+    def kill_ffmpeg(self):
+        try:
+            if self._ffmpeg_proc and self._ffmpeg_proc.poll() is None:
+                self._ffmpeg_proc.kill()
+                self.finished.emit(self.audio_path)
         except Exception:
             self.error.emit(traceback.format_exc())
 
@@ -290,17 +311,15 @@ class HotSpotAnalyzer(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)
 
-    def __init__(self, segments, use_llm=False, llm_url="", llm_key="", llm_model=""):
+    def __init__(self, segments, use_llm=False, llm_model=""):
         super().__init__()
         self.segments = [s for s in segments if hasattr(s, 'start') and hasattr(s, 'text')]
         self.use_llm = use_llm
-        self.llm_url = llm_url
-        self.llm_key = llm_key
         self.llm_model = llm_model
 
     def run(self):
         try:
-            if self.use_llm and self.llm_url and self.llm_key:
+            if self.use_llm and self.llm_model:
                 self._llm_analyze()
             else:
                 self._rule_analyze()
@@ -370,9 +389,9 @@ class HotSpotAnalyzer(BaseWorker):
         self.finished.emit(results)
 
     def _llm_analyze(self):
-        self.stage.emit("正在使用大模型(DeepSeek/OpenAI)分析热点...")
-        self.progress.emit(10)
-        import requests
+        import re
+        import json
+        from utils.llm_proxy import llm_chat_messages
         full = []
         for s in self.segments:
             ts = f"[{int(s.start//60):02d}:{int(s.start%60):02d}]"
@@ -415,25 +434,22 @@ class HotSpotAnalyzer(BaseWorker):
                 "【待分析字幕文本】：\n" + chunk
             )
             try:
-                resp = requests.post(
-                    f"{self.llm_url.rstrip('/')}/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {self.llm_key}", "Content-Type": "application/json"},
-                    json={"model": self.llm_model, "messages": [{"role": "user", "content": prompt}],
-                          "temperature": 0.3, "max_tokens": 2000}, timeout=120)
-                if resp.status_code == 200:
-                    content = resp.json()["choices"][0]["message"]["content"]
-                    m = re.search(r"\[[\s\S]*\]", content)
-                    if m:
-                        for item in json.loads(m.group()):
-                            sp = item["start"].split(":"); ep = item["end"].split(":")
-                            item["start"] = int(sp[0]) * 60 + int(sp[1])
-                            item["end"] = int(ep[0]) * 60 + int(ep[1])
-                            item["duration"] = item["end"] - item["start"]
-                            item["start_str"] = item.get("start_str", item.get("start", ""))
-                            item["end_str"] = item.get("end_str", item.get("end", ""))
-                            item["preview"] = ""
-                            item["score"] = item.get("score", 5.0)
-                            all_results.append(item)
+                content = llm_chat_messages(
+                    [{"role": "user", "content": prompt}],
+                    model=self.llm_model, temperature=0.3, timeout=120, max_tokens=2000
+                )
+                m = re.search(r"\[[\s\S]*\]", content)
+                if m:
+                    for item in json.loads(m.group()):
+                        sp = item["start"].split(":"); ep = item["end"].split(":")
+                        item["start"] = int(sp[0]) * 60 + int(sp[1])
+                        item["end"] = int(ep[0]) * 60 + int(ep[1])
+                        item["duration"] = item["end"] - item["start"]
+                        item["start_str"] = item.get("start_str", item.get("start", ""))
+                        item["end_str"] = item.get("end_str", item.get("end", ""))
+                        item["preview"] = ""
+                        item["score"] = item.get("score", 5.0)
+                        all_results.append(item)
             except Exception as e:
                 log.warning(f"LLM chunk {ci} error: {e}")
                 
@@ -521,7 +537,7 @@ class VideoClipWorker(BaseWorker):
                        "-i", abs_video,
                        "-ss", f"{remain_start:.3f}",
                        "-t", f"{duration:.3f}"] + vf_args + [
-                       "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                       *get_video_encode_args(crf=23, preset="fast"),
                        "-c:a", "aac", abs_out]
                        
                 r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -640,7 +656,7 @@ class AudioPlayerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = mdi_button("播放", "play")
         self.btn_play.setFixedWidth(70)
         self.btn_play.setObjectName("secondary_button")
         self.btn_play.clicked.connect(self.toggle_play)
@@ -687,17 +703,17 @@ class AudioPlayerWidget(QWidget):
         self.audio_path = audio_path
         self.player.setSource(QUrl.fromLocalFile(audio_path))
         self.setEnabled(True)
-        self.btn_play.setText("▶ 播放")
+        self.btn_play.setText("播放")
         self.lbl_time.setText("00:00 / 00:00")
         self.slider.setValue(0)
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def position_changed(self, position):
         if not self.slider.isSliderDown():
@@ -817,7 +833,7 @@ class CoverEditDialog(QDialog):
         ctrl_layout = QHBoxLayout()
         ctrl_layout.setSpacing(10)
         
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = mdi_button("播放", "play")
         self.btn_play.setStyleSheet("""
             QPushButton {
                 background-color: #27272a;
@@ -843,7 +859,7 @@ class CoverEditDialog(QDialog):
         
         ctrl_layout.addStretch()
         
-        self.btn_capture = QPushButton("📸 选择当前帧为封面")
+        self.btn_capture = mdi_button("选择当前帧为封面", "camera")
         self.btn_capture.setStyleSheet("""
             QPushButton {
                 background-color: #10b981;
@@ -985,15 +1001,15 @@ class CoverEditDialog(QDialog):
     def on_slider_pressed(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def set_position(self, position):
         self.pending_seek_pos = position
@@ -1031,7 +1047,7 @@ class CoverEditDialog(QDialog):
     def capture_current_frame(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放")
             
         time_sec = self.player.position() / 1000.0
         self.btn_capture.setEnabled(False)
@@ -1045,7 +1061,7 @@ class CoverEditDialog(QDialog):
             QMessageBox.warning(self, "截图失败", f"无法捕获当前帧:\n{str(e)}")
         finally:
             self.btn_capture.setEnabled(True)
-            self.btn_capture.setText("📸 选择当前帧为封面")
+            self.btn_capture.setText("选择当前帧为封面")
             
     def on_title_changed(self, text):
         self.current_title = text.strip()
@@ -1161,7 +1177,7 @@ class ClipListItemWidget(QFrame):
         """)
         self.slice_layout.addWidget(self.pbar_slice, 1)
         
-        self.btn_slice_single = QPushButton("✂ 单独切片")
+        self.btn_slice_single = mdi_button("单独切片", "cut")
         self.btn_slice_single.setStyleSheet("""
             QPushButton {
                 background-color: #d97706;
@@ -1196,7 +1212,7 @@ class ClipListItemWidget(QFrame):
         play_layout = QHBoxLayout()
         play_layout.setSpacing(6)
         
-        self.btn_play = QPushButton("▶ 播放声音")
+        self.btn_play = mdi_button("播放声音", "play")
         self.btn_play.setStyleSheet("""
             QPushButton {
                 background-color: #27272a;
@@ -1248,7 +1264,7 @@ class ClipListItemWidget(QFrame):
         """)
         play_layout.addWidget(self.slider)
         
-        self.btn_edit_cover = QPushButton("🎨 编辑封面")
+        self.btn_edit_cover = mdi_button("编辑封面", "palette")
         self.btn_edit_cover.setStyleSheet("""
             QPushButton {
                 background-color: #3b82f6;
@@ -1323,7 +1339,7 @@ class ClipListItemWidget(QFrame):
         self.btn_edit_cover.setEnabled(True)
         self.slider.setEnabled(True)
         
-        self.btn_slice_single.setText("✓ 已切片")
+        self.btn_slice_single.setText("已切片")
         self.btn_slice_single.setEnabled(False)
         self.pbar_slice.setVisible(False)
         
@@ -1333,16 +1349,16 @@ class ClipListItemWidget(QFrame):
             
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放声音")
+            self.btn_play.setText("播放声音")
         else:
             self.main_page.pause_all_players_except(self.clip_index)
             self.player.play()
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停")
             
     def pause_audio(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("▶ 播放声音")
+            self.btn_play.setText("播放声音")
             
     def open_cover_editor(self):
         video_path = self.clip_info.get("video_path")
@@ -1406,7 +1422,7 @@ class ClipListItemWidget(QFrame):
         
     def on_individual_slice_error(self, err):
         self.btn_slice_single.setEnabled(True)
-        self.btn_slice_single.setText("✂ 单独切片")
+        self.btn_slice_single.setText("单独切片")
         self.pbar_slice.setVisible(False)
         QMessageBox.critical(self.main_page.parent_widget, "错误", f"单独切片失败:\n{err}")
         
@@ -1451,10 +1467,7 @@ class ClipListItemWidget(QFrame):
         self.enable_playback(ci["video_path"])
         self.main_page.update_covers_info_for_index(self.clip_index, ci)
         
-        self.btn_slice_single.setText("✓ 已切片")
-        self.btn_slice_single.setEnabled(False)
-        self.pbar_slice.setVisible(False)
-        
+        self.btn_slice_single.setText("已切片")
     def position_changed(self, position):
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
@@ -1486,6 +1499,8 @@ class LiveClipPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
+        self._stop_requested = False
+        self._workers = []  # 所有可停止的 worker 列表
         self.hotspots = []
         self.transcript_segments = []
         self.audio_path = ""
@@ -1523,7 +1538,7 @@ class LiveClipPage(BasePage):
         self.pause_all_players_except(-1)
         if hasattr(self, "audio_player"):
             self.audio_player.player.pause()
-            self.audio_player.btn_play.setText("▶ 播放")
+            self.audio_player.btn_play.setText("播放")
 
         if index == 0:
             self.progress_bar = self.progress_bar_p0
@@ -1567,7 +1582,10 @@ class LiveClipPage(BasePage):
             lbl.setFont(self._get_step_font(i == 0))
             sl.addWidget(lbl)
             self.step_labels.append(lbl)
-        layout.addWidget(self.step_bar, 0)
+            layout.addWidget(self.step_bar, 0)
+    
+            # 初始化第一步为激活状态
+            QTimer.singleShot(0, lambda: self._update_step_indicator(0))
 
         # Stacked widget
         self.stacked = QStackedWidget()
@@ -1609,7 +1627,14 @@ class LiveClipPage(BasePage):
         vr.addWidget(self.video_info_lbl)
         cl.addLayout(vr)
 
-        # Row 2: Analysis method, transcription engine and Start button in one line
+        # Row 2: Audio player for seek and playback
+        pr = QHBoxLayout()
+        pr.addWidget(QLabel("音频预览:"))
+        self.audio_player = AudioPlayerWidget()
+        pr.addWidget(self.audio_player, 1)
+        cl.addLayout(pr)
+
+        # Row 3: Analysis method, transcription engine and Start button in one line
         ar = QHBoxLayout()
         ar.addWidget(QLabel("分析方法:"))
         self.analysis_mode = QComboBox()
@@ -1626,19 +1651,24 @@ class LiveClipPage(BasePage):
         self.transcribe_lang.setCurrentIndex(0)  # Default to Chinese
         ar.addWidget(self.transcribe_lang)
 
-        self.btn_analyze = QPushButton("🎤 开始提取并分析")
+        self.chk_reextract = QCheckBox("强制重新提取音频")
+        self.chk_reextract.setToolTip("勾选后每次重新用 ffmpeg 提取音频")
+        ar.addWidget(self.chk_reextract)
+
+        self.btn_analyze = mdi_button("开始提取并分析", "mic")
         self.btn_analyze.setObjectName("action_button")
         self.btn_analyze.setFixedHeight(30)
         self.btn_analyze.clicked.connect(self._start_analysis_pipeline)
         ar.addWidget(self.btn_analyze, 1)
-        cl.addLayout(ar)
 
-        # Row 3: Audio player for seek and playback
-        pr = QHBoxLayout()
-        pr.addWidget(QLabel("音频预览:"))
-        self.audio_player = AudioPlayerWidget()
-        pr.addWidget(self.audio_player, 1)
-        cl.addLayout(pr)
+        self.btn_stop = mdi_button("停止", "stop")
+        self.btn_stop.setObjectName("secondary_button")
+        self.btn_stop.setProperty("danger", True)
+        self.btn_stop.setFixedHeight(30)
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._stop_analysis)
+        ar.addWidget(self.btn_stop)
+        cl.addLayout(ar)
 
         layout.addWidget(card)
 
@@ -1652,20 +1682,21 @@ class LiveClipPage(BasePage):
         sub_vl = QVBoxLayout(sub_card)
         sub_vl.setSpacing(8)
         sub_vl.setContentsMargins(12, 10, 12, 10)
-        sub_vl.addWidget(QLabel("<b>📝 字幕预览</b>"))
+        sub_header = QHBoxLayout()
+        sub_header.addWidget(QLabel("<b>📝 字幕预览</b>"))
+        sub_header.addStretch()
+        self.btn_export_sub = mdi_button("导出字幕", "save")
+        self.btn_export_sub.setObjectName("secondary_button")
+        self.btn_export_sub.setEnabled(False)
+        self.btn_export_sub.clicked.connect(self._export_subtitles)
+        sub_header.addWidget(self.btn_export_sub)
+        sub_vl.addLayout(sub_header)
         
         self.transcript_preview = QTextEdit()
         self.transcript_preview.setReadOnly(True)
         self.transcript_preview.setObjectName("log_viewer")
         self.transcript_preview.setPlaceholderText("转写完成后在此预览字幕...")
         sub_vl.addWidget(self.transcript_preview)
-
-        # Export Subtitles Button
-        self.btn_export_sub = QPushButton("💾 导出字幕")
-        self.btn_export_sub.setObjectName("secondary_button")
-        self.btn_export_sub.setEnabled(False)
-        self.btn_export_sub.clicked.connect(self._export_subtitles)
-        sub_vl.addWidget(self.btn_export_sub)
 
         lower_layout.addWidget(sub_card, 1)
 
@@ -1737,7 +1768,7 @@ class LiveClipPage(BasePage):
         self.progress_bar_p0.setRange(0, 100)
         bot_layout.addWidget(self.progress_bar_p0, 1)
 
-        self.btn_to_step2 = QPushButton("下一步：切片与封面 ➔")
+        self.btn_to_step2 = mdi_button("下一步：切片与封面", "right")
         self.btn_to_step2.setObjectName("primary_button")
         self.btn_to_step2.setEnabled(False)
         self.btn_to_step2.clicked.connect(lambda: self._go_to_step(1))
@@ -1772,14 +1803,14 @@ class LiveClipPage(BasePage):
         self.clip_status_lbl = QLabel("已选 0 个片段待切片")
         self.clip_status_lbl.setObjectName("clip_status_label")
         header_layout.addWidget(self.clip_status_lbl)
-        
-        self.btn_clip = QPushButton("\u2702 开始切片")
-        self.btn_clip.setObjectName("action_button")
-        self.btn_clip.setFixedHeight(30)
-        self.btn_clip.setFixedWidth(120)
-        self.btn_clip.clicked.connect(self._start_clip_pipeline)
-        header_layout.addWidget(self.btn_clip)
-        
+
+        self.btn_open_output = mdi_button("打开输出目录", "folder")
+        self.btn_open_output.setObjectName("secondary_button")
+        self.btn_open_output.setFixedHeight(30)
+        self.btn_open_output.clicked.connect(self._open_output)
+        self.btn_open_output.setEnabled(False)
+        header_layout.addWidget(self.btn_open_output)
+
         ccl.addLayout(header_layout)
         
         # Scroll Area for the list of clips
@@ -1810,21 +1841,20 @@ class LiveClipPage(BasePage):
         
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
-        
-        self.btn_export = QPushButton("\U0001F680 确认封面并导出最终视频")
+
+        self.btn_clip = mdi_button("开始切片", "cut")
+        self.btn_clip.setObjectName("action_button")
+        self.btn_clip.setFixedHeight(40)
+        self.btn_clip.clicked.connect(self._start_clip_pipeline)
+        btn_layout.addWidget(self.btn_clip, 1)
+
+        self.btn_export = mdi_button("确认封面并导出最终视频", "rocket")
         self.btn_export.setObjectName("action_button")
         self.btn_export.setFixedHeight(40)
         self.btn_export.clicked.connect(self._start_final_export)
         self.btn_export.setEnabled(False)
         btn_layout.addWidget(self.btn_export, 1)
 
-        self.btn_open_output = QPushButton("\U0001F4C2 打开输出目录")
-        self.btn_open_output.setObjectName("secondary_button")
-        self.btn_open_output.setFixedHeight(40)
-        self.btn_open_output.clicked.connect(self._open_output)
-        self.btn_open_output.setEnabled(False)
-        btn_layout.addWidget(self.btn_open_output, 1)
-        
         evl.addLayout(btn_layout)
 
         self.export_result_lbl = QLabel("")
@@ -1846,7 +1876,7 @@ class LiveClipPage(BasePage):
 
         # Nav
         nav = QHBoxLayout()
-        nav.addWidget(QPushButton("⇠ 上一步：视频分析"))
+        nav.addWidget(mdi_button("上一步：视频分析", "left"))
         nav.itemAt(0).widget().setObjectName("secondary_button")
         nav.itemAt(0).widget().clicked.connect(lambda: self._go_to_step(0))
         nav.addStretch()
@@ -1854,7 +1884,7 @@ class LiveClipPage(BasePage):
 
         self.stacked.addWidget(page)
 
-    # ===== Actions =====
+        # ===== Actions =====
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择直播视频", "",
@@ -1875,6 +1905,8 @@ class LiveClipPage(BasePage):
                 self.audio_player.lbl_time.setText("等待提取音频...")
 
     def _start_analysis_pipeline(self):
+        self._stop_requested = False
+        log.info("[LiveClip] _start_analysis_pipeline")
         video_path = self.video_path_input.text().strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择视频文件")
@@ -1886,74 +1918,122 @@ class LiveClipPage(BasePage):
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
 
-        # Skip audio extraction if audio_path already exists and is valid
-        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
-            self.btn_analyze.setEnabled(False)
-            self.btn_to_step2.setEnabled(False)
-            self.stage_lbl.setText("检测到已提取的音频，直接进入转写...")
+        def _do_transcribe(audio_path):
+            log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
+            out_dir = os.path.join(OUTPUTS_DIR, "transcription")
+            os.makedirs(out_dir, exist_ok=True)
+            vn = os.path.splitext(os.path.basename(self.video_path))[0]
+            out = os.path.join(out_dir, f"{vn}.srt")
+            self.srt_path = out
+            self.stage_lbl.setText("正在上传音频到服务端...")
+            self.progress_bar.setRange(0, 0)
             self.progress_bar.setVisible(True)
-            self.progress_bar.setValue(100)
+            lang_choice = self.transcribe_lang.currentData()
+            language = None if lang_choice == "auto" else lang_choice
+            from utils.asr_client import transcribe_remote, read_asr_url
+            from utils.base_worker import BaseWorker
+            class _RemoteWorker(BaseWorker):
+                stage = Signal(str)
+                progress = Signal(int)
+                finished = Signal(str)
+                error = Signal(str)
+                def __init__(self, vp, op, lg):
+                    super().__init__()
+                    self.video_path = vp
+                    self.output_path = op
+                    self.language = lg
+                def do_work(self):
+                    if self.isInterruptionRequested(): return
+                    try:
+                        log.info(f"[_RemoteWorker] 开始 file={self.video_path}")
+                        segs = transcribe_remote(self.video_path, read_asr_url(),
+                            language=self.language, task_type="transcribe",
+                            progress_cb=lambda m: (self.stage.emit(m), log.info(f"[_RemoteWorker] {m}")))
+                        if self.isInterruptionRequested(): return
+                        lines = []
+                        for i, s in enumerate(segs):
+                            t = s.get("text","").strip().replace("\n"," ")
+                            lines.append(f"{i+1}")
+                            lines.append(f"{int(s.get('start',0)//3600):02d}:{int(s.get('start',0)%3600//60):02d}:{s.get('start',0)%60:06.3f} --> {int(s.get('end',0)//3600):02d}:{int(s.get('end',0)%3600//60):02d}:{s.get('end',0)%60:06.3f}")
+                            lines.append(t)
+                            lines.append("")
+                        with open(self.output_path, "w", encoding="utf-8") as fp:
+                            fp.write("\n".join(lines))
+                        self.stage.emit("转写完成")
+                        self.finished.emit(self.output_path)
+                    except Exception as e:
+                        self.error.emit(str(e))
+            self._tw = _RemoteWorker(audio_path, out, language)
+            self._workers.append(self._tw)
+            self.audio_player.set_audio_path(audio_path)
+            self._tw.stage.connect(self.stage_lbl.setText)
+            self._tw.finished.connect(self._do_analyze)
+            self._tw.error.connect(self._on_err)
+            self._tw.start()
+
+        # 音频缓存：存在且未勾选"重新提取"则跳过
+        reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
+        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
+            log.info(f"[LiveClip] 使用缓存音频: {self.audio_path}")
+            self.btn_analyze.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_to_step2.setEnabled(False)
+            self.stage_lbl.setText("使用已提取的音频...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
             self.audio_player.set_audio_path(self.audio_path)
-            self._do_transcribe(self.audio_path)
+            _do_transcribe(self.audio_path)
             return
 
+        # 勾选了重新提取或首次运行，删除旧文件
+        if os.path.exists(self.audio_path):
+            try:
+                os.remove(self.audio_path)
+            except Exception:
+                pass
+
         self.btn_analyze.setEnabled(False)
+        self.btn_stop.setEnabled(True)
         self.btn_to_step2.setEnabled(False)
         self.stage_lbl.setText("正在读取视频并转换为声音文件...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
 
+        log.info(f"[LiveClip] 创建 AudioExtractWorker, video={video_path}")
         self._audio_worker = AudioExtractWorker(video_path, self.audio_path)
+        self._workers.append(self._audio_worker)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)
-        self._audio_worker.finished.connect(self._do_transcribe)
+        self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
 
-    def _do_transcribe(self, audio_path):
-        import sys
-        import traceback
-        from gui.transcription_page import setup_nvidia_dll_path
-        from config.paths import WHISPER_MODELS_DIR, WORKSPACE_ROOT
-        
-        # Ensure workspace root is in sys.path so we can import apps.*
-        if WORKSPACE_ROOT not in sys.path:
-            sys.path.insert(0, WORKSPACE_ROOT)
-            
-        setup_nvidia_dll_path()
+    def _stop_analysis(self):
+        log.info("[LiveClip] _stop_analysis 用户请求停止")
+        self._stop_requested = True
+        # 杀死所有 worker
+        for w in list(self._workers):
+            if hasattr(w, "kill_ffmpeg"):
+                w.kill_ffmpeg()
+            if w and w.isRunning():
+                w.requestInterruption()
+                w.terminate()
+                w.wait(2000)
+        self._workers.clear()
+        self._reset_ui()
+        self.stage_lbl.setText("⏹ 已停止")
+        log.info("[LiveClip] _stop_analysis 完成")
 
-        out_dir = os.path.join(OUTPUTS_DIR, "transcription")
-        os.makedirs(out_dir, exist_ok=True)
-        vname = os.path.splitext(os.path.basename(self.video_path))[0]
-        out = os.path.join(out_dir, f"{vname}.srt")
-        self.srt_path = out
-
-        self.stage_lbl.setText("正在准备加载/下载模型并转写字幕...")
-        self.progress_bar.setValue(0)
-
-        lang_choice = self.transcribe_lang.currentData()
-        language = None if lang_choice == "auto" else lang_choice
-
+    def _do_analyze(self, srt_path):
+        """转写完成后的分析入口。srt_path 是 SRT 文件路径。"""
         try:
-            from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
-            self._tw = WhisperXTranscribeWorker(
-                video_path=self.video_path, audio_path=audio_path, output_path=out,
-                model_name="large-v3", language=language, task_type="transcribe",
-                multi_mode=False,
-                download_root=WHISPER_MODELS_DIR,
-                device_mode="auto",
-            )
-            self.audio_player.set_audio_path(audio_path)
-            self._tw.stage.connect(self.stage_lbl.setText)
-            self._tw.progress.connect(self.progress_bar.setValue)
-            self._tw.finished.connect(self._do_analyze)
-            self._tw.error.connect(self._on_err)
-            self._tw.start()
-        except Exception as e:
-            log.exception("创建转写 Worker 失败")
-            self._on_err(traceback.format_exc())
-
-    def _do_analyze(self, srt_content, srt_path):
+            with open(srt_path, "r", encoding="utf-8") as f:
+                srt_content = f.read()
+        except Exception:
+            log.error(f"[LiveClip] 读取 SRT 失败: {srt_path}")
+            QMessageBox.warning(self.parent_widget, "错误", "读取字幕文件失败")
+            self._reset_ui()
+            return
         self._parse_srt(srt_content)
         self._update_transcript_preview_html()
         self.btn_export_sub.setEnabled(True)
@@ -1965,25 +2045,24 @@ class LiveClipPage(BasePage):
 
         mode = self.analysis_mode.currentData()
         use_llm = (mode == "llm")
-        llm_url = llm_key = llm_model = ""
+        llm_model = ""
         if use_llm:
             cfg = getattr(self.main_window, "ai_config", {})
-            llm_url = cfg.get("llm_api_url", "")
-            llm_key = cfg.get("llm_api_key", "")
             llm_model = cfg.get("llm_model", "deepseek-chat")
-            if not llm_url or not llm_key:
+            if not llm_model:
                 QMessageBox.warning(self.parent_widget, "未配置LLM",
-                                    "请在 'AI 设置' 中配置大模型 API。\n将使用内置算法。")
+                                    "请在 'AI 设置' 中配置大模型。\n将使用内置算法。")
                 use_llm = False
 
         if use_llm:
-            self.stage_lbl.setText("正在使用大模型（DeepSeek/OpenAI）分析热点...")
+            self.stage_lbl.setText("正在使用大模型分析热点...")
         else:
             self.stage_lbl.setText("正在使用内置算法分析热点...")
         self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
 
         self._analyzer = HotSpotAnalyzer(self.transcript_segments,
-                                         use_llm=use_llm, llm_url=llm_url, llm_key=llm_key, llm_model=llm_model)
+                                         use_llm=use_llm, llm_model=llm_model)
+        self._workers.append(self._analyzer)
         self._analyzer.stage.connect(self.stage_lbl.setText)
         self._analyzer.progress.connect(self.progress_bar.setValue)
         self._analyzer.finished.connect(self._on_analysis)
@@ -2367,7 +2446,7 @@ class LiveClipPage(BasePage):
         for widget in getattr(self, "clip_item_widgets", []):
             if not widget.clip_info.get("video_path"):
                 widget.btn_slice_single.setEnabled(True)
-                widget.btn_slice_single.setText("✂ 单独切片")
+                widget.btn_slice_single.setText("单独切片")
                 
         s = ""
         for line in (err or "").splitlines()[::-1]:
@@ -2376,6 +2455,7 @@ class LiveClipPage(BasePage):
 
     def _reset_ui(self):
         self.btn_analyze.setEnabled(True)
+        self.btn_stop.setEnabled(False)
         self.btn_to_step2.setEnabled(False)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)

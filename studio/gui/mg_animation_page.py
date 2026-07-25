@@ -18,7 +18,6 @@ from PySide6.QtCore import Signal
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager
 from utils.remotion_client import TEMPLATES, install, render, is_installed, node_ok
 from config.paths import MG_OUTPUT_DIR
 
@@ -48,7 +47,6 @@ class MGRenderWorker(BaseWorker):
 class MGAnimationPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.media = MediaLibraryManager()
         self.param_widgets = {}     # key -> (widget, type)
         self.worker = None
         self._last_out = ""
@@ -108,9 +106,6 @@ class MGAnimationPage(BasePage):
         self.btn_open = QPushButton("打开"); self.btn_open.setObjectName("secondary_button")
         self.btn_open.clicked.connect(self._open); self.btn_open.setEnabled(False)
         rrow.addWidget(self.btn_open)
-        self.btn_media = QPushButton("加入素材管理"); self.btn_media.setObjectName("secondary_button")
-        self.btn_media.clicked.connect(self._to_media); self.btn_media.setEnabled(False)
-        rrow.addWidget(self.btn_media)
         root.addLayout(rrow)
         root.addStretch()
 
@@ -204,7 +199,7 @@ class MGAnimationPage(BasePage):
         comp = self.combo_template.currentData()
         out = os.path.join(MG_OUTPUT_DIR, datetime.now().strftime(f"mg_{comp}_%Y%m%d_%H%M%S.mp4"))
         self.btn_render.setEnabled(False); self.pbar.setVisible(True)
-        self.btn_open.setEnabled(False); self.btn_media.setEnabled(False)
+        self.btn_open.setEnabled(False)
         self.status.setText("正在渲染 MG 素材…")
         self.worker = MGRenderWorker(comp, self._collect_props(), out)
         self.worker.phase.connect(self.status.setText)
@@ -215,7 +210,7 @@ class MGAnimationPage(BasePage):
     def _done(self, out):
         self._last_out = out
         self.btn_render.setEnabled(True); self.pbar.setVisible(False)
-        self.btn_open.setEnabled(True); self.btn_media.setEnabled(True)
+        self.btn_open.setEnabled(True)
         self.status.setText(f"✅ MG 素材已生成：{out}")
 
     def _err(self, e):
@@ -227,7 +222,4 @@ class MGAnimationPage(BasePage):
         if self._last_out and os.path.isfile(self._last_out) and os.name == "nt":
             os.startfile(self._last_out)  # noqa
 
-    def _to_media(self):
-        if self._last_out and os.path.isfile(self._last_out):
-            self.media.add_mount(MG_OUTPUT_DIR, kind="项目", group="MG动画", tags=["MG", "Remotion"])
-            self.show_info("已把 MG 输出目录加入素材管理。")
+	

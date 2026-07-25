@@ -1,7 +1,7 @@
 import os
 import sys
 
-IS_WIN = sys.platform == "win32"
+IS_WIN = True  # 工程仅支持 Windows
 
 # ── 运行模式感知 ────────────────────────────────────────────────────────────
 # 两种运行模式：
@@ -40,6 +40,7 @@ OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
+VIDEO_CONFIG_FILE = os.path.join(CONFIG_DIR, "video_config.json")
 ERP_CONFIG_FILE = os.path.join(CONFIG_DIR, "erp_config.json")
 UPDATE_CONFIG_FILE = os.path.join(CONFIG_DIR, "update.json")
 CONFIG_INI_FILE = os.path.join(PROJECT_ROOT, "config.ini")
@@ -65,7 +66,7 @@ WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
 VSR_DIR = os.path.join(APPS_DIR, "vsr-v1.1.1-windows-nvidia-cuda")
 VSR_V14_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0")
 PADDLEOCR_VENV_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0", "Python")
-PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe" if IS_WIN else "bin/python")
+PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe")
 if not os.path.isfile(PADDLEOCR_PYTHON):
     from utils.platform_utils import find_python
     PADDLEOCR_PYTHON = find_python()
@@ -85,15 +86,14 @@ QWEN_IMAGE_LAYERED_DIR = os.path.join(APPS_DIR, "Qwen-Image-Layered")
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 ASSET_BROWSER_DIR = os.path.join(APPS_DIR, "asset-browser")
 MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
+# JSON 元数据目录（固定项目内部，kb_items.json / kb_sync.json 存放于此）
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")
+# 媒体文件存储目录（用户可配置，视频/图片等下载至此）
+# 默认与 JSON 目录相同；可通过 data/knowledge_dir.json 的 media_dir 覆盖
+KNOWLEDGE_MEDIA_DIR = os.path.join(MATERIALS_DIR, "knowledge")
 
 # 素材目录平台默认值
-_MATERIALS_DEFAULTS = {
-    "linux": [os.path.join(MATERIALS_DIR, "knowledge"), "/mnt/nas/Photos"],
-    "win32": [os.path.join(MATERIALS_DIR, "knowledge")],
-    "darwin": [os.path.join(MATERIALS_DIR, "knowledge")],
-}
-MATERIALS_PLATFORM_DEFAULTS = _MATERIALS_DEFAULTS.get(sys.platform, _MATERIALS_DEFAULTS["linux"])
+MATERIALS_PLATFORM_DEFAULTS = [os.path.join(MATERIALS_DIR, "knowledge")]
 HOTSPOTS_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "hotspots")
 HOTSPOTS_FILE = os.path.join(DATA_DIR, "hotspots.json")
 VIDEO_PREDICTIONS_FILE = os.path.join(DATA_DIR, "video_predictions.json")
@@ -101,7 +101,7 @@ VIDEO_INDEX_FILE = os.path.join(DATA_DIR, "video_index.json")
 
 # Platform-specific binary directories（内置 bin 是只读资源，frozen 时在 _BUNDLE_DIR）
 BIN_DIR = os.path.join(_BUNDLE_STUDIO_DIR, "bin")
-PLATFORM_DIR = "win" if IS_WIN else ("linux" if sys.platform == "linux" else "darwin")
+PLATFORM_DIR = "win"
 BIN_PLATFORM_DIR = os.path.join(BIN_DIR, PLATFORM_DIR)
 
 # Built-in binaries (resolved at import time via get_bin)
@@ -110,28 +110,22 @@ OLLAMA_BIN = None
 
 
 def get_bin(name):
-    """Return full path to a platform-specific binary in bin/<platform>/<name>.
+    """Return full path to a platform-specific binary in bin/win/<name>.
     On Windows, auto-appends .exe.
     """
     bin_dir = BIN_PLATFORM_DIR
-    if IS_WIN:
-        candidates = [
-            os.path.join(bin_dir, f"{name}.exe"),
-            os.path.join(bin_dir, name),
-        ]
-    else:
-        candidates = [
-            os.path.join(bin_dir, name),
-            os.path.join(bin_dir, f"{name}.exe"),
-        ]
+    candidates = [
+        os.path.join(bin_dir, f"{name}.exe"),
+        os.path.join(bin_dir, name),
+    ]
     for c in candidates:
         if os.path.isfile(c):
             return os.path.abspath(c)
     import shutil
-    found = shutil.which(name if not IS_WIN else f"{name}.exe")
+    found = shutil.which(f"{name}.exe")
     if found:
         return found
-    return os.path.join(bin_dir, f"{name}.exe" if IS_WIN else name)
+    return os.path.join(bin_dir, f"{name}.exe")
 
 
 def init_bin_paths():
@@ -145,16 +139,17 @@ init_bin_paths()
 # Legacy compat aliases (prefer get_bin() for new code)
 DREAMINA_EXE_LEGACY = DREAMINA_EXE
 
-# knowledge_dir mapping override
+# knowledge_dir mapping override：仅覆盖媒体文件目录，JSON 元数据始终留在项目内
 _kb_dir_cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
 if os.path.exists(_kb_dir_cfg):
     try:
         import json as _j
         with open(_kb_dir_cfg, encoding="utf-8") as _kf:
             _kd = _j.load(_kf)
-        _custom = (_kd.get("materials_dir") or "").strip()
+        # 兼容旧字段名 materials_dir 和新字段名 media_dir
+        _custom = (_kd.get("media_dir") or _kd.get("materials_dir") or "").strip()
         if _custom and os.path.isdir(_custom):
-            KNOWLEDGE_MATERIALS_DIR = _custom
+            KNOWLEDGE_MEDIA_DIR = _custom
     except Exception:
         pass
 

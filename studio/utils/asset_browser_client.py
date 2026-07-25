@@ -13,13 +13,12 @@
 """
 import os
 import re
-import sys
 import json
 import time
 import shutil
 import subprocess
 
-from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR
+from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from utils.logger_utils import log
 from utils.platform_utils import create_no_window_flag
 
@@ -46,9 +45,9 @@ def _electron_exe() -> str | None:
     """定位可用的 electron 启动器（优先工程内 node_modules）。"""
     candidates = [
         os.path.join(ASSET_BROWSER_DIR, "node_modules", "electron", "dist",
-                     "electron.exe" if sys.platform == "win32" else "electron"),
+                     "electron.exe"),
         os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin",
-                     "electron.cmd" if sys.platform == "win32" else "electron"),
+                     "electron.cmd"),
         os.path.join(ASSET_BROWSER_DIR, "node_modules", ".bin", "electron"),
     ]
     for p in candidates:
@@ -79,21 +78,16 @@ def _launch_asset_browser_process() -> tuple[bool, str]:
             launch_errors.append(f"electron 启动失败: {e}")
 
     npm_candidates = []
-    if sys.platform == "win32":
-        npm_candidates.extend([
-            os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
-            os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
-            shutil.which("npm.cmd") or "",
-        ])
-    else:
-        npm_candidates.extend([
-            shutil.which("npm") or "",
-        ])
+    npm_candidates.extend([
+        os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
+        os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
+        shutil.which("npm.cmd") or "",
+    ])
 
     for npm in [x for x in npm_candidates if x]:
         try:
             if npm.lower().endswith("npm-cli.js"):
-                node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe" if sys.platform == "win32" else "node")
+                node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe")
                 if not os.path.isfile(node_exe):
                     continue
                 p = subprocess.Popen([node_exe, npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)
@@ -120,8 +114,8 @@ def safe_name(name: str) -> str:
 
 def topic_dir(topic: str) -> str:
     """返回某选题的素材落地目录（绝对路径，已建好）。
-    使用用户配置的素材根目录（与浏览器下载目录对齐）。"""
-    d = os.path.join(KNOWLEDGE_MATERIALS_DIR, safe_name(topic))
+    使用用户配置的媒体存储目录（与浏览器下载目录对齐）。"""
+    d = os.path.join(KNOWLEDGE_MEDIA_DIR, safe_name(topic))
     os.makedirs(d, exist_ok=True)
     return d
 

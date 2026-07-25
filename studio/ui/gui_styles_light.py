@@ -8,6 +8,9 @@ from config.paths import BUNDLE_ICONS_DIR
 _CHECK_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "check_light.svg")
 _CHECK_LIGHT_URL = _CHECK_LIGHT_ICON.replace(_os.sep, '/')
 
+_ARROW_DOWN_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "arrow_down_light.svg")
+_ARROW_DOWN_LIGHT_URL = _ARROW_DOWN_LIGHT_ICON.replace(_os.sep, '/')
+
 LIGHT_STYLE_SHEET = """
 * {
     font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
@@ -159,6 +162,12 @@ QComboBox:hover { border: 1px solid #b0b0b8; }
 
 QComboBox::drop-down { border: none; width: 28px; }
 
+QComboBox::down-arrow {
+    image: url("__ARROW_DOWN_LIGHT_URL__");
+    width: 10px;
+    height: 10px;
+}
+
 QComboBox QAbstractItemView {
     background-color: #ffffff;
     color: #1d1d1f;
@@ -232,6 +241,11 @@ QPushButton#action_button {
 
 QPushButton#action_button:hover {
     background-color: #059669;
+}
+
+QPushButton#action_button:disabled {
+    background-color: #d1d1d6;
+    color: #8e8e93;
 }
 
 QCheckBox { color: #3a3a3f; spacing: 8px; }
@@ -548,9 +562,16 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #step_label {
     color: #86868b; padding: 4px 0; font-size: 13px;
 }
-#step_label[active="true"] {
+#step_label[status="active"] {
     color: #2563eb; font-weight: bold;
     background-color: rgba(37, 99, 235, 0.1); border-radius: 4px;
+}
+#step_label[status="done"] {
+    color: #059669;
+    background-color: rgba(5, 150, 105, 0.08); border-radius: 4px;
+}
+#step_label[status="pending"] {
+    color: #86868b;
 }
 #nas_root_label { font-size: 13px; font-weight: bold; color: #1d1d1f; }
 #stats_analyze, #stats_ingest { font-size: 13px; color: #1d1d1f; }
@@ -627,4 +648,4 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 #model_groupbox[section="ocr"]::title     { color: #d97706; }
 
 #comfyui_local_status { color: #86868b; font-size: 12px; }
-""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL)
+""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)

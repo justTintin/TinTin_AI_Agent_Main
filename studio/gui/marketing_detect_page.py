@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📢 营销视频检测页。
+📢 视频营销检测页。
 
 通过对视频进行关键帧提取，使用配置的视觉大模型对关键帧内容进行综合研判，
 判断该视频是否为营销/广告视频，并分析推广的品类、提取营销特征线索，提供相关的改进建议。
@@ -22,6 +22,7 @@ from PySide6.QtCore import Signal, Qt
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.video_compiler import _find, _probe_duration
+from utils.platform_utils import find_ffmpeg
 from config.paths import TMP_DIR
 
 
@@ -41,19 +42,15 @@ def _sample_times(dur):
 class VisionModelTestWorker(BaseWorker):
     finished = Signal(bool, str)
 
-    def __init__(self, api_url, api_key, model):
+    def __init__(self, model):
         super().__init__()
-        self.api_url, self.api_key, self.model = api_url, api_key, model
+        self.model = model
 
     def do_work(self):
-        import requests
-        url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {"model": self.model, "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 5}
+        from utils.llm_proxy import llm_chat
         try:
-            res = requests.post(url, json=payload, headers=headers, timeout=8)
-            self.finished.emit(res.status_code == 200,
-                               "🟢 连接成功" if res.status_code == 200 else f"❌ 失败 (HTTP {res.status_code})")
+            llm_chat("", "Hi", model=self.model, max_tokens=5, timeout=8)
+            self.finished.emit(True, "🟢 连接成功")
         except Exception:
             self.finished.emit(False, "❌ 无法连接")
 
@@ -69,12 +66,10 @@ class MarketingDetectWorker(BaseWorker):
         self.cfg = ai_config or {}
 
     def do_work(self):
-        import requests
-        api_url = self.cfg.get("llm_vision_api_url")
-        model = self.cfg.get("llm_vision_model")
-        api_key = self.cfg.get("llm_vision_api_key") or self.cfg.get("llm_api_key", "")
-        if not (api_url and model):
-            raise RuntimeError("需要『视觉模型』。请至『系统配置 / 大模型配置』填写视觉模型相关配置。")
+        from utils.llm_proxy import llm_chat_messages
+        model = self.cfg.get("llm_vision_model", "")
+        if not model:
+            raise RuntimeError("需要『视觉模型』。请至『系统配置 / 大模型配置』填写视觉模型名称。")
 
         # 1. 探测时长并抽帧
         self.phase.emit("正在解析视频时长…")
@@ -86,7 +81,7 @@ class MarketingDetectWorker(BaseWorker):
         os.makedirs(frames_dir, exist_ok=True)
         
         frames = []
-        ffmpeg = _find("ffmpeg.exe")
+        ffmpeg = find_ffmpeg()
         flags = 0x08000000 if os.name == "nt" else 0
         
         for i, t in enumerate(times):
@@ -128,42 +123,13 @@ class MarketingDetectWorker(BaseWorker):
                 b64 = base64.b64encode(f.read()).decode()
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
             
-        payload = {
-            "model": model,
-            "temperature": 0.3,
-            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-            "messages": [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": content}
-            ]
-        }
-        
         try:
-            res = requests.post(
-                f"{api_url.rstrip('/')}/v1/chat/completions",
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
-                timeout=180
-            )
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"无法连接视觉大模型接口（{api_url}）：{e}\n请检查“大模型配置”中的配置信息。")
-            
-        if res.status_code != 200:
-            raise RuntimeError(f"视觉大模型请求失败 (HTTP {res.status_code})：\n{res.text[:400]}")
-            
-        try:
-            data = res.json()
-        except ValueError:
-            raise RuntimeError(f"视觉大模型返回的数据不是 JSON 格式：\n{res.text[:400]}")
-            
-        choices = data.get("choices") or []
-        if not choices:
-            raise RuntimeError(f"大模型响应中没有返回文本结果，请确认模型是否支持图片输入。详情：\n{str(data)[:400]}")
-            
-        text = (choices[0].get("message", {}).get("content", "") or "").strip()
+            text = llm_chat_messages(
+                [{"role": "system", "content": sys_prompt},
+                 {"role": "user", "content": content}],
+                model=model, temperature=0.3, timeout=180)
+        except RuntimeError as e:
+            raise RuntimeError(f"无法连接视觉大模型：{e}\n请检查“大模型配置”中的服务端地址和视觉模型名称。")
         if not text:
             raise RuntimeError("大模型返回空响应。")
             
@@ -198,7 +164,7 @@ class MarketingDetectPage(BasePage):
         root.setSpacing(12)
 
         # 1. 标题与说明
-        heading = QLabel("📢 营销视频检测")
+        heading = QLabel("📢 视频营销检测")
         heading.setObjectName("heading")
         root.addWidget(heading)
         
@@ -206,6 +172,10 @@ class MarketingDetectPage(BasePage):
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
         root.addWidget(sub)
+
+        warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
+        warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
+        root.addWidget(warning_lbl)
 
         # 2. 视觉模型状态卡片
         self.model_status_card = QFrame()
@@ -338,10 +308,9 @@ class MarketingDetectPage(BasePage):
 
     def update_vision_model_display(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        url = ai.get("llm_vision_api_url", "")
         model = ai.get("llm_vision_model", "")
-        if url and model:
-            self.lbl_model_info.setText(f"视频大模型：{model} ({url})")
+        if model:
+            self.lbl_model_info.setText(f"视频大模型：{model}")
             self.lbl_model_status.setText("🟢 已配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#2ecc71;")
             self.btn_test_model.setEnabled(True)
@@ -353,16 +322,14 @@ class MarketingDetectPage(BasePage):
 
     def _test_vision_model(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        url = ai.get("llm_vision_api_url", "")
-        key = ai.get("llm_vision_api_key") or ai.get("llm_api_key", "")
         model = ai.get("llm_vision_model", "")
-        if not url or not model:
+        if not model:
             return
         self.btn_test_model.setEnabled(False)
         self.lbl_model_status.setText("🟡 正在测试...")
         self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
         
-        self.test_worker = VisionModelTestWorker(url, key, model)
+        self.test_worker = VisionModelTestWorker(model)
 
         def on_finished(success, message):
             self.btn_test_model.setEnabled(True)
@@ -455,4 +422,4 @@ class MarketingDetectPage(BasePage):
         self.btn_run.setEnabled(True)
         self.pbar.setVisible(False)
         self.lbl_status.setText("检测失败。")
-        self.show_error(str(e), "营销视频检测失败")
+        self.show_error(str(e), "视频营销检测失败")

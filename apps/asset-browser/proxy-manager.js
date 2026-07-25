@@ -1,16 +1,45 @@
 /**
- * 代理管理器（代理功能已移除）。
+ * 代理管理器 — 为 yt-dlp 提供代理配置。
  *
- * 保留空操作接口供 main.js 调用，避免引用断裂。
- * 如需恢复代理支持，在此重新实现。
+ * 代理来源（优先级从高到低）：
+ * 1. settings.proxyUrl（用户通过 UI 配置）
+ * 2. 环境变量 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY
  */
 
-function applyProxy(_settings) {
-  // 代理功能已移除，不做任何设置
+function getProxyUrl(settings) {
+  // 1. 用户配置
+  if (settings && settings.proxyUrl) {
+    const url = settings.proxyUrl.trim();
+    if (url) return url;
+  }
+  // 2. 环境变量
+  const env = process.env;
+  return env.HTTPS_PROXY || env.https_proxy ||
+         env.HTTP_PROXY  || env.http_proxy  ||
+         env.ALL_PROXY   || env.all_proxy   || '';
 }
 
-function getYtDlpProxyArg(_settings) {
+function applyProxy(settings) {
+  const url = getProxyUrl(settings);
+  if (url) {
+    // 设置环境变量供子进程（如 yt-dlp）继承
+    if (!process.env.HTTPS_PROXY) process.env.HTTPS_PROXY = url;
+    if (!process.env.HTTP_PROXY)  process.env.HTTP_PROXY  = url;
+  }
+}
+
+// 返回 --proxy "url" 字符串（兼容 exec 调用）
+function getYtDlpProxyArg(settings) {
+  const url = getProxyUrl(settings);
+  if (url) return `--proxy "${url}"`;
   return '';
+}
+
+// 返回 ['--proxy', 'url'] 数组（供 spawn 使用，避免引号转义）
+function getYtDlpProxyArgv(settings) {
+  const url = getProxyUrl(settings);
+  if (url) return ['--proxy', url];
+  return [];
 }
 
 function shutdown() {
@@ -20,5 +49,6 @@ function shutdown() {
 module.exports = {
   applyProxy,
   getYtDlpProxyArg,
+  getYtDlpProxyArgv,
   shutdown,
 };

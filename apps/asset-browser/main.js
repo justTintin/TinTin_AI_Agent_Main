@@ -4,8 +4,9 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const proxyManager = require('./proxy-manager');
+const v2rayManager = require('./v2ray-manager');
 
 // 捕获未捕获的异常，防止因为 Electron/Chromium 内部的 WebFrameMain 销毁竞争等底层问题弹出 JavaScript 错误弹窗
 process.on('uncaughtException', (err) => {
@@ -24,15 +25,20 @@ function formatBytes(bytes, decimals = 2) {
 let mainWindow;
 const dbPath = path.join(app.getPath('userData'), 'database.json');
 
-// ── 素材目录：支持用户通过 knowledge_dir.json 映射到外置盘/网络盘 ──
+// ── 素材目录分离：JSON 元数据存项目内，媒体文件用户可配置 ──
 const _STUDIO_ROOT = path.join(__dirname, '..', '..', 'studio');
 const _KB_DIR_CFG = path.join(_STUDIO_ROOT, 'data', 'knowledge_dir.json');
-let KNOWLEDGE_DIR = path.join(_STUDIO_ROOT, 'outputs', 'materials', 'knowledge');
+// JSON 元数据目录（固定项目内，存放 kb_items.json / kb_sync.json）
+const KNOWLEDGE_DIR = path.join(_STUDIO_ROOT, 'outputs', 'materials', 'knowledge');
+// 媒体文件存储目录（用户可配置，视频/图片下载至此）
+let MEDIA_DOWNLOAD_DIR = KNOWLEDGE_DIR; // 默认与 JSON 目录相同
 try {
   if (fs.existsSync(_KB_DIR_CFG)) {
     const _kd = JSON.parse(fs.readFileSync(_KB_DIR_CFG, 'utf-8'));
-    if (_kd && _kd.materials_dir && fs.existsSync(_kd.materials_dir)) {
-      KNOWLEDGE_DIR = _kd.materials_dir;
+    // 兼容旧字段名 materials_dir 和新字段名 media_dir
+    const _custom = (_kd && (_kd.media_dir || _kd.materials_dir)) || '';
+    if (_custom && fs.existsSync(_custom)) {
+      MEDIA_DOWNLOAD_DIR = _custom;
     }
   }
 } catch (e) { console.warn('knowledge_dir.json read failed', e); }
@@ -40,7 +46,7 @@ try {
 // Initialize database
 function initDatabase() {
   const defaultSettings = {
-    downloadPath: KNOWLEDGE_DIR,
+    downloadPath: MEDIA_DOWNLOAD_DIR,
   };
 
   if (!fs.existsSync(dbPath)) {
@@ -61,8 +67,8 @@ function initDatabase() {
       const db = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
       let modified = false;
       if (!db.settings) { db.settings = defaultSettings; modified = true; }
-      // 始终与 Studio 配置的素材目录同步（knowledge_dir.json 优先）
-      if (db.settings.downloadPath !== KNOWLEDGE_DIR) { db.settings.downloadPath = KNOWLEDGE_DIR; modified = true; }
+      // 始终与 Studio 配置的媒体目录同步（knowledge_dir.json 优先）
+      if (db.settings.downloadPath !== MEDIA_DOWNLOAD_DIR) { db.settings.downloadPath = MEDIA_DOWNLOAD_DIR; modified = true; }
       if (!db.creators) { db.creators = []; modified = true; }
       if (!db.downloads) { db.downloads = []; modified = true; }
       if (!Array.isArray(db.downloadDirs)) {
@@ -106,6 +112,23 @@ function saveDatabase(db) {
   }
 }
 
+
+// ── yt-dlp 启动参数：优先使用独立版 exe（不依赖 Python）──
+function getYtdlpSpawnArgs() {
+  // 返回 { cmd, args } 供 spawn() 使用
+  // 1) 优先用 bin/yt-dlp.exe（独立版，不依赖外部 Python）
+  const localBin = path.join(__dirname, 'bin', 'yt-dlp.exe');
+  if (fs.existsSync(localBin)) {
+    return { cmd: localBin, args: [] };
+  }
+  // 2) 回退到 python_embeded 的 python -m yt_dlp
+  const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+  if (fs.existsSync(pyPath)) {
+    return { cmd: pyPath, args: ['-m', 'yt_dlp'] };
+  }
+  // 3) 最后回退到系统命令
+  return { cmd: 'yt-dlp', args: [] };
+}
 
 // ── studio 集成：握手文件（选题关键词 → 搜索页 + 下载目录）──
 let pendingHandoff = null;
@@ -170,7 +193,10 @@ ipcMain.handle('append-hotspot-manifest', (event, items) => {
 ipcMain.handle('save-kb-items', (event, items) => {
   try {
     const db = getDatabase();
-    db.kbItems = Array.isArray(items) ? items : [];
+    // 按 URL 去重后保存，防止累积重复
+    const arr = Array.isArray(items) ? items : [];
+    const uniqueItems = Array.from(new Map(arr.map(i => [i.url, i])).values());
+    db.kbItems = uniqueItems;
     saveDatabase(db);
     // 同步镜像到 studio 可读的共享目录，供「导入收藏记录」功能使用
     try {
@@ -272,6 +298,10 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   initDatabase();
 
+  // 启动时检查 yt-dlp 环境
+  const ytArgs = getYtdlpSpawnArgs();
+  console.log('yt-dlp 启动参数:', ytArgs.cmd, ytArgs.args.join(' '));
+
   // 启动时把数据库中已有的 kbItems 镜像到 studio 共享目录
   // 解决「旧数据存在 database.json 但 kb_items.json 从未写过」的问题
   try {
@@ -301,6 +331,11 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+
+  // F12 打开开发者工具
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12') { mainWindow.webContents.toggleDevTools(); }
+  });
 
   // 应用初始代理设置
   const db = getDatabase();
@@ -848,10 +883,22 @@ function downloadStream(id, url, destPath, referer, onProgress) {
             return;
           }
 
-          // YouTube 使用 range=0-99999999999 时，服务器会返回 206 Partial Content
+          // 检查状态码
           if (res.statusCode !== 200 && res.statusCode !== 206) {
-            reject(new Error(`HTTP 状态码错误: ${res.statusCode}`));
+            // 收集错误响应内容以便调试
+            let errBody = '';
+            res.on('data', (chunk) => { errBody += chunk.toString().slice(0, 500); });
+            res.on('end', () => {
+              reject(new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 200)}`));
+            });
             return;
+          }
+
+          // 检查 Content-Type 是否为视频/音频
+          const ct = (res.headers['content-type'] || '').toLowerCase();
+          if (ct && !ct.includes('video') && !ct.includes('audio') && !ct.includes('octet-stream') && !ct.includes('mp4')) {
+            // 可能是 CDN 返回了错误页面，仍继续下载但记日志
+            console.warn(`[下载] 非视频响应 Content-Type: ${ct} url: ${(url||'').slice(0,80)}`);
           }
 
           // 仅在 HTTP 请求成功且返回 200/206 时，才创建文件流，避免重定向过程中对流进行关闭 and 重建报错
@@ -925,15 +972,13 @@ function cleanMediaUrlForDownload(urlStr) {
     const parsed = new URL(urlStr);
     if (parsed.hostname.includes('googlevideo.com') || parsed.hostname.includes('youtube.com')) {
       // YouTube 要求必须有 range 参数，否则直接返回 403。
-      // 我们将其设置为超大范围，从而实现一个链接下载完整音频/视频文件。
       parsed.searchParams.set('range', '0-99999999999');
-    } else {
-      parsed.searchParams.delete('range');
+      parsed.searchParams.delete('rn');
+      parsed.searchParams.delete('obuf');
+      parsed.searchParams.delete('start');
+      parsed.searchParams.delete('end');
     }
-    parsed.searchParams.delete('rn');
-    parsed.searchParams.delete('obuf');
-    parsed.searchParams.delete('start');
-    parsed.searchParams.delete('end');
+    // 其他 CDN（抖音、B站等）保留原始参数，range/start/end 是分段下载的关键参数
     return parsed.toString();
   } catch (e) {
     return urlStr;
@@ -941,22 +986,39 @@ function cleanMediaUrlForDownload(urlStr) {
 }
 
 // 辅助函数：导出指定域名的 Cookie 给 yt-dlp 使用
+// 用 url 参数更精确，且能获取 httpOnly/secure 等完整 cookie
 async function exportCookiesForDomain(domain, destPath) {
   try {
-    const cookies = await session.fromPartition('persist:tintin-browser').cookies.get({ domain });
-    let cookieText = "# Netscape HTTP Cookie File\n";
-    for (const c of cookies) {
-      const d = c.domain;
-      const flag = d.startsWith('.') ? 'TRUE' : 'FALSE';
-      const path = c.path;
-      const secure = c.secure ? 'TRUE' : 'FALSE';
-      const expiration = c.expirationDate ? Math.round(c.expirationDate) : Math.round(Date.now() / 1000 + 86400 * 30);
-      cookieText += `${d}\t${flag}\t${path}\t${secure}\t${expiration}\t${c.name}\t${c.value}\n`;
+    const sess = session.fromPartition('persist:tintin-browser');
+    // 先用 domain 查，再尝试用具体 URL 查
+    let cookies = await sess.cookies.get({ domain });
+    if (cookies.length === 0 && domain.startsWith('.')) {
+      // 去掉前导点再查一次
+      cookies = await sess.cookies.get({ domain: domain.slice(1) });
     }
-    fs.writeFileSync(destPath, cookieText, 'utf-8');
+    if (cookies.length === 0) {
+      console.log(`[cookie] ${domain}: 无 cookie`);
+      return false;
+    }
+    console.log(`[cookie] ${domain}: ${cookies.length} 条 (${cookies.map(c=>c.name).join(', ')})`);
+
+    // 文件不存在时写头，存在时追加
+    const isNew = !fs.existsSync(destPath);
+    // 写入 Netscape HTTP Cookie File 格式
+    let cookieText = isNew ? "# Netscape HTTP Cookie File\n# This file is generated by TinTin Asset Browser\n" : "";
+    for (const c of cookies) {
+      // yt-dlp 需要: domain flag path secure expiration name value
+      const d = c.domain.startsWith('.') ? c.domain : '.' + c.domain;
+      const flag = 'TRUE'; // domain 通配
+      const path = c.path || '/';
+      const secure = c.secure ? 'TRUE' : 'FALSE';
+      const exp = c.expirationDate ? Math.round(c.expirationDate) : Math.round(Date.now() / 1000 + 86400 * 30);
+      cookieText += `${d}\t${flag}\t${path}\t${secure}\t${exp}\t${c.name}\t${c.value}\n`;
+    }
+    fs.writeFileSync(destPath, cookieText, { flag: isNew ? 'w' : 'a', encoding: 'utf-8' });
     return true;
   } catch (err) {
-    console.warn(`导出域名 ${domain} 的 Cookie 失败:`, err);
+    console.warn(`[cookie] 导出 ${domain} 失败:`, err.message);
     return false;
   }
 }
@@ -1083,90 +1145,195 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
   saveDatabase(db);
   mainWindow.webContents.send('download-list-updated', db.downloads);
 
-  // 判断是否应该使用 yt-dlp 进行页面整包下载（若明确指定，或者 URL/referer 指向主要视频站视频详情页且非直接静态流链接）
-  const isVideoPage = useYtdlp || (referer && isValidVideoPageUrl(referer));
+  // 判断是否应该使用 yt-dlp
+  // useYtdlp=true 强制用，false 强制不用，undefined/null 按 referer 自动判断
+  const isVideoPage = useYtdlp === true || (useYtdlp !== false && referer && isValidVideoPageUrl(referer));
 
+  console.log(`[下载] useYtdlp=${useYtdlp} isVideoPage=${isVideoPage} url=${(fileUrl||'').slice(0,80)}`);
   if (isVideoPage) {
     updateTaskProgress(id, 5, '正在通过 yt-dlp 解析视频...', 0);
 
     const urlToDownload = isVideoPage ? (referer || fileUrl) : fileUrl;
     
     // 根据域名判断需要导出的 Cookie，实现登录视频下载
-    let cookieDomain = '';
-    if (urlToDownload.includes('youtube.com') || urlToDownload.includes('youtu.be')) {
-      cookieDomain = '.youtube.com';
-    } else if (urlToDownload.includes('bilibili.com')) {
-      cookieDomain = '.bilibili.com';
-    } else if (urlToDownload.includes('douyin.com')) {
-      cookieDomain = '.douyin.com';
-    } else if (urlToDownload.includes('zhihu.com')) {
-      cookieDomain = '.zhihu.com';
-    }
+	    let cookieDomains = [];
+	    if (urlToDownload.includes('youtube.com') || urlToDownload.includes('youtu.be')) {
+	      cookieDomains = ['.youtube.com', '.google.com', 'accounts.google.com'];
+	    } else if (urlToDownload.includes('bilibili.com')) {
+	      cookieDomains = ['.bilibili.com'];
+	    } else if (urlToDownload.includes('douyin.com')) {
+	      cookieDomains = ['.douyin.com', 'www.douyin.com'];
+	    } else if (urlToDownload.includes('zhihu.com')) {
+	      cookieDomains = ['.zhihu.com'];
+	    }
 
     const cookieTempPath = finalPath + '.cookies.txt';
-    if (cookieDomain) {
-      await exportCookiesForDomain(cookieDomain, cookieTempPath);
-    }
-
-    const localYtdlpPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'bin', 'yt-dlp.exe')
-      : path.join(__dirname, 'bin', 'yt-dlp.exe');
-      
-    const ytdlpBin = fs.existsSync(localYtdlpPath) ? `"${localYtdlpPath}"` : 'yt-dlp';
-
-    const cookieArg = fs.existsSync(cookieTempPath) ? `--cookies "${cookieTempPath}"` : '';
-    const proxyArg = proxyManager.getYtDlpProxyArg(db.settings);
-
-    // 调用 yt-dlp，指定合并格式为 mp4 并指定保存文件名路径
-    const cmd = `${ytdlpBin} ${cookieArg} ${proxyArg} --no-warnings -f "bv+ba/b" --merge-output-format mp4 -o "${finalPath}" "${urlToDownload}"`;
-
-    const child = exec(cmd, (err, stdout, stderr) => {
-      // 销毁时清理 Cookie 临时文件
-      try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch(e){}
-      activeDownloads.delete(id);
-
-      if (err) {
-        // 即使 exit code 非零，若文件已成功生成则视为成功（yt-dlp 警告信息可能触发非零退出）
-        let fileCreated = false;
-        try { fileCreated = fs.existsSync(finalPath) && fs.statSync(finalPath).size > 0; } catch(e) {}
-        if (fileCreated) {
-          const finalSize = fs.statSync(finalPath).size;
-          updateTaskSize(id, finalSize);
-          updateTaskStatus(id, 'completed', 100, finalSize);
-        } else {
-          console.error('yt-dlp 下载失败:', err, stderr);
-          const errLines = (stderr || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
-          const errMsg = errLines.join('\n').trim() || err.message;
-          updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + errMsg);
-        }
-      } else {
-        let finalSize = 0;
-        try {
-          if (fs.existsSync(finalPath)) {
-            finalSize = fs.statSync(finalPath).size;
-          }
-        } catch (e) {}
-        updateTaskSize(id, finalSize);
-        updateTaskStatus(id, 'completed', 100, finalSize);
+    if (cookieDomains.length > 0) {
+      for (const d of cookieDomains) {
+        await exportCookiesForDomain(d, cookieTempPath);
       }
-    });
-
-    // 解析 stdout 得到进度和速度
-    if (child.stdout) {
-      child.stdout.on('data', (data) => {
-        const str = data.toString();
-        // 匹配进度: [download]  12.5% of  15.20MiB at  2.11MiB/s ETA 00:06
-        const match = str.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
-        if (match) {
-          const progress = Math.round(parseFloat(match[1]));
-          const speed = match[3];
-          updateTaskProgress(id, progress, `下载中 ${speed}`, 0);
-        }
-      });
+      // 用完整 URL 再查一次（某些 cookie 绑定具体路径）
+      if (urlToDownload.includes('youtube.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.youtube.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+            console.log(`[cookie] YouTube URL 查询到 ${urlCookies.length} 条 cookie`);
+          }
+        } catch(e) { console.warn('[cookie] URL 查询失败:', e.message); }
+      }
+      // 抖音也查完整 URL
+      if (urlToDownload.includes('douyin.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.douyin.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+            console.log(`[cookie] 抖音 URL 查询到 ${urlCookies.length} 条 cookie`);
+          }
+        } catch(e) { console.warn('[cookie] URL 查询失败:', e.message); }
+      }
+      // 空 cookie 文件不传给 yt-dlp
+      if (fs.existsSync(cookieTempPath)) {
+        const content = fs.readFileSync(cookieTempPath, 'utf-8');
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        if (lines.length === 0) fs.unlinkSync(cookieTempPath);
+      }
     }
 
-    activeDownloads.set(id, child);
-    return { success: true };
+    // 获取 yt-dlp 启动参数（YouTube/抖音 强制用 pip 版，支持解密 Chrome cookie）
+    const needsPip = urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com');
+    let ytdlpBin, ytdlpBaseArgs;
+    if (needsPip) {
+      const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+      if (fs.existsSync(pipPy)) {
+        ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp'];
+      } else {
+        const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+      }
+    } else {
+      const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+    }
+    // cookie 参数：有文件就传，YouTube/抖音 兜底用浏览器 cookie
+    let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+    if (cookieArg.length === 0 && (urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com'))) {
+      cookieArg = ['--cookies-from-browser', 'chrome'];
+    }
+    // 代理：仅国外平台需要（YouTube、TikTok、Twitter 等）
+    const needsProxy = /(youtube\.com|youtu\.be|tiktok\.com|twitter\.com|x\.com|instagram\.com|facebook\.com)/.test(urlToDownload);
+    const proxyArgArr = needsProxy ? proxyManager.getYtDlpProxyArgv(db.settings) : [];
+
+    // 尝试多种格式，依次降级
+	    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
+    let lastError = '', lastLog = '';
+
+    for (const fmt of formatList) {
+      if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
+      updateTaskProgress(id, 5, `正在通过 yt-dlp 下载 (格式: ${fmt})...`, 0);
+
+      // 用 spawn 避免 cmd.exe 引号转义问题（尤其 Windows 路径含空格/特殊字符时）
+      const allArgs = [
+        ...ytdlpBaseArgs,
+        ...cookieArg,
+        ...proxyArgArr,
+        '--no-warnings',
+        '--extractor-retries', '3',
+        '--retries', '5',
+        // YouTube 防机器人检测：模拟 TV 客户端（反爬最宽松）
+        ...(urlToDownload.includes('youtube.com') ? [
+          '--extractor-args', 'youtube:player_client=tv_embedded',
+          '--user-agent', 'Mozilla/5.0 (PlayStation; PlayStation 5/2.00) AppleWebKit/609.1 (KHTML, like Gecko) Version/16.0 Safari/609.1',
+          '--sleep-requests', '2',
+        ] : []),
+        '-f', fmt,
+        '--merge-output-format', 'mp4',
+        '-o', finalPath,
+        urlToDownload,
+      ];
+
+      const result = await new Promise((resolve) => {
+        let stderrBuf = '';
+        let stdoutBuf = '';
+        const child = spawn(ytdlpBin, allArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        });
+
+        const parseProgress = (text) => {
+          const match = text.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+          if (match) {
+            updateTaskProgress(id, Math.round(parseFloat(match[1])), `下载中 ${match[3]}`, 0);
+          }
+        };
+
+        child.stdout.on('data', (data) => {
+          const s = data.toString();
+          stdoutBuf += s;
+          parseProgress(s);
+        });
+
+        child.stderr.on('data', (data) => {
+          const s = data.toString();
+          stderrBuf += s;
+          parseProgress(s); // yt-dlp 进度输出到 stderr
+        });
+
+        child.on('close', (code) => {
+          // 清理 Cookie 临时文件
+          try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch(e){}
+
+          if (code === 0) {
+            let finalSize = 0;
+            try { if (fs.existsSync(finalPath)) finalSize = fs.statSync(finalPath).size; } catch(e) {}
+            resolve({ success: true, size: finalSize });
+          } else {
+            // exit code 非零，但文件已成功生成则视为成功（yt-dlp 警告可能触发非零退出）
+            let fileCreated = false;
+            try { fileCreated = fs.existsSync(finalPath) && fs.statSync(finalPath).size > 0; } catch(e) {}
+            if (fileCreated) {
+              resolve({ success: true, size: fs.statSync(finalPath).size });
+            } else {
+              const errLines = (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:'));
+              const fullOutput = (stderrBuf + '\n--- stdout ---\n' + stdoutBuf).trim();
+              const errMsg = errLines.join('\n').trim() || `exit code ${code}`;
+              lastError = errMsg;
+              lastLog = fullOutput;
+              console.error(`yt-dlp 格式 ${fmt} 下载失败 (exit ${code}):`, fullOutput.slice(0, 1000));
+              resolve({ success: false, error: errMsg, log: fullOutput });
+            }
+          }
+        });
+
+        child.on('error', (e) => {
+          lastError = e.message;
+          resolve({ success: false, error: e.message });
+        });
+
+        activeDownloads.set(id, child);
+      });
+
+      if (result.success) {
+        activeDownloads.delete(id);
+        updateTaskSize(id, result.size);
+        updateTaskStatus(id, 'completed', 100, result.size);
+        return { success: true };
+      }
+    }
+
+    // 所有格式均失败
+    activeDownloads.delete(id);
+    console.error('yt-dlp 所有格式尝试均失败:', lastError);
+    updateTaskStatus(id, 'failed', 0, 0, '下载失败: ' + lastError, lastLog);
+    return { success: false, error: lastError };
   }
 
   // 清理 URL 的 range 和分段请求参数，下载完整流数据
@@ -1306,39 +1473,199 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
   return { success: true };
 });
 
-ipcMain.handle('cancel-download', (event, id) => {
-  let cancelled = false;
-
-  // 1. 取消单个任务句柄 (yt-dlp child process or single download req)
+// 通用：杀掉活跃下载进程（返回是否成功）
+function killActiveTask(id) {
+  let killed = false;
   if (activeDownloads.has(id)) {
-    const task = activeDownloads.get(id);
-    if (task.kill) {
-      task.kill(); // child process
-    } else if (task.destroy) {
-      task.destroy(); // http request
-    }
+    const t = activeDownloads.get(id);
+    if (t.kill) t.kill();
+    else if (t.destroy) t.destroy();
     activeDownloads.delete(id);
-    cancelled = true;
+    killed = true;
   }
+  const vid = id + '_video', aid = id + '_audio';
+  if (activeDownloads.has(vid)) { try { activeDownloads.get(vid).destroy?.(); } catch{} activeDownloads.delete(vid); killed = true; }
+  if (activeDownloads.has(aid)) { try { activeDownloads.get(aid).destroy?.(); } catch{} activeDownloads.delete(aid); killed = true; }
+  return killed;
+}
 
-  // 2. 取消音视频分离下载的子请求 (video 与 audio 任务)
-  const videoId = id + '_video';
-  const audioId = id + '_audio';
-  if (activeDownloads.has(videoId)) {
-    const task = activeDownloads.get(videoId);
-    if (task.destroy) task.destroy();
-    activeDownloads.delete(videoId);
-    cancelled = true;
+ipcMain.handle('cancel-download', (event, id) => {
+  // 旧版取消（保留向后兼容，转换为暂停）
+  if (killActiveTask(id)) {
+    updateTaskStatus(id, 'paused', 0, 0, '已暂停');
+    return true;
   }
-  if (activeDownloads.has(audioId)) {
-    const task = activeDownloads.get(audioId);
-    if (task.destroy) task.destroy();
-    activeDownloads.delete(audioId);
-    cancelled = true;
-  }
+  return false;
+});
 
-  if (cancelled) {
-    updateTaskStatus(id, 'failed', 0, 0, '已取消');
+// 暂停下载：杀掉进程，保留部分文件，标记为 paused
+ipcMain.handle('pause-download', (event, id) => {
+  if (killActiveTask(id)) {
+    updateTaskStatus(id, 'paused', 0, 0, '已暂停');
+    return true;
+  }
+  return false;
+});
+
+// 重新下载：从已保存的任务参数重新启动下载
+ipcMain.handle('resume-download', (event, id) => {
+  const db = getDatabase();
+  const task = db.downloads.find(t => t.id === id);
+  if (!task) return false;
+
+  // 重置状态为 downloading
+  task.status = 'downloading';
+  task.progress = 0;
+  task.error = '';
+  saveDatabase(db);
+  mainWindow.webContents.send('download-list-updated', db.downloads);
+
+  // 构造下载参数并重新启动
+  const referer = task.url || '';
+  const fileUrl = task.url || '';
+  const audioUrl = task.audioUrl || null;
+
+  // 判断是否走 yt-dlp
+  const isVideoPage = isValidVideoPageUrl(referer);
+
+  if (isVideoPage) {
+    // yt-dlp 路径（YouTube/抖音 强制用 pip 版以支持 Chrome cookie 解密）
+    const needsPip = referer.includes('youtube.com') || referer.includes('douyin.com');
+    let ytdlpBin, ytdlpBaseArgs;
+    if (needsPip) {
+      const pipPy = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+      if (fs.existsSync(pipPy)) { ytdlpBin = pipPy; ytdlpBaseArgs = ['-m', 'yt_dlp']; }
+      else { const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args; }
+    } else {
+      const r = getYtdlpSpawnArgs(); ytdlpBin = r.cmd; ytdlpBaseArgs = r.args;
+    }
+    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
+
+    // 导出 Cookie
+    let cookieDomains = [];
+    if (referer.includes('youtube.com') || referer.includes('youtu.be')) cookieDomains = ['.youtube.com', '.google.com', 'accounts.google.com'];
+    else if (referer.includes('bilibili.com')) cookieDomains = ['.bilibili.com'];
+    else if (referer.includes('douyin.com')) cookieDomains = ['.douyin.com', 'www.douyin.com'];
+
+    (async () => {
+      const cookieTempPath = task.path + '.cookies.txt';
+      for (const d of cookieDomains) await exportCookiesForDomain(d, cookieTempPath);
+      // 用完整 URL 查 cookie
+      if (referer.includes('youtube.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.youtube.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+          }
+        } catch(e) {}
+      }
+      if (referer.includes('douyin.com')) {
+        try {
+          const sess = session.fromPartition('persist:tintin-browser');
+          const urlCookies = await sess.cookies.get({ url: 'https://www.douyin.com' });
+          if (urlCookies.length > 0) {
+            const ctext = urlCookies.map(c =>
+              `${c.domain.startsWith('.')?c.domain:'.'+c.domain}\tTRUE\t${c.path||'/'}\t${c.secure?'TRUE':'FALSE'}\t${Math.round(c.expirationDate||Date.now()/1000+86400*30)}\t${c.name}\t${c.value}`
+            ).join('\n');
+            fs.writeFileSync(cookieTempPath,
+              "# Netscape HTTP Cookie File\n# Generated from Electron session\n" + ctext, 'utf-8');
+          }
+        } catch(e) {}
+      }
+      if (fs.existsSync(cookieTempPath)) {
+        const c = fs.readFileSync(cookieTempPath, 'utf-8');
+        if (c.split('\n').filter(l => l.trim() && !l.startsWith('#')).length === 0) fs.unlinkSync(cookieTempPath);
+      }
+      let cookieArg = fs.existsSync(cookieTempPath) ? ['--cookies', cookieTempPath] : [];
+      if (cookieArg.length === 0 && (referer.includes('youtube.com') || referer.includes('douyin.com'))) {
+        cookieArg = ['--cookies-from-browser', 'chrome'];
+      }
+      const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
+
+      let lastLog = '';
+      for (const fmt of formatList) {
+        if (activeDownloads.has(id) && activeDownloads.get(id) === 'cancelled') break;
+        updateTaskProgress(id, 5, `正在重新下载 (格式: ${fmt})...`, 0);
+
+	        const allArgs = [
+	          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
+	          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
+          ...(referer.includes('youtube.com') ? [
+            '--extractor-args', 'youtube:player_client=tv_embedded',
+            '--user-agent', 'Mozilla/5.0 (PlayStation; PlayStation 5/2.00) AppleWebKit/609.1 (KHTML, like Gecko) Version/16.0 Safari/609.1',
+            '--sleep-requests', '2',
+          ] : []),
+	          '-f', fmt, '--merge-output-format', 'mp4',
+	          '-o', task.path, referer,
+	        ];
+
+        const result = await new Promise((resolve) => {
+          const child = spawn(ytdlpBin, allArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+          let stderrBuf = '', stdoutBuf = '';
+          const parseProgress = (text) => {
+            const m = text.match(/\[download\]\s+(\d+\.\d+)%\s+of\s+([^\s]+)\s+at\s+([^\s]+)/);
+            if (m) updateTaskProgress(id, Math.round(parseFloat(m[1])), `下载中 ${m[3]}`, 0);
+          };
+          child.stdout.on('data', (d) => { const s = d.toString(); stdoutBuf += s; parseProgress(s); });
+          child.stderr.on('data', (d) => { const s = d.toString(); stderrBuf += s; parseProgress(s); });
+          child.on('close', (code) => {
+            try { if (fs.existsSync(cookieTempPath)) fs.unlinkSync(cookieTempPath); } catch{}
+            if (code === 0) {
+              let s = 0; try { if (fs.existsSync(task.path)) s = fs.statSync(task.path).size; } catch{}
+              resolve({ success: true, size: s });
+            } else {
+              let created = false; try { created = fs.existsSync(task.path) && fs.statSync(task.path).size > 0; } catch{}
+              if (created) { resolve({ success: true, size: fs.statSync(task.path).size }); }
+              else {
+                const fullLog = (stderrBuf + '\n--- stdout ---\n' + stdoutBuf).trim();
+                lastLog = fullLog;
+                resolve({ success: false, error: (stderrBuf || '').split('\n').filter(l => l.trim() && !l.startsWith('WARNING:')).join('\n').trim() || `exit ${code}`, log: fullLog });
+              }
+            }
+          });
+          child.on('error', (e) => resolve({ success: false, error: e.message }));
+          activeDownloads.set(id, child);
+        });
+
+        if (result.success) {
+          activeDownloads.delete(id);
+          updateTaskSize(id, result.size);
+          updateTaskStatus(id, 'completed', 100, result.size);
+          return;
+        }
+      }
+      activeDownloads.delete(id);
+      updateTaskStatus(id, 'failed', 0, 0, '重新下载失败', lastLog);
+    })();
+    return true;
+  } else {
+    // 非 yt-dlp 路径：重新走 HTTP 下载
+    // 简化处理：对于音视频分离或单文件，重新发起 start-download 逻辑
+    updateTaskStatus(id, 'failed', 0, 0, '该任务不支持重新下载');
+    return false;
+  }
+});
+
+// 取消并删除任务：杀掉进程、删除部分文件、标记已取消
+ipcMain.handle('cancel-download-item', (event, id) => {
+  killActiveTask(id);
+  const db = getDatabase();
+  const task = db.downloads.find(t => t.id === id);
+  if (task) {
+    // 删除部分下载的文件
+    try { if (fs.existsSync(task.path)) fs.unlinkSync(task.path); } catch{}
+    try { if (fs.existsSync(task.path + '.video.tmp')) fs.unlinkSync(task.path + '.video.tmp'); } catch{}
+    try { if (fs.existsSync(task.path + '.audio.tmp')) fs.unlinkSync(task.path + '.audio.tmp'); } catch{}
+    try { if (fs.existsSync(task.path + '.cookies.txt')) fs.unlinkSync(task.path + '.cookies.txt'); } catch{}
+    // 从下载列表中移除
+    db.downloads = db.downloads.filter(t => t.id !== id);
+    saveDatabase(db);
+    mainWindow.webContents.send('download-list-updated', db.downloads);
     return true;
   }
   return false;
@@ -1362,7 +1689,7 @@ function updateTaskProgress(id, progress, speed, receivedBytes) {
   }
 }
 
-function updateTaskStatus(id, status, progress, size, errorMsg = '') {
+function updateTaskStatus(id, status, progress, size, errorMsg = '', log = '') {
   const db = getDatabase();
   const task = db.downloads.find(t => t.id === id);
   if (task) {
@@ -1370,6 +1697,7 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '') {
     task.progress = progress;
     if (size > 0) task.size = size;
     if (errorMsg) task.error = errorMsg;
+    if (log) task.log = log;
     saveDatabase(db);
     if (mainWindow) {
       mainWindow.webContents.send('download-list-updated', db.downloads);
@@ -1377,3 +1705,206 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '') {
     }
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  v2ray 代理 IPC
+// ═══════════════════════════════════════════════════════════════
+
+// 设置 Electron 浏览器 webview 的代理（让浏览器走 v2ray）
+async function setWebviewProxy(proxyUrl) {
+  try {
+    const sess = session.fromPartition('persist:tintin-browser');
+    if (proxyUrl) {
+      // 把 http://127.0.0.1:10809 转为 proxyRules 格式
+      const url = new URL(proxyUrl);
+      const rules = `http=${url.protocol}//${url.host};https=${url.protocol}//${url.host}`;
+      await sess.setProxy({ proxyRules: rules, proxyBypassRules: '<local>' });
+      console.log('webview 代理已设置为:', rules);
+    } else {
+      await sess.setProxy({ proxyRules: 'direct://' });
+      console.log('webview 代理已清除');
+    }
+  } catch (e) {
+    console.warn('设置 webview 代理失败:', e.message);
+  }
+}
+
+// 解析分享链接（用于 UI 预览）
+ipcMain.handle('v2ray-parse-link', (event, link) => {
+  return v2rayManager.parseShareLink(link);
+});
+
+// 下载订阅并解析节点列表
+ipcMain.handle('v2ray-fetch-subscription', async (event, subUrl) => {
+  try {
+    const text = await v2rayManager.downloadSubscription(subUrl);
+    const nodes = v2rayManager.parseSubscription(text);
+    return { ok: true, nodes };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 启动 v2ray（传入节点列表）
+ipcMain.handle('v2ray-start', async (event, nodes) => {
+  try {
+    const proxyUrl = await v2rayManager.start(nodes);
+    // 启动后自动设置代理（yt-dlp + webview）
+    const db = getDatabase();
+    db.settings = { ...db.settings, proxyUrl };
+    saveDatabase(db);
+    proxyManager.applyProxy(db.settings);
+    await setWebviewProxy(proxyUrl);  // webview 也走代理
+    return { ok: true, proxyUrl };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 停止 v2ray
+ipcMain.handle('v2ray-stop', async () => {
+  const stopped = v2rayManager.stop();
+  // 清除代理设置
+  const db = getDatabase();
+  if (db.settings && db.settings.proxyUrl && db.settings.proxyUrl.includes('127.0.0.1')) {
+    delete db.settings.proxyUrl;
+    saveDatabase(db);
+    proxyManager.applyProxy(db.settings);
+  }
+  await setWebviewProxy('');  // 清除 webview 代理
+  return { ok: true, stopped };
+});
+
+// 检查 v2ray 运行状态
+ipcMain.handle('v2ray-status', () => {
+  return {
+    running: v2rayManager.isRunning(),
+    proxyUrl: v2rayManager.getProxyUrl(),
+  };
+});
+
+// 测试节点延迟（TCP ping，不启动 xray）
+ipcMain.handle('v2ray-test-latency', async (event, node) => {
+  try {
+    const ms = await v2rayManager.testLatency(node);
+    return { ok: true, latency: ms };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 检查各平台 cookie 状态 + 强制同步
+ipcMain.handle('check-cookie-status', async () => {
+  const checks = {
+    youtube: { domains: ['.youtube.com', '.google.com'], urls: ['https://www.youtube.com'] },
+    bilibili: { domains: ['.bilibili.com'], urls: [] },
+    douyin: { domains: ['.douyin.com', 'www.douyin.com'], urls: ['https://www.douyin.com'] },
+  };
+  const result = {};
+  const sess = session.fromPartition('persist:tintin-browser');
+  for (const [name, cfg] of Object.entries(checks)) {
+    try {
+      let allCookies = [];
+      for (const d of cfg.domains) {
+        const c = await sess.cookies.get({ domain: d });
+        allCookies = allCookies.concat(c);
+      }
+      for (const u of cfg.urls) {
+        const c = await sess.cookies.get({ url: u });
+        allCookies = allCookies.concat(c);
+      }
+      // 去重
+      const unique = Array.from(new Map(allCookies.map(c => [c.name, c])).values());
+      result[name] = { count: unique.length, names: unique.map(c => c.name).slice(0, 15) };
+    } catch (e) {
+      result[name] = { count: 0, error: e.message };
+    }
+  }
+  return result;
+});
+
+// 用 python_embeded 下载抖音视频（绕过 CDN 鉴权/过期问题）
+ipcMain.handle('douyin-download', async (event, { url, destPath, referer }) => {
+  try {
+    const pyPath = path.join(__dirname, '..', '..', 'python_embeded', 'python.exe');
+    if (!fs.existsSync(pyPath)) return { ok: false, error: 'python_embeded not found' };
+    const script = `
+import urllib.request, urllib.parse, json, sys, os, time, ssl
+url = ${JSON.stringify(url)}
+dest = ${JSON.stringify(destPath)}
+referer = ${JSON.stringify(referer)}
+ctx = ssl.create_default_context()
+req = urllib.request.Request(url, headers={
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Referer': referer,
+    'Accept': '*/*',
+})
+try:
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+        total = int(r.headers.get('Content-Length', 0) or 0)
+        with open(dest, 'wb') as f:
+            downloaded = 0
+            while True:
+                chunk = r.read(65536)
+                if not chunk: break
+                f.write(chunk)
+                downloaded += len(chunk)
+        print(json.dumps({'ok': True, 'size': downloaded}))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': str(e)[:200]}))
+`;
+    const { spawn } = require('child_process');
+    const result = await new Promise(resolve => {
+      const child = spawn(pyPath, ['-c', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', d => out += d.toString());
+      child.stderr.on('data', d => {});
+      child.on('close', () => {
+        try { resolve(JSON.parse(out.trim())); } catch(e) { resolve({ ok: false, error: 'parse failed: '+out.slice(0,100) }); }
+      });
+    });
+    return result;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 从镜像文件恢复收藏数据（当 database.json 中没有时）
+ipcMain.handle('get-kb-items-fallback', () => {
+  try {
+    const mirrorPath = path.join(KNOWLEDGE_DIR, 'kb_items.json');
+    if (fs.existsSync(mirrorPath)) {
+      const data = JSON.parse(fs.readFileSync(mirrorPath, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch(e) {}
+  return [];
+});
+
+// 写入调试日志到桌面（方便用户反馈问题）
+ipcMain.handle('write-debug-log', (event, filename, content) => {
+  try {
+    const desktop = path.join(require('os').homedir(), 'Desktop');
+    const filePath = path.join(desktop, filename);
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { ok: true, path: filePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// 强制导出指定域名 cookie 到文件（供调试/手动同步）
+ipcMain.handle('export-cookies-file', async (event, platform) => {
+  const domainMap = {
+    youtube: ['.youtube.com', '.google.com', 'accounts.google.com'],
+    bilibili: ['.bilibili.com'],
+    douyin: ['.douyin.com'],
+  };
+  const domains = domainMap[platform] || [];
+  if (domains.length === 0) return { ok: false, error: '未知平台' };
+  const destPath = path.join(app.getPath('desktop'), `cookies_${platform}.txt`);
+  for (const d of domains) {
+    await exportCookiesForDomain(d, destPath);
+  }
+  return { ok: true, path: destPath };
+});

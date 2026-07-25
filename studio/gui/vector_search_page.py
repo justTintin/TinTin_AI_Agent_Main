@@ -1,927 +1,271 @@
 # -*- coding: utf-8 -*-
 """
-向量检索页面（page 40）
+素材检索页面（page 40）
 
-三个搜索模式（Tab）：
-  文字语义检索 — Chinese-CLIP 文字向量搜索
-  标签检索     — 按品牌 / 型号 / 类别 / AI状态 精确或模糊查询
-  目录查询     — 按路径前缀列出数据库中该目录下所有素材及标签
+通过服务端 /material/search API 检索素材。
 """
 import os
+import requests
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QFrame, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QSpinBox, QComboBox, QFileDialog,
+    QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QSpinBox, QComboBox, QCompleter,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtCore import Qt, Signal, QUrl, QTimer
+from PySide6.QtGui import QGuiApplication, QDesktopServices
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
-from config.paths import CONFIG_DIR
 
 
-# ── Workers ───────────────────────────────────────────────────────────────────
+def _get_server_url():
+    try:
+        from config.paths import AI_CONFIG_FILE
+        import json
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return "http://192.168.111.18:8000"
 
-class _VectorSearchWorker(BaseWorker):
-    """Chinese-CLIP 文字向量检索。"""
+
+class _SearchWorker(BaseWorker):
+    """服务端素材检索。"""
     finished = Signal(list, int)
 
-    def __init__(self, query: str, top_k: int, path_prefix: str,
-                 brand: str, category: str, hash_prefix: str = "",
-                 color: str = "", offset: int = 0):
+    def __init__(self, query="", brand="", category="", model="", media_type="", limit=50, offset=0):
         super().__init__()
-        self.query       = query
-        self.top_k       = top_k
-        self.path_prefix = path_prefix
-        self.brand       = brand or None
-        self.category    = category or None
-        self.hash_prefix = hash_prefix
-        self.color       = color or None
-        self.offset      = offset
-
-    def do_work(self):
-        from utils.material_clip_indexer import search_by_text
-        results, total = search_by_text(
-            self.query, top_k=self.top_k,
-            filter_brand=self.brand,
-            filter_category=self.category,
-            filter_hash=self.hash_prefix,
-            filter_path_prefix=self.path_prefix,
-            filter_color=self.color,
-            offset=self.offset,
-        )
-        self.finished.emit(results, total)
-
-
-class _TagSearchWorker(BaseWorker):
-    """按品牌/型号/类别/状态标签查询数据库。"""
-    finished = Signal(list, int)
-
-    def __init__(self, brand: str, model: str, category: str,
-                 ai_status: str, limit: int, hash_prefix: str = "",
-                 offset: int = 0):
-        super().__init__()
-        self.brand       = brand or None
-        self.model       = model or None
-        self.category    = category or None
-        self.ai_status   = ai_status or None
-        self.limit       = limit
-        self.hash_prefix = hash_prefix
-        self.offset      = offset
-
-    def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.search_by_tags(
-                brand=self.brand, model=self.model,
-                category=self.category, ai_status=self.ai_status,
-                limit=self.limit, hash_prefix=self.hash_prefix,
-                offset=self.offset,
-            )
-        self.finished.emit(rows, total)
-
-
-class _DirQueryWorker(BaseWorker):
-    """按路径前缀从 DB 列出素材。"""
-    finished = Signal(list, int)
-
-    def __init__(self, path_prefix: str, limit: int = 100,
-                 hash_prefix: str = "", offset: int = 0):
-        super().__init__()
-        self.path_prefix = path_prefix
-        self.limit       = limit
-        self.hash_prefix = hash_prefix
-        self.offset      = offset
-
-    def do_work(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.list_materials(
-                path_prefix=self.path_prefix,
-                limit=self.limit,
-                hash_prefix=self.hash_prefix,
-                offset=self.offset,
-            )
-        self.finished.emit(rows, total)
-
-
-class _KeywordSearchWorker(BaseWorker):
-    """关键词模糊搜索：对文件名/描述/品牌/型号做 LIKE 匹配。"""
-    finished = Signal(list, int)
-
-    def __init__(self, keyword: str, limit: int = 100,
-                 file_type: str = "", brand: str = "", model: str = "",
-                 category: str = "", ai_status: str = "", offset: int = 0):
-        super().__init__()
-        self.keyword = keyword.strip()
+        self.query = query
+        self.brand = brand
+        self.category = category
+        self.model = model
+        self.media_type = media_type
         self.limit = limit
-        self.file_type = file_type
-        self.brand = brand.strip() or None
-        self.model = model.strip() or None
-        self.category = category.strip() or None
-        self.ai_status = ai_status or None
         self.offset = offset
 
     def do_work(self):
-        if not self.keyword:
-            self.finished.emit([], 0)
-            return
-        from utils.material_clip_indexer import MaterialClipIndexer
-        with MaterialClipIndexer() as idx:
-            rows, total = idx.search_by_keyword(
-                self.keyword, self.limit,
-                file_type=self.file_type, brand=self.brand,
-                model=self.model, category=self.category,
-                ai_status=self.ai_status, offset=self.offset)
-        self.finished.emit(rows, total)
+        try:
+            url = f"{_get_server_url()}/material/search"
+            params = {"limit": self.limit, "offset": self.offset}
+            if self.query:
+                params["query"] = self.query
+            if self.brand:
+                params["brand"] = self.brand
+            if self.category:
+                params["category"] = self.category
+            if self.model:
+                params["model"] = self.model
+            if self.media_type:
+                params["media_type"] = self.media_type
+            resp = requests.post(url, json=params, timeout=15)
+            if resp.status_code != 200:
+                raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            results = data.get("results") or data.get("data") or []
+            total = data.get("total") or len(results)
+            self.finished.emit(results, total)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
-# ── 主页面 ────────────────────────────────────────────────────────────────────
+class _BrandLoader(BaseWorker):
+    """异步获取品牌去重列表。"""
+    finished = Signal(list)
 
-_STATUS_COLOR = {
-    "pending":  "#f59e0b",
-    "analyzed": "#22c55e",
-    "failed":   "#ef4444",
-}
-
-_TABLE_COLS     = ["文件名", "主要画面描述", "次要画面描述", "品牌", "型号", "类别", "置信度", "相似度", "AI状态", "Hash", "路径"]
-_TABLE_COLS_IDX = {n: i for i, n in enumerate(_TABLE_COLS)}
+    def do_work(self):
+        try:
+            url = f"{_get_server_url()}/material/distinct?field=brand"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                self.finished.emit(data.get("values", []))
+                return
+        except Exception:
+            pass
+        self.finished.emit([])
 
 
 class VectorSearchPage(BasePage):
-    _PAGE_SIZE = 50
-
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(10)
 
         hdr = QHBoxLayout()
-        title = QLabel("🔍 向量检索")
+        title = QLabel("🔍 素材检索")
         title.setObjectName("heading")
         hdr.addWidget(title)
         hdr.addStretch()
-        sub = QLabel("语义搜索 · 标签筛选 · 目录查询")
+        sub = QLabel(f"服务端: {_get_server_url()}")
         sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         root.addLayout(hdr)
 
-        self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_text_tab(),     "🔎 文字语义检索")
-        self._tabs.addTab(self._build_tag_tab(),      "🏷️ 标签检索")
-        self._tabs.addTab(self._build_keyword_tab(),  "🔤 关键词检索")
-        self._tabs.addTab(self._build_dir_tab(),      "📂 目录查询")
-        self._tabs.currentChanged.connect(self._on_tab_changed)
-        root.addWidget(self._tabs, 1)
-
-        self._load_tag_options()
-        self._page_state = {"text": 0, "tag": 0, "kw": 0, "dir": 0}
-
-    def _on_tab_changed(self, index):
-        if index in (0, 1):  # Tab 1 & 2: 文字语义检索 + 标签检索
-            self._load_tag_options()
-
-    # ── Tab 1：文字语义检索 ───────────────────────────────────────────────────
-
-    def _build_text_tab(self):
-        panel = QFrame()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
-
-        hint = QLabel("通过自然语言描述画面内容，使用 Chinese-CLIP 向量相似度检索素材")
-        hint.setObjectName("muted_text")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-
         # 搜索行
-        q_row = QHBoxLayout()
-        self.txt_query = QLineEdit()
-        self.txt_query.setPlaceholderText("描述画面内容，例如：罗技无线鼠标 白色 手持 特写")
-        self.txt_query.returnPressed.connect(self._do_text_search)
-        q_row.addWidget(self.txt_query, 1)
-        self.txt_btn = QPushButton("搜索")
-        self.txt_btn.setObjectName("primary_button")
-        self.txt_btn.clicked.connect(self._do_text_search)
-        q_row.addWidget(self.txt_btn)
-        lay.addLayout(q_row)
+        search_row = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("输入关键词搜索素材（必填，如品牌/型号/产品名/画面描述）")
+        self.search_input.returnPressed.connect(self._do_search)
+        search_row.addWidget(self.search_input, 1)
+        self.btn_search = QPushButton("搜索")
+        self.btn_search.setObjectName("primary_button")
+        self.btn_search.clicked.connect(self._do_search)
+        search_row.addWidget(self.btn_search)
+        root.addLayout(search_row)
 
         # 筛选行
-        flt = QHBoxLayout()
-        flt.addWidget(QLabel("路径前缀："))
-        self.txt_path = QLineEdit()
-        self.txt_path.setPlaceholderText("可选，限定搜索目录范围")
-        flt.addWidget(self.txt_path, 1)
-        flt.addWidget(QLabel("品牌："))
-        self.txt_brand = QComboBox()
-        self.txt_brand.setEditable(True)
-        self.txt_brand.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.txt_brand.setFixedWidth(110)
-        flt.addWidget(self.txt_brand)
-        flt.addWidget(QLabel("类别："))
-        self.txt_category = QComboBox()
-        self.txt_category.setEditable(True)
-        self.txt_category.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.txt_category.setFixedWidth(90)
-        flt.addWidget(self.txt_category)
-        flt.addWidget(QLabel("颜色："))
-        self.txt_color = QLineEdit()
-        self.txt_color.setPlaceholderText("如：白色 黑色")
-        self.txt_color.setFixedWidth(100)
-        self.txt_color.returnPressed.connect(self._do_text_search)
-        flt.addWidget(self.txt_color)
-        flt.addWidget(QLabel("Hash："))
-        self.txt_hash = QLineEdit()
-        self.txt_hash.setPlaceholderText("Hash 过滤")
-        self.txt_hash.setFixedWidth(100)
-        flt.addWidget(self.txt_hash)
-        flt.addWidget(QLabel("每页："))
-        self.txt_topk = QSpinBox()
-        self.txt_topk.setRange(10, 200)
-        self.txt_topk.setValue(self._PAGE_SIZE)
-        self.txt_topk.setFixedWidth(56)
-        flt.addWidget(self.txt_topk)
-        lay.addLayout(flt)
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("品牌:"))
+        self.filter_brand = QComboBox()
+        self.filter_brand.setEditable(True)
+        self.filter_brand.setPlaceholderText("如 罗技")
+        self.filter_brand.setMaximumWidth(160)
+        self.filter_brand.setInsertPolicy(QComboBox.NoInsert)
+        filter_row.addWidget(self.filter_brand)
+        QTimer.singleShot(100, self._load_brands)
+        filter_row.addWidget(QLabel("分类:"))
+        self.filter_category = QComboBox()
+        self.filter_category.addItems(["全部", "鼠标", "鼠标垫", "键盘", "耳机", "摄像头"])
+        self.filter_category.setMaximumWidth(100)
+        filter_row.addWidget(self.filter_category)
+        filter_row.addWidget(QLabel("类型:"))
+        self.filter_type = QComboBox()
+        self.filter_type.addItems(["全部", "video", "image"])
+        self.filter_type.setMaximumWidth(80)
+        filter_row.addWidget(self.filter_type)
+        filter_row.addWidget(QLabel("每页:"))
+        self.spin_limit = QSpinBox()
+        self.spin_limit.setRange(10, 200)
+        self.spin_limit.setValue(50)
+        self.spin_limit.setFixedWidth(60)
+        filter_row.addWidget(self.spin_limit)
+        filter_row.addStretch()
+        root.addLayout(filter_row)
 
-        self.txt_table, self.txt_stat = self._make_result_table()
-        lay.addWidget(self.txt_table, 1)
+        # 结果表格
+        self.result_table = QTableWidget()
+        self.result_table.setColumnCount(7)
+        self.result_table.setHorizontalHeaderLabels(["文件名", "品牌", "型号", "分类", "类型", "大小", "路径"])
+        hh = self.result_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Interactive)
+        hh.setSectionResizeMode(6, QHeaderView.Stretch)
+        self.result_table.setColumnWidth(0, 200)
+        self.result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.result_table.setAlternatingRowColors(True)
+        self.result_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.result_table.doubleClicked.connect(self._open_file_location)
+        root.addWidget(self.result_table, 1)
 
-        bot = QHBoxLayout()
-        bot.addWidget(self.txt_stat, 1)
-        self.txt_prev, self.txt_next, self.txt_page_lbl = self._make_pager()
-        self.txt_prev.clicked.connect(lambda: self._do_text_search(page_delta=-1))
-        self.txt_next.clicked.connect(lambda: self._do_text_search(page_delta=1))
-        bot.addWidget(self.txt_prev)
-        bot.addWidget(self.txt_page_lbl)
-        bot.addWidget(self.txt_next)
-        btn_copy = QPushButton("📋 复制路径")
-        btn_copy.setObjectName("secondary_button")
-        btn_copy.clicked.connect(lambda: self._copy_path(self.txt_table))
-        bot.addWidget(btn_copy)
-        btn_open = QPushButton("🗂 打开目录")
-        btn_open.setObjectName("secondary_button")
-        btn_open.clicked.connect(lambda: self._open_dir(self.txt_table))
-        bot.addWidget(btn_open)
-        lay.addLayout(bot)
+        # 状态栏
+        stat_row = QHBoxLayout()
+        self.lbl_stat = QLabel("就绪")
+        self.lbl_stat.setObjectName("muted_text")
+        stat_row.addWidget(self.lbl_stat, 1)
+        self.btn_copy_path = QPushButton("📋 复制路径")
+        self.btn_copy_path.setObjectName("secondary_button")
+        self.btn_copy_path.clicked.connect(self._copy_selected_path)
+        stat_row.addWidget(self.btn_copy_path)
+        root.addLayout(stat_row)
 
-        return panel
+        self._results = []
+        self._total = 0
 
-    # ── Tab 2：标签检索 ───────────────────────────────────────────────────────
-
-    def _build_tag_tab(self):
-        panel = QFrame()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
-
-        hint = QLabel("按品牌 / 型号 / 类别标签直接查询数据库，支持模糊匹配（留空不限）")
-        hint.setObjectName("muted_text")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-
-        # 标签筛选行
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("品牌："))
-        self.tag_brand = QComboBox()
-        row1.addWidget(self.tag_brand, 1)
-        row1.addWidget(QLabel("型号："))
-        self.tag_model = QComboBox()
-        row1.addWidget(self.tag_model, 1)
-        lay.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("类别："))
-        self.tag_category = QComboBox()
-        row2.addWidget(self.tag_category, 1)
-        row2.addWidget(QLabel("AI状态："))
-        self.tag_status = QComboBox()
-        self.tag_status.addItem("全部", "")
-        self.tag_status.addItem("待分析", "pending")
-        self.tag_status.addItem("已分析", "analyzed")
-        self.tag_status.addItem("失败", "failed")
-        row2.addWidget(self.tag_status, 1)
-        lay.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Hash："))
-        self.tag_hash = QLineEdit()
-        self.tag_hash.setPlaceholderText("Hash 过滤")
-        row3.addWidget(self.tag_hash, 1)
-        row3.addWidget(QLabel("每页："))
-        self.tag_limit = QSpinBox()
-        self.tag_limit.setRange(10, 200)
-        self.tag_limit.setValue(self._PAGE_SIZE)
-        self.tag_limit.setFixedWidth(65)
-        row3.addWidget(self.tag_limit)
-        self.tag_btn = QPushButton("查询")
-        self.tag_btn.setObjectName("primary_button")
-        self.tag_btn.clicked.connect(self._do_tag_search)
-        row3.addWidget(self.tag_btn)
-        lay.addLayout(row3)
-
-        self.tag_table, self.tag_stat = self._make_result_table()
-        lay.addWidget(self.tag_table, 1)
-
-        bot = QHBoxLayout()
-        bot.addWidget(self.tag_stat, 1)
-        self.tag_prev, self.tag_next, self.tag_page_lbl = self._make_pager()
-        self.tag_prev.clicked.connect(lambda: self._do_tag_search(page_delta=-1))
-        self.tag_next.clicked.connect(lambda: self._do_tag_search(page_delta=1))
-        bot.addWidget(self.tag_prev)
-        bot.addWidget(self.tag_page_lbl)
-        bot.addWidget(self.tag_next)
-        btn_copy = QPushButton("📋 复制路径")
-        btn_copy.setObjectName("secondary_button")
-        btn_copy.clicked.connect(lambda: self._copy_path(self.tag_table))
-        bot.addWidget(btn_copy)
-        btn_open = QPushButton("🗂 打开目录")
-        btn_open.setObjectName("secondary_button")
-        btn_open.clicked.connect(lambda: self._open_dir(self.tag_table))
-        bot.addWidget(btn_open)
-        lay.addLayout(bot)
-
-        return panel
-
-    # ── Tab 3：关键词检索 ───────────────────────────────────────────────────
-
-    def _build_keyword_tab(self):
-        panel = QFrame()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
-
-        hint = QLabel("在文件名、画面描述、品牌、型号、路径中模糊匹配关键词，不依赖向量模型。")
-        hint.setObjectName("muted_text"); hint.setWordWrap(True)
-        lay.addWidget(hint)
-
-        q_row = QHBoxLayout()
-        self.kw_input = QLineEdit()
-        self.kw_input.setPlaceholderText("输入关键词，例如：罗技 G502 无线鼠标")
-        self.kw_input.returnPressed.connect(self._do_kw_search)
-        q_row.addWidget(self.kw_input, 1)
-        self.kw_btn = QPushButton("搜索")
-        self.kw_btn.setObjectName("primary_button")
-        self.kw_btn.clicked.connect(self._do_kw_search)
-        q_row.addWidget(self.kw_btn)
-        lay.addLayout(q_row)
-
-        # 过滤行
-        flt = QHBoxLayout()
-        flt.addWidget(QLabel("类型:")); self.kw_type = QComboBox()
-        self.kw_type.addItems(["全部", "视频", "图片"]); self.kw_type.setFixedWidth(70)
-        flt.addWidget(self.kw_type)
-        flt.addWidget(QLabel("品牌:")); self.kw_brand = QLineEdit()
-        self.kw_brand.setPlaceholderText("可选"); self.kw_brand.setFixedWidth(90)
-        flt.addWidget(self.kw_brand)
-        flt.addWidget(QLabel("型号:")); self.kw_model = QLineEdit()
-        self.kw_model.setPlaceholderText("可选"); self.kw_model.setFixedWidth(90)
-        flt.addWidget(self.kw_model)
-        flt.addWidget(QLabel("类目:")); self.kw_category = QLineEdit()
-        self.kw_category.setPlaceholderText("可选"); self.kw_category.setFixedWidth(80)
-        flt.addWidget(self.kw_category)
-        flt.addWidget(QLabel("AI:")); self.kw_aistat = QComboBox()
-        self.kw_aistat.addItems(["全部","pending","analyzed","failed"]); self.kw_aistat.setFixedWidth(80)
-        flt.addWidget(self.kw_aistat)
-        flt.addStretch()
-        lay.addLayout(flt)
-
-        self.kw_table, self.kw_stat = self._make_result_table()
-        lay.addWidget(self.kw_table, 1)
-
-        bot = QHBoxLayout()
-        bot.addWidget(self.kw_stat, 1)
-        self.kw_prev, self.kw_next, self.kw_page_lbl = self._make_pager()
-        self.kw_prev.clicked.connect(lambda: self._do_kw_search(page_delta=-1))
-        self.kw_next.clicked.connect(lambda: self._do_kw_search(page_delta=1))
-        bot.addWidget(self.kw_prev)
-        bot.addWidget(self.kw_page_lbl)
-        bot.addWidget(self.kw_next)
-        btn_copy = QPushButton("📋 复制路径"); btn_copy.setObjectName("secondary_button")
-        btn_copy.clicked.connect(lambda: self._copy_path(self.kw_table)); bot.addWidget(btn_copy)
-        btn_open = QPushButton("🗂 打开目录"); btn_open.setObjectName("secondary_button")
-        btn_open.clicked.connect(lambda: self._open_dir(self.kw_table)); bot.addWidget(btn_open)
-        lay.addLayout(bot)
-        return panel
-
-    def _do_kw_search(self, page_delta: int = 0):
-        kw = self.kw_input.text().strip()
-        if not kw: return
-        if page_delta == 0:
-            self._page_state["kw"] = 0
-        else:
-            self._page_state["kw"] = max(0, self._page_state["kw"] + page_delta)
-        offset = self._page_state["kw"] * self._PAGE_SIZE
-        self.kw_btn.setEnabled(False)
-        self.kw_table.setRowCount(0)
-        self.kw_stat.setText("搜索中…")
-        self.kw_prev.setEnabled(False)
-        self.kw_next.setEnabled(False)
-        ft = "" if self.kw_type.currentIndex() == 0 else self.kw_type.currentText()
-        ai = "" if self.kw_aistat.currentIndex() == 0 else self.kw_aistat.currentText()
-        w = self.track_worker(_KeywordSearchWorker(
-            kw, self._PAGE_SIZE, file_type=ft,
-            brand=self.kw_brand.text().strip(),
-            model=self.kw_model.text().strip(),
-            category=self.kw_category.text().strip(),
-            ai_status=ai, offset=offset))
-        w.finished.connect(lambda rows, total: self._on_kw_done(rows, total))
-        w.error.connect(lambda m: self._on_search_err(m, self.kw_btn, self.kw_stat))
+    def _load_brands(self):
+        w = self.track_worker(_BrandLoader())
+        w.finished.connect(self._on_brands_loaded)
         w.start()
 
-    def _on_kw_done(self, rows: list, total: int):
-        self.kw_btn.setEnabled(True)
-        self._fill_table(self.kw_table, rows, has_score=False)
-        page = self._page_state["kw"]
-        ps = self._PAGE_SIZE
-        total_pages = (total + ps - 1) // ps if total > 0 else 0
-        start = page * ps + 1 if total > 0 else 0
-        end = min(start + len(rows) - 1, total)
-        self.kw_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
-        self.kw_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
-        self.kw_prev.setEnabled(page > 0)
-        self.kw_next.setEnabled((page + 1) * ps < total)
+    def _on_brands_loaded(self, brands):
+        if not brands:
+            return
+        self.filter_brand.clear()
+        self.filter_brand.addItems(brands)
+        c = self.filter_brand.completer()
+        if c:
+            c.setFilterMode(Qt.MatchContains)
+            c.setCaseSensitivity(Qt.CaseInsensitive)
 
-    # ── Tab 4：目录查询 ───────────────────────────────────────────────────────
-
-    def _build_dir_tab(self):
-        panel = QFrame()
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
-
-        hint = QLabel("输入目录路径，从向量库数据库中列出该目录下所有已索引素材及其标签信息")
-        hint.setObjectName("muted_text")
-        hint.setWordWrap(True)
-        lay.addWidget(hint)
-
-        dir_row = QHBoxLayout()
-        dir_row.addWidget(QLabel("目录路径："))
-        self.dir_path = QLineEdit()
-        self.dir_path.setPlaceholderText(r"例如 R:\鼠标\罗技  或  \\NAS\素材\产品")
-        self.dir_path.returnPressed.connect(self._do_dir_query)
-        dir_row.addWidget(self.dir_path, 1)
-        btn_browse = QPushButton("选择…")
-        btn_browse.setObjectName("secondary_button")
-        btn_browse.clicked.connect(self._browse_dir)
-        dir_row.addWidget(btn_browse)
-        self.dir_btn = QPushButton("查询")
-        self.dir_btn.setObjectName("primary_button")
-        self.dir_btn.clicked.connect(self._do_dir_query)
-        dir_row.addWidget(self.dir_btn)
-        lay.addLayout(dir_row)
-
-        dir_filter_row = QHBoxLayout()
-        dir_filter_row.addWidget(QLabel("Hash 过滤："))
-        self.dir_hash = QLineEdit()
-        self.dir_hash.setPlaceholderText("输入 hash 前缀筛选")
-        dir_filter_row.addWidget(self.dir_hash, 1)
-        dir_filter_row.addWidget(QLabel("每页："))
-        self.dir_limit = QSpinBox()
-        self.dir_limit.setRange(10, 200)
-        self.dir_limit.setValue(self._PAGE_SIZE)
-        self.dir_limit.setFixedWidth(65)
-        dir_filter_row.addWidget(self.dir_limit)
-        lay.addLayout(dir_filter_row)
-
-        self.dir_table, self.dir_stat = self._make_result_table()
-        lay.addWidget(self.dir_table, 1)
-
-        bot = QHBoxLayout()
-        bot.addWidget(self.dir_stat, 1)
-        self.dir_prev, self.dir_next, self.dir_page_lbl = self._make_pager()
-        self.dir_prev.clicked.connect(lambda: self._do_dir_query(page_delta=-1))
-        self.dir_next.clicked.connect(lambda: self._do_dir_query(page_delta=1))
-        bot.addWidget(self.dir_prev)
-        bot.addWidget(self.dir_page_lbl)
-        bot.addWidget(self.dir_next)
-        btn_copy = QPushButton("📋 复制路径")
-        btn_copy.setObjectName("secondary_button")
-        btn_copy.clicked.connect(lambda: self._copy_path(self.dir_table))
-        bot.addWidget(btn_copy)
-        btn_open = QPushButton("🗂 打开目录")
-        btn_open.setObjectName("secondary_button")
-        btn_open.clicked.connect(lambda: self._open_dir(self.dir_table))
-        bot.addWidget(btn_open)
-        lay.addLayout(bot)
-
-        return panel
-
-    # ── 通用：结果表格 ────────────────────────────────────────────────────────
-
-    def _make_pager(self):
-        from PySide6.QtWidgets import QPushButton, QLabel
-        prev = QPushButton("◀ 上一页")
-        prev.setObjectName("secondary_button")
-        prev.setEnabled(False)
-        nxt = QPushButton("下一页 ▶")
-        nxt.setObjectName("secondary_button")
-        nxt.setEnabled(False)
-        lbl = QLabel("0/0 页")
-        lbl.setObjectName("muted_text")
-        return prev, nxt, lbl
-
-    def _make_result_table(self):
-        table = QTableWidget()
-        table.setColumnCount(len(_TABLE_COLS))
-        table.setHorizontalHeaderLabels(_TABLE_COLS)
-        hh = table.horizontalHeader()
-        hh.setSectionResizeMode(10, QHeaderView.Stretch)   # 路径列拉伸
-        for c in range(10):
-            if c == 0:  # 文件名列
-                hh.setSectionResizeMode(c, QHeaderView.Interactive)
-                table.setColumnWidth(c, 400)
-            elif c in (1, 2):  # 主要画面描述, 次要画面描述
-                hh.setSectionResizeMode(c, QHeaderView.Interactive)
-                table.setColumnWidth(c, 150)
-            elif c == 9:  # Hash 列
-                hh.setSectionResizeMode(c, QHeaderView.Interactive)
-                table.setColumnWidth(c, 250)
-            else:
-                hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setAlternatingRowColors(True)
-        table.doubleClicked.connect(lambda idx, t=table: self._open_dir_by_index(t, idx))
-        table.setContextMenuPolicy(Qt.CustomContextMenu)
-        table.customContextMenuRequested.connect(lambda pos, t=table: self._show_table_context_menu(t, pos))
-
-        stat = QLabel("共 0 条")
-        stat.setObjectName("muted_text")
-        stat.setWordWrap(False)
-        stat.setMaximumHeight(24)
-        return table, stat
-
-    def _fill_table(self, table: QTableWidget, rows: list, has_score: bool = False):
-        table.setUpdatesEnabled(False)
-        table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            fname  = row.get("filename") or os.path.basename(row.get("path", ""))
-            desc_p = row.get("scene_desc_primary") or "—"
-            desc_s = row.get("scene_desc_secondary") or "—"
-            brand  = row.get("brand") or "—"
-            model  = row.get("model") or "—"
-            cat    = row.get("category") or row.get("product") or "—"
-            conf   = row.get("ai_confidence")
-            conf_t = f"{conf:.0%}" if conf is not None else "—"
-            score  = row.get("score")
-            score_t= f"{score:.3f}" if (has_score and score is not None) else "—"
-            status = row.get("ai_status") or "pending"
-            fhash  = row.get("file_hash") or "—"
-            path   = row.get("path") or "—"
-
-            vals = [fname, desc_p, desc_s, brand, model, cat, conf_t, score_t, status, fhash, path]
-            for c, v in enumerate(vals):
-                cell = QTableWidgetItem(str(v))
-                cell.setData(Qt.UserRole, row)
-                if c == 6 and conf is not None:  # 置信度着色
-                    color = "#22c55e" if conf >= 0.7 else ("#f59e0b" if conf >= 0.4 else "#ef4444")
-                    cell.setForeground(QColor(color))
-                if c == 8:  # AI状态着色
-                    cell.setForeground(QColor(_STATUS_COLOR.get(status, "#9ca3af")))
-                table.setItem(r, c, cell)
-        table.setUpdatesEnabled(True)
-
-    # ── 搜索动作 ─────────────────────────────────────────────────────────────
-
-    def _do_text_search(self, page_delta: int = 0):
-        query = self.txt_query.text().strip()
+    def _do_search(self):
+        query = self.search_input.text().strip()
+        # 前置校验：服务端要求 query 必填（空会返回 400），客户端提前拦截并提示
         if not query:
+            self.lbl_stat.setText("⚠ 请输入搜索关键词（如品牌/型号/产品名）")
+            self.search_input.setFocus()
             return
-        page_size = self.txt_topk.value()
-        if page_delta == 0:
-            self._page_state["text"] = 0
-        else:
-            self._page_state["text"] = max(0, self._page_state["text"] + page_delta)
-        offset = self._page_state["text"] * page_size
-        self.txt_btn.setEnabled(False)
-        self.txt_table.setRowCount(0)
-        self.txt_stat.setText("检索中…")
-        self.txt_prev.setEnabled(False)
-        self.txt_next.setEnabled(False)
-        brand = self.txt_brand.currentText().strip()
-        if brand == "全部":
-            brand = ""
-        category = self.txt_category.currentText().strip()
+        brand = self.filter_brand.currentText().strip()
+        category = self.filter_category.currentText()
         if category == "全部":
             category = ""
-        w = self.track_worker(_VectorSearchWorker(
-            query, page_size,
-            self.txt_path.text().strip(),
-            brand, category,
-            hash_prefix=self.txt_hash.text().strip(),
-            color=self.txt_color.text().strip(),
-            offset=offset,
-        ))
-        w.finished.connect(lambda rows, total: self._on_text_done(rows, total, page_size))
-        w.error.connect(lambda m: self._on_search_err(m, self.txt_btn, self.txt_stat))
+        media_type = self.filter_type.currentText()
+        if media_type == "全部":
+            media_type = ""
+
+        self.btn_search.setEnabled(False)
+        self.lbl_stat.setText("搜索中...")
+        self.result_table.setRowCount(0)
+
+        w = self.track_worker(_SearchWorker(
+            query=query, brand=brand, category=category,
+            media_type=media_type, limit=self.spin_limit.value()))
+        w.finished.connect(self._on_search_done)
+        w.error.connect(lambda m: self._on_search_error(m))
         w.start()
 
-    def _on_text_done(self, rows: list, total: int, page_size: int):
-        self.txt_btn.setEnabled(True)
-        self._fill_table(self.txt_table, rows, has_score=True)
-        page = self._page_state["text"]
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
-        start = page * page_size + 1 if total > 0 else 0
-        end = min(start + len(rows) - 1, total)
-        self.txt_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
-        self.txt_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
-        self.txt_prev.setEnabled(page > 0)
-        self.txt_next.setEnabled((page + 1) * page_size < total)
+    def _on_search_done(self, results, total):
+        self.btn_search.setEnabled(True)
+        self._results = results
+        self._total = total
+        self._fill_table(results)
+        self.lbl_stat.setText(f"共 {total} 条结果")
 
-    def _do_tag_search(self, page_delta: int = 0):
-        page_size = self.tag_limit.value()
-        if page_delta == 0:
-            self._page_state["tag"] = 0
-        else:
-            self._page_state["tag"] = max(0, self._page_state["tag"] + page_delta)
-        offset = self._page_state["tag"] * page_size
-        self.tag_btn.setEnabled(False)
-        self.tag_table.setRowCount(0)
-        self.tag_stat.setText("查询中…")
-        self.tag_prev.setEnabled(False)
-        self.tag_next.setEnabled(False)
+    def _on_search_error(self, msg):
+        self.btn_search.setEnabled(True)
+        # 把服务端原始错误转成对用户友好的中文提示
+        friendly = msg
+        if "400" in msg and ("query" in msg or "不能为空" in msg):
+            friendly = "请输入搜索关键词后再搜索"
+        elif "Connection" in msg or "timed out" in msg or "Max retries" in msg:
+            friendly = "无法连接服务端，请检查服务端是否在线"
+        self.lbl_stat.setText(f"❌ {friendly}")
+        self.result_table.setRowCount(0)
 
-        brand = self.tag_brand.currentText()
-        if brand == "全部":
-            brand = ""
-        model = self.tag_model.currentText()
-        if model == "全部":
-            model = ""
-        category = self.tag_category.currentText()
-        if category == "全部":
-            category = ""
+    def _fill_table(self, rows):
+        self.result_table.setUpdatesEnabled(False)
+        self.result_table.setRowCount(len(rows))
+        for r, item in enumerate(rows):
+            fname = item.get("filename", "")
+            brand = item.get("brand") or "—"
+            model = item.get("model") or "—"
+            category = item.get("product") or item.get("category") or "—"
+            mtype = item.get("media_type", "")
+            fsize = item.get("file_size", 0)
+            size_str = f"{fsize / 1048576:.1f}MB" if fsize else ""
+            path = item.get("path", item.get("filepath", ""))
+            self.result_table.setItem(r, 0, QTableWidgetItem(fname))
+            self.result_table.setItem(r, 1, QTableWidgetItem(brand))
+            self.result_table.setItem(r, 2, QTableWidgetItem(model))
+            self.result_table.setItem(r, 3, QTableWidgetItem(category))
+            self.result_table.setItem(r, 4, QTableWidgetItem(mtype))
+            self.result_table.setItem(r, 5, QTableWidgetItem(size_str))
+            self.result_table.setItem(r, 6, QTableWidgetItem(path))
+        self.result_table.setUpdatesEnabled(True)
 
-        w = self.track_worker(_TagSearchWorker(
-            brand,
-            model,
-            category,
-            self.tag_status.currentData(),
-            page_size,
-            hash_prefix=self.tag_hash.text().strip(),
-            offset=offset,
-        ))
-        w.finished.connect(lambda rows, total: self._on_tag_done(rows, total, page_size))
-        w.error.connect(lambda m: self._on_search_err(m, self.tag_btn, self.tag_stat))
-        w.start()
-
-    def _on_tag_done(self, rows: list, total: int, page_size: int):
-        self.tag_btn.setEnabled(True)
-        self._fill_table(self.tag_table, rows, has_score=False)
-        page = self._page_state["tag"]
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
-        start = page * page_size + 1 if total > 0 else 0
-        end = min(start + len(rows) - 1, total)
-        self.tag_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
-        self.tag_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
-        self.tag_prev.setEnabled(page > 0)
-        self.tag_next.setEnabled((page + 1) * page_size < total)
-
-    def _do_dir_query(self, page_delta: int = 0):
-        path = self.dir_path.text().strip()
-        if not path:
-            self.show_warning("请输入要查询的目录路径。", "未填目录")
+    def _copy_selected_path(self):
+        idx = self.result_table.currentRow()
+        if idx < 0 or idx >= len(self._results):
             return
-        page_size = self.dir_limit.value()
-        if page_delta == 0:
-            self._page_state["dir"] = 0
-        else:
-            self._page_state["dir"] = max(0, self._page_state["dir"] + page_delta)
-        offset = self._page_state["dir"] * page_size
-        self.dir_btn.setEnabled(False)
-        self.dir_table.setRowCount(0)
-        self.dir_stat.setText("查询中…")
-        self.dir_prev.setEnabled(False)
-        self.dir_next.setEnabled(False)
-        w = self.track_worker(_DirQueryWorker(
-            path,
-            limit=page_size,
-            hash_prefix=self.dir_hash.text().strip(),
-            offset=offset,
-        ))
-        w.finished.connect(lambda rows, total: self._on_dir_done(rows, total, page_size))
-        w.error.connect(lambda m: self._on_search_err(m, self.dir_btn, self.dir_stat))
-        w.start()
+        path = self._results[idx].get("path", self._results[idx].get("filepath", ""))
+        if path:
+            QGuiApplication.clipboard().setText(path)
 
-    def _on_dir_done(self, rows: list, total: int, page_size: int):
-        self.dir_btn.setEnabled(True)
-        self._fill_table(self.dir_table, rows, has_score=False)
-        page = self._page_state["dir"]
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
-        start = page * page_size + 1 if total > 0 else 0
-        end = min(start + len(rows) - 1, total)
-        self.dir_stat.setText(f"共 {total} 条 · 第 {start}-{end} 条")
-        self.dir_page_lbl.setText(f"{page + 1}/{total_pages if total_pages > 0 else 0} 页")
-        self.dir_prev.setEnabled(page > 0)
-        self.dir_next.setEnabled((page + 1) * page_size < total)
-
-    def _browse_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择要查询的目录")
-        if d:
-            self.dir_path.setText(d)
-
-    def _on_search_err(self, msg: str, btn: QPushButton, stat: QLabel):
-        btn.setEnabled(True)
-        first = msg.split("\n")[0].strip()
-        stat.setText(f"❌ {first}")
-        if "Chinese-CLIP" in msg or "无法加载" in msg:
-            self.show_error(
-                "CLIP 模型未加载，无法进行向量检索。\n\n"
-                "请前往「环境配置」→「向量库 / CLIP 模型」\n"
-                "点击「⬇ 一键下载模型」后重新搜索。",
-                "模型未就绪",
-            )
-        elif len(msg) > 120:
-            self.show_error(msg, "查询失败")
-
-    # ── 通用行操作 ────────────────────────────────────────────────────────────
-
-    def _get_row_data(self, table: QTableWidget, row: int = None) -> dict:
-        r = row if row is not None else table.currentRow()
-        if r < 0:
-            return {}
-        item = table.item(r, 0)
-        return item.data(Qt.UserRole) if item else {}
-
-    def _get_nas_root(self) -> str:
-        import json as _json
-        cfg_path = os.path.join(
-            CONFIG_DIR, "material_index_config.json"
-        )
-        if os.path.isfile(cfg_path):
-            try:
-                with open(cfg_path, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                return cfg.get("nas_root", "")
-            except Exception:
-                pass
-        return ""
-
-    def _play_file_by_path(self, path: str):
-        if not path or path == "—" or not os.path.isfile(path):
-            self.show_warning(f"文件不存在或无法播放：\n{path}", "文件不存在")
+    def _open_file_location(self, idx):
+        row = idx.row()
+        if row < 0 or row >= len(self._results):
             return
-        try:
-            os.startfile(path)
-        except Exception as e:
-            self.show_error(f"播放文件失败：\n{e}")
-
-    def _open_dir_by_path(self, path: str):
-        if not path or path == "—":
-            return
-        folder = os.path.dirname(path)
-        if os.path.isdir(folder):
-            import subprocess
-            subprocess.Popen(f'explorer "{folder}"')
-        else:
-            self.show_warning(f"目录不可访问：\n{folder}", "无法打开")
-
-    def _open_dir_by_index(self, table: QTableWidget, index):
-        data = self._get_row_data(table, index.row())
-        path = data.get("path", "")
-        if not path or path == "—":
-            return
-        nas_root = self._get_nas_root()
-        if nas_root:
-            full_path = os.path.normpath(os.path.join(nas_root, path.lstrip("/\\")))
-        else:
-            full_path = path
-
-        # 双击文件名(列0)时播放，双击其他列时打开所在目录
-        if index.column() == 0:
-            self._play_file_by_path(full_path)
-        else:
-            self._open_dir_by_path(full_path)
-
-    def _open_dir(self, table: QTableWidget):
-        r = table.currentRow()
-        if r < 0:
-            return
-        data = self._get_row_data(table, r)
-        path = data.get("path", "")
-        if not path or path == "—":
-            return
-        nas_root = self._get_nas_root()
-        if nas_root:
-            full_path = os.path.normpath(os.path.join(nas_root, path.lstrip("/\\")))
-        else:
-            full_path = path
-        self._open_dir_by_path(full_path)
-
-    def _copy_path(self, table: QTableWidget):
-        data = self._get_row_data(table)
-        if data:
-            path = data.get("path", "")
-            nas_root = self._get_nas_root()
-            if nas_root and path:
-                full_path = os.path.normpath(os.path.join(nas_root, path.lstrip("/\\")))
-            else:
-                full_path = path
-            QGuiApplication.clipboard().setText(full_path)
-
-    def _load_tag_options(self):
-        from utils.material_clip_indexer import MaterialClipIndexer
-        from utils.brand_normalizer import canonical_name
-
-        curr_txt_brand = self.txt_brand.currentText()
-        curr_txt_cat = self.txt_category.currentText()
-        curr_tag_brand = self.tag_brand.currentText()
-        curr_tag_model = self.tag_model.currentText()
-        curr_tag_cat = self.tag_category.currentText()
-
-        brands = set()
-        models = set()
-        categories = set()
-        try:
-            with MaterialClipIndexer() as idx:
-                idx._connect()
-                with idx._conn.cursor() as cur:
-                    cur.execute("SELECT DISTINCT brand FROM materials WHERE brand IS NOT NULL AND brand != '' ORDER BY brand")
-                    for r in cur.fetchall():
-                        b = canonical_name(r[0]) or r[0]
-                        if b:
-                            brands.add(b)
-                    cur.execute("SELECT DISTINCT model FROM materials WHERE model IS NOT NULL AND model != '' ORDER BY model")
-                    models.update(r[0] for r in cur.fetchall() if r[0])
-                    cur.execute("SELECT DISTINCT category FROM materials WHERE category IS NOT NULL AND category != '' ORDER BY category")
-                    categories.update(r[0] for r in cur.fetchall() if r[0])
-        except Exception as e:
-            print(f"加载标签选项失败: {e}")
-
-        brand_list = ["全部"] + sorted(brands)
-        model_list = ["全部"] + sorted(models)
-        cat_list = ["全部"] + sorted(categories)
-
-        # Tab 1: 文字语义检索
-        self._fill_combo(self.txt_brand, brand_list, curr_txt_brand)
-        self._fill_combo(self.txt_category, cat_list, curr_txt_cat)
-
-        # Tab 2: 标签检索
-        self._fill_combo(self.tag_brand, brand_list, curr_tag_brand)
-        self._fill_combo(self.tag_model, model_list, curr_tag_model)
-        self._fill_combo(self.tag_category, cat_list, curr_tag_cat)
-
-    def _fill_combo(self, combo, items: list, current: str):
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItems(items)
-        idx = combo.findText(current)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-        combo.blockSignals(False)
-
-    def _show_table_context_menu(self, table: QTableWidget, pos):
-        item = table.itemAt(pos)
-        if not item:
-            return
-        row_idx = item.row()
-        data = self._get_row_data(table, row_idx)
-        if not data:
-            return
-
-        path = data.get("path", "")
-        nas_root = self._get_nas_root()
-        if nas_root and path:
-            full_path = os.path.normpath(os.path.join(nas_root, path.lstrip("/\\")))
-        else:
-            full_path = path
-
-        from PySide6.QtWidgets import QMenu
-        from PySide6.QtGui import QAction, QGuiApplication
-
-        menu = QMenu(self.parent_widget)
-
-        act_play = QAction("▶ 播放文件", menu)
-        act_play.triggered.connect(lambda: self._play_file_by_path(full_path))
-        menu.addAction(act_play)
-
-        act_open_dir = QAction("🗂 打开文件所在目录", menu)
-        act_open_dir.triggered.connect(lambda: self._open_dir_by_path(full_path))
-        menu.addAction(act_open_dir)
-
-        menu.addSeparator()
-
-        txt = item.text().strip()
-        if txt:
-            act_copy_val = QAction(f"📋 复制当前单元格: '{txt}'", menu)
-            act_copy_val.triggered.connect(lambda: QGuiApplication.clipboard().setText(txt))
-            menu.addAction(act_copy_val)
-
-        fname = data.get("filename") or os.path.basename(path)
-        if fname:
-            act_copy_name = QAction("📋 复制文件名", menu)
-            act_copy_name.triggered.connect(lambda: QGuiApplication.clipboard().setText(fname))
-            menu.addAction(act_copy_name)
-
-        if full_path:
-            act_copy_path = QAction("📋 复制完整绝对路径", menu)
-            act_copy_path.triggered.connect(lambda: QGuiApplication.clipboard().setText(full_path))
-            menu.addAction(act_copy_path)
-
-        fhash = data.get("file_hash", "")
-        if fhash and fhash != "—":
-            act_copy_hash = QAction("📋 复制 Hash 值", menu)
-            act_copy_hash.triggered.connect(lambda: QGuiApplication.clipboard().setText(fhash))
-            menu.addAction(act_copy_hash)
-
-        menu.exec_(table.viewport().mapToGlobal(pos))
+        path = self._results[row].get("path", self._results[row].get("filepath", ""))
+        if path and os.path.exists(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))

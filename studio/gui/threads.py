@@ -106,69 +106,80 @@ class AIStatusCheckThread(QThread):
         import os
         import json
         import requests as req
+        from utils.http_client import resilient_get, resilient_post
 
         while self.running:
             status = {
                 "ollama_ok": False,
                 "vision_ok": False,
-                "whisper_ok": True,
-                "clip_ok": True,
+                "whisper_ok": False,
+                "clip_ok": False,
                 "clone_ok": False,
             }
             try:
-                # 1. 检测大模型 (Ollama/Vision)
+                # 1. 检测大模型 — 走服务端代理（不再直连带 API Key）
                 if os.path.isfile(self.config_file_path):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
-                    api_url = cfg.get("llm_vision_api_url", "").strip()
-                    api_key = (cfg.get("llm_vision_api_key") or cfg.get("llm_api_key", "")).strip()
+                    server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
                     model   = cfg.get("llm_vision_model", "").strip()
-                    
-                    if api_url:
+
+                    if server_url:
                         try:
-                            res = req.get(
-                                f"{api_url.rstrip('/')}/v1/models",
-                                headers={"Authorization": f"Bearer {api_key}"},
-                                timeout=2,
+                            res = resilient_get(
+                                f"{server_url.rstrip('/')}/ollama/status",
+                                timeout=2, service="ollama", circuit_breaker=False,
                             )
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
-                                if model:
-                                    try:
-                                        models_data = res.json().get("data", [])
-                                        model_names = [m.get("id") for m in models_data]
-                                        matched = False
-                                        for m_name in model_names:
-                                            if m_name == model or m_name == model + ":latest" or model == m_name.split(":")[0]:
-                                                matched = True
-                                                break
-                                        is_cloud = any(x in api_url for x in ("api.deepseek.com", "aliyuncs.com", "openai.com", "openrouter.ai"))
-                                        if matched or is_cloud:
-                                            status["vision_ok"] = True
-                                    except Exception:
-                                        status["vision_ok"] = True
+                                status["vision_ok"] = True  # 服务端代理管理视觉模型
                         except Exception:
                             pass
             except Exception:
                 pass
 
-            # 2. 检测本地声音克隆 API (VoxCPM) 端口状态
+            # 2. 检测远程声音克隆 API (VoxCPM) 连通性
             try:
-                import configparser
-                import socket
-                config = configparser.ConfigParser()
-                config_path = CONFIG_INI_FILE
-                port = 7861
-                if os.path.exists(config_path):
-                    config.read(config_path, encoding='utf-8')
-                    if config.has_section('VoxCPM'):
-                        port = config.getint('VoxCPM', 'Port', fallback=7861)
-                
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.5)
-                s.connect(("127.0.0.1", port))
-                s.close()
-                status["clone_ok"] = True
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    vox_url = cfg.get("vox_api_url", "").strip()
+                    if vox_url:
+                        base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
+                        r = resilient_get(f"{base}/voxcpm/health", timeout=3, service="voxcpm", circuit_breaker=False)
+                        if r.status_code == 200:
+                            status["clone_ok"] = True
+            except Exception:
+                pass
+
+            # 3. 检测远程 Whisper ASR 服务连通性
+            try:
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    whisper_url = cfg.get("whisper_api_url", "").strip()
+                    if whisper_url:
+                        base = whisper_url.rstrip("/")
+                        r = resilient_get(f"{base}/whisper/health", timeout=3, service="whisper", circuit_breaker=False)
+                        if r.status_code == 200:
+                            status["whisper_ok"] = True
+            except Exception:
+                pass
+
+            # 4. 检测远程 CLIP embedding 服务连通性
+            try:
+                import json as _json
+                if os.path.isfile(self.config_file_path):
+                    with open(self.config_file_path, encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    clip_url = cfg.get("clip_api_url", "").strip()
+                    if clip_url:
+                        base = clip_url.rstrip("/")
+                        r = resilient_get(f"{base}/clip/health", timeout=3, service="clip", circuit_breaker=False)
+                        if r.status_code == 200:
+                            status["clip_ok"] = True
             except Exception:
                 pass
 

@@ -10,6 +10,9 @@ from config.paths import BUNDLE_ICONS_DIR
 _CHECK_ICON = os.path.join(BUNDLE_ICONS_DIR, "check.svg")
 _CHECK_ICON_URL = _CHECK_ICON.replace(os.sep, '/')
 
+_ARROW_DOWN_ICON = os.path.join(BUNDLE_ICONS_DIR, "arrow_down.svg")
+_ARROW_DOWN_ICON_URL = _ARROW_DOWN_ICON.replace(os.sep, '/')
+
 STYLE_SHEET = """
 * {
     font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
@@ -228,6 +231,7 @@ QComboBox::drop-down {
 }
 
 QComboBox::down-arrow {
+    image: url("__ARROW_DOWN_ICON_URL__");
     width: 10px;
     height: 10px;
 }
@@ -324,6 +328,11 @@ QPushButton#action_button {
 
 QPushButton#action_button:hover {
     background-color: #059669;
+}
+
+QPushButton#action_button:disabled {
+    background-color: #3a3a46;
+    color: #7a7a88;
 }
 
 QPushButton#pill_button {
@@ -807,9 +816,16 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #step_label {
     color: #7f8c8d; padding: 4px 0; font-size: 13px;
 }
-#step_label[active="true"] {
+#step_label[status="active"] {
     color: #3498db; font-weight: bold;
     background-color: rgba(52, 152, 219, 0.1); border-radius: 4px;
+}
+#step_label[status="done"] {
+    color: #2ecc71;
+    background-color: rgba(46, 204, 113, 0.08); border-radius: 4px;
+}
+#step_label[status="pending"] {
+    color: #7f8c8d;
 }
 #nas_root_label { font-size: 13px; font-weight: bold; color: #ffffff; }
 #stats_analyze, #stats_ingest { font-size: 13px; color: #ffffff; }
@@ -886,4 +902,4 @@ QDialog QPushButton:hover, QMessageBox QPushButton:hover {
 #model_groupbox[section="ocr"]::title     { color: #f59e0b; }
 
 #comfyui_local_status { color: #666; font-size: 12px; }
-""".replace("__CHECK_ICON_URL__", _CHECK_ICON_URL)
+""".replace("__CHECK_ICON_URL__", _CHECK_ICON_URL).replace("__ARROW_DOWN_ICON_URL__", _ARROW_DOWN_ICON_URL)

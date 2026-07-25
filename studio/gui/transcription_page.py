@@ -1,644 +1,609 @@
+# -*- coding: utf-8 -*-
 import os
-import shutil
-import subprocess
 import traceback
 import sys
 
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame)
-from PySide6.QtCore import Signal, QThread, QUrl
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
+                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame,
+                               QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox,
+                               QWidget, QTextEdit, QSplitter)
+from PySide6.QtCore import Signal, Qt, QUrl, QTimer
+from PySide6.QtGui import QDesktopServices, QAction
+from PySide6.QtMultimedia import QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 from utils.base_worker import BaseWorker
-from PySide6.QtGui import QDesktopServices
+from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
-from config.paths import RUNTIME_DIR, TMP_DIR, OUTPUTS_DIR, WHISPER_MODELS_DIR, APPS_DIR, BUNDLE_ASSETS_DIR
-
-WHISPER_MODELS = {
-    "small": {"name": "small", "params": "244M", "description": "中等速度，较高准确率"},
-    "medium": {"name": "medium", "params": "769M", "description": "较慢，高准确率（需较大显存）"},
-    "large-v3": {"name": "large-v3", "params": "1550M", "description": "最慢，最高准确率（最新大模型，推荐）"},
-    "large": {"name": "large", "params": "1550M", "description": "最慢，原版大模型（需大显存）"},
-}
-
-
-def migrate_whisper_models():
-    """
-    自动将旧的 .runtime/whisper-models 目录下的模型迁移到 apps/whisper-models 目录下。
-    """
-    try:
-        old_dir = os.path.join(RUNTIME_DIR, "whisper-models")
-        new_dir = WHISPER_MODELS_DIR
-
-        if os.path.isdir(old_dir) and any(os.listdir(old_dir)):
-            log.info(f"检测到旧的 Whisper 模型放置在: {old_dir}，正在自动迁移到新目录: {new_dir}")
-            os.makedirs(new_dir, exist_ok=True)
-            for item in os.listdir(old_dir):
-                src = os.path.join(old_dir, item)
-                dst = os.path.join(new_dir, item)
-                if os.path.exists(dst):
-                    log.info(f"迁移目标路径已存在，跳过: {dst}")
-                    continue
-                try:
-                    shutil.move(src, dst)
-                    log.info(f"成功迁移文件/目录: {src} -> {dst}")
-                except Exception as e:
-                    log.error(f"迁移失败 {src} -> {dst}: {e}")
-            
-            # 检查旧目录是否为空，为空则删除
-            try:
-                if not os.listdir(old_dir):
-                    os.rmdir(old_dir)
-                    log.info(f"旧的空目录已清理: {old_dir}")
-            except Exception:
-                pass
-    except Exception as e:
-        log.error(f"迁移 Whisper 模型时发生错误: {e}")
-
-# 执行迁移
-migrate_whisper_models()
-
-
-def setup_nvidia_dll_path():
-    """
-    在 Windows 平台且使用嵌入式 Python 时，CTranslate2 (faster-whisper) 加速需要 cuda/cudnn 的 DLL。
-    如果用户通过 pip 安装了 nvidia-cublas-cu12 和 nvidia-cudnn-cu12，
-    我们将这些包的 bin 目录动态加入系统 PATH 和 DLL 搜索目录。
-    """
-    if sys.platform != "win32":
-        return
-
-    import site
-    packages_dirs = []
-
-    # 尝试系统 site-packages
-    try:
-        packages_dirs.extend(site.getsitepackages())
-    except Exception:
-        pass
-
-    # 尝试用户 site-packages
-    try:
-        packages_dirs.append(site.getusersitepackages())
-    except Exception:
-        pass
-
-    # 尝试相对于 python.exe 的 site-packages (特别适用于嵌入式 Python 环境)
-    try:
-        base_dir = os.path.dirname(sys.executable)
-        packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
-        packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
-    except Exception:
-        pass
-
-    added = False
-    for p in packages_dirs:
-        if not p or not os.path.isdir(p):
-            continue
-        nvidia_base = os.path.join(p, "nvidia")
-        if os.path.isdir(nvidia_base):
-            for sub in ["cublas", "cudnn"]:
-                bin_path = os.path.join(nvidia_base, sub, "bin")
-                if os.path.isdir(bin_path):
-                    if bin_path not in os.environ["PATH"]:
-                        os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
-                    if hasattr(os, "add_dll_directory"):
-                        try:
-                            os.add_dll_directory(bin_path)
-                            added = True
-                        except Exception:
-                            pass
-    if added:
-        log.info("已自动加载 nvidia CUDA/cuDNN DLL 路径")
-
-
-def format_srt_timestamp(seconds):
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int(round((seconds - int(seconds)) * 1000))
-    if ms == 1000:
-        ms = 0
-        s += 1
-        if s == 60:
-            s = 0
-            m += 1
-            if m == 60:
-                m = 0
-                h += 1
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
-def format_vtt_timestamp(seconds):
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int(round((seconds - int(seconds)) * 1000))
-    if ms == 1000:
-        ms = 0
-        s += 1
-        if s == 60:
-            s = 0
-            m += 1
-            if m == 60:
-                m = 0
-                h += 1
-    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-
-
-def format_txt_timestamp(seconds):
-    m = int(seconds // 60)
-    s = int(seconds % 60)
-    ms = int((seconds - int(seconds)) * 1000)
-    return f"{m:02d}:{s:02d}.{ms:03d}"
-
-# WhisperTranscribeWorker is deprecated. We use WhisperXTranscribeWorker from apps.whisperx.whisperx_worker instead.
-
-
+from config.paths import TMP_DIR, OUTPUTS_DIR
 from gui.base_page import BasePage
+
+
+# ── 支持的文件类型 ──
+SUPPORTED_EXTS = frozenset({
+    ".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v",
+    ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".wma",
+})
 
 
 class TranscriptionToolPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
-        self.last_output_path = ""
-        self.transcription_results = {}
+        self.files = []  # [{"path": str, "size": int, "status": str, "srt_text": str, "preview": str}, ...]
 
     def setup(self):
         layout = QVBoxLayout(self.parent_widget)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(12)
 
-        heading = QLabel("🎙️ 视频生成字幕文件（WhisperX）")
+        heading = QLabel("🎙️ 音频/视频转文字")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(24, 20, 24, 20)
-        card_layout.setSpacing(14)
+        # ── 顶部控制区 ──
+        ctrl_card = QFrame()
+        ctrl_card.setObjectName("card")
+        ctrl_lay = QVBoxLayout(ctrl_card)
+        ctrl_lay.setContentsMargins(24, 20, 24, 20)
+        ctrl_lay.setSpacing(12)
 
-        inp_row = QHBoxLayout()
-        inp_row.addWidget(QLabel("视频文件:"))
-        self.video_path_input = QLineEdit()
-        self.video_path_input.setPlaceholderText("选择视频文件 (.mp4/.mov/.avi/.mkv 等) ...")
-        inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("选择视频")
-        btn_sel.setObjectName("secondary_button")
-        btn_sel.clicked.connect(self._select_video)
-        inp_row.addWidget(btn_sel)
-        card_layout.addLayout(inp_row)
+        # 第一行：添加文件 + 配置
+        row1 = QHBoxLayout()
+        btn_add = mdi_button("添加文件", "plus")
+        btn_add.setObjectName("secondary_button")
+        btn_add.clicked.connect(self._add_files)
+        row1.addWidget(btn_add)
 
-        model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Whisper 模型:"))
-        self.model_combo = QComboBox()
-        for key, info in WHISPER_MODELS.items():
-            self.model_combo.addItem(f"{info['name']} ({info['params']}) — {info['description']}", key)
-        self.model_combo.setCurrentIndex(self.model_combo.findData("large-v3"))
-        model_row.addWidget(self.model_combo)
-        
-        btn_open_model_dir = QPushButton("📁 打开模型目录")
-        btn_open_model_dir.setObjectName("secondary_button")
-        btn_open_model_dir.clicked.connect(self._open_model_directory)
-        model_row.addWidget(btn_open_model_dir)
-
-        card_layout.addLayout(model_row)
-
-        lang_row = QHBoxLayout()
-        lang_row.addWidget(QLabel("音频语言（留空自动检测）:"))
+        row1.addWidget(QLabel("  语言:"))
         self.lang_input = QLineEdit()
-        self.lang_input.setPlaceholderText("如 zh、en、空则自动检测")
-        self.lang_input.setMaximumWidth(200)
-        lang_row.addWidget(self.lang_input)
-        lang_row.addStretch()
-        card_layout.addLayout(lang_row)
+        self.lang_input.setPlaceholderText("zh/en/空则自动")
+        self.lang_input.setMaximumWidth(120)
+        row1.addWidget(self.lang_input)
 
-        task_row = QHBoxLayout()
-        task_row.addWidget(QLabel("任务类型:"))
+        row1.addWidget(QLabel("任务:"))
         self.task_combo = QComboBox()
         self.task_combo.addItems(["转写（原语言）", "翻译为英文"])
-        task_row.addWidget(self.task_combo)
-        card_layout.addLayout(task_row)
+        self.task_combo.setMaximumWidth(140)
+        row1.addWidget(self.task_combo)
 
-        device_row = QHBoxLayout()
-        device_row.addWidget(QLabel("运行设备:"))
-        self.device_combo = QComboBox()
-        # 默认优先 CUDA GPU，放在第一项
-        self.device_combo.addItems(["CUDA (推荐，使用GPU)", "自动（优先CUDA）", "CPU"])
-        self.device_combo.setCurrentIndex(0)
-        device_row.addWidget(self.device_combo)
-        device_row.addStretch()
-        card_layout.addLayout(device_row)
+        self.multi_speaker_check = QCheckBox("👥 多人模式")
+        row1.addWidget(self.multi_speaker_check)
 
-        self.multi_check = QCheckBox("👥 多人模式（启用说话人分离）")
-        card_layout.addWidget(self.multi_check)
+        btn_process = mdi_button("开始处理", "play")
+        btn_process.setObjectName("action_button")
+        btn_process.setFixedHeight(34)
+        btn_process.clicked.connect(self._start_batch)
+        self.btn_process = btn_process
+        row1.addWidget(btn_process)
 
+        row1.addStretch()
+        ctrl_lay.addLayout(row1)
+
+        # 第二行：进度
+        ctrl_row2 = QHBoxLayout()
         self.stage_label = QLabel("就绪")
         self.stage_label.setObjectName("muted_text")
-        card_layout.addWidget(self.stage_label)
-
+        ctrl_row2.addWidget(self.stage_label, 1)
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        card_layout.addWidget(self.progress_bar)
+        self.progress_bar.setFixedWidth(200)
+        ctrl_row2.addWidget(self.progress_bar)
+        ctrl_lay.addLayout(ctrl_row2)
 
-        install_row = QHBoxLayout()
-        install_row.addStretch()
-        self.btn_install_deps = QPushButton("安装转写依赖")
-        self.btn_install_deps.setObjectName("secondary_button")
-        self.btn_install_deps.clicked.connect(self._install_deps)
-        install_row.addWidget(self.btn_install_deps)
-        card_layout.addLayout(install_row)
+        layout.addWidget(ctrl_card, 0)
 
-        btn_run = QPushButton("🎬 开始生成字幕")
-        btn_run.setObjectName("action_button")
-        btn_run.setFixedHeight(46)
-        btn_run.clicked.connect(self._start_transcription)
-        self.btn_run = btn_run
-        card_layout.addWidget(btn_run)
+        # ── 主体区域：左（文件列表 + 字幕文本） / 右（视频播放器） ──
+        splitter = QSplitter(Qt.Horizontal)
 
-        layout.addWidget(card, 0)
+        # 左侧面板：文件列表在上，字幕文本在下
+        left_panel = QWidget()
+        left_lay = QVBoxLayout(left_panel)
+        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay.setSpacing(6)
 
-        result_card = QFrame()
-        result_card.setObjectName("card")
-        result_layout = QVBoxLayout(result_card)
-        result_layout.setContentsMargins(24, 20, 24, 20)
+        # 文件表格（紧凑显示）
+        self.file_table = QTableWidget(0, 4)
+        self.file_table.setHorizontalHeaderLabels(["文件名", "大小", "状态", "操作"])
+        self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.file_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.file_table.setAlternatingRowColors(True)
+        self.file_table.setMaximumHeight(200)
+        self.file_table.doubleClicked.connect(self._on_table_double_click)
+        self.file_table.itemSelectionChanged.connect(self._on_file_selection_changed)
+        self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_table.customContextMenuRequested.connect(self._on_context_menu)
+        left_lay.addWidget(self.file_table)
 
-        res_header = QHBoxLayout()
-        res_header.addWidget(QLabel("转写字幕结果:"))
-        res_header.addStretch()
+        # 字幕文本编辑区（显示选中文件的全文字幕）
+        self.subtitle_editor = QTextEdit()
+        self.subtitle_editor.setReadOnly(False)
+        self.subtitle_editor.setPlaceholderText("选中已完成转写的文件，此处显示完整字幕内容，可直接编辑修改后保存…")
+        left_lay.addWidget(self.subtitle_editor, 1)
 
-        # 字幕预览格式切换选择框
-        res_header.addWidget(QLabel("字幕格式:"))
-        self.format_combo = QComboBox()
-        self.format_combo.addItem("SRT 字幕文件 (*.srt)", "srt")
-        self.format_combo.addItem("WebVTT 字幕文件 (*.vtt)", "vtt")
-        self.format_combo.addItem("TXT 带有时间戳文本 (*.txt)", "txt")
-        self.format_combo.addItem("TXT 纯文本（无时间戳） (*.txt)", "plain")
-        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
-        res_header.addWidget(self.format_combo)
-        res_header.addSpacing(10)
+        # 保存按钮行
+        save_row = QHBoxLayout()
+        self.btn_save_txt = QPushButton("💾 保存为 TXT（纯文本）")
+        self.btn_save_txt.setObjectName("secondary_button")
+        self.btn_save_txt.clicked.connect(lambda: self._save_current_subtitle("plain"))
+        save_row.addWidget(self.btn_save_txt)
+        self.btn_save_srt = QPushButton("💾 保存为 SRT（带时间戳）")
+        self.btn_save_srt.setObjectName("secondary_button")
+        self.btn_save_srt.clicked.connect(lambda: self._save_current_subtitle("srt"))
+        save_row.addWidget(self.btn_save_srt)
+        self.btn_save_txt_timestamp = QPushButton("💾 保存为 TXT（带时间戳）")
+        self.btn_save_txt_timestamp.setObjectName("secondary_button")
+        self.btn_save_txt_timestamp.clicked.connect(lambda: self._save_current_subtitle("txt"))
+        save_row.addWidget(self.btn_save_txt_timestamp)
+        save_row.addStretch()
+        left_lay.addLayout(save_row)
 
-        btn_save = QPushButton("💾 保存结果")
-        btn_save.setObjectName("secondary_button")
-        btn_save.clicked.connect(self._save_result)
-        self.btn_save = btn_save
-        self.btn_save.setEnabled(False)
-        res_header.addWidget(btn_save)
-        result_layout.addLayout(res_header)
+        splitter.addWidget(left_panel)
 
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setPlaceholderText("转写出的字幕将在此处显示 ...")
-        result_layout.addWidget(self.result_text)
+        # 右侧面板：视频播放器
+        right_panel = QWidget()
+        right_lay = QVBoxLayout(right_panel)
+        right_lay.setContentsMargins(0, 0, 0, 0)
 
-        layout.addWidget(result_card, 1)
-        self._refresh_dep_status()
+        self._video_widget = QVideoWidget()
+        self._video_widget.setMinimumSize(320, 240)
+        self._video_widget.setStyleSheet("background: #000;")
+        right_lay.addWidget(self._video_widget, 1)
 
-    def _select_video(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self.parent_widget,
-            "选择视频文件",
-            "",
-            "Video Files (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v);;All Files (*)",
-        )
-        if path:
-            self.video_path_input.setText(path)
+        # 播放控件
+        play_row = QHBoxLayout()
+        self.btn_play_prev = QPushButton("⏮")
+        self.btn_play_prev.clicked.connect(self._play_prev_file)
+        play_row.addWidget(self.btn_play_prev)
+        self.btn_play_toggle = QPushButton("⏸")
+        self.btn_play_toggle.clicked.connect(self._toggle_play)
+        play_row.addWidget(self.btn_play_toggle)
+        self.btn_play_next = QPushButton("⏭")
+        self.btn_play_next.clicked.connect(self._play_next_file)
+        play_row.addWidget(self.btn_play_next)
+        play_row.addStretch()
+        self._play_time_label = QLabel("00:00 / 00:00")
+        play_row.addWidget(self._play_time_label)
+        right_lay.addLayout(play_row)
 
-    def _start_transcription(self):
-        if self.worker and self.worker.isRunning():
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(splitter, 1)
+
+        # ── 播放器 ──
+        self._player = QMediaPlayer()
+        self._player.setVideoOutput(self._video_widget)
+        self._player.positionChanged.connect(self._update_play_time)
+
+    # ══════════════════════════════════════════
+    #  右侧播放控制
+    # ══════════════════════════════════════════
+
+    def _on_file_selection_changed(self):
+        """选中表格行时，更新左侧字幕文本和右侧视频。"""
+        rows = self.file_table.selectedIndexes()
+        if not rows:
             return
-        if not self._deps_ok():
-            self.stage_label.setText("缺少依赖（请先点击“安装转写依赖”）")
+        row = rows[0].row()
+        if row < 0 or row >= len(self.files):
             return
-
-        video_path = self.video_path_input.text().strip()
-        if not video_path:
-            QMessageBox.warning(self.parent_widget, "请选择文件", "请先选择一个视频文件。")
-            return
-        if not os.path.exists(video_path):
-            QMessageBox.warning(self.parent_widget, "文件不存在", f"文件不存在：\n{video_path}")
-            return
-
-        model_name = self.model_combo.currentData()
-        language = self.lang_input.text().strip() or None
-        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
-        multi_mode = self.multi_check.isChecked()
-        device_text = self.device_combo.currentText()
-        
-        if "CUDA" in device_text and "自动" not in device_text:
-            device_mode = "cuda"
-        elif "CPU" in device_text:
-            device_mode = "cpu"
+        f = self.files[row]
+        # 更新字幕编辑器
+        if f["srt_text"]:
+            self.subtitle_editor.setPlainText(
+                self._convert_format(f["srt_text"], "srt"))
         else:
-            device_mode = "auto"
+            self.subtitle_editor.clear()
+        # 播放视频
+        self._play_file(f["path"])
 
-        tmp_dir = TMP_DIR
-        out_dir = os.path.join(OUTPUTS_DIR, "transcription")
-        os.makedirs(out_dir, exist_ok=True)
-
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        audio_path = os.path.join(tmp_dir, f"{video_basename}_audio.wav")
-        # 默认保存为同名 .srt 字幕文件
-        output_path = os.path.join(out_dir, f"{video_basename}.srt")
-
-        # 检查模型是否已经在本地存在
-        model_dir_name = f"models--Systran--faster-whisper-{model_name}"
-        whisper_models_dir = WHISPER_MODELS_DIR
-        model_path = os.path.join(whisper_models_dir, model_dir_name)
-        simple_model_path = os.path.join(whisper_models_dir, model_name)
-        simple_model_path_alt = os.path.join(whisper_models_dir, f"faster-whisper-{model_name}")
-        root_model_bin = os.path.join(whisper_models_dir, "model.bin")
-        root_config_json = os.path.join(whisper_models_dir, "config.json")
-        
-        model_exists = False
-        if os.path.isdir(model_path) and any(os.listdir(model_path)):
-            model_exists = True
-        elif os.path.isdir(simple_model_path) and os.path.isfile(os.path.join(simple_model_path, "model.bin")):
-            model_exists = True
-        elif os.path.isdir(simple_model_path_alt) and os.path.isfile(os.path.join(simple_model_path_alt, "model.bin")):
-            model_exists = True
-        elif os.path.isfile(root_model_bin) and os.path.isfile(root_config_json):
-            model_exists = True
-            
-        if not model_exists:
-            reply = QMessageBox.question(
-                self.parent_widget,
-                "提示模型下载",
-                f"本地未检测到 {model_name} 模型。\n\n"
-                "程序将会自动为您从镜像网络下载该模型（约需几分钟）。\n"
-                "您也可以选择‘否’并手动将模型放置到模型目录下。\n\n"
-                "是否确认开始自动下载模型并转写视频？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            if reply == QMessageBox.No:
-                return
-
-        self.btn_run.setEnabled(False)
-        self.btn_save.setEnabled(False)
-        self.stage_label.setText("准备中")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.result_text.clear()
-        self.last_output_path = ""
-        self.transcription_results = {}
-
-        from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
-        self.worker = WhisperXTranscribeWorker(
-            video_path=video_path,
-            audio_path=audio_path,
-            output_path=output_path,
-            model_name=model_name,
-            language=language,
-            task_type=task_type,
-            multi_mode=multi_mode,
-            download_root=whisper_models_dir,
-            device_mode=device_mode,
-        )
-        self.worker.stage.connect(self._on_stage)
-        self.worker.progress.connect(self._on_progress)
-        self.worker.busy.connect(self._on_busy)
-        self.worker.finished.connect(self._on_finished)
-        self.worker.error.connect(self._on_error)
-        self.worker.start()
-
-    def _deps_ok(self):
-        try:
-            import torch  # noqa: F401
-            # Add apps to sys.path to check if whisperx can be loaded
-            import sys
-            import os
-            if APPS_DIR not in sys.path:
-                sys.path.insert(0, APPS_DIR)
-            import whisperx  # noqa: F401
-            return True
-        except Exception:
-            return False
-
-    def _refresh_dep_status(self):
-        ok = self._deps_ok()
-        self.btn_install_deps.setVisible(not ok)
-        self.btn_run.setEnabled(ok)
-        if not ok:
-            self.stage_label.setText("缺少依赖：需要安装 torch + whisperx 等库")
-
-    def _install_deps(self):
-        if hasattr(self, "_install_worker") and self._install_worker and self._install_worker.isRunning():
+    def _save_current_subtitle(self, fmt):
+        """按指定格式保存当前选中的文件字幕。"""
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            QMessageBox.warning(self.parent_widget, "未选择", "请先在文件列表中选择一个文件。")
             return
-
-        class PipInstallWorker(BaseWorker):
-            stage = Signal(str)
-            busy = Signal(bool)
-            finished = Signal()
-
-            def run(self):
-                try:
-                    wheel_dir = os.path.join(BUNDLE_ASSETS_DIR, "wheels")
-                    has_wheels = os.path.isdir(wheel_dir) and any(n.lower().endswith(".whl") for n in os.listdir(wheel_dir))
-                    has_nvidia = bool(shutil.which("nvidia-smi"))
-
-                    def run_pip(args):
-                        cmd = [sys.executable, "-m", "pip"] + args
-                        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-                        if p.returncode != 0:
-                            raise RuntimeError((p.stdout or "") + "\n" + (p.stderr or ""))
-
-                    def run_pip_allow_fail(args):
-                        cmd = [sys.executable, "-m", "pip"] + args
-                        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-
-                    self.stage.emit("正在清理旧版本 torch")
-                    self.busy.emit(True)
-                    run_pip_allow_fail(["uninstall", "-y", "torch", "torchvision", "torchaudio"])
-
-                    self.stage.emit("正在安装依赖包（时间较长，请耐心等待）...")
-                    self.busy.emit(True)
-                    
-                    if has_wheels:
-                        run_pip(["install", "--no-index", "--find-links", wheel_dir, "torch", "faster-whisper", "transformers", "pyannote-audio"])
-                    else:
-                        if has_nvidia:
-                            try:
-                                self.stage.emit("检测到 NVIDIA，正在安装 CUDA 版 torch 及其 GPU 运行库...")
-                                run_pip(["install", "torch", "--index-url", "https://download.pytorch.org/whl/cu118"])
-                                run_pip(["install", "faster-whisper", "transformers", "pyannote-audio", "nvidia-cublas-cu12", "nvidia-cudnn-cu12"])
-                            except Exception:
-                                self.stage.emit("CUDA 版安装失败，回退安装 CPU 版依赖...")
-                                run_pip(["install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"])
-                                run_pip(["install", "faster-whisper", "transformers", "pyannote-audio"])
-                        else:
-                            run_pip(["install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"])
-                            run_pip(["install", "faster-whisper", "transformers", "pyannote-audio"])
-
-                    self.busy.emit(False)
-                    self.stage.emit("依赖安装完成")
-                    self.finished.emit()
-                except Exception:
-                    self.busy.emit(False)
-                    self.error.emit(traceback.format_exc())
-
-        self.btn_install_deps.setEnabled(False)
-        self.stage_label.setText("正在安装依赖 ...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-
-        self._install_worker = PipInstallWorker()
-        self._install_worker.stage.connect(self._on_stage)
-        self._install_worker.busy.connect(self._on_busy)
-
-        def on_ok():
-            self.btn_install_deps.setEnabled(True)
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            self._refresh_dep_status()
-            if self._deps_ok():
-                self.stage_label.setText("依赖已安装，可开始生成字幕")
-            else:
-                self.stage_label.setText("依赖安装完成，但检测依然失败（请查看日志）")
-
-        def on_err(err):
-            log.exception("安装转写依赖失败")
-            self.btn_install_deps.setEnabled(True)
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            self.stage_label.setText("❌ 安装失败（详情请查看 .runtime/logs/app.log）")
-            QMessageBox.critical(self.parent_widget, "安装失败", "安装依赖失败，详情已写入日志：.runtime/logs/app.log")
-
-        self._install_worker.finished.connect(on_ok)
-        self._install_worker.error.connect(on_err)
-        self._install_worker.start()
-
-    def _on_stage(self, text):
-        self.stage_label.setText(text)
-
-    def _on_progress(self, value):
-        if self.progress_bar.minimum() == 0 and self.progress_bar.maximum() == 100:
-            self.progress_bar.setValue(int(value))
-
-    def _on_busy(self, is_busy):
-        if is_busy:
-            self.progress_bar.setRange(0, 0)
-        else:
-            if self.progress_bar.maximum() == 0:
-                self.progress_bar.setRange(0, 100)
-
-    def _on_finished(self, srt_text, output_path):
-        self.last_output_path = output_path
-        self.transcription_results = {
-            "srt": srt_text,
-            "vtt": "",
-            "txt": "",
-            "plain": ""
-        }
-        
-        # 自动加载同目录生成的其他格式内容
-        base_path = output_path.rsplit(".", 1)[0]
-        vtt_path = base_path + ".vtt"
-        txt_path = base_path + ".txt"
-        plain_path = base_path + "_plain.txt"
-        
-        if os.path.exists(vtt_path):
-            try:
-                with open(vtt_path, "r", encoding="utf-8") as f:
-                    self.transcription_results["vtt"] = f.read()
-            except Exception:
-                pass
-        if os.path.exists(txt_path):
-            try:
-                with open(txt_path, "r", encoding="utf-8") as f:
-                    self.transcription_results["txt"] = f.read()
-            except Exception:
-                pass
-        if os.path.exists(plain_path):
-            try:
-                with open(plain_path, "r", encoding="utf-8") as f:
-                    self.transcription_results["plain"] = f.read()
-            except Exception:
-                pass
-
-        self.btn_run.setEnabled(True)
-        self.btn_save.setEnabled(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        self.stage_label.setText(f"✅ 完成：{output_path}")
-        self._on_format_changed()
-
-    def _on_format_changed(self):
-        if not hasattr(self, "transcription_results") or not self.transcription_results:
+        row = rows[0].row()
+        if row < 0 or row >= len(self.files):
             return
-        fmt = self.format_combo.currentData()
-        self.result_text.setPlainText(self.transcription_results.get(fmt, ""))
-
-    def _on_error(self, err):
-        self.btn_run.setEnabled(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 失败（详情请查看 .runtime/logs/app.log）")
-        summary = ""
-        try:
-            for line in (err or "").splitlines()[::-1]:
-                if line.strip():
-                    summary = line.strip()
-                    break
-        except Exception:
-            summary = ""
-        msg = "转写失败，详情已写入日志：.runtime/logs/app.log"
-        if summary:
-            msg = msg + f"\n\n错误摘要：{summary}"
-        QMessageBox.critical(self.parent_widget, "转写失败", msg)
-
-    def _save_result(self):
-        text = self.result_text.toPlainText().strip()
-        if not text:
-            QMessageBox.warning(self.parent_widget, "无内容", "转写结果为空，无法保存。")
+        f = self.files[row]
+        if not f["srt_text"]:
+            QMessageBox.warning(self.parent_widget, "无字幕", "该文件还没有生成字幕。")
             return
-        
-        fmt = self.format_combo.currentData()
+        base = os.path.splitext(f["path"])[0]
         ext = "txt" if fmt in ("txt", "plain") else fmt
-        video_path = self.video_path_input.text().strip()
-        video_basename = os.path.splitext(os.path.basename(video_path))[0] if video_path else "whisper_transcript"
-        
-        # If a valid video path is specified, default to saving in its parent directory
-        if video_path and os.path.exists(video_path):
-            default_dir = os.path.dirname(os.path.abspath(video_path))
-            if fmt == "plain":
-                default_path = os.path.join(default_dir, f"{video_basename}_plain.txt")
-            else:
-                default_path = os.path.join(default_dir, f"{video_basename}.{ext}")
-        else:
-            # Fallback to standard Documents folder if possible
-            documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
-            if os.path.exists(documents_dir):
-                if fmt == "plain":
-                    default_path = os.path.join(documents_dir, f"{video_basename}_plain.txt")
-                else:
-                    default_path = os.path.join(documents_dir, f"{video_basename}.{ext}")
-            else:
-                if fmt == "plain":
-                    default_path = f"{video_basename}_plain.txt"
-                else:
-                    default_path = f"{video_basename}.{ext}"
-                
-        filter_str = f"{ext.upper()} Files (*.{ext});;All Files (*)"
-        
-        path, _ = QFileDialog.getSaveFileName(
-            self.parent_widget,
-            "保存转写结果",
-            default_path,
-            filter_str,
-        )
-        if path:
+        full_text = self._convert_format(f["srt_text"], fmt)
+        default_path = f"{base}.{ext}"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self.parent_widget, "保存字幕", default_path,
+            f"{ext.upper()} Files (*.{ext});;All Files (*)")
+        if save_path:
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                QMessageBox.information(self.parent_widget, "已保存", f"结果已保存到：\n{path}")
+                with open(save_path, "w", encoding="utf-8") as fp:
+                    fp.write(full_text)
+                QMessageBox.information(self.parent_widget, "已保存", f"字幕已保存:\n{save_path}")
             except Exception as e:
                 QMessageBox.critical(self.parent_widget, "保存失败", str(e))
 
-    def _open_model_directory(self):
-        model_dir = WHISPER_MODELS_DIR
-        os.makedirs(model_dir, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(model_dir))
+    def _play_file(self, path):
+        if not os.path.isfile(path):
+            return
+        self._player.stop()
+        self._player.setSource(QUrl.fromLocalFile(path))
+        self._player.setVideoOutput(self._video_widget)
+        self._player.play()
+        self.btn_play_toggle.setText("⏸")
+
+    def _toggle_play(self):
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._player.pause()
+            self.btn_play_toggle.setText("▶")
+        else:
+            self._player.play()
+            self.btn_play_toggle.setText("⏸")
+
+    def _play_prev_file(self):
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            return
+        row = rows[0].row() - 1
+        if row < 0:
+            row = len(self.files) - 1
+        self.file_table.selectRow(row)
+
+    def _play_next_file(self):
+        rows = self.file_table.selectedIndexes()
+        if not rows:
+            return
+        row = rows[0].row() + 1
+        if row >= len(self.files):
+            row = 0
+        self.file_table.selectRow(row)
+
+    def _update_play_time(self, pos):
+        dur = self._player.duration()
+        if dur > 0:
+            pos_str = f"{pos // 60000:02d}:{(pos % 60000) // 1000:02d}"
+            dur_str = f"{dur // 60000:02d}:{(dur % 60000) // 1000:02d}"
+            self._play_time_label.setText(f"{pos_str} / {dur_str}")
+
+    # ══════════════════════════════════════════
+    #  文件管理
+    # ══════════════════════════════════════════
+
+    def _add_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self.parent_widget, "选择文件", "",
+            "Media Files (*.mp4 *.mov *.avi *.mkv *.mp3 *.wav *.m4a *.flac *.aac *.ogg);;All Files (*)"
+        )
+        for p in paths:
+            ext = os.path.splitext(p)[1].lower()
+            if ext not in SUPPORTED_EXTS:
+                continue
+            # 去重
+            if any(f["path"] == p for f in self.files):
+                continue
+            try:
+                fsize = os.path.getsize(p)
+            except Exception:
+                fsize = 0
+            self.files.append({"path": p, "size": fsize, "status": "等待处理", "srt_text": "", "preview": ""})
+            self._insert_file_row(len(self.files) - 1)
+
+    def _insert_file_row(self, idx):
+        row = self.file_table.rowCount()
+        self.file_table.insertRow(row)
+        f = self.files[idx]
+        name = os.path.basename(f["path"])
+        self.file_table.setItem(row, 0, QTableWidgetItem(name))
+        size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
+        self.file_table.setItem(row, 1, QTableWidgetItem(size_text))
+        self.file_table.setItem(row, 2, QTableWidgetItem(f["status"]))
+        self._set_action_buttons(row, f)
+        self._apply_row_color(row, f["status"])
+
+    def _refresh_file_row(self, idx):
+        f = self.files[idx]
+        name = os.path.basename(f["path"])
+        self.file_table.item(idx, 0).setText(name)
+        size_text = f"{f['size'] / 1048576:.1f} MB" if f['size'] > 0 else ""
+        self.file_table.item(idx, 1).setText(size_text)
+        self.file_table.item(idx, 2).setText(f["status"])
+        self._set_action_buttons(idx, f)
+        self._apply_row_color(idx, f["status"])
+
+    def _set_action_buttons(self, row, f):
+        # 清除旧的按钮
+        old = self.file_table.cellWidget(row, 3)
+        if old:
+            old.deleteLater()
+            self.file_table.removeCellWidget(row, 3)
+        # 已完成才显示按钮
+        if f["status"] == "✅ 完成" and f["srt_text"]:
+            btn = table_action_button("💾", "导出 SRT 字幕")
+            btn.clicked.connect(lambda r=row: self._show_save_dialog(r))
+            self.file_table.setCellWidget(row, 3, btn)
+
+    def _apply_row_color(self, row, status):
+        from PySide6.QtGui import QColor
+        colors = {
+            "等待处理": QColor(60, 60, 70),
+            "⏳ 处理中": QColor(80, 70, 30),
+            "✅ 完成":   QColor(30, 70, 40),
+            "❌ 失败":   QColor(70, 35, 35),
+        }
+        bg = colors.get(status)
+        if bg:
+            for c in range(self.file_table.columnCount()):
+                item = self.file_table.item(row, c)
+                if item:
+                    item.setBackground(bg)
+
+    def _remove_file(self, idx):
+        if 0 <= idx < len(self.files):
+            self.files.pop(idx)
+            self.file_table.removeRow(idx)
+
+    def _on_context_menu(self, pos):
+        idx = self.file_table.indexAt(pos)
+        if not idx.isValid():
+            return
+        row = idx.row()
+        menu = self.file_table.createStandardContextMenu()
+        menu.addSeparator()
+        act = QAction("从列表移除", self.parent_widget)
+        act.triggered.connect(lambda r=row: self._remove_file(r))
+        menu.addAction(act)
+        menu.exec(self.file_table.viewport().mapToGlobal(pos))
+
+    def _on_table_double_click(self, index):
+        if not index.isValid():
+            return
+        row = index.row()
+        f = self.files[row]
+
+        # 已完成且有关键结果 → 保存对话框（不管是点哪列）
+        if f["status"] == "✅ 完成" and f["srt_text"]:
+            self._show_save_dialog(row)
+            return
+
+        # 否则播放文件
+        self._play_file(f["path"])
+
+    def _play_file(self, path):
+        if not os.path.isfile(path):
+            QMessageBox.warning(self.parent_widget, "文件不存在", f"文件不存在:\n{path}")
+            return
+        url = QUrl.fromLocalFile(path)
+        self._player.setSource(url)
+        self._video_widget.show()
+        self._player.setVideoOutput(self._video_widget)
+        self._player.play()
+
+    # ══════════════════════════════════════════
+    #  保存对话框
+    # ══════════════════════════════════════════
+
+    def _show_save_dialog(self, row):
+        f = self.files[row]
+        base = os.path.splitext(f["path"])[0]
+        basename = os.path.basename(base)
+
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle("保存字幕")
+        dlg.resize(640, 480)
+        dlg.setMinimumWidth(560)
+        lay = QVBoxLayout(dlg)
+
+        lay.addWidget(QLabel(f"文件：{os.path.basename(f['path'])}"))
+
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel("字幕格式:"))
+        fmt_combo = QComboBox()
+        fmt_combo.addItem("SRT 字幕文件 (*.srt)", "srt")
+        fmt_combo.addItem("WebVTT 字幕文件 (*.vtt)", "vtt")
+        fmt_combo.addItem("TXT 带有时间戳 (*.txt)", "txt")
+        fmt_combo.addItem("TXT 纯文本 (*.txt)", "plain")
+        fmt_row.addWidget(fmt_combo)
+        fmt_row.addStretch()
+        lay.addLayout(fmt_row)
+
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        preview.setPlaceholderText("选择格式后预览...")
+        lay.addWidget(preview, 1)
+
+        def _update_preview():
+            text = self._convert_format(f["srt_text"], fmt_combo.currentData())
+            preview.setPlainText(text)
+
+        fmt_combo.currentIndexChanged.connect(_update_preview)
+        _update_preview()
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        lay.addWidget(btn_box)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        fmt = fmt_combo.currentData()
+        ext = "txt" if fmt in ("txt", "plain") else fmt
+        full_text = self._convert_format(f["srt_text"], fmt)
+
+        default_path = f"{base}.{ext}"
+        save_path, _ = QFileDialog.getSaveFileName(
+            dlg, "保存字幕", default_path,
+            f"{ext.upper()} Files (*.{ext});;All Files (*)"
+        )
+        if save_path:
+            try:
+                with open(save_path, "w", encoding="utf-8") as fp:
+                    fp.write(full_text)
+                QMessageBox.information(dlg, "已保存", f"字幕已保存:\n{save_path}")
+            except Exception as e:
+                QMessageBox.critical(dlg, "保存失败", str(e))
+
+    @staticmethod
+    def _convert_format(srt_text: str, fmt: str) -> str:
+        """将 SRT 格式文本转换为指定格式。"""
+        if fmt == "srt":
+            return srt_text
+        lines = []
+        for seg in srt_text.split("\n\n"):
+            seg = seg.strip()
+            if not seg:
+                continue
+            parts = seg.split("\n")
+            if len(parts) >= 3:
+                idx = parts[0]
+                time_line = parts[1]
+                text = parts[2]
+                if fmt == "vtt":
+                    lines.append(idx)
+                    lines.append(time_line.replace(",", "."))
+                    lines.append(text)
+                    lines.append("")
+                elif fmt == "txt":
+                    lines.append(f"[{time_line.split('-->')[0].strip()}] {text}")
+                elif fmt == "plain":
+                    lines.append(text)
+        if fmt == "vtt":
+            return "WEBVTT\n\n" + "\n".join(lines)
+        return "\n".join(lines)
+
+    # ══════════════════════════════════════════
+    #  批量处理
+    # ══════════════════════════════════════════
+
+    def _start_batch(self):
+        if self.worker and self.worker.isRunning():
+            return
+
+        pending = [i for i, f in enumerate(self.files) if f["status"] == "等待处理" or f["status"] == "❌ 失败"]
+        if not pending:
+            QMessageBox.warning(self.parent_widget, "无待处理文件", "没有待处理的文件。请先添加文件。")
+            return
+
+        language = self.lang_input.text().strip() or None
+        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
+        diarize = self.multi_speaker_check.isChecked()
+
+        self.btn_process.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, len(pending))
+        self.progress_bar.setValue(0)
+        self._current_pending = pending
+        self._current_index = 0
+
+        self._process_next(language, task_type, diarize)
+
+    def _process_next(self, language, task_type, diarize):
+        if self._current_index >= len(self._current_pending):
+            self.btn_process.setEnabled(True)
+            self.progress_bar.setValue(self.progress_bar.maximum())
+            self.stage_label.setText("✅ 全部处理完成")
+            return
+
+        idx = self._current_pending[self._current_index]
+        f = self.files[idx]
+        f["status"] = "⏳ 处理中"
+        self._refresh_file_row(idx)
+        self.stage_label.setText(f"正在处理: {os.path.basename(f['path'])}")
+        self.progress_bar.setValue(self._current_index)
+
+        from utils.asr_client import transcribe_remote, read_asr_url
+
+        class BatchWorker(BaseWorker):
+            finished = Signal(int, str)  # file_list_index, srt_text
+            error = Signal(int, str)
+
+            def __init__(self, file_idx, path, language, task_type, diarize):
+                super().__init__()
+                self.file_idx = file_idx
+                self.path = path
+                self.language = language
+                self.task_type = task_type
+                self.diarize = diarize
+
+            def do_work(self):
+                try:
+                    asr_url = read_asr_url()
+                    segments = transcribe_remote(
+                        self.path, asr_url,
+                        language=self.language, task_type=self.task_type,
+                        diarize=self.diarize,
+                    )
+                    # 生成 SRT
+                    lines = []
+                    for i, seg in enumerate(segments):
+                        start = seg.get("start", 0)
+                        end = seg.get("end", 0)
+                        text = seg.get("text", "").strip().replace("\n", " ")
+                        lines.append(f"{i+1}")
+                        lines.append(
+                            f"{int(start//3600):02d}:{int(start%3600//60):02d}:{start%60:06.3f} --> "
+                            f"{int(end//3600):02d}:{int(end%3600//60):02d}:{end%60:06.3f}"
+                        )
+                        lines.append(text)
+                        lines.append("")
+                    srt_text = "\n".join(lines)
+                    self.finished.emit(self.file_idx, srt_text)
+                except Exception as e:
+                    self.error.emit(self.file_idx, str(e))
+
+        self.worker = BatchWorker(idx, f["path"], language, task_type, diarize)
+        self.worker.finished.connect(self._on_file_done)
+        self.worker.error.connect(self._on_file_error)
+        self.worker.start()
+
+    def _on_file_done(self, file_idx, srt_text):
+        f = self.files[file_idx]
+        f["status"] = "✅ 完成"
+        f["srt_text"] = srt_text
+        # 预览：取第一段文字的前 50 字
+        preview = ""
+        for seg in srt_text.split("\n\n"):
+            seg = seg.strip()
+            if seg:
+                parts = seg.split("\n")
+                if len(parts) >= 3:
+                    preview = parts[2][:50]
+                    break
+        f["preview"] = preview
+        self._refresh_file_row(file_idx)
+
+        self._current_index += 1
+        language = self.lang_input.text().strip() or None
+        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
+        diarize = self.multi_speaker_check.isChecked()
+        self._process_next(language, task_type, diarize)
+
+    def _on_file_error(self, file_idx, err):
+        f = self.files[file_idx]
+        f["status"] = "❌ 失败"
+        f["preview"] = ""
+        self._refresh_file_row(file_idx)
+
+        summary = ""
+        for line in (err or "").splitlines()[::-1]:
+            if line.strip():
+                summary = line.strip()
+                break
+        msg = f"❌ 处理失败: {os.path.basename(f['path'])}"
+        if summary:
+            msg += f"\n错误摘要：{summary}"
+        QMessageBox.critical(self.parent_widget, "处理失败", msg)
+
+        self._current_index += 1
+        language = self.lang_input.text().strip() or None
+        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
+        diarize = self.multi_speaker_check.isChecked()
+        self._process_next(language, task_type, diarize)

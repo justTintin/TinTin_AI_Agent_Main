@@ -4,7 +4,7 @@
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Windows 10/11 64位 或 Ubuntu 24.04+ |
+| 操作系统 | Windows 10/11 64位 |
 | GPU | NVIDIA GPU，CUDA 12.x，显存 ≥ 8GB（推荐 24GB RTX 4090） |
 | Python | 主程序使用内置 `python_embeded`（3.11），各子应用有独立 venv |
 | 磁盘空间 | ≥ 100GB（含模型权重） |
@@ -25,16 +25,21 @@
 ```
 TinTin_AI_Agent_Main/
 ├── python_embeded/          # 主 Python 3.11 环境
-├── studio/                  # 主程序源码
-│   ├── gui_main.py          # 启动入口
-│   ├── gui/                 # 界面代码
-│   ├── utils/               # 工具模块
-│   ├── config/              # 配置文件目录
-│   ├── config.ini           # VoxCPM 等配置
-│   ├── bin/win/             # ollama.exe、dreamina.exe 等
-│   ├── assets/              # 图标、字体、声音样本
-│   ├── data/                # 运行时数据（自动生成）
-│   └── .runtime/            # 日志、临时文件、cookies
+	├── studio/                  # 客户端主程序源码
+	│   ├── gui_main.py          # 启动入口
+	│   ├── gui/                 # 界面代码
+	│   ├── utils/               # 工具模块（含远程服务客户端）
+	│   │   ├── asr_client.py    # 远程 Whisper 语音转写客户端
+	│   │   ├── voxcpm_client.py # 远程 VoxCPM 声音克隆客户端
+	│   │   ├── comfyui_client.py# 远程 ComfyUI 图像生成客户端
+	│   │   ├── ollama_manager.py# Ollama 管理器（支持远程模式）
+	│   │   └── material_clip_indexer.py # 远程 CLIP 向量检索客户端
+	│   ├── config/              # 配置文件目录
+	│   ├── config.ini           # VoxCPM 等配置（保留项）
+	│   ├── bin/win/             # dreamina.exe 等
+	│   ├── assets/              # 图标、字体、声音样本
+	│   ├── data/                # 运行时数据（自动生成）
+	│   └── .runtime/            # 日志、临时文件、cookies
 ├── apps/                    # 子应用与模型（~59GB）
 │   ├── voxcpm2/             # 声音克隆
 │   ├── vsr-v1.4.0/          # 视频去字幕 v1.4
@@ -59,12 +64,6 @@ TinTin_AI_Agent_Main/
 studio\run_gui_integrated.bat
 ```
 该脚本自动定位 `python_embeded\pythonw.exe` 并启动 `gui_main.py`。
-
-### Linux
-```bash
-make install   # 首次：创建 .venv，安装依赖，下载 Chromium
-make run       # 启动 GUI
-```
 
 ---
 
@@ -110,7 +109,7 @@ port = 7861
 
 ### 5.2 `studio/config/ai_config.json`
 
-大模型、图像生成、声音克隆、对象存储等 AI 服务配置：
+大模型、计算节点、图像生成、声音克隆、对象存储等 AI 服务配置：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
@@ -118,15 +117,16 @@ port = 7861
 | `llm_api_url` | LLM API 地址 | `https://api.deepseek.com` |
 | `llm_api_key` | LLM API 密钥 | `sk-xxx` |
 | `llm_model` | 文本模型名 | `deepseek-v4-flash` |
-| `llm_vision_api_url` | 视觉模型(Ollama)地址 | `http://127.0.0.1:11434` |
+| `compute_server_url` | **统一计算节点地址**（ASR/VoxCPM/Ollama/CLIP 共用） | `http://192.168.111.18:8000` |
+| `whisper_api_url` | 语音转写地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `llm_vision_api_url` | 视觉分析（Ollama）地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
 | `llm_vision_model` | 视觉模型名 | `qwen2.5vl:7b-16k` |
-| `ollama_num_parallel` | Ollama 并发数（按显存自动调） | `4` |
-| `vision_concurrency` | 视觉分析并发数 | `4` |
-| `comfyui_addr` | ComfyUI 地址 | `http://127.0.0.1:8188` |
+| `vox_api_url` | VoxCPM TTS API 地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000/voxcpm/tts` |
+| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
+| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://192.168.111.36:8188` |
 | `runninghub_api_key` | RunningHub API Key | |
 | `runninghub_base_url` | RunningHub 基址 | `https://www.runninghub.cn` |
-| `voice_clone_addr` | 声音克隆服务地址 | `http://127.0.0.1:7860` |
-| `vox_api_url` | VoxCPM TTS API 地址 | `http://127.0.0.1:7861/v1/tts` |
 | `vox_mode` | VoxCPM 模式 | `api` |
 | `vox_timesteps` | VoxCPM 时间步数 | `20` |
 | `vox_cfg` | VoxCPM CFG 强度 | `2.0` |
@@ -135,6 +135,8 @@ port = 7861
 | `rustfs_secret_key` | S3 Secret Key | `xxx` |
 | `rustfs_bucket` | S3 Bucket 名 | `photos` |
 
+> **架构说明**：AI 推理任务统一通过 `compute_server_url` 指向的远程计算节点执行。客户端（本机）只负责 UI 交互和媒体预处理（ffmpeg 提取音频等）。各服务地址可单独覆盖，不填时自动从 `compute_server_url` 派生。
+> 
 > 模板见 `studio/config/ai_config.json.example`。
 
 ### 5.3 `studio/config/material_index_config.json`
@@ -285,10 +287,10 @@ vsr-v1.4.0 和 vsr-v1.1.1 使用 QPT 打包的嵌入式 Python，`python.exe` �
 
 | 服务 | 地址 | 用途 | 必需 |
 |------|------|------|------|
-| DeepSeek API | `api.deepseek.com` | 文案生成 | 是 |
-| Ollama | `127.0.0.1:11434` | 画面分析 | 是 |
+| **统一计算节点** | `http://<server>:8000` | ASR 转写 + VoxCPM TTS + Ollama 视觉 + CLIP 向量 | **是** |
+| DeepSeek API | `api.deepseek.com` | 文案生成 | **是** |
+| ComfyUI | `http://<server>:8188` | 图像生成 | 否 |
 | PostgreSQL | `192.168.111.17:15432` | 向量检索 | 是（向量检索功能） |
-| ComfyUI | `127.0.0.1:8188` | 图像生成 | 否 |
 | RunningHub | `runninghub.cn` | 云端图像生成 | 否 |
 | RustFS/S3 | `192.168.111.17:9000` | 素材存储 | 否 |
 | 抖音 | `douyin.com` | 直播切片录制 / 素材嗅探 | 否 |
@@ -301,9 +303,9 @@ vsr-v1.4.0 和 vsr-v1.1.1 使用 QPT 打包的嵌入式 Python，`python.exe` �
 1. **复制工程** 到目标电脑（任意盘符）
 2. **安装 NVIDIA 驱动**，确保 `nvidia-smi` 可用，CUDA ≥ 12.0
 3. **放置 ffmpeg.exe** 到工程根目录或 PATH 中
-4. **修改 `material_index_config.json`** 中 `clip_model_dir` 为实际路径
-5. **修改数据库连接** `material_index_config.json` 中的 host/port/password
-6. **填写 `ai_config.json`** 中的 DeepSeek API Key
-7. **拉取 Ollama 视觉模型**：`ollama pull qwen2.5vl:7b`
-8. **验证 VoxCPM venv** 依赖版本（见 9.1）
-9. **运行** `studio\run_gui_integrated.bat`
+4. **配置远程计算节点**：确认服务端已部署并获取计算节点 URL（`compute_server_url`），填入 `ai_config.json`
+5. **修改 `material_index_config.json`** 中 `clip_model_dir` 为实际路径
+6. **修改数据库连接** `material_index_config.json` 中的 host/port/password
+7. **填写 `ai_config.json`** 中的 DeepSeek API Key
+8. **运行** `studio\run_gui_integrated.bat`
+9. **配置统一计算节点**：在 GUI 中进入「系统设置 → 平台接入 → 统一计算节点」，填写服务端地址并测试连接

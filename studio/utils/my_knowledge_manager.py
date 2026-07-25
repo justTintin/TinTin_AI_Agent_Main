@@ -11,13 +11,28 @@ import os
 import json
 import time
 
-from config.paths import MY_KNOWLEDGE_FILE, KNOWLEDGE_MATERIALS_DIR
+from config.paths import MY_KNOWLEDGE_FILE, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from utils.logger_utils import log
 
 # 风格参考样本类型：从素材浏览器同步的关注/收藏视频文章（标题+文案文本为主，关联源/媒体）
 REFERENCE_TYPE = "风格参考样本"
 # 风格化类型：从参考样本提炼的写作风格画像（HOW to write，不是 WHAT）
 STYLIZATION_TYPE = "风格化"
+
+
+def _find_kb_json(filename: str) -> str:
+    """查找 JSON 元数据文件路径。
+    优先从项目内部 KNOWLEDGE_MATERIALS_DIR 查找；
+    若不存在则回退到用户可配置的 KNOWLEDGE_MEDIA_DIR（兼容旧版自定义目录）。
+    """
+    p1 = os.path.join(KNOWLEDGE_MATERIALS_DIR, filename)
+    if os.path.exists(p1):
+        return p1
+    p2 = os.path.join(KNOWLEDGE_MEDIA_DIR, filename)
+    if os.path.exists(p2):
+        return p2
+    # 默认返回项目内部路径（即使不存在，也用于报错提示）
+    return p1
 
 # 风格化维度：第一维度是账号，其余按内容类型/产品品类/行业垂类
 STYLE_DIMS = {
@@ -115,8 +130,8 @@ class MyKnowledgeManager:
         （浏览器全量收藏记录，包含未下载条目）后导入「风格参考样本」。
         kb_sync.json 数据优先（更丰富）；kb_items.json 补充其余未下载收藏。
         """
-        sync_path = manifest_path or os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_sync.json")
-        raw_path = items_path or os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_items.json")
+        sync_path = manifest_path or _find_kb_json("kb_sync.json")
+        raw_path = items_path or _find_kb_json("kb_items.json")
 
         # 合并两个来源：url → entry，kb_sync 优先（数据更丰富）
         all_entries = {}
@@ -148,10 +163,19 @@ class MyKnowledgeManager:
             (it.get("source") or {}).get("url")
             for it in self.items if (it.get("source") or {}).get("url")
         }
-        added = skipped = 0
+        added = skipped = updated = 0
         for e in all_entries.values():
             url = (e.get("url") or "").strip()
+            new_media = (e.get("mediaPath") or "").strip()
             if url and url in existing_urls:
+                # 已存在：若 sync 数据有 mediaPath 且当前为空，则补充更新
+                if new_media:
+                    for it in self.items:
+                        src = it.get("source") or {}
+                        if src.get("url") == url and not src.get("media_path"):
+                            src["media_path"] = new_media
+                            it["updated_at"] = int(time.time())
+                            updated += 1
                 skipped += 1
                 continue
             title = (e.get("title") or "").strip()
@@ -171,7 +195,7 @@ class MyKnowledgeManager:
                     "platformName": platform_name,
                     "creator": creator,
                     "url": url,
-                    "media_path": e.get("mediaPath", ""),
+                    "media_path": new_media,
                     "date": e.get("date", ""),
                     "heat": e.get("heat", ""),
                     "media_type": e.get("type", ""),
@@ -185,16 +209,55 @@ class MyKnowledgeManager:
             if url:
                 existing_urls.add(url)
             added += 1
-        if added:
+        if added or updated:
             self.save()
-        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在）。"
+        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在），更新 {updated} 条下载路径。"
+
+    def sync_media_paths(self, manifest_path=None):
+        """
+        从 kb_sync.json 读取已下载素材的 mediaPath，更新知识库中同 URL 条目的 media_path。
+        用于修正「先导入收藏记录、后下载」场景下 media_path 为空的问题。
+        返回更新条数。
+        """
+        sync_path = manifest_path or _find_kb_json("kb_sync.json")
+        if not os.path.exists(sync_path):
+            return 0
+        try:
+            with open(sync_path, "r", encoding="utf-8-sig") as f:
+                entries = json.load(f)
+        except Exception as e:
+            log.error(f"读取 kb_sync.json 失败: {e}")
+            return 0
+        if not isinstance(entries, list):
+            return 0
+        # 构建 url → mediaPath 映射
+        url_to_media = {}
+        for e in entries:
+            url = (e.get("url") or "").strip()
+            mp = (e.get("mediaPath") or "").strip()
+            if url and mp:
+                url_to_media[url] = mp
+        if not url_to_media:
+            return 0
+        updated = 0
+        for it in self.items:
+            src = it.get("source") or {}
+            url = (src.get("url") or "").strip()
+            if url in url_to_media and not src.get("media_path"):
+                src["media_path"] = url_to_media[url]
+                it["updated_at"] = int(time.time())
+                updated += 1
+        if updated:
+            self.save()
+            log.info(f"sync_media_paths: 更新了 {updated} 条素材的 media_path")
+        return updated
 
     def import_kb_items(self, items_path=None):
         """
         导入收藏记录：从浏览器全量收藏记录（kb_items.json）导入「风格参考样本」。
         无需下载，仅导入标题等基础文本信息，适合快速建立风格参考。
         """
-        fpath = items_path or os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_items.json")
+        fpath = items_path or _find_kb_json("kb_items.json")
         if not os.path.exists(fpath):
             return 0, 0, (
                 f"未找到收藏记录：{fpath}\n"
@@ -212,6 +275,20 @@ class MyKnowledgeManager:
             (it.get("source") or {}).get("url")
             for it in self.items if (it.get("source") or {}).get("url")
         }
+        # 同步下载路径：若 kb_items.json 条目已有下载，补充 media_path
+        sync_path = _find_kb_json("kb_sync.json")
+        url_to_media = {}
+        if os.path.exists(sync_path):
+            try:
+                with open(sync_path, "r", encoding="utf-8-sig") as f:
+                    for se in json.load(f):
+                        s_url = (se.get("url") or "").strip()
+                        s_mp = (se.get("mediaPath") or "").strip()
+                        if s_url and s_mp:
+                            url_to_media[s_url] = s_mp
+            except Exception:
+                pass
+
         added = skipped = 0
         for e in entries:
             url = (e.get("url") or "").strip()
@@ -235,7 +312,7 @@ class MyKnowledgeManager:
                     "platformName": platform_name,
                     "creator": creator,
                     "url": url,
-                    "media_path": "",
+                    "media_path": url_to_media.get(url, ""),
                     "date": e.get("date", ""),
                     "heat": e.get("heat", ""),
                     "media_type": e.get("type", ""),

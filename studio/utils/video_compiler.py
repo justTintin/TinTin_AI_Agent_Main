@@ -4,17 +4,14 @@ import subprocess
 import tempfile
 
 from config.paths import PROJECT_ROOT, WORKSPACE_ROOT
-from utils.platform_utils import IS_WIN, find_ffmpeg, find_ffprobe, create_no_window_flag
+from utils.platform_utils import find_ffmpeg, find_ffprobe, create_no_window_flag
+from utils.hwaccel import get_video_encode_args
 
 RATIO_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def _find(name):
-    # On non-Windows, always strip .exe suffix and prefer system binary
-    from utils.platform_utils import binary_name
-    if not IS_WIN:
-        name = name.replace(".exe", "")
     for c in (os.path.join(WORKSPACE_ROOT, name), os.path.join(PROJECT_ROOT, name), name):
         if os.path.isfile(c):
             return c
@@ -114,7 +111,7 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
             f.write(f"file '{os.path.abspath(images[-1])}'\n")
         slideshow = os.path.join(tmp, "slideshow.mp4")
         _run([ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", listf,
-              "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", slideshow])
+              "-vf", vf, *get_video_encode_args(crf=23, preset="veryfast"), slideshow])
         cur = slideshow
 
         if subtitle_text and subtitle_text.strip():
@@ -124,7 +121,7 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
             style = "FontSize=18,Outline=2,Alignment=2,MarginV=60"
             _run([ffmpeg, "-y", "-i", "slideshow.mp4",
                   "-vf", f"subtitles=subs.srt:force_style='{style}'",
-                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "sub.mp4"], cwd=tmp)
+                  *get_video_encode_args(crf=23, preset="veryfast"), "sub.mp4"], cwd=tmp)
             cur = sub_out
 
         pre = []
@@ -132,13 +129,13 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
             _p("加开场动画…")
             iv = os.path.join(tmp, "intro.mp4")
             _run([ffmpeg, "-y", "-i", intro, "-vf", vf, "-an",
-                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", iv])
+                  *get_video_encode_args(crf=23, preset="veryfast"), iv])
             pre.append(iv)
         if cover and os.path.isfile(cover):
             _p("加封面片头…")
             cov = os.path.join(tmp, "cover.mp4")
             _run([ffmpeg, "-y", "-loop", "1", "-t", "2", "-i", cover,
-                  "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", cov])
+                  "-vf", vf, *get_video_encode_args(crf=23, preset="veryfast"), cov])
             pre.append(cov)
         if pre:
             inputs = []
@@ -149,7 +146,7 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
             cat = os.path.join(tmp, "cat.mp4")
             _run([ffmpeg, "-y"] + inputs +
                  ["-filter_complex", f"{streams}concat=n={n}:v=1:a=0[v]", "-map", "[v]",
-                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", cat])
+                  *get_video_encode_args(crf=23, preset="veryfast"), cat])
             cur = cat
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)

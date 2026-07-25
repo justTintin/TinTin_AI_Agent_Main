@@ -3,7 +3,6 @@ import os
 import sys
 import shutil
 import subprocess
-import requests
 import json
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
@@ -12,9 +11,11 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QSpinBox)
 from PySide6.QtCore import Signal, QThread, Qt, QUrl
 from utils.base_worker import BaseWorker
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from config.paths import PROJECT_ROOT, OUTPUTS_DIR
 from gui.voice_samples_page import load_voice_samples
+from utils import voxcpm_client
 
 # Import workers and helper dialogs/widgets from video_montage_page to avoid duplicate definitions
 from gui.video_montage_page import (
@@ -27,40 +28,16 @@ from gui.video_montage_page import (
 class PunctuationLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, raw_text):
+    def __init__(self, model, raw_text):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.raw_text = raw_text
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            from utils.llm_proxy import llm_chat
             system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.raw_text}
-                ],
-                "temperature": 0.3
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=25)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -70,21 +47,14 @@ class PunctuationLLMWorker(BaseWorker):
 class SentenceSplitterLLMWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, api_url, api_key, model, text):
+    def __init__(self, model, text):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.text = text
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+            from utils.llm_proxy import llm_chat
             system_prompt = (
                 "你是一个短视频文案拆句专家。请把输入的文本段落拆分成适合逐句进行克隆配音合成的句子列表。\n"
                 "规则：\n"
@@ -92,23 +62,7 @@ class SentenceSplitterLLMWorker(BaseWorker):
                 "2. 主要依据句号（。）、感叹号（！）、问号（？）以及换行进行拆分。如果某个大句字数过长（例如超过30字），可在逗号（，）等语义停顿处进行合理切分，使每一行句意相对完整独立。\n"
                 "3. 每行输出一句话，不需要任何编号、Markdown标记或前缀，严格保持原文文字内容，绝对不能漏字或改字，只做合理的断句换行。"
             )
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": self.text}
-                ],
-                "temperature": 0.2
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=25)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError("Empty response from LLM")
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=25)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -189,7 +143,7 @@ class VoiceClonePage(BasePage):
         btn_sel_ref.clicked.connect(self._select_ref_audio)
         row_ref_audio.addWidget(btn_sel_ref)
         
-        self.btn_play_ref = QPushButton("🔊")
+        self.btn_play_ref = mdi_button("", "volume")
         self.btn_play_ref.setToolTip("播放人声样本")
         self.btn_play_ref.setStyleSheet("padding: 0px; font-size: 14px;")
         self.btn_play_ref.setFixedWidth(32)
@@ -228,7 +182,7 @@ class VoiceClonePage(BasePage):
         v_btn_layout.setSpacing(6)
         v_btn_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_transcribe_ref = QPushButton("📝 识别参考音频文本")
+        self.btn_transcribe_ref = mdi_button("识别参考音频文本", "edit")
         self.btn_transcribe_ref.setObjectName("secondary_button")
         self.btn_transcribe_ref.setFixedHeight(100)
         self.btn_transcribe_ref.setEnabled(False)
@@ -257,7 +211,7 @@ class VoiceClonePage(BasePage):
         btn_sel_vid_dir.clicked.connect(self._select_voice_video_dir)
         row_vid_dir.addWidget(btn_sel_vid_dir)
 
-        btn_open_dir = QPushButton("📂 打开目录")
+        btn_open_dir = mdi_button("打开目录", "folder")
         btn_open_dir.setObjectName("secondary_button")
         btn_open_dir.clicked.connect(self._open_voice_output_dir)
         row_vid_dir.addWidget(btn_open_dir)
@@ -295,13 +249,13 @@ class VoiceClonePage(BasePage):
         v_btn_clone_layout.setSpacing(6)
         v_btn_clone_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_clone_whole = QPushButton("🗣️ 一键生成整体克隆人声")
+        self.btn_clone_whole = mdi_button("一键生成整体克隆人声", "voice")
         self.btn_clone_whole.setObjectName("primary_button")
         self.btn_clone_whole.setFixedHeight(85)
         self.btn_clone_whole.clicked.connect(self._clone_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_clone_whole)
         
-        self.btn_play_whole = QPushButton("🔊 播放整体克隆声音")
+        self.btn_play_whole = mdi_button("播放整体克隆声音", "volume")
         self.btn_play_whole.setObjectName("secondary_button")
         self.btn_play_whole.setFixedHeight(30)
         self.btn_play_whole.setEnabled(False)
@@ -316,25 +270,25 @@ class VoiceClonePage(BasePage):
         row_table_header.addWidget(QLabel("📝 待合成人声音频列表与文案配置:"))
         row_table_header.addStretch()
         
-        self.btn_split_text = QPushButton("📋 一键拆分填充")
+        self.btn_split_text = mdi_button("一键拆分填充", "clipboard")
         self.btn_split_text.setObjectName("secondary_button")
         self.btn_split_text.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         self.btn_split_text.clicked.connect(self._split_and_populate_manually)
         row_table_header.addWidget(self.btn_split_text)
 
-        btn_add_row = QPushButton("➕ 添加行")
+        btn_add_row = mdi_button("添加行", "plus")
         btn_add_row.setObjectName("secondary_button")
         btn_add_row.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_add_row.clicked.connect(self._add_table_row)
         row_table_header.addWidget(btn_add_row)
 
-        btn_del_row = QPushButton("🗑️ 删除选中行")
+        btn_del_row = mdi_button("删除选中行", "trash")
         btn_del_row.setObjectName("secondary_button")
         btn_del_row.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_del_row.clicked.connect(self._delete_selected_row)
         row_table_header.addWidget(btn_del_row)
 
-        btn_clear_table = QPushButton("🧹 清空所有行")
+        btn_clear_table = mdi_button("清空所有行", "broom")
         btn_clear_table.setObjectName("secondary_button")
         btn_clear_table.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_clear_table.clicked.connect(self._clear_table)
@@ -370,7 +324,7 @@ class VoiceClonePage(BasePage):
 
         # 7. Action buttons row
         row_actions = QHBoxLayout()
-        self.btn_synthesize_voice = QPushButton("🗣️ 开始批量克隆人声合成")
+        self.btn_synthesize_voice = mdi_button("开始批量克隆人声合成", "voice")
         self.btn_synthesize_voice.setObjectName("action_button")
         self.btn_synthesize_voice.setFixedHeight(35)
         self.btn_synthesize_voice.clicked.connect(self._start_synthesize_voice)
@@ -415,8 +369,7 @@ class VoiceClonePage(BasePage):
     def _open_voice_output_dir(self):
         d = self.voice_video_dir_input.text().strip()
         if d and os.path.isdir(d):
-            if sys.platform == "win32":
-                os.startfile(d)
+            os.startfile(d)
         else:
             QMessageBox.warning(self.parent_widget, "目录无效", "输出目录不存在，请先选择或生成文件。")
 
@@ -578,7 +531,7 @@ class VoiceClonePage(BasePage):
         h_layout.setContentsMargins(4, 2, 4, 2)
         h_layout.setSpacing(4)
         
-        btn_play = QPushButton("🔊")
+        btn_play = mdi_button("", "volume")
         btn_play.setToolTip("播放克隆的声音")
         btn_play.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_play.setFixedWidth(30)
@@ -586,14 +539,14 @@ class VoiceClonePage(BasePage):
         btn_play.clicked.connect(lambda checked=False, b=btn_play: self._on_btn_play_clicked_by_btn(b))
         h_layout.addWidget(btn_play)
         
-        btn_regen = QPushButton("🔄")
+        btn_regen = mdi_button("", "refresh")
         btn_regen.setToolTip("仅重新生成该声音")
         btn_regen.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_regen.setFixedWidth(30)
         btn_regen.clicked.connect(lambda checked=False, b=btn_regen: self._on_btn_regen_clicked_by_btn(b))
         h_layout.addWidget(btn_regen)
         
-        btn_export = QPushButton("💾")
+        btn_export = mdi_button("", "save")
         btn_export.setToolTip("导出该克隆声音")
         btn_export.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_export.setFixedWidth(30)
@@ -736,18 +689,16 @@ class VoiceClonePage(BasePage):
 
         def on_finished(srt_content, path):
             self.btn_transcribe_ref.setEnabled(True)
-            self.btn_transcribe_ref.setText("📝 识别参考音频文本")
+            self.btn_transcribe_ref.setText("识别参考音频文本")
             self.stage_label.setText("✅ 识别参考音频文本完成")
             
             plain_text = self._clean_srt_to_text(srt_content)
             
-            llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-            llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
             
-            if llm_api_url and llm_api_key and plain_text.strip():
+            if llm_model and plain_text.strip():
                 self.stage_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
-                self.punc_worker = PunctuationLLMWorker(llm_api_url, llm_api_key, llm_model, plain_text)
+                self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
                 
                 def on_punc_done(punctuated_text):
                     self.ref_text_input.setPlainText(punctuated_text)
@@ -774,7 +725,7 @@ class VoiceClonePage(BasePage):
 
         def on_error(err):
             self.btn_transcribe_ref.setEnabled(True)
-            self.btn_transcribe_ref.setText("📝 识别参考音频文本")
+            self.btn_transcribe_ref.setText("识别参考音频文本")
             self.stage_label.setText("❌ 识别文本失败")
             QMessageBox.critical(self.parent_widget, "识别文本失败", f"无法从参考音频中提取文本：\n{err}")
 
@@ -833,16 +784,14 @@ class VoiceClonePage(BasePage):
             
             def on_align_finished(srt_content, srt_path):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ 音频时间戳分析完成，正在裁切音频并填充列表...")
                 
-                llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-                llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
                 llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
                 
-                if llm_api_url and llm_api_key:
+                if llm_model:
                     self.stage_label.setText("⏳ 正在使用 AI 模型智能拆分整体文案...")
-                    self.split_worker = SentenceSplitterLLMWorker(llm_api_url, llm_api_key, llm_model, text)
+                    self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
                     
                     def on_split_done(result_text):
                         lines = [line.strip() for line in result_text.split('\n') if line.strip()]
@@ -876,7 +825,7 @@ class VoiceClonePage(BasePage):
                     
             def on_align_error(err):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("❌ 识别音频时间戳失败")
                 QMessageBox.warning(self.parent_widget, "识别失败", f"分析整段音频失败，已退回纯文本拆分模式。\n错误：{err}")
                 self._split_and_populate_text_only(text)
@@ -1084,7 +1033,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
@@ -1155,7 +1104,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
@@ -1242,23 +1191,7 @@ class VoiceClonePage(BasePage):
         else:
             QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
-    def _stop_voxcpm_after_voice(self):
-        """离开声音克隆页面时停止 VoxCPM 服务，释放 GPU 显存。"""
-        try:
-            mw = getattr(self, "main_window", None)
-            if mw:
-                if hasattr(mw, "stop_voxcpm_service"):
-                    log.info("离开声音克隆页面，停止 VoxCPM 服务释放显存")
-                    mw.stop_voxcpm_service(show_prompt=False)
-                montage = getattr(mw, "subtitle_removal_tool_v14", None)
-                if montage and hasattr(montage, "stop_api_server"):
-                    montage.stop_api_server(show_prompt=False)
-        except Exception as e:
-            log.warning(f"停止 VoxCPM 服务失败: {e}")
-
     def hideEvent(self, event):
-        """页面隐藏时停止 VoxCPM 服务释放显存。"""
-        self._stop_voxcpm_after_voice()
         super().hideEvent(event)
 
     def _get_out_voice_dir(self, dir_path):
@@ -1390,7 +1323,7 @@ class VoiceClonePage(BasePage):
                     cmd,
                     capture_output=True,
                     text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 try:
                     if os.path.exists(concat_txt):
@@ -1431,7 +1364,7 @@ class VoiceClonePage(BasePage):
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
         voice_mode = cfg.get("vox_mode", "api")
-        api_url = cfg.get("vox_api_url", "http://127.0.0.1:7861/v1/tts")
+        api_url = cfg.get("vox_api_url", "") or voxcpm_client.tts_url()
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
@@ -1458,7 +1391,7 @@ class VoiceClonePage(BasePage):
         
         def on_whole_finished(results):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("🗣️ 一键生成整体克隆人声")
+            self.btn_clone_whole.setText("一键生成整体克隆人声")
             self.progress_bar.setValue(100)
             self.stage_label.setText("✅ 整体克隆人声生成成功！可以开始点击一键拆分填充。")
             self._check_whole_audio_exists()
@@ -1470,7 +1403,7 @@ class VoiceClonePage(BasePage):
             
         def on_whole_error(err):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("🗣️ 一键生成整体克隆人声")
+            self.btn_clone_whole.setText("一键生成整体克隆人声")
             self.progress_bar.setValue(0)
             self.stage_label.setText("❌ 整体生成失败")
             if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:
@@ -1487,20 +1420,18 @@ class VoiceClonePage(BasePage):
         self.voice_worker.start()
 
     def _split_and_populate_text_only(self, text):
-        llm_api_url = self.main_window.ai_config.get("llm_api_url", "")
-        llm_api_key = self.main_window.ai_config.get("llm_api_key", "")
         llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
-        if llm_api_url and llm_api_key:
+        if llm_model:
             self.btn_split_text.setEnabled(False)
             self.btn_split_text.setText("⏳ AI 拆分中...")
             self.stage_label.setText("⏳ 正在使用大模型智能拆分文案...")
 
-            self.split_worker = SentenceSplitterLLMWorker(llm_api_url, llm_api_key, llm_model, text)
+            self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
 
             def on_split_done(result_text):
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ AI 智能拆分完成")
                 
                 lines = [line.strip() for line in result_text.split('\n') if line.strip()]
@@ -1518,7 +1449,7 @@ class VoiceClonePage(BasePage):
             def on_split_err(err):
                 log.warning(f"AI 智能拆分失败: {err}，将使用本地分词规则进行拆分。")
                 self.btn_split_text.setEnabled(True)
-                self.btn_split_text.setText("📋 一键拆分填充")
+                self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("⚠️ AI 智能拆分失败，已自动使用本地规则")
                 
                 self._populate_sentences_to_table(text)
@@ -1684,7 +1615,7 @@ class VoiceClonePage(BasePage):
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             if r.returncode != 0:
                 log.error(f"裁剪音频失败 (返回码 {r.returncode}):\nSTDOUT: {r.stdout}\nSTDERR: {r.stderr}")

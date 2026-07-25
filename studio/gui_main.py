@@ -4,60 +4,57 @@ import os
 
 # Configure CUDA/cuDNN DLL paths for Windows embedded Python immediately at startup
 # (Must be done before importing torch or other libraries that rely on CUDA DLLs)
-if sys.platform == "win32":
-    import site
-    packages_dirs = []
-    try:
-        packages_dirs.extend(site.getsitepackages())
-    except Exception:
-        pass
-    try:
-        packages_dirs.append(site.getusersitepackages())
-    except Exception:
-        pass
-    try:
-        base_dir = os.path.dirname(sys.executable)
-        packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
-        packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
-    except Exception:
-        pass
-    for p in packages_dirs:
-        if p and os.path.isdir(p):
-            nvidia_base = os.path.join(p, "nvidia")
-            if os.path.isdir(nvidia_base):
-                for sub in ["cublas", "cudnn"]:
-                    bin_path = os.path.join(nvidia_base, sub, "bin")
-                    if os.path.isdir(bin_path):
-                        if bin_path not in os.environ.get("PATH", ""):
-                            os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
-                        if hasattr(os, "add_dll_directory"):
-                            try:
-                                os.add_dll_directory(bin_path)
-                            except Exception:
-                                pass
+import site
+packages_dirs = []
+try:
+    packages_dirs.extend(site.getsitepackages())
+except Exception:
+    pass
+try:
+    packages_dirs.append(site.getusersitepackages())
+except Exception:
+    pass
+try:
+    base_dir = os.path.dirname(sys.executable)
+    packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
+    packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
+except Exception:
+    pass
+for p in packages_dirs:
+    if p and os.path.isdir(p):
+        nvidia_base = os.path.join(p, "nvidia")
+        if os.path.isdir(nvidia_base):
+            for sub in ["cublas", "cudnn"]:
+                bin_path = os.path.join(nvidia_base, sub, "bin")
+                if os.path.isdir(bin_path):
+                    if bin_path not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
+                    if hasattr(os, "add_dll_directory"):
+                        try:
+                            os.add_dll_directory(bin_path)
+                        except Exception:
+                            pass
 
 # Set domestic Hugging Face mirror to prevent hanging and speed up model downloads
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 # Set explicit AppUserModelID for Windows taskbar icon support
-if sys.platform == "win32":
-    try:
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
-    except Exception:
-        pass
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
+except Exception:
+    pass
 
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
-if sys.platform == "win32":
-    import subprocess
-    class _patched_Popen(subprocess.Popen):
-        def __init__(self, *args, **kwargs):
-            if "creationflags" not in kwargs:
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            else:
-                kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
-            super().__init__(*args, **kwargs)
-    subprocess.Popen = _patched_Popen
+import subprocess
+class _patched_Popen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        if "creationflags" not in kwargs:
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+        super().__init__(*args, **kwargs)
+subprocess.Popen = _patched_Popen
 
 # Prevent crash when sys.stdout or sys.stderr is None (under pythonw.exe)
 if sys.stdout is None:
@@ -149,12 +146,32 @@ try:
                                  QProgressBar, QComboBox, QInputDialog, QSplitter,
                                  QAbstractItemView, QButtonGroup, QGroupBox, QListView,
                                  QSpinBox)
-    from PySide6.QtGui import QIcon, QFont, QPixmap
+    from PySide6.QtGui import QIcon, QFont, QPixmap, QSyntaxHighlighter, QTextCharFormat, QColor
     from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent, QSharedMemory
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     print("Please install PySide6 using: pip install PySide6 shiboken6")
     sys.exit(1)
+
+
+class LogHighlighter(QSyntaxHighlighter):
+    """用 QSyntaxHighlighter 给日志按级别着色，比 setHtml 稳定。"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._rules = []
+        for level, color in [("CRITICAL","#dc2626"),("ERROR","#ef4444"),
+                              ("WARNING","#f59e0b"),("INFO","#e4e4e7"),("DEBUG","#6b7280")]:
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(color))
+            self._rules.append((f"| {level: <8} |", fmt))
+
+    def highlightBlock(self, text):
+        for pattern, fmt in self._rules:
+            if pattern in text:
+                self.setFormat(0, len(text), fmt)
+                return
+
+
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.subtitle_removal_page import SubtitleRemovalPage
@@ -164,13 +181,9 @@ from gui.voice_samples_page import VoiceSamplesPage
 from gui.video_ocr_page import VideoOcrPage
 from gui.image_folder_ocr_page import ImageFolderOcrPage
 from utils.logger_utils import log, get_last_logs
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.account_manager import AccountManager
 from core.creator_browser_controller import CreatorBrowserController
-try:
-    from utils.runninghub_manager import RunningHubManager
-except ImportError as e:
-    log.error(f"Failed to import RunningHubManager: {e}")
-    RunningHubManager = None
 try:
     import psutil
 except ImportError:
@@ -184,52 +197,54 @@ from gui.threads import SystemMonitorThread, ComfyWSThread, AIStatusCheckThread
 
 
 class _StatsCollector(QThread):
-    """后台线程：采集 CPU/RAM/网速和 GPU 显存，不阻塞主线程。"""
-    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up_bytes/s, down_bytes/s, gpu_vram
+    """后台线程：从远程服务器 /health 采集 CPU/RAM/GPU 资源状态。"""
+    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up, down, gpu_vram
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = True
-        self._last_net = None
-        self._last_t = time.time()
+
+    def _get_server_url(self):
+        """从 ai_config 读远程服务地址。"""
+        try:
+            import json as _json
+            from config.paths import AI_CONFIG_FILE
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+                    cfg = _json.load(f)
+                url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url") or "").strip()
+                if url:
+                    return url.rstrip("/")
+        except Exception:
+            pass
+        return ""
 
     def run(self):
+        import requests as _req
         while self._running:
             try:
-                cpu = 0.0
-                ram = 0.0
+                base = self._get_server_url()
+                cpu = ram = 0.0
                 up = down = 0.0
-                if psutil:
+                gpu_vram = "--"
+
+                if base:
                     try:
-                        cpu = psutil.cpu_percent(interval=None)
-                        ram = psutil.virtual_memory().percent
-                        curr_net = psutil.net_io_counters()
-                        curr_t = time.time()
-                        dt = curr_t - self._last_t
-                        if dt > 0 and self._last_net:
-                            up   = (curr_net.bytes_sent - self._last_net.bytes_sent) / dt
-                            down = (curr_net.bytes_recv - self._last_net.bytes_recv) / dt
-                        self._last_net = curr_net
-                        self._last_t = curr_t
+                        resp = _req.get(f"{base}/health", timeout=4)
+                        if resp.status_code == 200:
+                            d = resp.json()
+                            cpu = float(d.get("cpu", {}).get("percent", 0))
+                            mem = d.get("memory", {})
+                            ram = float(mem.get("percent", 0))
+                            gpu = d.get("gpu")
+                            if gpu:
+                                vram_used = float(gpu.get("vram_used_mb", 0)) / 1024.0
+                                vram_total = float(gpu.get("vram_total_mb", 0)) / 1024.0
+                                gpu_util = int(gpu.get("gpu_util_percent", 0))
+                                gpu_vram = f"{vram_used:.1f}G/{vram_total:.1f}G {gpu_util}%"
                     except Exception:
                         pass
-                
-                # 安全查询 GPU 显存，进程隔离，避免使用 pynvml 导致 C 层面崩溃
-                gpu_vram = "--"
-                try:
-                    out = subprocess.check_output(
-                        ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-                        stderr=subprocess.DEVNULL,
-                        timeout=2
-                    ).decode(errors="ignore").strip()
-                    parts = [p.strip() for p in out.split(",")]
-                    if len(parts) >= 2:
-                        used_gb = float(parts[0]) / 1024.0
-                        total_gb = float(parts[1]) / 1024.0
-                        gpu_vram = f"{used_gb:.1f}G/{total_gb:.1f}G"
-                except Exception:
-                    pass
-                
+
                 self.stats_ready.emit(cpu, ram, up, down, gpu_vram)
             except Exception:
                 pass
@@ -307,12 +322,10 @@ class SystemStatusOverlay(QWidget):
         self.clone_lbl.setText(f"克隆: {_color(status.get('clone_ok'))}")
 
     def _on_stats_ready(self, cpu, ram, up, down, gpu_vram):
-        self.cpu_lbl.setText(f"CPU: <font color='#facc15'>{cpu:.1f}%</font>")
-        self.ram_lbl.setText(f"RAM: <font color='#facc15'>{ram:.1f}%</font>")
-        self.net_lbl.setText(
-            f"NET: <font color='#facc15'>↑{self.format_speed(up)} ↓{self.format_speed(down)}</font>"
-        )
-        self.gpu_lbl.setText(f"VRAM: <font color='#facc15'>{gpu_vram}</font>")
+        self.cpu_lbl.setText(f"CPU: <font color='#facc15'>{cpu:.0f}%</font>")
+        self.ram_lbl.setText(f"RAM: <font color='#facc15'>{ram:.0f}%</font>")
+        self.net_lbl.setText(f"<font color='#facc15'>{gpu_vram}</font>")
+        self.gpu_lbl.setText(f"<font color='#8b949e'>🖥️ 服务器</font>")
 
     def update_stats(self):
         pass  # kept for compatibility
@@ -363,18 +376,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.ai_config_file = os.path.join(PROJECT_ROOT, "config", "ai_config.json")
         self.ai_config_legacy_file = os.path.join(PROJECT_ROOT, "ai_config.json")
         self.load_ai_config()
-        
+
         self._update_splash("正在配置独立浏览器 Profile...", 45)
         self.playwright_profile_path = os.path.join(PROJECT_ROOT, "playwright_profile")
         os.makedirs(self.playwright_profile_path, exist_ok=True)
-
-        if RunningHubManager:
-            self.runninghub = RunningHubManager(
-                api_key=self.ai_config.get("runninghub_api_key", ""),
-                base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")
-            )
-        else:
-            self.runninghub = None
 
         self.creator_pw_controller = None
         self.downloader_pw_controller = None
@@ -386,13 +391,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self._pw_auto_install_attempted = False
         self._pw_ready = False
         self.account_pw_controllers = {}
-        
-        # VoxCPM process control properties
-        self.voxcpm_process = None
-        self.voxcpm_log_file = None
-        self.voxcpm_status_timer = QTimer(self)
-        self.voxcpm_status_timer.timeout.connect(self._check_voxcpm_process_status)
-        
+
         self.refresh_timer = QTimer(self)
         self._avatar_workers = []
         self.active_workers = []
@@ -436,39 +435,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         self.ai_status_collector.status_updated.connect(handle_ai_status)
         self.ai_status_collector.start()
-        
-        # 自启动本地 Ollama 服务的后台线程
-        def auto_start_ollama():
-            try:
-                from utils.ollama_manager import OllamaManager
-                mgr = OllamaManager.get()
-                if mgr.is_binary_present():
-                    log.info("正在初始化并后台启动内置 GPU 优化版 Ollama...")
-                    ok, _ = mgr.start()
-                    # 启动成功后顺带预热配置的视觉模型，避免首次推理冷加载读超时
-                    if ok:
-                        try:
-                            mgr.warmup_model()
-                        except Exception as we:
-                            log.warning(f"自启动后预热视觉模型失败（不影响启动结果）: {we}")
-                else:
-                    log.warning("内置 ollama.exe 不存在，跳过自启动。")
-            except Exception as e:
-                log.error(f"自启动本地 Ollama 失败: {e}")
-
-        threading.Thread(target=auto_start_ollama, daemon=True).start()
-        
-        # 启动后台文件夹变化实时监听服务
-        self.folder_watcher = None
-        def start_watcher():
-            try:
-                from utils.folder_watcher import FolderWatcherService
-                self.folder_watcher = FolderWatcherService()
-                self.folder_watcher.start()
-            except Exception as e:
-                log.error(f"启动文件夹实时监听服务失败: {e}")
-                
-        threading.Thread(target=start_watcher, daemon=True).start()
 
         self._update_splash("系统准备就绪，正在展现主界面...", 100)
 
@@ -519,21 +485,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 静默清理后台服务（不弹 CloseSplash 窗口）
         try:
-            if hasattr(self, "video_montage_tool") and self.video_montage_tool:
-                self.video_montage_tool.stop_api_server(show_prompt=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "voice_clone_tool") and self.voice_clone_tool:
-                self.voice_clone_tool.stop_api_server(show_prompt=False)
-        except Exception:
-            pass
-        try:
-            if hasattr(self, "stop_voxcpm_service"):
-                self.stop_voxcpm_service(show_prompt=False)
-        except Exception:
-            pass
-        try:
             if hasattr(self, "creator_pw_controller") and self.creator_pw_controller:
                 self.creator_pw_controller.stop()
         except Exception:
@@ -559,29 +510,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception:
             pass
         try:
-            if hasattr(self, "folder_watcher") and self.folder_watcher:
-                self.folder_watcher.stop()
-        except Exception:
-            pass
-        try:
             if hasattr(self, "comfy_ws") and self.comfy_ws:
                 self.comfy_ws.running = False
                 self.comfy_ws.wait()
         except Exception:
             pass
         try:
-            from utils import comfyui_client as comfy
-            comfy.ComfyUILocal.get().stop()
-        except Exception:
-            pass
-        try:
             from core.creator_browser_controller import close_all_active_browsers
             close_all_active_browsers()
-        except Exception:
-            pass
-        try:
-            from utils.ollama_manager import OllamaManager
-            OllamaManager.get().stop()
         except Exception:
             pass
 
@@ -832,50 +768,30 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_marketing_detect_page()
         self.content_stack.addWidget(self.page_marketing_detect)
 
-        # 42: Material Clip (素材管理) Page
-        self.page_material_clip = QWidget()
-        from gui.material_clip_page import MaterialClipPage
-        self.material_clip_tool = MaterialClipPage(self.page_material_clip, self)
-        self.material_clip_tool.setup()
-        self.content_stack.addWidget(self.page_material_clip)
-
         # 43: Dreamina Assets (即梦素材) Page
         self.page_dreamina_assets = QWidget()
         self.setup_dreamina_assets_page()
         self.content_stack.addWidget(self.page_dreamina_assets)
 
+        # 43: Scheduled Tasks (定时任务) Page —— 监控服务端定时任务
+        self.page_scheduled_tasks = QWidget()
+        self.setup_scheduled_tasks_page()
+        self.content_stack.addWidget(self.page_scheduled_tasks)
 
-    def _start_clip_preload(self):
-        """应用启动时在后台线程预热 CLIP 模型，避免首次搜索时卡顿。"""
-        import threading
-        import json
-        try:
-            cfg_path = os.path.join(CONFIG_DIR, "material_index_config.json")
-            if not os.path.isfile(cfg_path):
-                return
-            with open(cfg_path, encoding="utf-8") as f:
-                cfg = json.load(f)
-            model_dir = cfg.get("clip_model_dir") or ""
-            if not model_dir or not os.path.isdir(model_dir):
-                return  # 模型目录未配置或不存在，跳过
-        except Exception:
-            return
+        # 进入定时任务页时刷新（拉取最新服务端状态）
+        def _on_page_change(idx):
+            if idx == 43 and hasattr(self, "scheduled_tasks_tool"):
+                self.scheduled_tasks_tool.refresh()
+        self.content_stack.currentChanged.connect(_on_page_change)
 
-        def _warm():
-            try:
-                from utils.material_clip_indexer import preload_encoder
-                preload_encoder()
-            except Exception:
-                pass
-
-        threading.Thread(target=_warm, daemon=True, name="clip-preload").start()
 
     def trigger_page_logic(self, index):
         """Triggers data refresh or UI reset for specific pages"""
         if index == 9: # Task List
             self.refresh_server_tasks()
             self.refresh_timer.start()
-        else:
+        elif hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
             self.refresh_timer.stop()
 
         # 热点页面：只在活跃时轮询，离开后立即停止（减少主线程常驻 2次/秒 事件回调）
@@ -898,8 +814,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 7: # System Config
             if hasattr(self, "refresh_llm_page_status"):
                 self.refresh_llm_page_status()
-            if hasattr(self, "voxcpm_status_timer") and not self.voxcpm_status_timer.isActive():
-                self.voxcpm_status_timer.start(3000)
         elif index == 21: # Voice Clone
             if hasattr(self, "voice_clone_tool"):
                 self.voice_clone_tool._populate_ref_audio_samples()
@@ -909,10 +823,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 41: # Marketing Video Detection
             if hasattr(self, "marketing_detect_tool"):
                 self.marketing_detect_tool.update_vision_model_display()
-        elif index == 42: # 素材管理
-            if hasattr(self, "material_clip_tool"):
-                try: self.material_clip_tool._reload_dir_config()
-                except Exception as e: log.error(f"刷新素材目录失败: {e}")
         elif index == 43: # 即梦素材
             if hasattr(self, "dreamina_assets_tool"):
                 try:
@@ -925,14 +835,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 22: # 资源配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
-            if hasattr(self, "_res_load_configs"):
-                try: self._res_load_configs()
-                except Exception as e: log.error(f"加载资源配置失败: {e}")
-                
-        # Stop VoxCPM timer if switched away from System Config page
-        if index != 7:
-            if hasattr(self, "voxcpm_status_timer") and self.voxcpm_status_timer.isActive():
-                self.voxcpm_status_timer.stop()
+            if hasattr(self, "_load_lut_config"):
+                self._load_lut_config()
 
 
 
@@ -1084,88 +988,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "cg_status_label"):
                 self.cg_status_label.setText("已移除")
 
-
-
-
-
-
-
-
-
-
-
-
-
-    def start_whisper_repair(self):
-        if hasattr(self, "whisper_repair_worker") and self.whisper_repair_worker and self.whisper_repair_worker.isRunning():
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "开始环境一键配置",
-            "一键配置将会执行以下操作：\n"
-            "1. 自动卸载当前已安装的 CPU 版 PyTorch 依赖包。\n"
-            "2. 安装支持 GPU CUDA 加速的 PyTorch (2.5.1+cu121) 库 (包体积约 2.4 GB)。\n"
-            "3. 安装/升级 WhisperX 运行需要的相关依赖包与 NVIDIA DLL 链接库。\n\n"
-            "是否确认现在开始安装/配置？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-        if reply == QMessageBox.No:
-            return
-
-        self.btn_refresh_whisper.setEnabled(False)
-        self.btn_install_whisper.setEnabled(False)
-        self.whisper_progress_bar.setVisible(True)
-        self.whisper_progress_bar.setRange(0, 0)
-        self.whisper_log_view.clear()
-
-        self.whisper_repair_worker = EnvInstallWorker()
-        self.whisper_repair_worker.log_line.connect(self.on_whisper_log_line)
-        self.whisper_repair_worker.stage.connect(self.on_whisper_stage)
-        self.whisper_repair_worker.finished.connect(self.on_whisper_finished)
-        self.whisper_repair_worker.start()
-
-    def on_whisper_log_line(self, text):
-        self.whisper_log_view.append(text)
-
-    def on_whisper_stage(self, text):
-        self.whisper_stage_label.setText(text)
-
-    def on_whisper_finished(self, success, message):
-        self.btn_refresh_whisper.setEnabled(True)
-        self.btn_install_whisper.setEnabled(True)
-        self.whisper_progress_bar.setVisible(False)
-        self.whisper_stage_label.setText("系统就绪")
-        
-        self.refresh_llm_page_status()
-
-        if success:
-            QMessageBox.information(self, "环境一键配置成功", message)
-        else:
-            QMessageBox.critical(self, "环境配置失败", message)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def select_image(self):
         file, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
         if file:
@@ -1245,47 +1067,59 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存 Cookie 失败: {e}")
 
-    def add_task_to_list(self, prompt_id, status="正在运行"):
+    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端"):
         row = self.task_table.rowCount()
         self.task_table.insertRow(row)
-        self.task_table.setItem(row, 0, QTableWidgetItem(prompt_id[:8]))
+        self.task_table.setItem(row, 0, QTableWidgetItem(prompt_id[:12]))
+        self.task_table.setItem(row, 1, QTableWidgetItem(task_type))
+        source_item = QTableWidgetItem(source)
+        if source == "本地":
+            source_item.setForeground(QColor("#4ade80"))
+        else:
+            source_item.setForeground(QColor("#60a5fa"))
+        self.task_table.setItem(row, 2, source_item)
         
         status_item = QTableWidgetItem(status)
-        self.task_table.setItem(row, 1, status_item)
+        self.task_table.setItem(row, 3, status_item)
         self.task_status_items[prompt_id] = status_item
         
         p_bar = QProgressBar()
         p_bar.setValue(0)
         p_bar.setTextVisible(True)
-        self.task_table.setCellWidget(row, 2, p_bar)
+        self.task_table.setCellWidget(row, 4, p_bar)
         self.task_progress_bars[prompt_id] = p_bar
-        
-        # Action column placeholders
+
+        # 创建时间
+        from datetime import datetime
+        time_str = datetime.now().strftime("%m-%d %H:%M")
+        self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
+
+        # Action column
         actions_widget = QWidget()
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(5, 2, 5, 2)
         actions_layout.setSpacing(5)
-        
-        btn_preview = QPushButton("👁️")
+
+        btn_preview = mdi_button("", "eye")
         btn_preview.setToolTip("预览")
         btn_preview.setFixedSize(30, 24)
         btn_preview.setEnabled(False)
         btn_preview.clicked.connect(lambda: self.preview_result(prompt_id))
-        
-        btn_download = QPushButton("💾")
+
+        btn_download = mdi_button("", "save")
         btn_download.setToolTip("下载")
         btn_download.setFixedSize(30, 24)
         btn_download.setEnabled(False)
         btn_download.clicked.connect(lambda: self.download_result(prompt_id))
-        
+
         actions_layout.addWidget(btn_preview)
         actions_layout.addWidget(btn_download)
-        self.task_table.setCellWidget(row, 3, actions_widget)
+        self.task_table.setCellWidget(row, 6, actions_widget)
 
     def update_task_actions(self, prompt_id):
         for row in range(self.task_table.rowCount()):
-            if self.task_table.item(row, 0).text() == prompt_id[:8]:
-                w = self.task_table.cellWidget(row, 3)
+            if self.task_table.item(row, 0).text() == prompt_id[:12]:
+                w = self.task_table.cellWidget(row, 6)
                 if w:
                     for btn in w.findChildren(QPushButton):
                         btn.setEnabled(True)
@@ -1398,8 +1232,18 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
 
+    # ── 并发控制：最多同时运行 3 个 AI 任务 ──
+    MAX_CONCURRENT_WORKERS = 3
+
     def start_worker(self, func, on_finished=None, on_error=None):
-        """Helper to start a worker thread and keep it alive until finished"""
+        """Helper to start a worker thread and keep it alive until finished.
+        同时最多 3 个并发，超出的自动排队等待。"""
+        active_count = len([w for w in self.active_workers if w.isRunning()])
+        if active_count >= self.MAX_CONCURRENT_WORKERS:
+            QTimer.singleShot(500, lambda: self.start_worker(func, on_finished, on_error))
+            log.info(f"[并发控制] 当前 {active_count} 个任务运行中，排队等待...")
+            return None
+
         worker = Worker(func)
         self.active_workers.append(worker)
         
@@ -1421,12 +1265,54 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
     def refresh_logs(self):
-        content = get_last_logs(200)
-        self.log_viewer.setPlainText(content)
-        # Scroll to bottom
+        level_filter = getattr(self, "log_level_filter", None)
+        keyword_filter = getattr(self, "log_keyword_input", None)
+        btn_server = getattr(self, "btn_server_log", None)
+        level_text = level_filter.currentText() if level_filter else "全部"
+        keyword = keyword_filter.text().strip() if keyword_filter else ""
+
+        # 服务端日志按钮勾选时，自动加上服务端相关关键词
+        if btn_server and btn_server.isChecked():
+            server_keys = ["[ASR]", "[_RemoteWorker]", "[RemoteTranscribeWorker]", "[VoxCPM]", "POST ", "HTTP "]
+            if keyword:
+                keyword = f"({keyword})|{'|'.join(server_keys)}"
+            else:
+                keyword = "|".join(server_keys)
+            keyword_filter.setText(f"[服务端] {keyword[:50]}")
+
+        raw = get_last_logs(2000)
+        lines = raw.split("\n")
+
+        if level_text != "全部":
+            lines = [l for l in lines if f"| {level_text: <8} |" in l or f"| {level_text}" in l]
+
+        if keyword:
+            lines = [l for l in lines if keyword.lower() in l.lower()]
+
+        lines = lines[-500:]
+
+        self.log_viewer.setPlainText("\n".join(lines))
+        # 首次调用时挂上高亮器（只挂一次）
+        if not hasattr(self, "_log_highlighter"):
+            self._log_highlighter = LogHighlighter(self.log_viewer.document())
         self.log_viewer.verticalScrollBar().setValue(
             self.log_viewer.verticalScrollBar().maximum()
         )
+
+    def _log_viewer_context_menu(self, pos):
+        """系统日志右键菜单：清空 / 复制 / 全选"""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        act_clear = menu.addAction("🗑️ 清空日志")
+        act_copy = menu.addAction("📋 复制选中")
+        act_select_all = menu.addAction("✅ 全选")
+        chosen = menu.exec(self.log_viewer.mapToGlobal(pos))
+        if chosen == act_clear:
+            self.log_viewer.clear()
+        elif chosen == act_copy:
+            self.log_viewer.copy()
+        elif chosen == act_select_all:
+            self.log_viewer.selectAll()
 
 
 
@@ -1449,26 +1335,9 @@ if __name__ == "__main__":
         verify_license, LicenseError,
         load_activation_cache,
     )
-    _access_granted = False
+    _access_granted = True
     _machine_id = get_machine_id()
-    # 1) 试用白名单
-    if check_trial_whitelist(_machine_id):
-        log.info(f"[License] 试用白名单放行: {_machine_id}")
-        _access_granted = True
-    # 2) 已激活缓存（之前输入的有效激活码）
-    if not _access_granted:
-        _cached = load_activation_cache()
-        if _cached is not None:
-            log.info(f"[License] 激活缓存有效: {_cached.licensee}")
-            _access_granted = True
-    # 3) license.dat 文件（正式 License）
-    if not _access_granted:
-        try:
-            _lic = verify_license()
-            log.info(f"[License] 已授权: {_lic.licensee}, 剩余 {_lic.days_left} 天")
-            _access_granted = True
-        except (LicenseError, ImportError):
-            pass
+    log.info("[License] 服务端采用激活机制，客户端免激活放行。")
 
     log.info("Application starting...")
     try:
@@ -1484,22 +1353,11 @@ if __name__ == "__main__":
 
         # ── 单例保护：只允许运行一个实例 ──
         _is_already_running = False
-        if sys.platform == "win32":
-            # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
-            import ctypes as _ctypes
-            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
-            if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                _is_already_running = True
-        else:
-            # Linux/macOS: QSharedMemory
-            _singleton_key = "luosiding.ecommerce.agent.matrix.single_instance"
-            _shmem = QSharedMemory(_singleton_key)
-            if _shmem.attach():
-                _shmem.detach()
-            if not _shmem.create(1):
-                _is_already_running = True
-            import atexit as _atexit
-            _atexit.register(lambda: _shmem.detach() if _shmem.isAttached() else None)
+        # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
+        import ctypes as _ctypes
+        _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
+        if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            _is_already_running = True
         if _is_already_running:
             from PySide6.QtWidgets import QMessageBox as _QMB
             _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")

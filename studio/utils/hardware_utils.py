@@ -34,12 +34,11 @@ def get_system_hardware_info() -> dict:
         pass
 
     try:
-        if platform.system() == "Windows":
-            import winreg
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
-            cpu_name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
-            if cpu_name:
-                info["cpu_name"] = cpu_name
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        cpu_name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+        if cpu_name:
+            info["cpu_name"] = cpu_name
     except Exception:
         pass
 
@@ -105,6 +104,11 @@ def auto_adjust_concurrency_configs(force: bool = False) -> dict:
         try:
             with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 ai_cfg = json.load(f)
+        except json.JSONDecodeError:
+            import shutil
+            backup = AI_CONFIG_FILE + ".corrupted"
+            shutil.copy2(AI_CONFIG_FILE, backup)
+            log.warning(f"[Hardware] ai_config.json corrupted, backed up to {backup}, starting fresh")
         except Exception:
             pass
     
@@ -131,6 +135,11 @@ def auto_adjust_concurrency_configs(force: bool = False) -> dict:
         try:
             with open(_CLIP_CFG_FILE, "r", encoding="utf-8") as f:
                 clip_cfg = json.load(f)
+        except json.JSONDecodeError:
+            import shutil
+            backup = _CLIP_CFG_FILE + ".corrupted"
+            shutil.copy2(_CLIP_CFG_FILE, backup)
+            log.warning(f"[Hardware] material_index_config.json corrupted, backed up to {backup}, starting fresh")
         except Exception:
             pass
             

@@ -11,8 +11,8 @@ from PySide6.QtCore import Signal, QThread, Qt
 from PySide6.QtGui import QColor
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from config.paths import TMP_DIR, WHISPER_MODELS_DIR, CONFIG_INI_FILE
 from utils.my_knowledge_manager import MyKnowledgeManager
+from config.paths import CONFIG_INI_FILE
 
 class FeishuSyncWorker(BaseWorker):
     finished = Signal(list)
@@ -130,38 +130,17 @@ class LLMWorker(BaseWorker):
 
     def __init__(self, api_url, api_key, model, system_prompt, user_prompt):
         super().__init__()
-        self.api_url = api_url
-        self.api_key = api_key
         self.model = model
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
 
     def run(self):
         try:
-            import requests
-            url = f"{self.api_url.rstrip('/')}/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": self.user_prompt}
-                ],
-                "temperature": 0.7
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=60)
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM 请求失败: HTTP {res.status_code} - {res.text}")
-            
-            data = res.json()
-            choices = data.get("choices", [])
-            if not choices:
-                raise RuntimeError(f"接口未返回内容: {data}")
-            
-            content = choices[0].get("message", {}).get("content", "")
+            from utils.llm_proxy import llm_chat
+            content = llm_chat(
+                self.system_prompt, self.user_prompt,
+                model=self.model, temperature=0.7, timeout=60
+            )
             self.finished.emit(content)
         except Exception as e:
             self.error.emit(str(e))
@@ -279,17 +258,17 @@ class AIScriptPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
-        self.records_list = []
-        self.selected_record = None
         self.my_kb = MyKnowledgeManager()
         self._selected_stylization = None
+        self.records_list = []
+        self.selected_record = None
 
     def setup(self):
         layout = QVBoxLayout(self.parent_widget)
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(16)
 
-        heading = QLabel("✍️ 飞书选题文案（热点 / 选题驱动）")
+        heading = QLabel("✍️ AI 文案创作")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
@@ -308,7 +287,7 @@ class AIScriptPage(BasePage):
         left_layout.setContentsMargins(0, 0, 10, 0)
         left_layout.setSpacing(14)
 
-        # 卡片 1：飞书选题列表
+        # 卡片 1：飞书选题同步
         card_topics = QFrame()
         card_topics.setObjectName("card")
         topics_layout = QVBoxLayout(card_topics)
@@ -316,11 +295,12 @@ class AIScriptPage(BasePage):
         topics_layout.setSpacing(10)
 
         title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("📋 飞书多维表格选题列表"))
+        title_row.addWidget(QLabel("📋 飞书选题"))
         title_row.addStretch()
-        self.btn_sync_topics = QPushButton("🔄 同步飞书选题")
+        self.btn_sync_topics = QPushButton("🔧 同步飞书选题")
         self.btn_sync_topics.setObjectName("secondary_button")
         self.btn_sync_topics.clicked.connect(self._sync_feishu_topics)
+        self.btn_sync_topics.hide()
         title_row.addWidget(self.btn_sync_topics)
         topics_layout.addLayout(title_row)
 
@@ -336,6 +316,19 @@ class AIScriptPage(BasePage):
         self.table_topics.setMinimumWidth(100)
         topics_layout.addWidget(self.table_topics, 1)
         left_layout.addWidget(card_topics, 1)
+
+        # 卡片 2：选题输入
+        card_topic = QFrame()
+        card_topic.setObjectName("card")
+        topic_layout = QVBoxLayout(card_topic)
+        topic_layout.setContentsMargins(20, 16, 20, 16)
+        topic_layout.setSpacing(10)
+        topic_layout.addWidget(QLabel("📋 选题标题"))
+        self.edit_topic_title = QLineEdit()
+        self.edit_topic_title.setPlaceholderText("输入视频选题标题，用于生成AI文案...")
+        self.edit_topic_title.textChanged.connect(self._on_topic_text_changed)
+        topic_layout.addWidget(self.edit_topic_title)
+        left_layout.addWidget(card_topic, 0)
 
         # 卡片 2：选题背景笔记（可选，手动填写；联网查素材在分镜页操作）
         card_ref = QFrame()
@@ -451,6 +444,11 @@ class AIScriptPage(BasePage):
 
         self.reload_sources()
 
+    def _on_topic_text_changed(self):
+        has_text = bool(self.edit_topic_title.text().strip())
+        self.btn_gen_draft.setEnabled(has_text or self.selected_record is not None)
+        self.btn_go_storyboard.setEnabled(has_text or self.selected_record is not None)
+
     # ── 风格化 ──
 
     def _reload_stylizations(self):
@@ -487,130 +485,25 @@ class AIScriptPage(BasePage):
         if hasattr(self, "text_style_portrait") and item:
             self.text_style_portrait.setPlainText(item.get("content", ""))
 
-    def _get_feishu_config(self):
-        config = configparser.ConfigParser()
-        appid = ""
-        appsecret = ""
-        apptoken = ""
-        tableid = ""
-        topicfield = "选题"
-        scriptfield = "脚本"
-        foldertoken = ""
-        try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding='utf-8')
-                if config.has_section('Feishu'):
-                    appid = config.get('Feishu', 'AppId', fallback="")
-                    appsecret = config.get('Feishu', 'AppSecret', fallback="")
-                    apptoken = config.get('Feishu', 'AppToken', fallback="")
-                    tableid = config.get('Feishu', 'TableId', fallback="")
-                    topicfield = config.get('Feishu', 'TopicField', fallback="选题")
-                    scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
-                    foldertoken = config.get('Feishu', 'FolderToken', fallback="")
-        except Exception:
-            pass
-        return appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken
-
-    def _sync_feishu_topics(self):
-        appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken = self._get_feishu_config()
-        if not appid or not appsecret or not apptoken or not tableid:
-            QMessageBox.warning(self.parent_widget, "配置未完备", "请先在「环境配置」页面配置好飞书 AppID/Secret/AppToken/TableID！")
-            return
-
-        self.btn_sync_topics.setEnabled(False)
-        self.lbl_status.setText("正在连接飞书并获取选题数据...")
-        self.pbar.setVisible(True)
-
-        self.sync_worker = FeishuSyncWorker(appid, appsecret, apptoken, tableid, topicfield, scriptfield)
-        
-        def on_done(records):
-            self.btn_sync_topics.setEnabled(True)
-            self.pbar.setVisible(False)
-            self.lbl_status.setText(f"同步成功：获取到 {len(records)} 个选题")
-            self.records_list = records
-
-            self.table_topics.setRowCount(0)
-            for idx, r in enumerate(records):
-                self.table_topics.insertRow(idx)
-                self.table_topics.setItem(idx, 0, QTableWidgetItem(r["topic"]))
-                self.table_topics.setItem(idx, 1, QTableWidgetItem(r["status"]))
-                self.table_topics.setItem(idx, 2, QTableWidgetItem(r["id"]))
-
-        def on_err(err_msg):
-            self.btn_sync_topics.setEnabled(True)
-            self.pbar.setVisible(False)
-            self.lbl_status.setText("同步失败")
-            QMessageBox.critical(self.parent_widget, "同步错误", f"从飞书同步选题失败：\n{err_msg}")
-
-        self.sync_worker.finished.connect(on_done)
-        self.sync_worker.error.connect(on_err)
-        self.sync_worker.start()
-
-    def _on_topic_selected(self):
-        selected_ranges = self.table_topics.selectedRanges()
-        if not selected_ranges:
-            self.selected_record = None
-            self.btn_gen_draft.setEnabled(False)
-            self.btn_go_storyboard.setEnabled(False)
-            return
-
-        row = selected_ranges[0].topRow()
-        if row < 0 or row >= len(self.records_list):
-            return
-
-        self.selected_record = self.records_list[row]
-        self.btn_gen_draft.setEnabled(True)
-        self.btn_go_storyboard.setEnabled(True)
-
-        if self.selected_record.get("script"):
-            self.edit_copywriting.setText(self.selected_record["script"])
-
-    def _search_references(self):
-        if not self.selected_record:
-            return
-
-        query = self.selected_record["topic"]
-        if not query:
-            QMessageBox.warning(self.parent_widget, "选题为空", "选中的选题标题为空，无法搜索。")
-            return
-
-        self.btn_search_ref.setEnabled(False)
-        self.lbl_status.setText(f"正在全网搜索关于「{query}」的素材与参考资料...")
-        self.pbar.setVisible(True)
-
-        self.search_worker = WebSearchWorker(query)
-        
-        def on_done(results):
-            self.btn_search_ref.setEnabled(True)
-            self.pbar.setVisible(False)
-            self.lbl_status.setText("搜索资料完成。")
-            self.edit_references.setText(results)
-
-        def on_err(err_msg):
-            self.btn_search_ref.setEnabled(True)
-            self.pbar.setVisible(False)
-            self.lbl_status.setText("搜索资料失败。")
-            QMessageBox.warning(self.parent_widget, "搜索提示", f"联网搜索参考资料失败（网络异常）：\n{err_msg}\n您仍可以直接在此输入框手动输入背景资料。")
-
-        self.search_worker.finished.connect(on_done)
-        self.search_worker.error.connect(on_err)
-        self.search_worker.start()
-
     def _generate_copywriting(self):
-        if not self.selected_record:
-            return
+        topic = self.edit_topic_title.text().strip()
+        if not topic:
+            if self.selected_record:
+                topic = self.selected_record.get("topic", "")
+            if not topic:
+                QMessageBox.warning(self.parent_widget, "选题为空", "请先输入视频选题标题或从飞书同步选题。")
+                return
 
         ai = getattr(self.main_window, "ai_config", {}) or {}
         llm_api_url = ai.get("llm_api_url", "")
         llm_api_key = ai.get("llm_api_key", "")
         llm_model   = ai.get("llm_model", "deepseek-chat")
 
-        if not llm_api_url or not llm_api_key:
+        if not llm_model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在「AI 设置」配置 LLM 的 API 地址与 Key。")
+                                "请先在「AI 设置」配置 LLM 模型名称。")
             return
 
-        topic        = self.selected_record["topic"]
         background   = self.edit_references.toPlainText().strip()
         extra_prompt = self.edit_extra_prompt.toPlainText().strip()
 
@@ -682,7 +575,11 @@ class AIScriptPage(BasePage):
         # Pass copywriting text and Feishu record info to Storyboard Page
         if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:
             style_id = self._selected_stylization.get("id") if self._selected_stylization else None
-            self.main_window.storyboard_tool.set_copywriting(copy_text, self.selected_record, stylization_id=style_id)
+            self.main_window.storyboard_tool.set_copywriting(
+                copy_text,
+                feishu_record=self.selected_record,
+                stylization_id=style_id,
+            )
         
         # Switch to storyboard page (index 38)
         self.main_window.switch_page(38)
@@ -730,3 +627,78 @@ class AIScriptPage(BasePage):
             "极限词提醒",
             f"检测到 {len(matches)} 处平台广告极限词，已在文本中红底高亮显示！\n\n涉及词汇：{word_list_str}"
         )
+
+    # ──────────────────── 飞书同步 ──────────────────────────────────
+    def _get_feishu_config(self):
+        """从 CONFIG_INI_FILE 读取飞书配置。"""
+        config = configparser.ConfigParser()
+        appid = ""
+        appsecret = ""
+        apptoken = ""
+        tableid = ""
+        topicfield = "选题"
+        scriptfield = "脚本"
+        foldertoken = ""
+        try:
+            config.read(CONFIG_INI_FILE, encoding="utf-8")
+            if config.has_section('Feishu'):
+                appid = config.get('Feishu', 'AppId', fallback="")
+                appsecret = config.get('Feishu', 'AppSecret', fallback="")
+                apptoken = config.get('Feishu', 'AppToken', fallback="")
+                tableid = config.get('Feishu', 'TableId', fallback="")
+                topicfield = config.get('Feishu', 'TopicField', fallback="选题")
+                scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
+                foldertoken = config.get('Feishu', 'FolderToken', fallback="")
+        except Exception:
+            pass
+        return appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken
+
+    def _sync_feishu_topics(self):
+        """从飞书多维表格同步选题列表。"""
+        appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken = self._get_feishu_config()
+        if not appid or not appsecret or not apptoken or not tableid:
+            QMessageBox.warning(self.parent_widget, "配置未完成",
+                                "请先在「环境配置」页配置好飞书 AppID/Secret/AppToken/TableID。")
+            return
+        self.btn_sync_topics.setEnabled(False)
+        self.lbl_status.setText("正在连接飞书并获取选题数据...")
+        self.pbar.setVisible(True)
+        self.sync_worker = FeishuSyncWorker(appid, appsecret, apptoken, tableid, topicfield, scriptfield)
+
+        def on_done(records):
+            self.btn_sync_topics.setEnabled(True)
+            self.pbar.setVisible(False)
+            self.lbl_status.setText(f"同步成功，获取到 {len(records)} 个选题")
+            self.records_list = records
+
+            self.table_topics.setRowCount(0)
+            for idx, r in enumerate(records):
+                self.table_topics.insertRow(idx)
+                self.table_topics.setItem(idx, 0, QTableWidgetItem(r["topic"]))
+                self.table_topics.setItem(idx, 1, QTableWidgetItem(r["status"]))
+                self.table_topics.setItem(idx, 2, QTableWidgetItem(r["id"]))
+
+        def on_err(err_msg):
+            self.btn_sync_topics.setEnabled(True)
+            self.pbar.setVisible(False)
+            self.lbl_status.setText("同步失败")
+            QMessageBox.critical(self.parent_widget, "飞书同步失败", err_msg)
+
+        self.sync_worker.finished.connect(on_done)
+        self.sync_worker.error.connect(on_err)
+        self.sync_worker.start()
+
+    def _on_topic_selected(self):
+        """当在飞书选题表格中选择一行时触发。"""
+        selected_ranges = self.table_topics.selectedRanges()
+        if not selected_ranges:
+            self.selected_record = None
+            return
+        row = selected_ranges[0].topRow()
+        if row < 0 or row >= len(self.records_list):
+            return
+        self.selected_record = self.records_list[row]
+        self.btn_gen_draft.setEnabled(True)
+        self.btn_go_storyboard.setEnabled(True)
+        if self.selected_record["topic"]:
+            self.edit_topic_title.setText(self.selected_record["topic"])

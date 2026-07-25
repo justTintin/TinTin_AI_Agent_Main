@@ -1,36 +1,45 @@
+# -*- coding: utf-8 -*-
+"""VoxCPM 远程客户端（纯远程模式）。
+
+服务端接口：POST /voxcpm/tts
+  Body: {"text": "...", "prompt_audio": "base64...", "speaker": "default"}
+  Response: audio/wav bytes
+"""
 import os
-import sys
-import time
+import json
 import base64
-import subprocess
-import configparser
+import requests
+from utils.http_client import resilient_post
 
-from config.paths import PROJECT_ROOT, WORKSPACE_ROOT, VOXCPM2_DIR
-from utils.platform_utils import IS_WIN, find_venv_python, create_no_window_flag
-
-_proc = None
+from utils.logger_utils import log
 
 
-def tts_port():
-    port = 7861
-    cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
+def _read_vox_url() -> str:
+    """从 ai_config 读 vox_api_url。优先 vox_api_url，否则从 compute_server_url + /voxcpm/tts 派生。"""
     try:
-        if os.path.isfile(cfg_path):
-            cfg = configparser.ConfigParser()
-            cfg.read(cfg_path, encoding="utf-8")
-            if cfg.has_section("VoxCPM"):
-                port = cfg.getint("VoxCPM", "Port", fallback=7861)
+        from config.paths import AI_CONFIG_FILE
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            url = (cfg.get("vox_api_url") or "").strip()
+            if not url:
+                base = (cfg.get("compute_server_url") or "").strip()
+                if base:
+                    url = base.rstrip("/") + "/voxcpm/tts"
+            return url
     except Exception:
         pass
-    return port
+    return ""
 
 
-def tts_url():
-    return f"http://127.0.0.1:{tts_port()}/v1/tts"
+def tts_url() -> str:
+    """当前 TTS 服务地址。"""
+    url = _read_vox_url()
+    return url or "http://127.0.0.1:8000/voxcpm/tts"
 
 
 def is_running(timeout=2):
-    import requests
+    """检测远程 VoxCPM 是否可用（发空文本探测）。"""
     try:
         requests.post(tts_url(), json={"text": ""}, timeout=timeout)
         return True
@@ -38,112 +47,37 @@ def is_running(timeout=2):
         return False
 
 
-def _voxcpm_python():
-    return find_venv_python(VOXCPM2_DIR)
+def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
+                   timeout: int = 600) -> str:
+    """远程 TTS 合成，返回输出路径。
 
-
-def _checkpoint():
-    cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
-    try:
-        if os.path.isfile(cfg_path):
-            cfg = configparser.ConfigParser()
-            cfg.read(cfg_path, encoding="utf-8")
-            mp = cfg.get("VoxCPM", "ModelPath", fallback="").strip()
-            if mp:
-                if not os.path.isabs(mp):
-                    mp = os.path.join(WORKSPACE_ROOT, mp)
-                if os.path.isdir(mp):
-                    return os.path.abspath(mp)
-    except Exception:
-        pass
-
-    from config.paths import VOXCPM2_DIR
-    default_path = os.path.join(VOXCPM2_DIR, "models", "openbmb__VoxCPM2")
-    if os.path.isdir(default_path):
-        return os.path.abspath(default_path)
-    return "openbmb/VoxCPM2"
-
-
-def start_server():
-    if is_running():
-        return False, "服务已在运行"
-    script = os.path.join(WORKSPACE_ROOT, "studio", "voxcpm_api_server.py")
-    if not os.path.isfile(script):
-        raise RuntimeError("找不到 voxcpm_api_server.py。")
-    cmd = [_voxcpm_python(), script, "--listen", f"127.0.0.1:{tts_port()}",
-           "--checkpoint-path", _checkpoint()]
-    log_dir = os.path.join(PROJECT_ROOT, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    logf = open(os.path.join(log_dir, "voxcpm_api.log"), "a", encoding="utf-8")
-    flags = create_no_window_flag()
-    global _proc
-    _proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, cwd=PROJECT_ROOT, creationflags=flags)
-    return True, "已启动，正在加载模型…"
-
-
-def stop_server():
-    global _proc
-    stopped = False
-    try:
-        if _proc and _proc.poll() is None:
-            _proc.terminate()
-            try:
-                _proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                _proc.kill()
-            stopped = True
-    except Exception:
-        pass
-    _proc = None
-    if IS_WIN:
-        try:
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*voxcpm_api_server.py*' } "
-                 "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
-                creationflags=create_no_window_flag(), timeout=10, capture_output=True)
-            stopped = True
-        except Exception:
-            pass
-    else:
-        try:
-            subprocess.run(
-                ["pkill", "-f", "voxcpm_api_server.py"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-            stopped = True
-        except Exception:
-            pass
-    return stopped, "已停止" if stopped else "未发现运行中的服务"
-
-
-def ensure_running(wait=300, on_phase=None):
-    if is_running():
-        return True
-    start_server()
-    deadline = time.time() + wait
-    while time.time() < deadline:
-        if on_phase:
-            on_phase("正在启动 VoxCPM 服务并加载模型，请稍候…")
-        time.sleep(3)
-        if is_running():
-            return True
-    return False
-
-
-def synthesize_tts(text, ref_wav, out_path, timeout=600):
-    import requests
+    服务端 API：POST /voxcpm/tts
+      {"text": "...", "prompt_audio": "base64...", "speaker": "default"}
+    """
     text = (text or "").strip()
     if not text:
         raise RuntimeError("配音文案为空。")
-    payload = {"text": text, "normalize": True}
+
+    prompt_audio = None
     if ref_wav and os.path.isfile(ref_wav):
         with open(ref_wav, "rb") as f:
-            payload["references"] = [{"audio": base64.b64encode(f.read()).decode()}]
+            prompt_audio = base64.b64encode(f.read()).decode()
+
+    payload = {"text": text, "prompt_audio": prompt_audio, "speaker": "default"}
+    url = tts_url()
+    log.info(f"[VoxCPM] 请求 TTS: {url} text_len={len(text)}")
+
     try:
-        r = requests.post(tts_url(), json=payload, timeout=timeout)
+        r = resilient_post(url, json=payload, timeout=timeout, service="voxcpm")
+        log.info(f"[VoxCPM] 响应 HTTP {r.status_code} ({len(r.content)//1024}KB)")
     except requests.exceptions.RequestException:
-        raise RuntimeError(f"无法连接 VoxCPM 本地服务（{tts_url()}）。"
-                           "请先到『声音克隆』页启动本地 API 服务后再试。")
+        log.error(f"[VoxCPM] 连接失败: {url}")
+        raise RuntimeError(
+            f"无法连接 VoxCPM 远程服务（{url}）。"
+            "请到『大模型配置』→『声音克隆』页检查 API 地址是否正确，"
+            "并确认远程服务已启动。"
+        )
+
     if r.status_code != 200:
         msg = ""
         try:
@@ -151,7 +85,9 @@ def synthesize_tts(text, ref_wav, out_path, timeout=600):
         except Exception:
             pass
         raise RuntimeError(f"TTS 失败（HTTP {r.status_code}）：{msg or r.text[:200]}")
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(r.content)
+    log.info(f"[VoxCPM] TTS 合成完成: {out_path} ({len(r.content) // 1024}KB)")
     return out_path

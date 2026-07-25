@@ -41,6 +41,7 @@ from PySide6.QtGui import QIcon, QFont, QPixmap
 from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
+from utils.gui_icons import mdi_button, mdi_icon
 
 
 class SidebarMixin:
@@ -67,7 +68,12 @@ class SidebarMixin:
         
         self.nav_buttons = []
 
-
+        # 素材浏览器（菜单最顶部，直接打开外部 Electron 应用，非页面切换）
+        btn_browser = QPushButton("🌐 素材浏览器")
+        btn_browser.setObjectName("nav_button")
+        btn_browser.setCursor(Qt.PointingHandCursor)
+        btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
+        scroll_layout.addWidget(btn_browser)
 
         # 3. 账户平台 Section (暂时隐藏)
         # account_card = QFrame()
@@ -101,14 +107,16 @@ class SidebarMixin:
         script_layout.addWidget(script_header)
         
         script_menus = [
-            ("📚 我的知识库", 29),
-            ("📦 产品资料", 28),
-            ("🛒 产品文案创作", 30),
-            ("📝 分镜脚本创作", 38),
-            # ("✍️ 飞书选题文案", 20),       # 下版本
+            ("📚 我的知识库", 29, None),
+            ("产品资料", 28, "download"),
+            ("🛒 产品文案创作", 30, None),
+            ("分镜脚本创作", 38, "pencil"),
         ]
-        for text, index in script_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in script_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -129,27 +137,23 @@ class SidebarMixin:
         media_layout.addWidget(media_header)
 
         media_menus = [
-            ("🎨 即梦生成", 32),
+            ("🎨 即梦生成", 32, None),
             # ("🧺 即梦素材", 43),          # 暂时隐藏
             # ("🪄 MG 动画", 36),          # 暂时隐藏
-            ("🗄️ 素材管理", 42),
-            ("🔍 向量检索", 39),
-            # ("📋 任务列表", 9),           # 暂时隐藏
+            ("素材检索", 39, "search"),
+            ("📋 任务队列", 9, None),
         ]
-        for text, index in media_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in media_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             media_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        # 直接打开素材浏览器（外部 Electron 应用，非页面切换）
-        btn_browser = QPushButton("🌐 素材浏览器")
-        btn_browser.setObjectName("nav_button")
-        btn_browser.setCursor(Qt.PointingHandCursor)
-        btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
-        media_layout.addWidget(btn_browser)
         scroll_layout.addWidget(media_card)
 
         # 成片制作 Section
@@ -164,12 +168,16 @@ class SidebarMixin:
         compose_layout.addWidget(compose_header)
 
         compose_menus = [
-            # ("🚀 一键成片", 34),           # 下版本
-            ("✂️ 智能混剪", 15),
-            ("📡 直播切片", 19),
+            ("成片任务", 43, "clock-outline"),
+            ("一键成片", 34, "rocket"),
+            ("智能混剪", 15, "content-cut"),
+            ("📡 直播切片", 19, None),
         ]
-        for text, index in compose_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in compose_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -218,18 +226,19 @@ class SidebarMixin:
         
         video_menus = [
             # ("🗣️ 数字人", 3),             # 下版本
-            ("💬 视频转文字", 12),
-            ("🎙️ 声音克隆", 21),
-            ("🎞️ 视频去字幕", 18),
-            # ("✨ 视频修复", 11),          # 暂时隐藏
-            ("🔎 视频框选 OCR", 24),
+            ("💬 视频转文字", 12, None),
+            ("声音克隆", 21, "audio"),
+            ("🎞️ 视频去字幕", 18, None),
+            # ("✨ 视频修复", 11, None),
+            ("视频框选 OCR", 24, "search"),
             # ("🏷️ 视频智能重命名", 26),   # 暂时隐藏
             # ("🌈 批量 LUT 调色", 27),     # 暂时隐藏
-            ("📈 视频预测评价", 35),
-            ("📢 营销视频检测", 41),
         ]
-        for text, index in video_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in video_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -237,6 +246,34 @@ class SidebarMixin:
             video_layout.addWidget(btn)
             self.nav_buttons.append(btn)
         scroll_layout.addWidget(video_card)
+
+        # 7. 视频运营 Section
+        ops_card = QFrame()
+        ops_card.setProperty("section_type", "ai")
+        ops_layout = QVBoxLayout(ops_card)
+        ops_layout.setContentsMargins(6, 8, 6, 8)
+        ops_layout.setSpacing(2)
+
+        ops_header = QLabel("视频运营")
+        ops_header.setObjectName("section_header")
+        ops_layout.addWidget(ops_header)
+
+        ops_menus = [
+            ("📈 视频评价预测", 35, None),
+            ("📢 视频营销检测", 41, None),
+        ]
+        for text, index, icon_name in ops_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
+            btn.setObjectName("nav_button")
+            btn.setProperty("target_index", index)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
+            ops_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
+        scroll_layout.addWidget(ops_card)
 
         # 5. 系统配置 Section
         system_card = QFrame()
@@ -250,14 +287,17 @@ class SidebarMixin:
         system_layout.addWidget(system_header)
         
         other_menus = [
-            ("⚙️ 模型配置", 7),
-            ("🔌 平台接入", 23),
-            ("📦 资源配置", 22),
-            ("🖥️ 运行环境", 37),
-            ("❓ 帮助", 6)
+            ("模型配置", 7, "cog"),
+            ("平台接入", 23, "link"),
+            ("资源配置", 22, "download"),
+            ("运行环境", 37, "server"),
+            ("❓ 帮助", 6, None),
         ]
-        for text, index in other_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in other_menus:
+            if icon_name:
+                btn = mdi_button(text, icon_name)
+            else:
+                btn = QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)

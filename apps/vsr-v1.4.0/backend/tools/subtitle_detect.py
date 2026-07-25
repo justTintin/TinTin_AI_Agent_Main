@@ -55,7 +55,17 @@ class SubtitleDetect:
 
     def detect_subtitle(self, img):
         temp_list = []
-        results = self.text_detector.predict(img)
+        try:
+            results = self.text_detector.predict(img)
+        except Exception as e:
+            if not getattr(self, "_paddle_error_logged", False):
+                print(f"[WARN] Paddle / cuDNN 库加载或运行异常 ({e})。系统已自动为您降级为「强制重绘选区」模式，去字幕将继续顺畅完成。", flush=True)
+                self._paddle_error_logged = True
+            coordinate_list = []
+            for s_ymin, s_ymax, s_xmin, s_xmax in self.sub_areas:
+                coordinate_list.append((s_xmin, s_xmax, s_ymin, s_ymax))
+            return coordinate_list
+
         sub_areas = self.sub_areas
         has_areas = sub_areas is not None and len(sub_areas) > 0
         for res in results:

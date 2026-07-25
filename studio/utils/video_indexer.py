@@ -15,13 +15,177 @@ import base64
 import tempfile
 
 from utils.base_worker import BaseWorker
-from utils.video_index_manager import VideoIndexManager, compute_video_hash
 from utils.logger_utils import log
 from PySide6.QtCore import Signal
-import threading
 
-_whisper_model_lock = threading.Lock()
-_whisper_model_cache = {}
+
+# ─── 灰片/Log 检测 ──────────────────────────────────────────────────
+
+# Log 色彩空间的 transfer characteristics
+_LOG_TRANSFERS = {
+    "arib-std-b67",   # HLG（Sony 部分 S-Log 使用）
+    "smpte2084",      # PQ（HDR / 部分 Log）
+    "smpte428",       # D-Cinema
+    "linear",         # 线性（ACES / 部分 Log）
+    "log",            # 通用 Log
+    "log100",
+    "log100-sqrt10",
+    "log316-sqrt10",
+}
+
+# 10-bit 像素格式（专业/Log 素材常见）
+_10BIT_PIX_FMTS = {
+    "yuv420p10le", "yuv422p10le", "yuv444p10le",
+    "yuv420p10be", "yuv422p10be", "yuv444p10be",
+    "gbrp10le", "gbrp10le",
+}
+
+
+def probe_color_metadata(video_path: str, ffprobe_path: str = "") -> dict:
+    """用 ffprobe 提取视频的色彩元数据。
+
+    Returns:
+        {"color_transfer": str, "color_primaries": str, "color_space": str,
+         "pix_fmt": str, "width": int, "height": int}
+        失败返回空 dict。
+    """
+    import subprocess
+    if not ffprobe_path:
+        from utils.platform_utils import find_ffprobe
+        ffprobe_path = find_ffprobe()
+        if not ffprobe_path or not os.path.isfile(ffprobe_path):
+            from utils.platform_utils import find_ffmpeg
+            ff = find_ffmpeg()
+            if ff:
+                ffprobe_path = ff.replace("ffmpeg", "ffprobe")
+    if not ffprobe_path or not os.path.isfile(ffprobe_path):
+        return {}
+
+    cmd = [
+        ffprobe_path, "-v", "error", "-select_streams", "v:0",
+        "-show_entries",
+        "stream=color_transfer,color_primaries,color_space,pix_fmt,width,height",
+        "-of", "json", video_path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                           creationflags=0x08000000)
+        if r.returncode != 0:
+            return {}
+        data = json.loads(r.stdout)
+        streams = data.get("streams", [])
+        return streams[0] if streams else {}
+    except Exception:
+        return {}
+
+
+def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
+    """检测视频是否为 Log/灰片，需要 LUT 还原。
+
+    两路判断：
+      1. ffprobe 色彩元数据：transfer 是否为 Log 类 / pix_fmt 是否为 10-bit
+      2. 采样帧直方图：对比度是否偏低（灰片特征）
+
+    Returns:
+        {
+            "is_log": bool,           # 是否为灰片
+            "confidence": float,       # 置信度 0.0 ~ 1.0
+            "reason": str,            # 判断理由
+            "color_metadata": dict,   # ffprobe 原始色彩元数据
+            "frame_stats": dict,      # 帧采样统计 {mean_brightness, contrast_std, ...}
+        }
+    """
+    import cv2
+    import numpy as np
+
+    result = {
+        "is_log": False,
+        "confidence": 0.0,
+        "reason": "",
+        "color_metadata": {},
+        "frame_stats": {},
+    }
+
+    # ── 1. 色彩元数据 ──
+    meta = probe_color_metadata(video_path)
+    result["color_metadata"] = meta
+
+    transfer = (meta.get("color_transfer") or "").strip().lower()
+    pix_fmt = (meta.get("pix_fmt") or "").strip().lower()
+    color_space = (meta.get("color_space") or "").strip().lower()
+
+    meta_score = 0.0
+    reasons = []
+
+    if transfer and transfer != "unknown":
+        if transfer in _LOG_TRANSFERS:
+            meta_score += 0.6
+            reasons.append(f"色彩传输函数为 {transfer}（Log/HDR 类）")
+        elif transfer == "bt709":
+            meta_score -= 0.3  # 标准 Rec.709，很可能不是灰片
+
+    if pix_fmt in _10BIT_PIX_FMTS:
+        meta_score += 0.25
+        reasons.append(f"10-bit 像素格式 {pix_fmt}（常见于 Log 素材）")
+
+    if color_space and color_space != "bt709" and color_space != "unknown":
+        if "bt2020" in color_space or "smpte" in color_space:
+            meta_score += 0.15
+            reasons.append(f"广色域 {color_space}")
+
+    # ── 2. 采样帧直方图分析 ──
+    try:
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+        else:
+            contrasts = []
+            brightnesses = []
+            # 在 5%~95% 区间均匀采样
+            positions = [int(total_frames * p) for p in
+                         [0.05, 0.25, 0.50, 0.75, 0.90][:sample_frames]]
+            for pos in positions:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                bright = float(np.mean(gray))
+                contrast = float(np.std(gray))
+                brightnesses.append(bright)
+                contrasts.append(contrast)
+            cap.release()
+
+            if brightnesses and contrasts:
+                avg_brightness = np.mean(brightnesses)
+                avg_contrast = np.mean(contrasts)
+                result["frame_stats"] = {
+                    "mean_brightness": round(avg_brightness, 1),
+                    "mean_contrast_std": round(avg_contrast, 1),
+                }
+                # 灰片特征：对比度偏低（像素集中在中间，标准差小）
+                # 正常 Rec.709 视频对比度通常 > 50；灰片往往 < 40
+                if avg_contrast < 35:
+                    meta_score += 0.4
+                    reasons.append(f"帧对比度偏低(std={avg_contrast:.0f})，典型灰片特征")
+                elif avg_contrast < 50:
+                    meta_score += 0.2
+                    reasons.append(f"帧对比度中等(std={avg_contrast:.0f})，可能为灰片")
+                else:
+                    meta_score -= 0.1  # 高对比度，不像灰片
+    except ImportError:
+        pass  # cv2 不可用，跳过帧分析
+    except Exception:
+        pass
+
+    meta_score = max(0.0, min(1.0, meta_score))
+    result["confidence"] = round(meta_score, 2)
+    result["is_log"] = meta_score >= 0.5
+    result["reason"] = "；".join(reasons) if reasons else (
+        "未检测到明显 Log 特征" if meta_score < 0.5 else "综合判断可能为灰片"
+    )
+    return result
 
 
 # ─── 抽帧（复用 video_ai_rename_page 的 cv2 方案）──────────────────────────
@@ -82,8 +246,7 @@ def frame_to_b64(path: str) -> str:
 
 # ─── 视觉 LLM：提取 AI 标签（语义标签列表，区别于重命名页的品牌/型号）─────────
 
-def call_vision_for_tags(frames_b64: list[str], api_url: str,
-                         api_key: str, model: str) -> list[str]:
+def call_vision_for_tags(frames_b64: list[str], model: str) -> list[str]:
     """
     把多帧 base64 图片一次发给视觉模型，提取画面语义标签列表。
     返回 ["键盘", "机械轴", "俯拍", "客制化"] 格式。
@@ -91,7 +254,7 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
     if not frames_b64:
         return []
     try:
-        import requests as req
+        from utils.llm_proxy import llm_chat_messages
         system_prompt = (
             "你是专业的消费电子/产品视频标注专家。\n"
             "给你若干视频关键帧，请归纳画面中出现的所有语义标签。\n"
@@ -105,23 +268,10 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
             })
-        url = f"{api_url.rstrip('/')}/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": model,
-            "num_ctx": 32768,  # Ollama: override default 4096 context for vision models
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": content},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 300,
-        }
-        resp = req.post(url, json=payload, headers=headers, timeout=90)
-        if resp.status_code != 200:
-            log.error(f"视觉 LLM 返回 {resp.status_code}: {resp.text[:200]}")
-            return []
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
+        raw = llm_chat_messages(
+            [{"role": "system", "content": system_prompt},
+             {"role": "user", "content": content}],
+            model=model, temperature=0.1, max_tokens=300, timeout=90)
         # 清除 markdown 代码块
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
         raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE).strip()
@@ -135,57 +285,26 @@ def call_vision_for_tags(frames_b64: list[str], api_url: str,
         return []
 
 
-# ─── Whisper 转写（inline faster_whisper，与重命名/知识库页复用同一模型路径）──
-
-def _resolve_whisper_model_path(models_dir: str, model_name: str) -> str:
-    """检查本地是否已有模型文件，返回可用的模型路径或原始名称。"""
-    candidates = [
-        os.path.join(models_dir, f"models--Systran--faster-whisper-{model_name}"),
-        os.path.join(models_dir, model_name),
-        os.path.join(models_dir, f"faster-whisper-{model_name}"),
-    ]
-    for p in candidates:
-        if os.path.isdir(p) and os.path.isfile(os.path.join(p, "model.bin")):
-            return p
-    return model_name
-
+# ─── Whisper 转写（纯远程 ASR 服务）──
 
 def transcribe_audio(video_path: str, models_dir: str,
                      model_name: str = "large-v3") -> str:
     """
-    用 faster_whisper 对视频音轨转写，返回纯文本台词。
-    使用全局字典缓存模型，避免每个视频重复加载模型文件。
+    调用远程 ASR 服务对视频音轨转写，返回纯文本台词。
+
+    远程模式下走 asr_client 远程服务，不加载本地模型。
+    models_dir / model_name 参数仅为兼容调用方签名保留，本模式下不再使用。
     """
     try:
-        import os as _os
-        _os.environ["LANG"] = "zh_CN.UTF-8"
-        _os.environ["LC_ALL"] = "zh_CN.UTF-8"
-        from faster_whisper import WhisperModel
-
-        device = "cpu"  # 避免与 Ollama 抢显存
-        compute_type = "int8"
-        resolved = _resolve_whisper_model_path(models_dir, model_name)
-        local_files_only = resolved != model_name  # 本地路径找到则禁止下载
-        cache_key = (resolved, device, compute_type)
-
-        with _whisper_model_lock:
-            if cache_key not in _whisper_model_cache:
-                log.info(f"正在加载 Whisper 模型 {model_name} (device={device}, compute_type={compute_type})...")
-                _whisper_model_cache[cache_key] = WhisperModel(
-                    resolved,
-                    device=device,
-                    compute_type=compute_type,
-                    download_root=models_dir,
-                    local_files_only=local_files_only,
-                )
-            model = _whisper_model_cache[cache_key]
-
-            segments, _ = model.transcribe(video_path, language="zh", beam_size=5)
-            text = " ".join(s.text.strip() for s in segments).strip()
-
-        return text
+        from utils.asr_client import read_asr_url, transcribe_remote, segments_to_plain
+        asr_url = read_asr_url()
+        if not asr_url:
+            log.warning("未配置远程 ASR 服务地址，跳过转写")
+            return ""
+        segments = transcribe_remote(video_path, asr_url, language="zh")
+        return segments_to_plain(segments)
     except Exception as e:
-        log.warning(f"Whisper 转写失败（跳过）: {e}")
+        log.warning(f"远程 ASR 转写失败（跳过）: {e}")
         return ""
 
 
@@ -223,7 +342,7 @@ class VideoIndexWorker(BaseWorker):
         from utils.rustfs_manager import _build_client, _ensure_bucket, get_rustfs_config
 
         vpath = self.video_path
-        mgr = VideoIndexManager()
+        # mgr = VideoIndexManager()  # removed with material mgmt
 
         # ── 1. 哈希 ──────────────────────────────────────────────
         self._log(f"[1/5] 计算哈希：{os.path.basename(vpath)}")
@@ -284,15 +403,13 @@ class VideoIndexWorker(BaseWorker):
             ai_cfg = {}
             with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 ai_cfg = json.load(f)
-            api_url = ai_cfg.get("llm_vision_api_url", "")
-            api_key = ai_cfg.get("llm_vision_api_key") or ai_cfg.get("llm_api_key", "")
             model = ai_cfg.get("llm_vision_model", "")
-            if api_url and model and frame_paths:
+            if model and frame_paths:
                 frames_b64 = [frame_to_b64(p) for p in frame_paths[:6]]
-                ai_tags = call_vision_for_tags(frames_b64, api_url, api_key, model)
+                ai_tags = call_vision_for_tags(frames_b64, model)
                 self._log(f"  标签: {ai_tags}")
             else:
-                self._log("  视觉 API 未配置，跳过标签提取")
+                self._log("  视觉模型未配置，跳过标签提取")
         except Exception as e:
             self._log(f"  标签提取失败（跳过）: {e}")
 
@@ -344,7 +461,7 @@ class WhisperFillWorker(BaseWorker):
 
     def do_work(self):
         from config.paths import WHISPER_MODELS_DIR
-        mgr = VideoIndexManager()
+        # mgr = VideoIndexManager()  # removed with material mgmt
         entry = mgr.get_by_id(self.video_id)
         if not entry:
             raise RuntimeError(f"未找到 video_id={self.video_id}")

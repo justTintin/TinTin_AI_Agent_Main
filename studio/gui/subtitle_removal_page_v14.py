@@ -15,7 +15,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_V14_DIR
-from utils.platform_utils import python_binary, IS_WIN
+from utils.platform_utils import python_binary
 
 class SubtitleRemovalWorkerV14(QThread):
     progress_updated = Signal(int)
@@ -23,9 +23,10 @@ class SubtitleRemovalWorkerV14(QThread):
     log_received = Signal(str)
     finished = Signal(bool, str)
 
-    def __init__(self, vsr_python, vsr_script, video_path, boxes, mode, skip_detect, lama_fast, h264, preview_path):
+    def __init__(self, vsr_python, vsr_script, video_path, boxes, mode, skip_detect, lama_fast, h264, preview_path, max_load_num=0):
         """
         :param boxes: list of (ymin, ymax, xmin, xmax) tuples
+        :param max_load_num: STTN max frames per batch. 0 = use backend default (50).
         """
         super().__init__()
         self.vsr_python = vsr_python
@@ -37,6 +38,7 @@ class SubtitleRemovalWorkerV14(QThread):
         self.lama_fast = lama_fast
         self.h264 = h264
         self.preview_path = preview_path
+        self.max_load_num = max_load_num
         self.process = None
         self.is_aborted = False
 
@@ -65,11 +67,9 @@ class SubtitleRemovalWorkerV14(QThread):
         err_msg = ""
 
         # Hide console window on Windows
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0 # SW_HIDE
 
         for idx, box in enumerate(self.boxes):
             if self.is_aborted:
@@ -105,6 +105,8 @@ class SubtitleRemovalWorkerV14(QThread):
                 cmd.append("--lama_fast")
             if self.h264:
                 cmd.append("--h264")
+            if self.max_load_num > 0 and self.max_load_num != 50:
+                cmd.extend(["--max_load_num", str(self.max_load_num)])
 
             self.status_updated.emit(f"正在处理第 {idx+1}/{num_boxes} 个字幕选区...")
             self.log_received.emit(f"\n[INFO] 开始处理选区 {idx+1}/{num_boxes}: (YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax})")
@@ -126,13 +128,18 @@ class SubtitleRemovalWorkerV14(QThread):
 
                 while self.process.poll() is None:
                     if self.is_aborted:
-                        if sys.platform == "win32":
-                            subprocess.run(
+                        # 异步终止，不阻塞工作线程
+                        try:
+                            si = subprocess.STARTUPINFO()
+                            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            si.wShowWindow = 0
+                            subprocess.Popen(
                                 ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                                capture_output=True
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                startupinfo=si
                             )
-                        else:
-                            self.process.terminate()
+                        except Exception:
+                            pass
                         break
                         
                     line = self.process.stdout.readline()
@@ -195,19 +202,16 @@ class SubtitleRemovalWorkerV14(QThread):
         self.is_aborted = True
         if self.process:
             try:
-                if sys.platform == "win32":
-                    # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
-                    subprocess.run(
-                        ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                        capture_output=True
-                    )
-                    try:
-                        self.process.wait(timeout=5)
-                    except Exception:
-                        pass
-                else:
-                    self.process.terminate()
-                    self.process.wait(timeout=5)
+                # 异步运行 taskkill 防止 GUI 主线程卡死
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0 # SW_HIDE
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=startupinfo
+                )
             except Exception:
                 try:
                     self.process.kill()
@@ -414,7 +418,7 @@ class SubtitleRemovalPageV14(BasePage):
         main_layout.setSpacing(16)
 
         # Title
-        heading = QLabel("🎬 视频去字幕 1.4 新版 (PP-OCRv5)")
+        heading = QLabel("视频去字幕")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -422,23 +426,18 @@ class SubtitleRemovalPageV14(BasePage):
         splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
         main_layout.addWidget(splitter, 1)
 
-        # --- Left Panel: Controls & Options ---
+        # --- Left Panel: File Selection & Preview ---
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 10, 0)
         left_layout.setSpacing(14)
-        
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(0, 20, 0, 20)
-        card_layout.setSpacing(14)
 
-        # Video path picker (wrapped in QWidget with 24px margins)
-        inp_container = QWidget()
-        inp_container_layout = QVBoxLayout(inp_container)
-        inp_container_layout.setContentsMargins(24, 0, 24, 0)
-        inp_container_layout.setSpacing(14)
+        # Select file card (top part of left side)
+        select_card = QFrame()
+        select_card.setObjectName("card")
+        select_layout = QVBoxLayout(select_card)
+        select_layout.setContentsMargins(16, 16, 16, 16)
+        select_layout.setSpacing(10)
 
         inp_row = QHBoxLayout()
         inp_row.addWidget(QLabel("输入视频/图片:"))
@@ -450,8 +449,135 @@ class SubtitleRemovalPageV14(BasePage):
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_video)
         inp_row.addWidget(btn_sel)
-        inp_container_layout.addLayout(inp_row)
-        card_layout.addWidget(inp_container)
+        select_layout.addLayout(inp_row)
+        left_layout.addWidget(select_card, 0)
+
+        # Video Preview card (bottom part of left side)
+        preview_card = QFrame()
+        preview_card.setObjectName("card")
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout = QVBoxLayout(preview_card)
+        p_layout.setContentsMargins(16, 16, 16, 16)
+        p_layout.setSpacing(10)
+
+        p_title = QLabel("🖼️ 实时预览画面 (多选区: 绿框为当前选中，蓝框为其他选区):")
+        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
+        p_layout.addWidget(p_title)
+
+        self.preview_label = InteractivePreviewLabelV14()
+        self.preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
+        self.preview_label.selectionChanged.connect(self._on_label_selection_changed)
+        self.preview_label.resized.connect(self.update_preview)
+        p_layout.addWidget(self.preview_label, 1)
+
+        # Video progress slider for scrubbing / previewing frames
+        seek_row = QHBoxLayout()
+        seek_row.setSpacing(8)
+        
+        button_style = """
+            QPushButton {
+                background-color: #1a1a24;
+                color: #a1a1aa;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2e2e38;
+                color: #ffffff;
+                border-color: #3b82f6;
+            }
+            QPushButton:disabled {
+                background-color: #13131a;
+                color: #4b5563;
+                border-color: #1f2937;
+            }
+        """
+
+        self.btn_prev_frame = QPushButton("◀")
+        self.btn_prev_frame.setFixedWidth(30)
+        self.btn_prev_frame.setStyleSheet(button_style)
+        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
+        seek_row.addWidget(self.btn_prev_frame)
+        
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0, 1000)
+        self.seek_slider.setValue(0)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3b82f6;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #3b82f6;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #3b82f6;
+                border: 2px solid #ffffff;
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
+        seek_row.addWidget(self.seek_slider)
+        
+        self.btn_next_frame = QPushButton("▶")
+        self.btn_next_frame.setFixedWidth(30)
+        self.btn_next_frame.setStyleSheet(button_style)
+        self.btn_next_frame.clicked.connect(self._step_next_frame)
+        seek_row.addWidget(self.btn_next_frame)
+        
+        self.lbl_seek_time = QLabel("00:00 / 00:00")
+        self.lbl_seek_time.setFixedWidth(90)
+        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
+        self.lbl_seek_time.setStyleSheet("""
+            QLabel {
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                color: #3b82f6;
+                background-color: #16161e;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        """)
+        seek_row.addWidget(self.lbl_seek_time)
+
+        p_layout.addLayout(seek_row)
+        left_layout.addWidget(preview_card, 1)
+
+        left_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        splitter.addWidget(left_widget)
+
+        # --- Right Panel: Control Area & Processing Log ---
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_widget.setMinimumWidth(380)
+
+        # Control card (top part of right side)
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(0, 20, 0, 20)
+        controls_layout.setSpacing(14)
 
         # Combined Subtitle Area Manager & Editor (Visual Design Optimized)
         box_manage_group = QFrame()
@@ -460,13 +586,13 @@ class SubtitleRemovalPageV14(BasePage):
         box_manage_layout = QVBoxLayout(box_manage_group)
         box_manage_layout.setContentsMargins(24, 16, 24, 16)
         box_manage_layout.setSpacing(14)
-        
+
         # Header: Title (uses standard style)
         box_manage_title = QLabel("📦 字幕选区管理:")
         box_manage_title.setStyleSheet("font-weight: bold; color: #ffffff;")
         box_manage_layout.addWidget(box_manage_title)
 
-        # List Widget (standard styling matching the rest of the application)
+        # List Widget
         self.box_list_widget = QListWidget()
         self.box_list_widget.setMaximumHeight(95)
         self.box_list_widget.currentRowChanged.connect(self._on_box_list_row_changed)
@@ -489,20 +615,20 @@ class SubtitleRemovalPageV14(BasePage):
         """)
         box_manage_layout.addWidget(self.box_list_widget)
 
-        # Action Buttons (standard secondary buttons)
+        # Action Buttons
         btn_box_layout = QHBoxLayout()
         btn_box_layout.setSpacing(10)
-        
+
         self.btn_add_box = QPushButton("➕ 添加选区")
         self.btn_add_box.setObjectName("secondary_button")
         self.btn_add_box.clicked.connect(self._add_box)
         btn_box_layout.addWidget(self.btn_add_box)
-        
+
         self.btn_delete_box = QPushButton("➖ 删除选区")
         self.btn_delete_box.setObjectName("secondary_button")
         self.btn_delete_box.clicked.connect(self._delete_box)
         btn_box_layout.addWidget(self.btn_delete_box)
-        
+
         box_manage_layout.addLayout(btn_box_layout)
 
         # Separator line
@@ -512,11 +638,10 @@ class SubtitleRemovalPageV14(BasePage):
         sep.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
         box_manage_layout.addWidget(sep)
 
-        # Coordinate sliders (standard control sizes with tight vertical spacing)
+        # Coordinate sliders
         sliders_layout = QVBoxLayout()
         sliders_layout.setSpacing(14)
 
-        # Helper to create standard slider row
         def create_slider_row(label_text, slider, val_lbl):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -529,34 +654,30 @@ class SubtitleRemovalPageV14(BasePage):
             row.addWidget(val_lbl)
             return row
 
-        # X Slider
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
         sliders_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
 
-        # W Slider
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
         sliders_layout.addLayout(create_slider_row("字幕选区宽 W:", self.w_slider, self.w_val_lbl))
 
-        # Y Slider
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
         sliders_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
 
-        # H Slider
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
         sliders_layout.addLayout(create_slider_row("字幕选区高 H:", self.h_slider, self.h_val_lbl))
 
         box_manage_layout.addLayout(sliders_layout)
-        card_layout.addWidget(box_manage_group)
+        controls_layout.addWidget(box_manage_group)
 
-        # Bottom section: Algorithm & options (wrapped in QWidget with 24px margins)
+        # Options & action buttons (bottom of control card)
         bottom_container = QWidget()
         bottom_container_layout = QVBoxLayout(bottom_container)
         bottom_container_layout.setContentsMargins(24, 0, 24, 0)
@@ -573,7 +694,11 @@ class SubtitleRemovalPageV14(BasePage):
         bottom_container_layout.addLayout(algo_row)
 
         # Checkboxes
-        self.skip_detect_chk = QCheckBox("⏩ 跳过文字检测 (对框选区域强制覆盖重绘，仅STTN有效)")
+        self.skip_detect_chk = QCheckBox("⏩ 切换为去水印模式 (跳过检测，对框选全区强制覆盖重绘)")
+        self.skip_detect_chk.setToolTip(
+            "【去字幕模式】(未勾选)：使用精准文字检测，只涂抹字幕笔画本身，保护背景，适合动态字幕。\n"
+            "【去水印模式】(已勾选)：跳过文字检测直接重绘整个框选矩形区域，适合静态台标、LOGO水印。"
+        )
         self.skip_detect_chk.setChecked(True)
         bottom_container_layout.addWidget(self.skip_detect_chk)
 
@@ -585,7 +710,41 @@ class SubtitleRemovalPageV14(BasePage):
         self.h264_chk.setChecked(True)
         bottom_container_layout.addWidget(self.h264_chk)
 
-        # Leave blank space above the start button and status display
+        # STTN batch size control (key for high-resolution videos)
+        batch_row = QHBoxLayout()
+        batch_lbl = QLabel("🎞️ STTN 每批处理帧数:")
+        batch_lbl.setStyleSheet("font-size: 12px; color: #a1a1aa;")
+        batch_row.addWidget(batch_lbl)
+        from PySide6.QtWidgets import QSpinBox
+        self.sttn_max_load_spinbox = QSpinBox()
+        self.sttn_max_load_spinbox.setRange(5, 300)
+        self.sttn_max_load_spinbox.setValue(50)
+        self.sttn_max_load_spinbox.setSingleStep(5)
+        self.sttn_max_load_spinbox.setToolTip(
+            "控制 STTN 每批次处理的视频帧数。\n"
+            "默认 50 帧，适用于 1080p 以下视频。\n"
+            "处理 4K 或高分辨率视频时如崩溃，\n"
+            "请将此值降低到 10~20（减少 GPU 显存占用）。"
+        )
+        self.sttn_max_load_spinbox.setStyleSheet("""
+            QSpinBox {
+                background-color: #1a1a24;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 2px 4px;
+                font-size: 12px;
+                min-width: 60px;
+            }
+            QSpinBox:focus { border-color: #3b82f6; }
+        """)
+        batch_row.addWidget(self.sttn_max_load_spinbox)
+        batch_hint = QLabel("帧  (4K视频建议10~20)")
+        batch_hint.setStyleSheet("font-size: 11px; color: #71717a;")
+        batch_row.addWidget(batch_hint)
+        batch_row.addStretch()
+        bottom_container_layout.addLayout(batch_row)
+
         bottom_container_layout.addStretch(1)
 
         # Status & progress
@@ -594,9 +753,24 @@ class SubtitleRemovalPageV14(BasePage):
         bottom_container_layout.addWidget(self.status_lbl)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #15151e;
+                text-align: center;
+                color: #ffffff;
+                font-weight: bold;
+                height: 16px;
+            }
+            QProgressBar::chunk {
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                border-radius: 5px;
+            }
+        """)
         bottom_container_layout.addWidget(self.progress_bar)
 
         # Run buttons
@@ -612,81 +786,27 @@ class SubtitleRemovalPageV14(BasePage):
         btn_action_layout.addWidget(self.btn_stop)
         bottom_container_layout.addLayout(btn_action_layout)
 
-        card_layout.addWidget(bottom_container, 1)
+        controls_layout.addWidget(bottom_container, 1)
+        right_layout.addWidget(controls_card, 0)
 
-        left_layout.addWidget(card)
-        left_widget.setMaximumWidth(450)
-        splitter.addWidget(left_widget)
-
-        # --- Right Panel: Live Preview & Console Output ---
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(10, 0, 0, 0)
-        right_layout.setSpacing(14)
-
-        # Video Preview card
-        preview_card = QFrame()
-        preview_card.setObjectName("card")
-        p_layout = QVBoxLayout(preview_card)
-        p_layout.setContentsMargins(16, 16, 16, 16)
-        
-        p_title = QLabel("🖼️ 实时预览画面 (多选区: 绿框为当前选中，蓝框为其他选区):")
-        p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
-        p_layout.addWidget(p_title)
-
-        self.preview_label = InteractivePreviewLabelV14()
-        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
-        self.preview_label.selectionChanged.connect(self._on_label_selection_changed)
-        self.preview_label.resized.connect(self.update_preview)
-        p_layout.addWidget(self.preview_label)
-
-        # Video progress slider for scrubbing / previewing frames
-        seek_row = QHBoxLayout()
-        self.btn_prev_frame = QPushButton("◀")
-        self.btn_prev_frame.setFixedWidth(30)
-        self.btn_prev_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
-        seek_row.addWidget(self.btn_prev_frame)
-        
-        self.seek_slider = QSlider(Qt.Horizontal)
-        self.seek_slider.setRange(0, 1000)
-        self.seek_slider.setValue(0)
-        self.seek_slider.setEnabled(False)
-        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
-        self.seek_slider.sliderReleased.connect(self._on_seek_released)
-        seek_row.addWidget(self.seek_slider)
-        
-        self.btn_next_frame = QPushButton("▶")
-        self.btn_next_frame.setFixedWidth(30)
-        self.btn_next_frame.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-        self.btn_next_frame.clicked.connect(self._step_next_frame)
-        seek_row.addWidget(self.btn_next_frame)
-        
-        self.lbl_seek_time = QLabel("00:00 / 00:00")
-        self.lbl_seek_time.setFixedWidth(90)
-        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
-        self.lbl_seek_time.setStyleSheet("color: #9ca3af; font-size: 11px;")
-        seek_row.addWidget(self.lbl_seek_time)
-        
-        p_layout.addLayout(seek_row)
-        right_layout.addWidget(preview_card)
-
-        # Console Output Log
+        # Processing Log (bottom part of right side)
         log_card = QFrame()
         log_card.setObjectName("card")
+        log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout = QVBoxLayout(log_card)
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
 
-        log_layout.addWidget(QLabel("📝 去字幕 1.4 引擎实时运行日志:"))
+        log_layout.addWidget(QLabel("📝 处理日志:"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(160)
+        self.log_view.setMinimumHeight(150)
         log_layout.addWidget(self.log_view)
-        right_layout.addWidget(log_card)
-
+        right_layout.addWidget(log_card, 1)  # ← log_card 加入右侧布局（修复：原来缺失此行）
         splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 7)
+        splitter.setStretchFactor(1, 3)
 
     def _select_video(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -770,7 +890,16 @@ class SubtitleRemovalPageV14(BasePage):
             ]
             self.active_box_index = 0
             self._update_box_list_widget()
+            
+            # Force layout activation & events processing to quickly determine correct preview size
+            if self.parent_widget.layout():
+                self.parent_widget.layout().activate()
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
             self.update_preview()
+            
+            # Schedule a short deferred update as well
+            QTimer.singleShot(50, self.update_preview)
         except Exception as e:
             log.error(f"Failed to load video preview: {e}")
             self.original_frame = None
@@ -979,13 +1108,9 @@ class SubtitleRemovalPageV14(BasePage):
         vsr_dir = VSR_V14_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
-        if not os.path.exists(vsr_python) and IS_WIN:
+        if not os.path.exists(vsr_python):
             vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
         vsr_script = os.path.join(vsr_dir, "vsr_run.py")
-
-        # On Linux, the bundled Python is Windows-only; fall back to project venv
-        if not os.path.exists(vsr_python) and not IS_WIN:
-            vsr_python = sys.executable
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
             QMessageBox.critical(
@@ -1041,7 +1166,8 @@ class SubtitleRemovalPageV14(BasePage):
             skip_detect=self.skip_detect_chk.isChecked(),
             lama_fast=self.lama_fast_chk.isChecked(),
             h264=self.h264_chk.isChecked(),
-            preview_path=self.preview_img_path
+            preview_path=self.preview_img_path,
+            max_load_num=self.sttn_max_load_spinbox.value()
         )
         self.worker.progress_updated.connect(self.on_worker_progress)
         self.worker.status_updated.connect(self.on_worker_status)
@@ -1058,9 +1184,9 @@ class SubtitleRemovalPageV14(BasePage):
     def stop_removal(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
-            self.status_lbl.setText("状态: 已被用户终止。")
-            self.log_view.append("\n[WARN] 去字幕引擎任务已被用户终止。")
-            self.cleanup_ui()
+            self.status_lbl.setText("状态: 正在终止中，请稍候...")
+            self.log_view.append("\n[WARN] 已发出停止指令，等待引擎退出...") 
+            # 不在这里调用 cleanup_ui()，等 worker 的 finished 信号触发 on_worker_finished 统一处理
 
     def on_worker_progress(self, val):
         self.progress_bar.setValue(val)
@@ -1089,16 +1215,18 @@ class SubtitleRemovalPageV14(BasePage):
             if msg_box.clickedButton() == open_btn:
                 try:
                     import subprocess
-                    if sys.platform == "win32":
-                        subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
-                    else:
-                        os.system(f'open "{os.path.dirname(out_path)}"')
+                    subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
                 except Exception as e:
                     log.error(f"Failed to open output directory: {e}")
 
             # Restore original video preview with selection boxes overlaid
             self.update_preview()
         else:
+            if self.worker and self.worker.is_aborted:
+                self.status_lbl.setText("状态: 已被用户终止。")
+                self.update_preview()
+                return
+
             self.status_lbl.setText(f"状态: 出错。")
             QMessageBox.critical(
                 self.parent_widget,
@@ -1143,7 +1271,7 @@ class SubtitleRemovalPageV14(BasePage):
         self.skip_detect_chk.setEnabled(True)
         self.lama_fast_chk.setEnabled(True)
         self.h264_chk.setEnabled(True)
-        self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
 
         # Restore seek controls based on if it's a video
         video_path = self.video_path_input.text().strip()
@@ -1182,12 +1310,11 @@ class SubtitleRemovalPageV14(BasePage):
                 frame_found = True
                 break
                 
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
             
             if frame_found:
                 self.update_preview()
-                
-                total_sec = container.duration / 1000000.0 if container.duration else 0.0
                 curr_sec = ratio * total_sec
                 self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
                 

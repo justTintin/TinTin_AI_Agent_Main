@@ -18,10 +18,11 @@ def open_cef_browser(url, title="RunningHub AI 应用浏览器"):
         import webview
         if not _webview_started:
             webview.create_window(title, url, width=1100, height=800)
-            webview.start(threaded=True)
+            webview.start(gui='cef', threaded=True)
             _webview_started = True
         else:
-            webview.create_window(title, url, width=1100, height=800)
+            log.warning("CEF browser already started, falling back to system browser")
+            webbrowser.open(url)
     except Exception as e:
         log.error(f"Failed to open CEF browser: {e}")
         webbrowser.open(url)

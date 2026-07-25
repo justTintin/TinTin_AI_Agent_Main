@@ -3,9 +3,7 @@ import sys
 import shutil
 import subprocess
 
-IS_WIN = sys.platform == "win32"
-IS_LINUX = sys.platform == "linux"
-IS_MAC = sys.platform == "darwin"
+IS_WIN = True  # 工程仅支持 Windows
 
 _CREATE_NO_WINDOW = 0x08000000
 
@@ -15,13 +13,13 @@ _CREATE_NO_WINDOW = 0x08000000
 # ═══════════════════════════════════════════════════════════════
 
 def binary_name(name: str) -> str:
-    """返回平台正确的可执行文件名。"""
-    return f"{name}.exe" if IS_WIN else name
+    """返回平台正确的可执行文件名（Windows 固定加 .exe）。"""
+    return f"{name}.exe"
 
 
 def python_binary() -> str:
     """venv 中的 python 路径。"""
-    return "Scripts/python.exe" if IS_WIN else "bin/python"
+    return "Scripts/python.exe"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -29,23 +27,13 @@ def python_binary() -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def open_path(path: str):
-    """用系统默认程序打开文件或文件夹（跨平台）。"""
-    if IS_WIN:
-        os.startfile(path)
-    elif IS_MAC:
-        subprocess.run(["open", path])
-    else:
-        subprocess.run(["xdg-open", path])
+    """用系统默认程序打开文件或文件夹。"""
+    os.startfile(path)
 
 
 def reveal_in_folder(path: str):
     """在文件管理器中定位文件。"""
-    if IS_WIN:
-        subprocess.run(["explorer", "/select,", os.path.abspath(path)])
-    elif IS_MAC:
-        subprocess.run(["open", "-R", path])
-    else:
-        subprocess.run(["xdg-open", os.path.dirname(path)])
+    subprocess.run(["explorer", "/select,", os.path.abspath(path)])
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -53,40 +41,24 @@ def reveal_in_folder(path: str):
 # ═══════════════════════════════════════════════════════════════
 
 def kill_process(name_pattern: str, *, tree: bool = False):
-    """跨平台终止进程（按名称模式）。"""
-    if IS_WIN:
-        args = ["taskkill", "/F"]
-        if tree:
-            args.append("/T")
-        if name_pattern.endswith(".exe"):
-            args += ["/IM", name_pattern]
-        else:
-            args += ["/FI", f"IMAGENAME eq {name_pattern}"]
-        subprocess.run(args, capture_output=True)
+    """按名称模式终止进程。"""
+    args = ["taskkill", "/F"]
+    if tree:
+        args.append("/T")
+    if name_pattern.endswith(".exe"):
+        args += ["/IM", name_pattern]
     else:
-        flag = "-f" if tree else ""
-        subprocess.run(["pkill", flag, name_pattern],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        args += ["/FI", f"IMAGENAME eq {name_pattern}"]
+    subprocess.run(args, capture_output=True)
 
 
 def kill_process_by_pid(pid: int, *, tree: bool = False):
-    """跨平台按 PID 终止进程。"""
-    if IS_WIN:
-        args = ["taskkill", "/F"]
-        if tree:
-            args.append("/T")
-        args += ["/PID", str(pid)]
-        subprocess.run(args, capture_output=True)
-    else:
-        import signal
-        try:
-            if tree:
-                subprocess.run(["kill", "-TERM", "--", f"-{pid}"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else:
-                os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+    """按 PID 终止进程。"""
+    args = ["taskkill", "/F"]
+    if tree:
+        args.append("/T")
+    args += ["/PID", str(pid)]
+    subprocess.run(args, capture_output=True)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -94,18 +66,16 @@ def kill_process_by_pid(pid: int, *, tree: bool = False):
 # ═══════════════════════════════════════════════════════════════
 
 def run_subprocess(cmd, **kwargs):
-    """subprocess.run 统一封装 —— 自动处理 Windows 控制台隐藏。"""
-    if IS_WIN:
-        kwargs.setdefault("creationflags", 0)
-        kwargs["creationflags"] |= _CREATE_NO_WINDOW
+    """subprocess.run 统一封装 —— 自动隐藏 Windows 控制台窗口。"""
+    kwargs.setdefault("creationflags", 0)
+    kwargs["creationflags"] |= _CREATE_NO_WINDOW
     return subprocess.run(cmd, **kwargs)
 
 
 def popen_subprocess(cmd, **kwargs):
-    """subprocess.Popen 统一封装 —— 自动处理 Windows 控制台隐藏。"""
-    if IS_WIN:
-        kwargs.setdefault("creationflags", 0)
-        kwargs["creationflags"] |= _CREATE_NO_WINDOW
+    """subprocess.Popen 统一封装 —— 自动隐藏 Windows 控制台窗口。"""
+    kwargs.setdefault("creationflags", 0)
+    kwargs["creationflags"] |= _CREATE_NO_WINDOW
     return subprocess.Popen(cmd, **kwargs)
 
 
@@ -114,8 +84,8 @@ def popen_subprocess(cmd, **kwargs):
 # ═══════════════════════════════════════════════════════════════
 
 def create_no_window_flag() -> int:
-    """返回 Windows CREATE_NO_WINDOW 标志，非 Windows 返回 0。"""
-    return _CREATE_NO_WINDOW if IS_WIN else 0
+    """返回 Windows CREATE_NO_WINDOW 标志。"""
+    return _CREATE_NO_WINDOW
 
 
 def get_bin(name: str) -> str:
@@ -123,26 +93,18 @@ def get_bin(name: str) -> str:
     return _get_bin(name)
 
 
-def _ffmpeg_platform_dir() -> str:
-    """Return the platform-specific subdirectory name used under apps/*/ffmpeg/."""
-    if IS_WIN:
-        return "win_x64"
-    else:
-        return "linux_x64"
-
-
 def _ffmpeg_fallback_candidates(exe: str) -> list:
-    """Return a list of fallback paths to search for ffmpeg/ffprobe executables."""
+    """Return a list of fallback paths to search for ffmpeg/ffprobe executables.
+
+    ffmpeg 是通用工具，标准位置是 studio/bin/<platform>/（由 find_ffmpeg 第一顺位命中）。
+    这里只在项目 bin 与系统 PATH 都未命中时，兜底查工程根目录，不再依赖各子应用内部目录。
+    """
     try:
         from config.paths import WORKSPACE_ROOT
     except Exception:
         return []
-    plat = _ffmpeg_platform_dir()
     return [
         os.path.join(WORKSPACE_ROOT, exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "asset-browser", "bin", exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.4.0", "backend", "ffmpeg", plat, exe),
-        os.path.join(WORKSPACE_ROOT, "apps", "vsr-v1.1.1-windows-nvidia-cuda", "resources", "backend", "ffmpeg", plat, exe),
     ]
 
 
@@ -167,7 +129,7 @@ def find_ffprobe() -> str:
     exe = binary_name("ffprobe")
     ffmpeg = find_ffmpeg()
     if ffmpeg:
-        sibling = ffmpeg.replace("ffmpeg", "ffprobe")
+        sibling = os.path.join(os.path.dirname(ffmpeg), binary_name("ffprobe"))
         if os.path.isfile(sibling):
             return sibling
     found = shutil.which(exe)
@@ -183,36 +145,25 @@ def find_ffprobe() -> str:
 
 
 def find_python() -> str:
-    from config.paths import PYTHON_EMBEDED_DIR, WORKSPACE_ROOT
-    if IS_WIN:
-        for p in (
-            os.path.join(PYTHON_EMBEDED_DIR, "python.exe"),
-            os.path.join(PYTHON_EMBEDED_DIR, "bin", "python.exe"),
-        ):
-            if os.path.isfile(p):
-                return os.path.abspath(p)
-    else:
-        venv_python = os.path.join(WORKSPACE_ROOT, ".venv", "bin", "python")
-        if os.path.isfile(venv_python):
-            return venv_python
-    return sys.executable
-
-
-def find_venv_python(base_dir: str) -> str:
-    if IS_WIN:
-        candidates = [
-            os.path.join(base_dir, "venv", "python.exe"),
-            os.path.join(base_dir, "venv", "Scripts", "python.exe"),
-        ]
-    else:
-        candidates = [
-            os.path.join(base_dir, "venv", "bin", "python"),
-        ]
-    for p in candidates:
+    from config.paths import PYTHON_EMBEDED_DIR
+    for p in (
+        os.path.join(PYTHON_EMBEDED_DIR, "python.exe"),
+        os.path.join(PYTHON_EMBEDED_DIR, "bin", "python.exe"),
+    ):
         if os.path.isfile(p):
             return os.path.abspath(p)
     return sys.executable
 
+
+def find_venv_python(base_dir: str) -> str:
+    candidates = [
+        os.path.join(base_dir, "venv", "python.exe"),
+        os.path.join(base_dir, "venv", "Scripts", "python.exe"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return os.path.abspath(p)
+    return sys.executable
 
 # 兼容旧名
 subprocess_run = run_subprocess

@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 
 import configparser
+
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
     QFrame, QWidget, QComboBox, QMessageBox, QProgressBar, QScrollArea,
@@ -22,10 +23,9 @@ from PySide6.QtCore import Qt, Signal, QUrl
 
 from utils.logger_utils import log
 from utils.base_worker import BaseWorker
-from utils.media_library_manager import MediaLibraryManager, scan_directory
 from utils.my_knowledge_manager import MyKnowledgeManager, STYLIZATION_TYPE
 from utils.dreamina_client import DreaminaClient
-from config.paths import DREAMINA_OUTPUT_DIR, CONFIG_INI_FILE, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR
+from config.paths import DREAMINA_OUTPUT_DIR, CONFIG_INI_FILE, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from gui.ai_script_page import LLMWorker, FeishuUploadWorker, WebSearchWorker
 from gui.base_page import BasePage
 
@@ -124,7 +124,7 @@ class _SimilarSearchWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        from utils.material_clip_indexer import search_by_text
+        None  # material_clip_indexer removed
         rows, _total = search_by_text(
             self.query,
             top_k=max(self.top_k * 3, self.top_k),   # 多取一些用于按文件去重
@@ -162,7 +162,7 @@ class _AutoBindShotsWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        from utils.material_clip_indexer import search_by_text
+        None  # material_clip_indexer removed
         result = {}
         total = len(self.shots)
         for n, (shot_idx, query) in enumerate(self.shots, 1):
@@ -517,8 +517,8 @@ class StoryboardPage(BasePage):
         super().__init__(parent_widget, main_window)
         self.worker = None
         self.shot_cards = []
-        self.feishu_record = None
         self._selected_stylization = None
+        self.feishu_record = None
 
     # ──────────────────────────── UI ────────────────────────────────
     def setup(self):
@@ -676,32 +676,40 @@ class StoryboardPage(BasePage):
         self.sb_scroll.setWidget(self.sb_container)
         sb.addWidget(self.sb_scroll, 1)
 
-        # 飞书同步行
+        # 飞书同步行（已隐藏按钮，代码保留）
         feishu_row = QHBoxLayout()
         self.lbl_feishu_info = QLabel("飞书关联：无")
         self.lbl_feishu_info.setObjectName("muted_text")
+        self.lbl_feishu_info.hide()
         feishu_row.addWidget(self.lbl_feishu_info)
         feishu_row.addStretch()
-        btn_save = QPushButton("💾 保存分镜脚本")
-        btn_save.setObjectName("secondary_button")
-        btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录")
-        btn_save.clicked.connect(self._save_storyboard)
-        feishu_row.addWidget(btn_save)
         self.btn_sync_bitable = QPushButton("📊 同步到多维表格")
         self.btn_sync_bitable.setObjectName("secondary_button")
         self.btn_sync_bitable.setEnabled(False)
         self.btn_sync_bitable.clicked.connect(lambda: self._upload_to_feishu("bitable"))
+        self.btn_sync_bitable.hide()
         feishu_row.addWidget(self.btn_sync_bitable)
         self.btn_sync_docx = QPushButton("📝 创建飞书文档")
         self.btn_sync_docx.setObjectName("secondary_button")
         self.btn_sync_docx.setEnabled(False)
         self.btn_sync_docx.clicked.connect(lambda: self._upload_to_feishu("docx"))
+        self.btn_sync_docx.hide()
         feishu_row.addWidget(self.btn_sync_docx)
         sb.addLayout(feishu_row)
 
         appid, appsecret, *_ = self._get_feishu_config()
         if appid and appsecret:
             self.btn_sync_docx.setEnabled(True)
+
+        # 底部操作行
+        bottom_row = QHBoxLayout()
+        btn_save = QPushButton("💾 保存分镜脚本")
+        btn_save.setObjectName("secondary_button")
+        btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录")
+        btn_save.clicked.connect(self._save_storyboard)
+        bottom_row.addWidget(btn_save)
+        bottom_row.addStretch()
+        sb.addLayout(bottom_row)
 
         col.addWidget(card_sb, 1)
         return panel
@@ -753,7 +761,6 @@ class StoryboardPage(BasePage):
         """从文案首行 + 日期生成默认文件名。"""
         import re as _re
         date_str = datetime.now().strftime("%Y%m%d")
-        # 优先用飞书选题名，其次取文案首行
         title = ""
         if self.feishu_record:
             title = self.feishu_record.get("topic", "")
@@ -814,16 +821,19 @@ class StoryboardPage(BasePage):
         bg = QButtonGroup(dlg)
         fmt_excel = QRadioButton("Excel（.xlsx）— 默认")
         fmt_md = QRadioButton("Markdown（.md）")
+        fmt_json = QRadioButton("JSON（.json，供脚本成片）")
         fmt_both = QRadioButton("Excel + Markdown")
+        fmt_all = QRadioButton("Excel + Markdown + JSON")
         fmt_excel.setChecked(True)
-        for rb in (fmt_excel, fmt_md, fmt_both):
+        for rb in (fmt_excel, fmt_md, fmt_json, fmt_both, fmt_all):
             bg.addButton(rb)
             dl.addWidget(rb)
 
-        chk_feishu = QCheckBox("同时同步到飞书文档")
+        # ── 飞书同步选项 ──
+        chk_feishu = QCheckBox("同步到飞书文档")
         appid, appsecret, *_ = self._get_feishu_config()
         chk_feishu.setEnabled(bool(appid and appsecret))
-        chk_feishu.setToolTip("" if (appid and appsecret) else "请先在「环境配置」配置飞书 AppID/AppSecret")
+        chk_feishu.setToolTip("" if (appid and appsecret) else "请先在「环境配置」页配置飞书 AppID/AppSecret")
         dl.addWidget(chk_feishu)
 
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -837,14 +847,15 @@ class StoryboardPage(BasePage):
             return
 
         base_name = name_edit.text().strip() or default_name
-        do_excel = fmt_excel.isChecked() or fmt_both.isChecked()
-        do_md = fmt_md.isChecked() or fmt_both.isChecked()
+        do_excel = fmt_excel.isChecked() or fmt_both.isChecked() or fmt_all.isChecked()
+        do_md = fmt_md.isChecked() or fmt_both.isChecked() or fmt_all.isChecked()
+        do_json = fmt_json.isChecked() or fmt_all.isChecked()
         do_feishu = chk_feishu.isChecked()
 
         # 保存到配置的素材目录（与浏览器下载目录对齐）
         import re as _re
         safe_topic = _re.sub(r'[\\/:*?"<>|\r\n\t]', "_", topic)[:40]
-        out_dir = os.path.join(KNOWLEDGE_MATERIALS_DIR, safe_topic, "storyboard")
+        out_dir = os.path.join(KNOWLEDGE_MEDIA_DIR, safe_topic, "storyboard")
         os.makedirs(out_dir, exist_ok=True)
 
         saved_files = []
@@ -859,12 +870,16 @@ class StoryboardPage(BasePage):
             self._export_storyboard_md(md_path, topic, ratio, orient, style_name, total_dur, shots)
             saved_files.append(md_path)
 
+        if do_json:
+            json_path = os.path.join(out_dir, base_name + ".json")
+            self._export_storyboard_json(json_path, topic, ratio, total_dur, shots)
+            saved_files.append(json_path)
+
         if not saved_files:  # fallback
             xlsx_path = os.path.join(out_dir, base_name + ".xlsx")
             self._export_storyboard_excel(xlsx_path, topic, ratio, orient, style_name, total_dur, shots)
             saved_files.append(xlsx_path)
 
-        # 同步到飞书文档
         if do_feishu:
             self._upload_to_feishu("docx")
 
@@ -954,6 +969,23 @@ class StoryboardPage(BasePage):
             )
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+
+    def _export_storyboard_json(self, path, topic, ratio, total_dur, shots):
+        """导出为 JSON（供「一键成片 > 脚本成片」tab 选择并提交服务端）。
+        结构：{topic, ratio, total_duration, shot_count, shots:[{index,shot_type,duration,sfx,visual,narration,material_type,material_path,material_hash}], saved_at}
+        """
+        import json as _json
+        import time as _time
+        data = {
+            "topic": topic,
+            "ratio": ratio,
+            "total_duration": total_dur,
+            "shot_count": len(shots),
+            "shots": shots,   # _collect_shots() 的输出，已含素材路径+文案
+            "saved_at": int(_time.time()),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, ensure_ascii=False, indent=2)
 
     # ──────────────────── 风格化 ────────────────────────────────────
     def _reload_stylizations(self):
@@ -1220,14 +1252,12 @@ class StoryboardPage(BasePage):
     # ──────────────────── LLM 调用 ──────────────────────────────────
     def _ai_cfg(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        url = ai.get("llm_api_url", "")
-        key = ai.get("llm_api_key", "")
-        model = ai.get("llm_model", "deepseek-chat")
-        if not url or not key:
+        model = ai.get("llm_model", "deepseek-v4-flash")
+        if not model:
             QMessageBox.warning(self.parent_widget, "大模型未配置",
-                                "请先在「AI 设置 / 大模型配置」中填写并测试 API 地址与密钥。")
+                                "请先在「AI 设置 / 大模型配置」中选择模型名称。")
             return None
-        return url, key, model
+        return "", "", model
 
     def _run_llm(self, system_prompt, user_prompt, on_done, busy_btn, busy_text):
         cfg = self._ai_cfg()
@@ -1330,8 +1360,6 @@ class StoryboardPage(BasePage):
             self.btn_gen_shots.setEnabled(True)
             self.pbar.setVisible(False)
             if files:
-                MediaLibraryManager().add_mount(out_dir, kind="项目", group="镜头素材",
-                                                tags=["即梦", "分镜"])
                 self.lbl_status.setText(f"✅ 已生成 {len(files)} 张镜头素材：{out_dir}")
             else:
                 self.lbl_status.setText("未生成任何素材（可能未登录或全部失败）。")
@@ -1347,26 +1375,29 @@ class StoryboardPage(BasePage):
 
     # ──────────────────── 飞书同步 ──────────────────────────────────
     def _get_feishu_config(self):
+        """从 CONFIG_INI_FILE 读取飞书配置。"""
+        import configparser
         config = configparser.ConfigParser()
-        appid = appsecret = apptoken = tableid = foldertoken = ""
+        appid = appsecret = apptoken = tableid = ""
         topicfield = "选题"
         scriptfield = "脚本"
+        foldertoken = ""
         try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding="utf-8")
-                if config.has_section("Feishu"):
-                    appid = config.get("Feishu", "AppId", fallback="")
-                    appsecret = config.get("Feishu", "AppSecret", fallback="")
-                    apptoken = config.get("Feishu", "AppToken", fallback="")
-                    tableid = config.get("Feishu", "TableId", fallback="")
-                    topicfield = config.get("Feishu", "TopicField", fallback="选题")
-                    scriptfield = config.get("Feishu", "ScriptField", fallback="脚本")
-                    foldertoken = config.get("Feishu", "FolderToken", fallback="")
+            config.read(CONFIG_INI_FILE, encoding="utf-8")
+            if config.has_section("Feishu"):
+                appid = config.get("Feishu", "AppId", fallback="")
+                appsecret = config.get("Feishu", "AppSecret", fallback="")
+                apptoken = config.get("Feishu", "AppToken", fallback="")
+                tableid = config.get("Feishu", "TableId", fallback="")
+                topicfield = config.get("Feishu", "TopicField", fallback="选题")
+                scriptfield = config.get("Feishu", "ScriptField", fallback="脚本")
+                foldertoken = config.get("Feishu", "FolderToken", fallback="")
         except Exception:
             pass
         return appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken
 
     def _get_script_table_as_text(self):
+        """将当前分镜脚本格式化为文本，供飞书同步。"""
         lines = []
         for card in self.shot_cards:
             idx = card["idx"]
@@ -1375,33 +1406,22 @@ class StoryboardPage(BasePage):
             sfx = card["edit_sfx"].text().strip()
             visual = card["desc"].toPlainText().strip()
             narration = card["narration"].toPlainText().strip()
-            mat = card.get("material")
-            lines.append(f"【镜头 {idx}】{shot_type}  时长：{duration}s")
-            lines.append(f"  画面描述：{visual}")
-            lines.append(f"  旁白台词：{narration}")
-            if sfx:
-                lines.append(f"  音效：{sfx}")
-            if mat:
-                lines.append(f"  引用素材：{mat.get('name','')}  {mat.get('path','')}")
-                if mat.get("hash"):
-                    lines.append(f"  素材Hash：{mat.get('hash')}")
-            lines.append("")
-        # 统计汇总
-        total = sum(c["spin_dur"].value() for c in self.shot_cards)
-        ratio = self.combo_shot_ratio.currentText()
-        orient = {"9:16": "竖屏", "16:9": "横屏", "1:1": "方形"}.get(ratio, ratio)
-        lines.insert(0, f"【分镜统计】共 {len(self.shot_cards)} 个镜头，总时长约 {total}s，画幅：{orient}（{ratio}）\n")
+            mat = card.get("material") or {}
+            mat_path = mat.get("path", "")
+            lines.append(
+                f"【镜头{idx}】{shot_type} | {duration}s | 音效：{sfx or '—'}\n"
+                f"画面：{visual}\n"
+                f"旁白：{narration}\n"
+                f"素材：{mat_path}\n"
+            )
         return "\n".join(lines)
 
     def _upload_to_feishu(self, mode):
+        """将分镜脚本同步到飞书（bitable 或 docx）。"""
         appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken = self._get_feishu_config()
         if not appid or not appsecret:
-            QMessageBox.warning(self.parent_widget, "配置未完备",
-                                "请先在「环境配置」页面配置好飞书 AppID 和 AppSecret！")
-            return
-        script_text = self._get_script_table_as_text()
-        if not script_text.strip():
-            QMessageBox.warning(self.parent_widget, "内容为空", "没有可同步的分镜脚本内容。")
+            QMessageBox.warning(self.parent_widget, "配置未完成",
+                                "请先在「环境配置」页配置飞书 AppID 和 AppSecret。")
             return
         record_id = None
         topic_name = "新分镜脚本"
@@ -1410,11 +1430,10 @@ class StoryboardPage(BasePage):
             topic_name = self.feishu_record.get("topic", "新分镜脚本")
         if mode == "bitable" and (not record_id or not apptoken or not tableid):
             QMessageBox.warning(self.parent_widget, "无法同步",
-                                "当前未关联飞书选题记录，或者 AppToken/TableID 配置为空！")
+                                "飞书多维表格配置不完整或未关联选题。\n请先在 AI 文案页同步选题。")
             return
-        self.btn_sync_bitable.setEnabled(False)
-        self.btn_sync_docx.setEnabled(False)
-        self.lbl_status.setText("正在上传/同步到飞书...")
+        script_text = self._get_script_table_as_text()
+        self.lbl_status.setText(f"正在同步到飞书（{mode}）…")
         self.pbar.setVisible(True)
         self.upload_worker = FeishuUploadWorker(
             app_id=appid, app_secret=appsecret, mode=mode,
@@ -1424,18 +1443,14 @@ class StoryboardPage(BasePage):
         )
 
         def on_done(msg):
-            self.btn_sync_bitable.setEnabled(True)
-            self.btn_sync_docx.setEnabled(True)
             self.pbar.setVisible(False)
             self.lbl_status.setText("飞书同步完成。")
-            QMessageBox.information(self.parent_widget, "同步结果", msg)
+            self.show_info(msg)
 
         def on_err(err_msg):
-            self.btn_sync_bitable.setEnabled(True)
-            self.btn_sync_docx.setEnabled(True)
             self.pbar.setVisible(False)
-            self.lbl_status.setText("同步失败。")
-            QMessageBox.critical(self.parent_widget, "同步失败", f"上传到飞书失败：\n{err_msg}")
+            self.lbl_status.setText("飞书同步失败。")
+            QMessageBox.critical(self.parent_widget, "飞书同步失败", err_msg)
 
         self.upload_worker.finished.connect(on_done)
         self.upload_worker.error.connect(on_err)

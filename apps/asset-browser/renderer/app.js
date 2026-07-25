@@ -46,6 +46,59 @@ const btnClearDownloads = document.getElementById('btn-clear-downloads');
 const btnOpenDir = document.getElementById('btn-open-dir');
 const downloadPathDisplay = document.getElementById('download-path-display');
 const btnChangePath = document.getElementById('btn-change-path');
+const proxyUrlInput = document.getElementById('proxy-url-input');
+const btnSaveProxy = document.getElementById('btn-save-proxy');
+
+// ── 代理配置弹窗 ──
+const proxyOverlay = document.getElementById('proxy-config-overlay');
+const btnProxyConfig = document.getElementById('btn-proxy-config');
+const btnProxyClose = document.getElementById('btn-proxy-close');
+const proxyStatusDot = document.getElementById('proxy-status-dot');
+const proxyInputField = document.getElementById('proxy-input-field');
+const btnProxyParse = document.getElementById('btn-proxy-parse');
+const proxyNodeList = document.getElementById('proxy-node-list');
+const proxyNodeCount = document.getElementById('proxy-node-count');
+const btnProxyStart = document.getElementById('btn-proxy-start');
+const btnProxyStop = document.getElementById('btn-proxy-stop');
+const btnProxyUpdateSub = document.getElementById('btn-proxy-update-sub');
+const btnProxyCopyLog = document.getElementById('btn-proxy-copy-log');
+const proxyPanelStatus = document.getElementById('proxy-panel-status');
+const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
+
+let proxyNodes = [];       // 当前解析到的节点列表
+let proxyRunning = false;  // 代理是否运行中
+
+// 节点列表持久化（localStorage 跨进程/重启不丢失）
+const PROXY_NODES_KEY = 'tintin_proxy_nodes';
+function saveProxyNodes() {
+  try { localStorage.setItem(PROXY_NODES_KEY, JSON.stringify(proxyNodes)); } catch(e){}
+}
+function loadProxyNodes() {
+  try {
+    const saved = localStorage.getItem(PROXY_NODES_KEY);
+    if (saved) { const arr = JSON.parse(saved); if (Array.isArray(arr) && arr.length > 0) proxyNodes = arr; }
+  } catch(e){}
+}
+
+// 显示可复制的错误信息（取代 alert）
+function showProxyError(msg) {
+  const box = document.getElementById('proxy-error-box');
+  if (!box) return;
+  box.textContent = msg;
+  box.style.display = 'block';
+  // 自动选中方便复制
+  setTimeout(() => {
+    const range = document.createRange();
+    range.selectNodeContents(box);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, 100);
+}
+function clearProxyError() {
+  const box = document.getElementById('proxy-error-box');
+  if (box) { box.style.display = 'none'; box.textContent = ''; }
+}
 
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
@@ -107,6 +160,13 @@ async function init() {
     const saved = await window.api.loadKbItems();
     if (Array.isArray(saved) && saved.length) allKnowledgeItems = saved;
   } catch (e) {}
+  // 如果 IPC 没有数据，从镜像文件恢复
+  if (allKnowledgeItems.length === 0) {
+    try {
+      const fallback = await window.api.getKbItemsFallback();
+      if (Array.isArray(fallback) && fallback.length > 0) allKnowledgeItems = fallback;
+    } catch(e) {}
+  }
 
   // Set initial address input value
   addressInput.value = webview.src;
@@ -146,6 +206,9 @@ async function init() {
 async function loadSettings() {
   currentSettings = await window.api.getSettings();
   downloadPathDisplay.textContent = currentSettings.downloadPath || '未选择';
+  if (proxyUrlInput && currentSettings.proxyUrl) {
+    proxyUrlInput.value = currentSettings.proxyUrl;
+  }
 }
 
 // Load and render downloads
@@ -165,9 +228,6 @@ function renderDownloads() {
   downloadsEmpty.style.display = 'none';
   downloadList.style.display = 'flex';
   
-  // Save DOM structures of items currently being drawn
-  const activeIds = new Set(Array.from(document.querySelectorAll('.download-card')).map(el => el.dataset.id));
-  
   downloadList.innerHTML = '';
   downloadTasks.forEach(task => {
     const card = document.createElement('div');
@@ -181,14 +241,31 @@ function renderDownloads() {
     let progressVal = task.progress || 0;
     
     if (task.status === 'completed') {
-      statusText = '已完';
+      statusText = '已完成';
       badgeClass = 'completed';
       progressVal = 100;
     } else if (task.status === 'failed') {
-      statusText = task.error || '失败';
+      statusText = (task.error || '失败').slice(0, 20) + ((task.error || '').length > 20 ? '...' : '');
       badgeClass = 'failed';
     } else if (task.status === 'downloading') {
-      statusText = `下载'(${progressVal}%)`;
+      statusText = `下载中(${progressVal}%)`;
+    } else if (task.status === 'paused') {
+      statusText = '已暂停';
+      badgeClass = 'paused';
+    }
+    
+    let actionHtml = '';
+    if (task.status === 'downloading') {
+      actionHtml = `<button class="download-action-btn pause" onclick="pauseDownload('${task.id}')">⏸ 暂停</button>`;
+    } else if (task.status === 'paused') {
+      actionHtml = `<button class="download-action-btn resume" onclick="resumeDownload('${task.id}')">↻ 重新下载</button>`;
+    } else {
+      // 失败时显示日志按钮 + 打开文件
+      const openBtn = `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件</button>`;
+      const logBtn = task.status === 'failed' && task.log
+        ? `<button class="download-action-btn log" onclick="showDownloadLog('${task.id}')">📋 日志</button>`
+        : '';
+      actionHtml = logBtn + openBtn;
     }
     
     card.innerHTML = `
@@ -204,17 +281,146 @@ function renderDownloads() {
           ${task.status === 'downloading' ? '<span id="dl-speed-' + task.id + '">0 KB/s</span>' : sizeText}
         </span>
         <div class="download-actions" id="dl-actions-${task.id}">
-          ${task.status === 'downloading' 
-            ? `<button class="download-action-btn cancel" onclick="cancelDownload('${task.id}')">取消</button>`
-            : `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件'/button>`
-
-          }
+          ${actionHtml}
         </div>
       </div>
     `;
     
+    // 双击失败项弹出详细日志
+    if (task.status === 'failed' && task.log) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('dblclick', () => showDownloadLog(task.id));
+    }
+    
+    // 右键菜单：取消任务
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showDownloadContextMenu(e.clientX, e.clientY, task);
+    });
+    
     downloadList.appendChild(card);
   });
+}
+
+// 右键下载项上下文菜单
+function showDownloadContextMenu(x, y, task) {
+  // 移除已有菜单
+  const old = document.getElementById('download-context-menu');
+  if (old) old.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'download-context-menu';
+  menu.style.cssText = `
+    position: fixed; left: ${x}px; top: ${y}px; z-index: 9999;
+    background: #2a2a2a; border: 1px solid #444; border-radius: 6px;
+    padding: 4px 0; min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  `;
+
+  const cancelItem = document.createElement('div');
+  cancelItem.textContent = '🗑 取消下载';
+  cancelItem.style.cssText = `
+    padding: 8px 16px; cursor: pointer; color: #ef4444; font-size: 0.8rem;
+    display: flex; align-items: center; gap: 6px;
+  `;
+  cancelItem.addEventListener('mouseenter', () => { cancelItem.style.background = '#333'; });
+  cancelItem.addEventListener('mouseleave', () => { cancelItem.style.background = 'transparent'; });
+  cancelItem.addEventListener('click', () => {
+    cancelDownloadItem(task.id);
+    menu.remove();
+  });
+  menu.appendChild(cancelItem);
+
+  document.body.appendChild(menu);
+
+  // 点击其他地方关闭菜单
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+      document.removeEventListener('contextmenu', closeMenu);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('contextmenu', closeMenu);
+  }, 0);
+}
+
+// 显示下载详情日志弹窗
+function showDownloadLog(id) {
+  const task = downloadTasks.find(t => t.id === id);
+  if (!task || !task.log) return;
+
+  // 移除已有弹窗
+  const old = document.getElementById('download-log-modal');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'download-log-modal';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+  `;
+
+  const panel = document.createElement('div');
+  panel.style.cssText = `
+    background: #1a1a2e; border: 1px solid #444; border-radius: 10px;
+    width: 80%; max-width: 800px; max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  `;
+
+  const header = document.createElement('div');
+  header.style.cssText = `
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid #333;
+  `;
+  header.innerHTML = `<span style="font-weight:700;color:#fca5a5;">📋 下载日志 - ${task.filename}</span>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span style="cursor:pointer;color:#888;font-size:0.75rem;" id="dl-log-copy">📋 复制</span>
+      <span style="cursor:pointer;color:#888;font-size:1.2rem;" id="dl-log-close">✕</span>
+    </div>`;
+
+  const body = document.createElement('pre');
+  body.style.cssText = `
+    margin: 0; padding: 16px 18px; overflow: auto; flex: 1;
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 0.75rem;
+    color: #d1d5db; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+    user-select: text; cursor: text;
+  `;
+  body.textContent = task.log;
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  header.querySelector('#dl-log-close').onclick = close;
+  header.querySelector('#dl-log-copy').onclick = () => {
+    navigator.clipboard.writeText(task.log).then(() => {
+      header.querySelector('#dl-log-copy').textContent = '✅ 已复制';
+      setTimeout(() => { header.querySelector('#dl-log-copy').textContent = '📋 复制'; }, 2000);
+    });
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+}
+
+// 暂停下载
+async function pauseDownload(id) {
+  await window.api.pauseDownload(id);
+}
+
+// 重新下载
+async function resumeDownload(id) {
+  await window.api.resumeDownload(id);
+}
+
+// 取消并删除任务
+async function cancelDownloadItem(id) {
+  await window.api.cancelDownloadItem(id);
 }
 
 function updateActiveDownloadCount() {
@@ -473,35 +679,34 @@ function setupEventListeners() {
   if (kbNextBtn) kbNextBtn.addEventListener('click', () => { kbPage++; renderKnowledgeBaseTable(); });
 
   // Knowledge Base Download Selected
-  btnKbDownloadSelected.addEventListener('click', async () => {
-    const checkedBoxes = document.querySelectorAll('.kb-item-check:checked');
+  if (btnKbDownloadSelected) {
+    btnKbDownloadSelected.addEventListener('click', async () => {
+    // 获取勾选项目；如果没勾选，默认下载全部 visible 项目
+    let checkedBoxes = Array.from(document.querySelectorAll('.kb-item-check:checked'));
     if (checkedBoxes.length === 0) {
-      alert('请先勾选需要下载的收藏记录');
-      return;
+      // 没有勾选时，下载当前筛选/分页下的全部项目
+      checkedBoxes = Array.from(document.querySelectorAll('.kb-item-check'));
+      if (checkedBoxes.length === 0) { alert('没有可下载的项目'); return; }
     }
     
-    // Get daily subdirectory name YYYY-MM-DD
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const subDir = `${yyyy}-${mm}-${dd}`;
+    const subDir = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     
-    // Switch to Downloads tab to display progress
-    document.querySelector('.tab-btn[data-tab="tab-downloads"]').click();
-    
-    // Disable download button and show message
+    // 切换到下载管理标签
+    document.querySelector('.tab-btn[data-tab=”tab-downloads”]').click();
     btnKbDownloadSelected.disabled = true;
-    btnKbDownloadSelected.textContent = '下载..';
+    btnKbDownloadSelected.textContent = '下载中...';
     
     try {
+      let count = 0;
       for (const cb of checkedBoxes) {
         const item = cb._itemData;
         if (item) {
           await downloadKnowledgeBaseItem(item, subDir);
+          count++;
         }
       }
-      alert(`已开始在后台为您下载选中的项目，请切换到“下载管理”标签查看进度！\n所有资源与元数据都存入今日目录'{subDir}/`);
+      alert(`已完成 ${count} 项下载任务，请切换到”下载管理”标签查看进度！\n所有资源与元数据都存入 ${subDir}/ 目录`);
     } catch(err) {
       console.error(err);
       alert('批量下载执行中遇到了问题，详情查看控制台');
@@ -510,6 +715,7 @@ function setupEventListeners() {
       btnKbDownloadSelected.textContent = '批量下载';
     }
   });
+  }
 
   // Tab switching
   tabBtns.forEach(btn => {
@@ -606,6 +812,279 @@ function setupEventListeners() {
     }
   });
 
+  btnSaveProxy.addEventListener('click', async () => {
+    const proxyUrl = proxyUrlInput.value.trim();
+    currentSettings = await window.api.saveSettings({ proxyUrl });
+    proxyUrlInput.style.borderColor = proxyUrl ? 'var(--color-primary)' : 'var(--border-color)';
+    setTimeout(() => { proxyUrlInput.style.borderColor = 'var(--border-color)'; }, 1500);
+  });
+
+  // ── 代理配置弹窗 ──
+
+  // 更新状态指示（左侧按钮小圆点 + 弹窗底部文字）
+  async function refreshProxyStatus() {
+    const st = await window.api.v2rayStatus();
+    proxyRunning = st.running;
+    if (st.running) {
+      proxyStatusDot.style.background = '#34d399';
+      proxyPanelStatus.textContent = `▶️ 运行中 (${st.proxyUrl})`;
+      proxyPanelStatus.style.color = '#34d399';
+      btnProxyStop.style.display = '';
+      btnProxyStart.textContent = '▶ 重启代理';
+      // 自动填入代理地址到手动代理设置
+      if (!proxyUrlInput.value.trim()) {
+        proxyUrlInput.value = st.proxyUrl;
+        await window.api.saveSettings({ proxyUrl: st.proxyUrl });
+      }
+    } else {
+      proxyStatusDot.style.background = '#6b7280';
+      proxyPanelStatus.textContent = '⏹ 未启动';
+      proxyPanelStatus.style.color = 'var(--text-muted)';
+      btnProxyStop.style.display = 'none';
+      btnProxyStart.textContent = '▶ 启动代理';
+    }
+  }
+
+  // 打开/关闭弹窗
+  btnProxyConfig.addEventListener('click', () => {
+    proxyOverlay.style.display = 'flex';
+    refreshProxyStatus();
+    refreshCookieStatus();
+    // 从 localStorage 恢复节点（重启也不丢失）
+    if (proxyNodes.length === 0) loadProxyNodes();
+    renderProxyNodes();
+  });
+  btnProxyClose.addEventListener('click', () => { proxyOverlay.style.display = 'none'; });
+  proxyOverlay.addEventListener('click', (e) => { if (e.target === proxyOverlay) proxyOverlay.style.display = 'none'; });
+
+  // 协议标签切换
+  proxyInputTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      proxyInputTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const proto = tab.dataset.proto;
+      if (proto === 'sub') {
+        proxyInputField.placeholder = '粘贴订阅地址...';
+      } else {
+        proxyInputField.placeholder = `粘贴 ${proto}:// 链接...`;
+      }
+    });
+  });
+
+  // 渲染节点列表
+  function renderProxyNodes() {
+    proxyNodeList.innerHTML = '';
+    proxyNodeCount.textContent = `${proxyNodes.length} 个节点`;
+
+    if (proxyNodes.length === 0) {
+      proxyNodeList.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;text-align:center;padding:20px 0;">请先输入订阅地址或分享链接</div>';
+      return;
+    }
+
+    // 找出当前启用的节点索引（从 localStorage 读取）
+    const activeIdx = (() => { try { return parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){ return -1; } })();
+
+    proxyNodes.forEach((node, i) => {
+      const div = document.createElement('div');
+      div.className = 'proxy-node-item';
+      if (i === activeIdx) div.classList.add('selected');
+      const proto = node.protocol || '?';
+      const name = node.remark || node.host || `节点 ${i+1}`;
+      const activeBadge = i === activeIdx ? '<span style="color:#34d399;font-weight:700;font-size:0.65rem;margin-right:4px;">▶</span>' : '';
+      div.innerHTML = `
+        <span style="font-weight:600;color:var(--color-primary);font-size:0.7rem;min-width:32px;">${proto}</span>
+        ${activeBadge}
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+        <span class="node-latency" id="nlat-${i}">—</span>
+      `;
+      div.addEventListener('click', async () => {
+        // 设为活动节点
+        document.querySelectorAll('.proxy-node-item').forEach(el => el.classList.remove('selected'));
+        div.classList.add('selected');
+        try { localStorage.setItem('tintin_active_node', String(i)); } catch(e){}
+        // 重新渲染以更新 ▶ 标记
+        renderProxyNodes();
+        // TCP 测速（不启动 xray，不占端口）
+        const latSpan = document.getElementById(`nlat-${i}`);
+        if (!latSpan) return;
+        latSpan.textContent = '测试中...';
+        latSpan.className = 'node-latency testing';
+        const result = await window.api.v2rayTestLatency(node);
+        if (result.ok && result.latency >= 0) {
+          latSpan.textContent = `${result.latency}ms`;
+          latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
+        } else {
+          // TCP 直连超时不代表节点不能用（防火墙拦直连但 v2ray 协议加密后可通）
+          latSpan.textContent = '⚠ 直连超时';
+          latSpan.className = 'node-latency bad';
+          latSpan.title = 'TCP 直连被拦，但通过 v2ray 协议仍可能正常使用';
+        }
+      });
+      proxyNodeList.appendChild(div);
+    });
+  }
+
+	  // 自动测试所有节点延迟（逐条，间隔 300ms 避免并发）
+	  async function testAllNodesLatency() {
+	    for (let i = 0; i < proxyNodes.length; i++) {
+	      const latSpan = document.getElementById(`nlat-${i}`);
+	      if (!latSpan) continue;
+	      latSpan.textContent = '测试中...';
+	      latSpan.className = 'node-latency testing';
+	      const result = await window.api.v2rayTestLatency(proxyNodes[i]);
+	      if (result.ok && result.latency >= 0) {
+	        latSpan.textContent = `${result.latency}ms`;
+	        latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
+	      } else {
+	        latSpan.textContent = '不通';
+	        latSpan.className = 'node-latency bad';
+	      }
+	      await new Promise(r => setTimeout(r, 300));
+	    }
+	  }
+
+	  // 解析按钮
+  btnProxyParse.addEventListener('click', async () => {
+    clearProxyError();
+    const input = proxyInputField.value.trim();
+    if (!input) return;
+
+    btnProxyParse.textContent = '解析中...';
+    btnProxyParse.disabled = true;
+
+    try {
+      // 判断当前激活的协议标签
+      const activeTab = document.querySelector('.proxy-input-tab.active');
+      const proto = activeTab ? activeTab.dataset.proto : 'sub';
+
+      if (proto === 'sub' || input.startsWith('http://') || input.startsWith('https://')) {
+        // 订阅地址
+        const result = await window.api.v2rayFetchSubscription(input);
+        if (!result.ok) throw new Error(result.error);
+        if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
+        proxyNodes = result.nodes;
+      } else {
+        // 分享链接
+        const node = await window.api.v2rayParseLink(input);
+        if (!node) throw new Error('无法解析该链接');
+        proxyNodes = [node];
+      }
+
+      saveProxyNodes();
+      renderProxyNodes();
+      // 自动测试所有节点的延迟
+      testAllNodesLatency();
+    } catch (e) {
+      showProxyError('解析失败:\n' + e.message);
+    }
+
+    btnProxyParse.textContent = '解析';
+    btnProxyParse.disabled = false;
+  });
+
+  // 启动代理
+  btnProxyStart.addEventListener('click', async () => {
+    clearProxyError();
+    if (proxyNodes.length === 0) { showProxyError('请先解析节点'); return; }
+    // 取活动节点（点击列表选中），没有则用第一个
+    let activeIdx = -1;
+    try { activeIdx = parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){}
+    if (activeIdx < 0 || activeIdx >= proxyNodes.length) activeIdx = 0;
+    // 保存活动节点
+    try { localStorage.setItem('tintin_active_node', String(activeIdx)); } catch(e){}
+    const nodesToUse = [proxyNodes[activeIdx]];
+
+    btnProxyStart.textContent = '启动中...';
+    btnProxyStart.disabled = true;
+
+    try {
+      const result = await window.api.v2rayStart(nodesToUse);
+      if (!result.ok) throw new Error(result.error);
+      await refreshProxyStatus();
+    } catch (e) {
+      showProxyError('启动失败:\n' + e.message);
+    }
+
+    btnProxyStart.textContent = '▶ 重启代理';
+    btnProxyStart.disabled = false;
+  });
+
+  // 停止代理
+  btnProxyStop.addEventListener('click', async () => {
+    clearProxyError();
+    await window.api.v2rayStop();
+    await refreshProxyStatus();
+  });
+
+  // 复制日志到剪贴板
+  btnProxyCopyLog.addEventListener('click', () => {
+    const box = document.getElementById('proxy-error-box');
+    const status = document.getElementById('proxy-panel-status');
+    const text = [
+      status ? status.textContent : '',
+      box && box.style.display !== 'none' ? '\n' + box.textContent : '',
+      '\n节点列表:',
+      ...proxyNodes.map(n => `  ${n.protocol}://${n.host}:${n.port}  # ${n.remark || ''}`),
+    ].join('\n').trim();
+    if (text) {
+      navigator.clipboard.writeText(text).then(() => {
+        btnProxyCopyLog.textContent = '✅ 已复制';
+        setTimeout(() => { btnProxyCopyLog.textContent = '📋 复制日志'; }, 2000);
+      });
+    }
+  });
+
+  // 更新订阅
+  btnProxyUpdateSub.addEventListener('click', async () => {
+    clearProxyError();
+    const subUrl = proxyInputField.value.trim();
+    if (!subUrl.startsWith('http')) { showProxyError('请在输入框中粘贴有效的订阅地址'); return; }
+
+    btnProxyUpdateSub.textContent = '更新中...';
+    btnProxyUpdateSub.disabled = true;
+
+    try {
+      const result = await window.api.v2rayFetchSubscription(subUrl);
+      if (!result.ok) throw new Error(result.error);
+      if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
+      proxyNodes = result.nodes;
+      saveProxyNodes();
+      renderProxyNodes();
+      testAllNodesLatency();
+    } catch (e) {
+      showProxyError('更新订阅失败:\n' + e.message);
+    }
+
+    btnProxyUpdateSub.textContent = '🔄 更新订阅';
+    btnProxyUpdateSub.disabled = false;
+  });
+
+  // Cookie 状态刷新
+  async function refreshCookieStatus() {
+    const display = document.getElementById('cookie-status-display');
+    const dot = document.getElementById('cookie-dot');
+    try {
+      const st = await window.api.checkCookieStatus();
+      if (display) {
+        display.innerHTML = Object.entries(st).map(([name, info]) => {
+          const color = info.count > 0 ? '#34d399' : '#f87171';
+          const detail = info.count > 0 ? `${info.count}条` : '未登录';
+          return `<span style="color:${color}">${name}: ${detail}</span>`;
+        }).join('');
+      }
+      // 侧边栏小点：至少一个平台有 cookie 就变绿
+      const anyOk = Object.values(st).some(v => v.count > 0);
+      if (dot) dot.style.background = anyOk ? '#34d399' : '#6b7280';
+    } catch (e) {
+      if (display) display.textContent = '获取失败';
+    }
+  }
+  document.getElementById('btn-sync-cookies')?.addEventListener('click', refreshCookieStatus);
+
+  // 初始化状态 + 恢复节点
+  loadProxyNodes();
+  setTimeout(refreshProxyStatus, 1000);
+
   // --- IPC Listeners (Download Events) ---
   window.api.onDownloadListUpdated((list) => {
     downloadTasks = list;
@@ -669,6 +1148,7 @@ function setupWebviewListeners() {
   webview.addEventListener('did-stop-loading', () => {
     btnRefresh.classList.remove('loading');
     addressInput.value = webview.getURL();
+    // 切回浏览器模式（如果在知识库/素材模式则保持）
   });
 
   // Clear sniffed results of the previous screen when navigation starts or SPA navigation happens
@@ -681,6 +1161,11 @@ function setupWebviewListeners() {
   });
 
   webview.addEventListener('did-navigate-in-page', () => {
+    // SPA 导航（如B站点击视频）更新地址栏
+    const currentUrl = webview.getURL();
+    if (currentUrl && currentUrl !== addressInput.value) {
+      addressInput.value = currentUrl;
+    }
     activeVideoSrc = null;
     activeVideoTitle = '';
     lastSniffedAssetsFallback = [];
@@ -705,8 +1190,13 @@ function setupWebviewListeners() {
       return;
     }
     e.preventDefault();
-    webview.src = url;
-    addressInput.value = url;
+    // 加延迟避免与当前页面导航冲突导致 ERR_ABORTED（B站等 SPA 站点常见）
+    setTimeout(() => {
+      if (webview.src !== url) {
+        webview.src = url;
+        addressInput.value = url;
+      }
+    }, 300);
   });
 
 
@@ -787,6 +1277,23 @@ function setupWebviewListeners() {
       _ingestKbCollect(payload);
     } else if (channel === 'hotspot-items-synced') {
       _ingestHotspot(payload);
+    } else if (channel === 'network-media-sniffed' || channel === 'dom-assets-scanned') {
+      try { if (payload) addSniffedAssets(Array.isArray(payload) ? payload : [payload]); } catch(e) {}
+    } else if (channel === 'mse-segment-appended') {
+      try {
+        const { url, type, blobUrl } = payload;
+        if (url && type && blobUrl) {
+          if (!blobToMediaUrlsMap.has(blobUrl)) blobToMediaUrlsMap.set(blobUrl, { videoUrl: null, audioUrl: null, title: '' });
+          const entry = blobToMediaUrlsMap.get(blobUrl);
+          if (type === 'video') entry.videoUrl = url;
+          else if (type === 'audio') entry.audioUrl = url;
+          if (entry.videoUrl && entry.audioUrl) {
+            addSniffedAssets([{ url: entry.videoUrl, type: 'combined', videoUrl: entry.videoUrl, audioUrl: entry.audioUrl }]);
+          }
+        }
+      } catch(e) { console.warn('scraper mse error:', e); }
+    } else if (channel === 'video-active-changed') {
+      try { activeVideoSrc = payload.src || ''; activeVideoTitle = payload.title || ''; } catch(e) {}
     }
   });
 }
@@ -802,7 +1309,9 @@ function _ingestKbCollect(payload) {
     }
   });
   if (addedCount > 0) {
-    console.log(`从拦截中同步'${addedCount} 条新收藏样本`);
+    // 全局 URL 去重，防止跨批次/跨平台标签页带来的重复
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
+    console.log(`从拦截中同步'${addedCount} 条新收藏样本（去重后共 ${allKnowledgeItems.length} 条）`);
     renderKnowledgeBaseTable();
     try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   }
@@ -962,7 +1471,7 @@ const FAV_PAGES = {
 // 滚动到底加载全部分页（非交互版，供采集用
 async function _loadAllByScroll(maxRounds = 30, stepMs = 1200, wv = webview) {
   let lastH = 0, stable = 0, i = 0;
-  while (i < maxRounds && stable < 3) {
+  while (i < maxRounds && stable < 3 && !_kbSyncCancelled) {
     let h = 0;
     try {
       h = await wv.executeJavaScript(`(() => {
@@ -1001,17 +1510,18 @@ async function captureFavorites(onPhase) {
     } catch (e) { console.error('resolve bilibili mid failed', e); }
   }
   for (const [plat, urls] of Object.entries(pages)) {
-    if (!activeLoginStatus[plat]) continue;
+    if (!activeLoginStatus[plat] || _kbSyncCancelled) continue;
     for (const u of urls) {
+      if (_kbSyncCancelled) break;
       if (onPhase) onPhase(`正在采集 ${plat} 收藏/点赞（滚动加载全部）…`);
       wv.src = u;
       await wait();
-      await scrollAll();   // 滚动到底，加载全部分
+      await scrollAll();
     }
   }
 
-  // 知乎：收藏是「收藏夹 '夹内条目」两层。先取自己的 token '打开收藏夹列''  // 逐个进入收藏夹页（其 contents 接口会被嗅探拦截）
-  if (activeLoginStatus.zhihu) {
+  // 知乎
+  if (activeLoginStatus.zhihu && !_kbSyncCancelled) {
     try {
       if (onPhase) onPhase('正在采集 知乎 收藏夹');
       wv.src = 'https://www.zhihu.com';
@@ -1484,16 +1994,12 @@ async function checkLoginStatus() {
 function renderLoginStatusBadges() {
   loginStatusContainer.innerHTML = '';
   const platforms = [
-    { id: 'bilibili', name: 'B' },
-    { id: 'xiaohongshu', name: '小红' },
-    { id: 'douyin', name: '抖音' },
-    { id: 'bilibili', name: 'B 站' },
+    { id: 'bilibili', name: 'B站' },
     { id: 'xiaohongshu', name: '小红书' },
     { id: 'douyin', name: '抖音' },
-    // { id: 'youtube', name: 'YouTube' },    # 暂时隐藏
+    { id: 'youtube', name: 'YouTube' },
     // { id: 'zhihu', name: '知乎' },          # 暂时隐藏
     { id: 'tiktok', name: 'TikTok' },
-    { id: 'tiktok', name: 'TikTok' }
   ];
   
   platforms.forEach(p => {
@@ -1520,22 +2026,60 @@ function renderLoginStatusBadges() {
   });
 }
 
+// ── 取消同步标志 ──
+let _kbSyncCancelled = false;
+
 // 知识库创作者更新同步主任务
 async function syncKnowledgeBase() {
+  _kbSyncCancelled = false;
   kbLoadingOverlay.style.display = 'flex';
-  kbEmptyState.style.display = 'none';
-  kbTable.style.display = 'none';
   kbSyncProgressBar.style.width = '0%';
   kbLoadingText.textContent = '正在检测已登录频道...';
-  
-  // 只保留已有的收藏样本，清除之前同步到的创作者更新内'  allKnowledgeItems = allKnowledgeItems.filter(item => !!item.isCollected);
-  
+
   await checkLoginStatus();
 
+  // 取消按钮
+  const btnCancel = document.getElementById('btn-cancel-kb-sync');
+  const cancelHandler = () => { _kbSyncCancelled = true; };
+  btnCancel?.addEventListener('click', cancelHandler);
+
+  // 边采集边显示（先清空并显示空表）
+  kbEmptyState.style.display = 'none';
+  kbTable.style.display = 'table';
+  kbTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">正在采集，请稍候...</td></tr>';
+
   try {
-    await captureFavorites((m) => { kbLoadingText.textContent = m; });
+    // 每 3 秒刷新一次表格，让用户看到逐步增加的数据
+    const renderTimer = setInterval(() => {
+      if (allKnowledgeItems.length > 0) {
+        kbEmptyState.style.display = 'none';
+        renderKnowledgeBaseTable();
+      }
+    }, 3000);
+
+    await Promise.race([
+      captureFavorites((m) => {
+        kbLoadingText.textContent = m;
+        // 更新进度：每采集一步刷新列表
+        if (allKnowledgeItems.length > 0) {
+          kbEmptyState.style.display = 'none';
+          renderKnowledgeBaseTable();
+        }
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('采集超时')), 180000))
+    ]);
+
+    clearInterval(renderTimer);
+  } catch (e) { console.error('captureFavorites error:', e.message); }
+
+  // 去掉取消按钮监听
+  btnCancel?.removeEventListener('click', cancelHandler);
+
+  // 去重保存
+  if (!_kbSyncCancelled) {
+    allKnowledgeItems = Array.from(new Map(allKnowledgeItems.map(i => [i.url, i])).values());
     try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
-  } catch (e) { console.error('captureFavorites failed', e); }
+  }
 
   kbSyncProgressBar.style.width = '100%';
   setTimeout(() => {
@@ -1553,11 +2097,10 @@ async function syncKnowledgeBase() {
       kbEmptyState.innerHTML = `
         <div style="text-align: left; padding: 10px 20px; line-height: 1.6;">
           ${loginLine}
-          <p style="color: var(--text-secondary);">进入你的「我的收藏 / 点赞」页，点工具栏「⬇️ 自动加载到底」，样本会自动出现在这里，可直接批量下载。</p>
+          <p style="color: var(--text-secondary);">进入你的「我的收藏 / 点赞」页，点工具栏「⬇️ 自动加载到底」，样本会自动出现在这里，可直接下载。</p>
         </div>
       `;
     }
-    try { window.api.saveKbItems(allKnowledgeItems); } catch (e) {}
   }, 500);
 }
 
@@ -1720,7 +2263,7 @@ function renderKnowledgeBaseTable() {
 // 更新已选计
 function updateKbSelectedCount() {
   const checked = document.querySelectorAll('.kb-item-check:checked').length;
-  kbSelectedCount.textContent = checked;
+  if (kbSelectedCount) kbSelectedCount.textContent = checked;
   
   const allCheckBoxes = document.querySelectorAll('.kb-item-check');
   if (allCheckBoxes.length > 0) {
@@ -1745,16 +2288,10 @@ async function downloadKnowledgeBaseItem(item, subDir) {
   
   // 1. 视频类型：下载视频 + 封面图片 + 详情元数据
   // 知乎平台始终使用图文归档方式（知乎主要为图文/文章内容）
-  if (item.type === 'video' && item.platform !== 'zhihu') {
-    const dlId = 'dl-kb-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-    await window.api.startDownload({
-      id: dlId,
-      url: item.url,
-      filename: `${filePrefix}.mp4`,
-      referer: item.url,
-      subDir: subDir,
-      useYtdlp: true
-    });
+	  if (item.type === 'video' && item.platform !== 'zhihu') {
+	    // 所有视频平台统一用嗅探器提取直链（比 yt-dlp 更稳定）
+	    await sniffAndDownloadVideo(item, filePrefix, subDir);
+	    return;
     
     if (item.cover) {
       const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
@@ -1929,7 +2466,83 @@ async function downloadKnowledgeBaseItem(item, subDir) {
     } catch (scrapeErr) {
       console.error(`归档详情提取遇到问题 ${item.url}:`, scrapeErr);
     }
+	}
+}
+
+// ── 抖音收藏项下载：用隐藏 webview 提取页面内嵌直链 ──
+let _dyLogs = [];
+function _dyLog(msg) {
+  _dyLogs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+  console.log(msg);
+}
+async function saveDyLog() {
+  try { await window.api.writeDebugLog('douyin_download_debug.txt', _dyLogs.join('\n')); } catch(e) {}
+}
+async function sniffAndDownloadVideo(item, filePrefix, subDir) {
+  _dyLogs = [];
+  _dyLog(`[嗅探下载] ${item.platform}: ${item.url}`);
+  let videoUrl = '', audioUrl = '';
+
+  // 导航到视频页，让嗅探器捕获直链
+  scraperWebview.src = item.url;
+  await new Promise(resolve => {
+    let done = false;
+    const onStop = () => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } };
+    scraperWebview.addEventListener('did-stop-loading', onStop);
+    setTimeout(() => { if (!done) { done = true; scraperWebview.removeEventListener('did-stop-loading', onStop); resolve(); } }, 10000);
+  });
+  _dyLog('页面已加载');
+  await new Promise(r => setTimeout(r, 2000));
+
+  // 从嗅探缓存找直链
+  const snapshot = [...lastSniffedAssetsFallback, ...sniffedAssets];
+  _dyLog(`嗅探缓存共 ${snapshot.length} 条`);
+  for (const c of snapshot) {
+    if ((c.type === 'combined' || c.type === 'video') && !videoUrl) {
+      videoUrl = c.videoUrl || c.url;
+      audioUrl = c.audioUrl || '';
+    }
   }
+  if (videoUrl) _dyLog(`直链: ${videoUrl.slice(0,80)}`);
+  else _dyLog('未找到直链，回退 yt-dlp');
+
+  if (!videoUrl) {
+    _dyLog('嗅探超时，回退 yt-dlp');
+    await window.api.startDownload({
+      id: 'dl-kb-fallback-'+Date.now(), url: item.url,
+      filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: true
+    });
+  } else {
+    _dyLog('正在下载视频...');
+    await window.api.startDownload({
+      id: 'dl-kb-'+Date.now(), url: videoUrl, audioUrl: audioUrl||null,
+      filename: `${filePrefix}.mp4`, referer: item.url, subDir, useYtdlp: false
+    });
+  }
+  // 3. 下载封面和元数据（同原逻辑）
+  if (item.cover) {
+    const coverId = 'dl-kb-cover-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    await window.api.startDownload({
+      id: coverId, url: item.cover,
+      filename: `${filePrefix}_cover.jpg`,
+      referer: item.url, subDir: subDir
+    });
+  }
+  const pn = { douyin:'抖音', bilibili:'B站', youtube:'YouTube', xiaohongshu:'小红书', tiktok:'TikTok' }[item.platform] || item.platform;
+  const metaText = `标题: ${item.title}\n创作者: ${item.creatorName}\n平台: ${pn}\n链接: ${item.url}\n发布时间: ${item.date}\n数据热度: ${item.heat || ''}\n下载时间: ${new Date().toLocaleString()}\n`;
+  await window.api.saveTextFile({ filename: `${filePrefix}_info.txt`, content: metaText, subDir });
+  try {
+    const base = currentSettings?.downloadPath || '';
+    await window.api.appendKbManifest({
+      platform: item.platform, platformName: pn,
+      creatorName: item.creatorName, title: item.title, caption: '',
+      url: item.url, date: item.date, heat: item.heat || '',
+      type: 'video',
+      mediaPath: base ? `${base}/${subDir}/${filePrefix}.mp4` : '',
+      isCollected: !!item.isCollected, isLiked: !!item.isLiked
+    });
+  } catch (e) { console.error('appendKbManifest failed', e); }
+  await saveDyLog();
 }
 
 // ----------------------------------------------------

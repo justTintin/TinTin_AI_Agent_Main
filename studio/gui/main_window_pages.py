@@ -46,6 +46,7 @@ from PySide6.QtGui import QIcon, QFont, QPixmap
 from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
+from utils.gui_icons import mdi_button, mdi_icon
 
 
 class PageSetupMixin:
@@ -103,64 +104,15 @@ class PageSetupMixin:
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
         tabs.addTab(p1, "🎭 声音样本")
 
-        # Tab 2: 素材资源
+        # Tab 2: 视频配置（LUT 还原）
         p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
-        l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30); l2.setSpacing(16)
-        # 文件下载位置
-        g1 = QGroupBox("📥 文件下载位置")
-        g1.setStyleSheet("QGroupBox { font-size:13px; font-weight:bold; border:1px solid #2e2e32; border-radius:8px; margin-top:12px; } QGroupBox::title { subcontrol-origin:margin; padding:0 8px; color:#a855f7; }")
-        lg1 = QVBoxLayout(g1); lg1.setContentsMargins(16,20,16,16); lg1.setSpacing(10)
-        lg1.addWidget(QLabel("即梦生成等文件下载默认存储位置，可映射到外置盘。重启生效。"))
-        r = QHBoxLayout(); r.addWidget(QLabel("当前目录:"))
-        self.res_mat_dir = QLineEdit(); self.res_mat_dir.setReadOnly(True); r.addWidget(self.res_mat_dir, 1)
-        b1 = QPushButton("📁 选择"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._res_choose_mat_dir); r.addWidget(b1)
-        b2 = QPushButton("↩ 恢复默认"); b2.setObjectName("secondary_button"); b2.clicked.connect(self._res_reset_mat_dir); r.addWidget(b2)
-        lg1.addLayout(r); l2.addWidget(g1)
+        self._setup_video_config_tab(p2)
+        tabs.addTab(p2, "🎬 视频配置")
 
-        # ── NAS 共享目录卡片 ──
-        g_nas = QGroupBox("🖥️ NAS 共享目录")
-        g_nas.setStyleSheet(g1.styleSheet().replace("#a855f7","#8b5cf6"))
-        lg_nas = QVBoxLayout(g_nas); lg_nas.setContentsMargins(16,20,16,16); lg_nas.setSpacing(10)
-        lg_nas.addWidget(QLabel("通过网络（SMB）访问 NAS 上的共享文件夹。"))
-        # NAS 网络地址
-        nas_addr_row = QHBoxLayout()
-        nas_addr_row.addWidget(QLabel("NAS 地址:"))
-        self.res_nas_root = QLineEdit()
-        self.res_nas_root.setPlaceholderText(r"格式: \\192.168.xxx.xxx")
-        nas_addr_row.addWidget(self.res_nas_root, 1)
-        lg_nas.addLayout(nas_addr_row)
-        # NAS 目录列表
-        lg_nas.addWidget(QLabel("NAS 共享目录:"))
-        self.res_index_dirs = QListWidget(); self.res_index_dirs.setMaximumHeight(100); self.res_index_dirs.setAlternatingRowColors(True)
-        lg_nas.addWidget(self.res_index_dirs)
-        nas_btn_row = QHBoxLayout()
-        btn_nas_add = QPushButton("＋ 添加NAS目录"); btn_nas_add.setObjectName("secondary_button"); btn_nas_add.clicked.connect(self._res_add_index_dir); nas_btn_row.addWidget(btn_nas_add)
-        btn_nas_del = QPushButton("－ 删除"); btn_nas_del.setObjectName("secondary_button"); btn_nas_del.clicked.connect(self._res_del_index_dir); nas_btn_row.addWidget(btn_nas_del)
-        nas_btn_row.addStretch()
-        b_nas_save = QPushButton("💾 保存NAS配置"); b_nas_save.setObjectName("primary_button"); b_nas_save.clicked.connect(self._res_save_nas_config); nas_btn_row.addWidget(b_nas_save)
-        lg_nas.addLayout(nas_btn_row)
-        l2.addWidget(g_nas)
-
-        # ── 本机磁盘目录卡片 ──
-        g_local = QGroupBox("💽 本机磁盘目录")
-        g_local.setStyleSheet(g1.styleSheet().replace("#a855f7","#10b981"))
-        lg_local = QVBoxLayout(g_local); lg_local.setContentsMargins(16,20,16,16); lg_local.setSpacing(10)
-        lg_local.addWidget(QLabel("本机磁盘上的素材文件夹，无需网络访问。"))
-        # 本机目录列表
-        self.res_local_dirs = QListWidget(); self.res_local_dirs.setMaximumHeight(100); self.res_local_dirs.setAlternatingRowColors(True)
-        lg_local.addWidget(self.res_local_dirs)
-        local_btn_row = QHBoxLayout()
-        btn_local_add = QPushButton("＋ 添加本机目录"); btn_local_add.setObjectName("secondary_button"); btn_local_add.clicked.connect(self._res_add_local_dir); local_btn_row.addWidget(btn_local_add)
-        btn_local_del = QPushButton("－ 删除"); btn_local_del.setObjectName("secondary_button"); btn_local_del.clicked.connect(self._res_del_local_dir); local_btn_row.addWidget(btn_local_del)
-        local_btn_row.addStretch()
-        b_local_save = QPushButton("💾 保存本机配置"); b_local_save.setObjectName("primary_button"); b_local_save.clicked.connect(self._res_save_local_config); local_btn_row.addWidget(b_local_save)
-        lg_local.addLayout(local_btn_row)
-        l2.addWidget(g_local)
-
-        
-
-        l2.addStretch()
-        tabs.addTab(p2, "🗄️ 素材资源")
+        # Tab 3: 本地配置（缓存目录）
+        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_local_config_tab(p3)
+        tabs.addTab(p3, "📁 本地配置")
 
         layout.addWidget(tabs, 1)
 
@@ -235,6 +187,11 @@ class PageSetupMixin:
         self.compile_video_tool = CompileVideoPage(self.page_compile_video, self)
         self.compile_video_tool.setup()
 
+    def setup_scheduled_tasks_page(self):
+        from gui.scheduled_tasks_page import ScheduledTasksPage
+        self.scheduled_tasks_tool = ScheduledTasksPage(self.page_scheduled_tasks, self)
+        self.scheduled_tasks_tool.setup()
+
     def setup_hook_score_page(self):
         from gui.hook_score_page import HookScorePage
         self.hook_score_tool = HookScorePage(self.page_hook_score, self)
@@ -300,7 +257,7 @@ class PageSetupMixin:
         
             config_layout.addSpacing(20)
         
-            self.btn_run_vt = QPushButton("🚀 提交视频处理任务")
+            self.btn_run_vt = mdi_button("提交视频处理任务", "rocket")
             self.btn_run_vt.setObjectName("action_button")
             self.btn_run_vt.setFixedHeight(50)
             self.btn_run_vt.clicked.connect(self.run_video_tool_task)
@@ -481,146 +438,128 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         heading = QLabel("⚙️ 模型配置"); heading.setObjectName("heading")
         layout.addWidget(heading, 0)
-        tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
-        def _page(): w = QWidget(); w.setStyleSheet("QWidget { background: transparent; }"); return w
-        def _lr(p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch()
-        def _row(w): r = QHBoxLayout(); w(r); return r
-        # ───── Tab 1: LLM ─────
-        p1 = _page(); l1 = QVBoxLayout(p1); l1.setContentsMargins(16,20,16,16); l1.setSpacing(10)
-        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
+        # ── 统一服务端地址（各Tab独立API地址可基于此派生或单独填写）──
+        server_row = QHBoxLayout()
+        server_row.setSpacing(8)
+        server_lbl = QLabel("🌐 服务端地址（统一配置）:")
+        server_lbl.setObjectName("muted_text")
+        server_row.addWidget(server_lbl)
+        self.compute_server_input = QLineEdit()
+        self.compute_server_input.setPlaceholderText("http://192.168.111.18:8000（各服务默认基址）")
+        self.compute_server_input.textChanged.connect(self._on_server_url_changed)
+        server_row.addWidget(self.compute_server_input, 1)
+        self.btn_save_server = mdi_button("保存全部", "save")
+        self.btn_save_server.setObjectName("primary_button")
+        self.btn_save_server.setFixedWidth(100)
+        self.btn_save_server.clicked.connect(self._save_all_ai_config)
+        server_row.addWidget(self.btn_save_server)
+        layout.addLayout(server_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(16)
+
         def _rl(l, p, w): r = QHBoxLayout(); r.addWidget(QLabel(p)); w(r); r.addStretch(); l.addLayout(r)
+        def _row(w): r = QHBoxLayout(); w(r); return r
         def _inp(l, p, a, ph): e = QLineEdit(); e.setPlaceholderText(ph); setattr(self,a,e); _rl(l, p, lambda r: r.addWidget(e))
+        # ───── LLM ─────
+        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         _rl(lg1, "提供商:", lambda r: (setattr(self,'llm_provider_combo',QComboBox()), self.llm_provider_combo.setView(QListView()),
-            self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"), self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
-            self.llm_provider_combo.addItem("自定义","custom"), self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
+            self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"),
+            self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
+            self.llm_provider_combo.addItem("Ollama 本地","ollama"),
+            self.llm_provider_combo.addItem("阿里云 DashScope","dashscope"),
+            self.llm_provider_combo.addItem("智谱 GLM","zhipu"),
+            self.llm_provider_combo.addItem("Moonshot (Kimi)","moonshot"),
+            self.llm_provider_combo.addItem("自定义","custom"),
+            self.llm_provider_combo.currentIndexChanged.connect(self._on_llm_provider_changed), r.addWidget(self.llm_provider_combo)))
         _inp(lg1, "API 地址:", "llm_api_url_input", "https://api.deepseek.com")
-        _inp(lg1, "API Key:", "llm_api_key_input", "sk-xxxxxxxxxxxxxxxx")
-        
-        # Configure API Key EchoMode and show/hide action
-        self.llm_api_key_input.setEchoMode(QLineEdit.Password)
-        self._llm_key_visible = False
-        
-        from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
-        from PySide6.QtCore import Qt
-        def make_eye_icon(visible):
-            pix = QPixmap(16, 16)
-            pix.fill(Qt.transparent)
-            painter = QPainter(pix)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(QPen(QColor(160, 160, 160), 1.5))
-            # Eye outline
-            painter.drawArc(1, 3, 14, 10, 45 * 16, 90 * 16)
-            painter.drawArc(1, 3, 14, 10, 225 * 16, 90 * 16)
-            # Pupil
-            painter.setBrush(QColor(160, 160, 160))
-            painter.drawEllipse(6, 6, 4, 4)
-            if not visible:
-                # Crossed out slash
-                painter.drawLine(3, 3, 13, 13)
-            painter.end()
-            return QIcon(pix)
-            
-        self._llm_key_action = self.llm_api_key_input.addAction(make_eye_icon(False), QLineEdit.TrailingPosition)
-        
-        def toggle_key_visibility():
-            self._llm_key_visible = not self._llm_key_visible
-            self.llm_api_key_input.setEchoMode(QLineEdit.Normal if self._llm_key_visible else QLineEdit.Password)
-            self._llm_key_action.setIcon(make_eye_icon(self._llm_key_visible))
-            
-        self._llm_key_action.triggered.connect(toggle_key_visibility)
-
+        # API Key 已隐藏，保留属性避免保存/测试代码崩溃
+        self.llm_api_key_input = QLineEdit(); self.llm_api_key_input.setVisible(False)
         _inp(lg1, "文本模型:", "llm_model_input", "deepseek-v4-flash")
         rr1 = QHBoxLayout(); rr1.addStretch()
-        self.btn_test_llm = QPushButton("🔍 测试连接"); self.btn_test_llm.setObjectName("secondary_button"); self.btn_test_llm.setFixedWidth(110); self.btn_test_llm.clicked.connect(self._test_llm_connection); rr1.addWidget(self.btn_test_llm)
-        b2 = QPushButton("💾 保存"); b2.setObjectName("primary_button"); b2.setFixedWidth(90); b2.clicked.connect(self.save_llm_config); rr1.addWidget(b2)
+        self.btn_test_llm = mdi_button("测试连接", "search"); self.btn_test_llm.setObjectName("secondary_button"); self.btn_test_llm.setFixedWidth(110); self.btn_test_llm.clicked.connect(self._test_llm_connection); rr1.addWidget(self.btn_test_llm)
+        b2 = mdi_button("保存", "save"); b2.setObjectName("primary_button"); b2.setFixedWidth(90); b2.clicked.connect(self.save_llm_config); rr1.addWidget(b2)
         lg1.addLayout(rr1)
         self.llm_status_lbl = QLabel(""); lg1.addWidget(self.llm_status_lbl)
-        l1.addWidget(g1); l1.addStretch(); tabs.addTab(p1, "🤖 LLM")
+        scroll_layout.addWidget(g1)
 
-        # ───── Tab 2: VoxCPM ─────
-        p3 = _page(); l3 = QVBoxLayout(p3); l3.setContentsMargins(16,20,16,16); l3.setSpacing(10)
-        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
-        _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://127.0.0.1:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
-        _rl(lg3, "调用方式:", lambda r: (setattr(self,'vox_mode_combo',QComboBox()), self.vox_mode_combo.setView(QListView()),
-            self.vox_mode_combo.addItem("API 接口服务调用","api"), self.vox_mode_combo.addItem("本地命令行直接调用","cli"), r.addWidget(self.vox_mode_combo)))
+        # ───── VoxCPM ─────
+        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM（远程）"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
+        _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         lg3.addLayout(_row(lambda r: (r.addWidget(QLabel("推理步数:")), setattr(self,'vox_timesteps_spin',QSpinBox()), self.vox_timesteps_spin.setRange(5,100), self.vox_timesteps_spin.setValue(20), self.vox_timesteps_spin.setFixedWidth(70), r.addWidget(self.vox_timesteps_spin), r.addSpacing(20),
             r.addWidget(QLabel("CFG:")), setattr(self,'vox_cfg_spin',QDoubleSpinBox()), self.vox_cfg_spin.setRange(0.5,10.0), self.vox_cfg_spin.setSingleStep(0.1), self.vox_cfg_spin.setValue(2.0), self.vox_cfg_spin.setFixedWidth(70), r.addWidget(self.vox_cfg_spin), r.addStretch())))
-        _rl(lg3, "模型路径:", lambda r: (setattr(self,'edit_voxcpm_model_path',QLineEdit()), self.edit_voxcpm_model_path.setPlaceholderText("留空使用 HuggingFace 预训练模型"), r.addWidget(self.edit_voxcpm_model_path),
-            setattr(self,'_browse_vox_btn',QPushButton("浏览")), self._browse_vox_btn.setObjectName("secondary_button"), self._browse_vox_btn.clicked.connect(self.browse_voxcpm_model_dir), r.addWidget(self._browse_vox_btn)))
-        _rl(lg3, "端口:", lambda r: (setattr(self,'spin_voxcpm_port',QSpinBox()), self.spin_voxcpm_port.setRange(1024,65535), self.spin_voxcpm_port.setValue(7861), r.addWidget(self.spin_voxcpm_port)))
-        rr3 = QHBoxLayout()
-        self.llm_vox_status_val = QLabel("服务状态: 未启动"); self.llm_vox_status_val.setObjectName("muted_text"); rr3.addWidget(self.llm_vox_status_val); rr3.addStretch()
-        self.btn_toggle_voxcpm = QPushButton("▶️ 启动"); self.btn_toggle_voxcpm.setObjectName("primary_button"); self.btn_toggle_voxcpm.clicked.connect(self.toggle_voxcpm_service); rr3.addWidget(self.btn_toggle_voxcpm)
-        b3 = QPushButton("💾 保存"); b3.setObjectName("secondary_button"); b3.setFixedWidth(80); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
+        rr3 = QHBoxLayout(); rr3.addStretch()
+        b3_test = mdi_button("测试连接", "search"); b3_test.setObjectName("secondary_button"); b3_test.setFixedWidth(110); b3_test.clicked.connect(self._test_vox_connection); rr3.addWidget(b3_test)
+        b3 = mdi_button("保存", "save"); b3.setObjectName("primary_button"); b3.setFixedWidth(90); b3.clicked.connect(self.save_voxcpm_config); rr3.addWidget(b3)
         lg3.addLayout(rr3)
-        l3.addWidget(g3); l3.addStretch(); tabs.addTab(p3, "🗣️ VoxCPM")
+        self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); lg3.addWidget(self.llm_vox_status_val)
+        scroll_layout.addWidget(g3)
 
-        # ───── Tab 4: Ollama ─────
-        p4 = _page(); l4 = QVBoxLayout(p4); l4.setContentsMargins(16,20,16,16); l4.setSpacing(10)
-        g4 = QGroupBox("🖥️ Ollama 本地视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        # ───── Ollama ─────
+        g4 = QGroupBox("🖥️ Ollama 远程视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
-        lg4.addLayout(_row(lambda r: (setattr(self,'btn_ollama_start',QPushButton("▶ 启动")), self.btn_ollama_start.setObjectName("primary_button"), self.btn_ollama_start.setFixedWidth(70), self.btn_ollama_start.clicked.connect(self._ollama_start),
-            setattr(self,'btn_ollama_stop',QPushButton("■ 停止")), self.btn_ollama_stop.setObjectName("secondary_button"), self.btn_ollama_stop.setFixedWidth(70), self.btn_ollama_stop.clicked.connect(self._ollama_stop),
-            setattr(self,'btn_ollama_refresh',QPushButton("↺ 刷新")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
-            r.addWidget(self.btn_ollama_start), r.addWidget(self.btn_ollama_stop), r.addWidget(self.btn_ollama_refresh), r.addStretch())))
-        setattr(self,'lbl_runners_warn',QLabel("⚠ 推理运行库缺失")); self.lbl_runners_warn.setObjectName("ollama_runners_warn"); self.lbl_runners_warn.setVisible(False)
-        setattr(self,'btn_fix_runners',QPushButton("🔧 修复")); self.btn_fix_runners.setObjectName("primary_button"); self.btn_fix_runners.setVisible(False); self.btn_fix_runners.clicked.connect(self._ollama_fix_runners)
-        lg4.addLayout(_row(lambda r: (r.addWidget(self.lbl_runners_warn), r.addStretch(), r.addWidget(self.btn_fix_runners))))
-        setattr(self,'runners_bar',QProgressBar()); self.runners_bar.setRange(0,100); self.runners_bar.setVisible(False); lg4.addWidget(self.runners_bar)
-        lg4.addLayout(_row(lambda r: (r.addWidget(QLabel("下载模型:")),
-            setattr(self,'ollama_pull_input',QComboBox()), [self.ollama_pull_input.addItem(md,userData=mid) for mid,md in [("internvl2.5:8b","InternVL2.5 8B"),("qwen2.5vl:7b","Qwen2.5-VL 7B"),("internvl2.5:26b","InternVL2.5 26B"),("qwen2.5vl:3b","Qwen2.5-VL 3B"),("minicpm-v:8b","MiniCPM-V 8B"),("llava:7b","LLaVA 1.5 7B"),("moondream:1.8b","Moondream 1.8B")]],
-            self.ollama_pull_input.setCurrentIndex(0), r.addWidget(self.ollama_pull_input),
-            setattr(self,'btn_ollama_pull',QPushButton("⬇ 下载")), self.btn_ollama_pull.setObjectName("primary_button"), self.btn_ollama_pull.setFixedWidth(70), self.btn_ollama_pull.clicked.connect(self._ollama_pull), r.addWidget(self.btn_ollama_pull), r.addStretch())))
-        setattr(self,'ollama_pull_bar',QProgressBar()); self.ollama_pull_bar.setRange(0,100); self.ollama_pull_bar.setFixedHeight(14); self.ollama_pull_bar.hide(); lg4.addWidget(self.ollama_pull_bar)
-        setattr(self,'ollama_progress_lbl',QLabel("")); self.ollama_progress_lbl.setObjectName("ollama_progress_lbl"); self.ollama_progress_lbl.setWordWrap(True); lg4.addWidget(self.ollama_progress_lbl)
+        lg4.addLayout(_row(lambda r: (
+            setattr(self,'btn_ollama_refresh',mdi_button("刷新", "refresh")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
+            r.addWidget(self.btn_ollama_refresh), r.addStretch())))
 
-        # ── 视觉模型配置（Ollama 托管的视觉模型，合并到此 Tab）──
+        # ── 视觉模型配置（Ollama 托管的视觉模型）──
         g_vm = QGroupBox("👁️ 当前视觉模型（由 Ollama 提供）"); g_vm.setObjectName("model_groupbox"); g_vm.setProperty("section", "vision"); lg_vm = QVBoxLayout(g_vm); lg_vm.setSpacing(10)
         _inp(lg_vm, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
         _rl(lg_vm, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
             self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
             self.llm_vision_model_input.lineEdit().setPlaceholderText("启动 Ollama 后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
         rr_vm = QHBoxLayout(); rr_vm.addStretch()
-        b_vm_test = QPushButton("🔍 测试连接"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
-        b_vm_save = QPushButton("💾 保存"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
+        b_vm_test = mdi_button("测试连接", "search"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
+        b_vm_save = mdi_button("保存", "save"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
         lg_vm.addLayout(rr_vm)
         self.vision_status_lbl = QLabel(""); lg_vm.addWidget(self.vision_status_lbl)
-        l4.addWidget(g4)
-        l4.addWidget(g_vm)
+        scroll_layout.addWidget(g4)
+        scroll_layout.addWidget(g_vm)
 
-        l4.addStretch(); tabs.addTab(p4, "🖥️ Ollama")
+        # ───── Whisper ─────
+        g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
+        whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
+        _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
+        lg5.addLayout(_row(lambda r: (r.addStretch(),
+            setattr(self,'btn_test_whisper',mdi_button("测试连接", "search")), self.btn_test_whisper.setObjectName("secondary_button"), self.btn_test_whisper.setFixedWidth(110), self.btn_test_whisper.clicked.connect(self._test_whisper_connection),
+            r.addWidget(self.btn_test_whisper),
+            setattr(self,'btn_save_whisper',mdi_button("保存", "save")), self.btn_save_whisper.setObjectName("primary_button"), self.btn_save_whisper.setFixedWidth(90), self.btn_save_whisper.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_whisper))))
+        self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
+        scroll_layout.addWidget(g5)
 
-        # ───── Tab 5: Whisper ─────
-        p5 = _page(); l5 = QVBoxLayout(p5); l5.setContentsMargins(16,20,16,16); l5.setSpacing(10)
-        g5 = QGroupBox("🎙️ Whisper 语音转写"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
-        _rl(lg5, "引擎:", lambda r: (setattr(self,'llm_whisper_status_val',QLabel("正在检测...")), r.addWidget(self.llm_whisper_status_val)))
-        _rl(lg5, "DLL:", lambda r: (setattr(self,'llm_dll_status_val',QLabel("正在检测...")), r.addWidget(self.llm_dll_status_val)))
-        _rl(lg5, "模型:", lambda r: (setattr(self,'llm_models_status_val',QLabel("正在检测...")), r.addWidget(self.llm_models_status_val)))
-        setattr(self,'whisper_stage_label',QLabel("系统就绪")); self.whisper_stage_label.setObjectName("muted_text"); lg5.addWidget(self.whisper_stage_label)
-        setattr(self,'whisper_progress_bar',QProgressBar()); self.whisper_progress_bar.setVisible(False); self.whisper_progress_bar.setRange(0,100); lg5.addWidget(self.whisper_progress_bar)
-        lg5.addLayout(_row(lambda r: (setattr(self,'btn_refresh_whisper',QPushButton("🔄 刷新")), self.btn_refresh_whisper.setObjectName("secondary_button"), self.btn_refresh_whisper.clicked.connect(self.refresh_llm_page_status),
-            setattr(self,'btn_install_whisper',QPushButton("🚀 一键修复/安装")), self.btn_install_whisper.setObjectName("primary_button"), self.btn_install_whisper.clicked.connect(self.start_whisper_repair),
-            r.addWidget(self.btn_refresh_whisper), r.addWidget(self.btn_install_whisper), r.addStretch())))
-        setattr(self,'whisper_log_view',QTextEdit()); self.whisper_log_view.setObjectName("log_viewer"); self.whisper_log_view.setReadOnly(True); self.whisper_log_view.setFixedHeight(100); self.whisper_log_view.setPlaceholderText("修复日志..."); lg5.addWidget(self.whisper_log_view)
-        l5.addWidget(g5); l5.addStretch(); tabs.addTab(p5, "🎙️ Whisper")
-
-        # ───── Tab 6: PaddleOCR ─────
-        p6 = _page(); l6 = QVBoxLayout(p6); l6.setContentsMargins(16,20,16,16); l6.setSpacing(10)
+        # ───── PaddleOCR ─────
         g6 = QGroupBox("🔍 PaddleOCR 文本识别"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
         _rl(lg6, "环境:", lambda r: (setattr(self,'llm_paddle_status_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_status_val)))
         _rl(lg6, "模型:", lambda r: (setattr(self,'llm_paddle_models_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_models_val)))
         setattr(self,'paddle_stage_label',QLabel("系统就绪")); self.paddle_stage_label.setObjectName("muted_text"); lg6.addWidget(self.paddle_stage_label)
         setattr(self,'paddle_progress_bar',QProgressBar()); self.paddle_progress_bar.setVisible(False); self.paddle_progress_bar.setRange(0,100); lg6.addWidget(self.paddle_progress_bar)
-        lg6.addLayout(_row(lambda r: (setattr(self,'btn_refresh_paddle',QPushButton("🔄 刷新")), self.btn_refresh_paddle.setObjectName("secondary_button"), self.btn_refresh_paddle.clicked.connect(self.refresh_llm_page_status),
-            setattr(self,'btn_install_paddle',QPushButton("🚀 一键部署/修复")), self.btn_install_paddle.setObjectName("primary_button"), self.btn_install_paddle.clicked.connect(self.start_paddle_repair),
+        lg6.addLayout(_row(lambda r: (setattr(self,'btn_refresh_paddle',mdi_button("刷新", "refresh")), self.btn_refresh_paddle.setObjectName("secondary_button"), self.btn_refresh_paddle.clicked.connect(self.refresh_llm_page_status),
+            setattr(self,'btn_install_paddle',mdi_button("一键部署/修复", "rocket")), self.btn_install_paddle.setObjectName("primary_button"), self.btn_install_paddle.clicked.connect(self.start_paddle_repair),
             r.addWidget(self.btn_refresh_paddle), r.addWidget(self.btn_install_paddle), r.addStretch())))
         setattr(self,'paddle_log_view',QTextEdit()); self.paddle_log_view.setObjectName("log_viewer"); self.paddle_log_view.setReadOnly(True); self.paddle_log_view.setFixedHeight(100); self.paddle_log_view.setPlaceholderText("部署日志..."); lg6.addWidget(self.paddle_log_view)
-        l6.addWidget(g6); l6.addStretch(); tabs.addTab(p6, "🔍 PaddleOCR")
+        scroll_layout.addWidget(g6)
 
-        layout.addWidget(tabs, 1)
+        # ───── CLIP ─────
+        g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
+        clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
+        _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
+        lg7.addLayout(_row(lambda r: (r.addStretch(),
+            setattr(self,'btn_test_clip',mdi_button("测试连接", "search")), self.btn_test_clip.setObjectName("secondary_button"), self.btn_test_clip.setFixedWidth(110), self.btn_test_clip.clicked.connect(self._test_clip_connection),
+            r.addWidget(self.btn_test_clip),
+            setattr(self,'btn_save_clip',mdi_button("保存", "save")), self.btn_save_clip.setObjectName("primary_button"), self.btn_save_clip.setFixedWidth(90), self.btn_save_clip.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_clip))))
+        self.clip_status_lbl = QLabel(""); self.clip_status_lbl.setObjectName("muted_text"); lg7.addWidget(self.clip_status_lbl)
+        scroll_layout.addWidget(g7)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
         # Load data
         prov = self.ai_config.get("llm_provider","deepseek"); idx = self.llm_provider_combo.findData(prov)
         if idx>=0: self.llm_provider_combo.setCurrentIndex(idx)
@@ -630,6 +569,28 @@ class PageSetupMixin:
         self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
         self.load_voxcpm_config()
+        # 统一服务端地址初始化（会联动同步 Whisper/CLIP/PaddleOCR 的地址）
+        self.compute_server_input.setText(self.ai_config.get("compute_server_url", "http://192.168.111.18:8000"))
+
+        # ── 统一管理：模型专属 API 地址置灰只读展示，禁止手动编辑 ──
+        # LLM API 地址输入框在「自定义」模式下可编辑，其余模式只读
+        _readonly_style = (
+            "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"
+        )
+        for inp in [
+            self.llm_vision_api_url_input,
+            getattr(self, "vox_api_url_input", None),
+            getattr(self, "whisper_api_url_input", None),
+            getattr(self, "clip_api_url_input", None),
+        ]:
+            if inp:
+                inp.setReadOnly(True)
+                inp.setStyleSheet(_readonly_style)
+        # LLM API 地址：根据当前提供商决定是否只读
+        if prov != "custom":
+            self.llm_api_url_input.setReadOnly(True)
+            self.llm_api_url_input.setStyleSheet(_readonly_style)
+
         self.refresh_llm_page_status()
 
     # ═══════════════════════════════════════════════════════════════
@@ -657,38 +618,29 @@ class PageSetupMixin:
         except Exception: pass
         self.btn_open_comfyui_editor = QPushButton("🎨 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)
         r1 = QHBoxLayout(); r1.addStretch()
-        b_save_comfy = QPushButton("💾 保存 ComfyUI 配置"); b_save_comfy.setObjectName("primary_button"); b_save_comfy.clicked.connect(self.save_ai_config); r1.addWidget(b_save_comfy)
+        b_save_comfy = mdi_button("保存 ComfyUI 配置", "save"); b_save_comfy.setObjectName("primary_button"); b_save_comfy.clicked.connect(self.save_ai_config); r1.addWidget(b_save_comfy)
         l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
 
-        # ── Tab 2: RunningHub ──
-        p2 = QWidget(); l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30)
-        _inp("API Key:", "rh_api_key_input", "从 runninghub.cn 获取的 API Key", l2, echo=QLineEdit.Password)
-        _inp("Base URL:", "rh_base_url_input", "https://www.runninghub.cn", l2)
-        self.rh_api_key_input.setText(self.ai_config.get("runninghub_api_key",""))
-        self.rh_base_url_input.setText(self.ai_config.get("runninghub_base_url","https://www.runninghub.cn"))
-        r2 = QHBoxLayout(); r2.addStretch()
-        b_save_rh = QPushButton("💾 保存 RunningHub 配置"); b_save_rh.setObjectName("primary_button"); b_save_rh.clicked.connect(self.save_ai_config); r2.addWidget(b_save_rh)
-        l2.addLayout(r2)
-        l2.addStretch(); tabs.addTab(p2, "🔗 RunningHub")
-
-        # ── Tab 3: 飞书 ──
+        # ── Tab 2: 飞书（已隐藏，代码保留）──
         p3 = QWidget(); l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30)
-        _inp("App ID:", "edit_feishu_appid", "cli_xxxxxxxxxxxxxxx", l3)
-        _inp("App Secret:", "edit_feishu_appsecret", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", l3, echo=QLineEdit.Password)
-        _inp("多维表格 App Token:", "edit_feishu_apptoken", "bascnxxxxxxxxxxxxxxxxxxxxxx", l3)
+        l3.addWidget(QLabel("飞书配置（用于同步选题 / 脚本到飞书多维表格）:"))
+        _inp("App ID:", "edit_feishu_appid", "飞书开放平台自建应用的 App ID", l3)
+        _inp("App Secret:", "edit_feishu_appsecret", "App Secret", l3, echo=QLineEdit.Password)
+        _inp("App Token:", "edit_feishu_apptoken", "飞书多维表格的 app_token", l3)
         _inp("数据表 Table ID:", "edit_feishu_tableid", "tblxxxxxxxxxxxxxx", l3)
-        _inp("选题列名称:", "edit_feishu_topicfield", "默认: 选题", l3)
-        _inp("脚本列名称:", "edit_feishu_scriptfield", "默认: 脚本", l3)
+        _inp("选题字段名:", "edit_feishu_topicfield", "默认: 选题", l3)
+        _inp("脚本字段名:", "edit_feishu_scriptfield", "默认: 脚本", l3)
         _inp("文档保存文件夹 Token:", "edit_feishu_foldertoken", "fldcnxxxxxxxxxxxxxxxxxxxxxx (选填)", l3)
         self.edit_feishu_topicfield.setText("选题")
         self.edit_feishu_scriptfield.setText("脚本")
         r3 = QHBoxLayout(); r3.addStretch()
-        b3 = QPushButton("💾 保存飞书配置"); b3.setObjectName("primary_button"); b3.clicked.connect(self.save_feishu_config); r3.addWidget(b3)
-        b4 = QPushButton("🔌 测试连接"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._test_feishu); r3.addWidget(b4)
+        b3 = mdi_button("保存飞书配置", "save"); b3.setObjectName("primary_button"); b3.clicked.connect(self.save_feishu_config); r3.addWidget(b3)
+        b4 = mdi_button("测试连接", "link"); b4.setObjectName("secondary_button"); b4.clicked.connect(self._test_feishu); r3.addWidget(b4)
         l3.addLayout(r3)
         self.fs_test_status = QLabel(""); self.fs_test_status.setObjectName("muted_text"); l3.addWidget(self.fs_test_status)
-        l3.addStretch(); tabs.addTab(p3, "📝 飞书")
+        l3.addStretch()
+        # 注意：不调用 tabs.addTab(p3, ...) 以隐藏飞书Tab
 
         # ── Tab 4: 即梦 ──
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30,30,30,30)
@@ -699,54 +651,15 @@ class PageSetupMixin:
         self.dr_status = QLabel(""); self.dr_status.setObjectName("muted_text"); l4.addWidget(self.dr_status)
         r4 = QHBoxLayout()
         b_login = QPushButton("🔑 登录"); b_login.setObjectName("primary_button"); b_login.clicked.connect(self._dreamina_login); r4.addWidget(b_login)
-        b_check = QPushButton("🔌 检测状态"); b_check.setObjectName("secondary_button"); b_check.clicked.connect(self._dreamina_check); r4.addWidget(b_check)
+        b_check = mdi_button("检测状态", "link"); b_check.setObjectName("secondary_button"); b_check.clicked.connect(self._dreamina_check); r4.addWidget(b_check)
         r4.addStretch(); l4.addLayout(r4)
         l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
 
-        # ── Tab 5: 旺店通 ERP ──
-        p5 = QWidget(); l5 = QVBoxLayout(p5); l5.setContentsMargins(30,30,30,30)
-        l5.addWidget(QLabel("旺店通 ERP 配置。产品资料从仓库同步时使用，留空则不启用。"))
-        l5.addSpacing(10)
-        _inp("API 地址:", "erp_url_input", "https://api.wangdian.cn/openapi2/", l5)
-        _inp("AppKey:", "erp_appkey_input", "旺店通 appkey", l5)
-        _inp("AppSecret:", "erp_appsecret_input", "旺店通 appsecret", l5, echo=QLineEdit.Password)
-        _inp("SID:", "erp_sid_input", "旺店通商家编码", l5)
-        r5 = QHBoxLayout(); r5.addStretch()
-        b_save_erp = QPushButton("💾 保存配置"); b_save_erp.setObjectName("primary_button")
-        b_save_erp.clicked.connect(self._save_erp_platform_cfg)
-        r5.addWidget(b_save_erp)
-        self.lbl_erp_status = QLabel(""); self.lbl_erp_status.setObjectName("muted_text"); r5.addWidget(self.lbl_erp_status)
-        r5.addStretch(); l5.addLayout(r5)
-        l5.addStretch(); tabs.addTab(p5, "🏪 旺店通")
-
-        # ── Tab 6: 数据库配置 ──
-        p6 = QWidget(); l6 = QVBoxLayout(p6); l6.setContentsMargins(30,30,30,30)
-        l6.addWidget(QLabel("素材向量库 PostgreSQL 数据库地址配置。可配置远程数据库。"))
-        l6.addSpacing(10)
-        _inp("主机地址:", "matdb_host_input", "192.168.111.17", l6)
-        _inp("端口:", "matdb_port_input", "15432", l6)
-        _inp("数据库名:", "matdb_name_input", "material_index", l6)
-        _inp("用户名:", "matdb_user_input", "postgres", l6)
-        _inp("密码:", "matdb_pass_input", "", l6, echo=QLineEdit.Password)
-        r6 = QHBoxLayout(); r6.addStretch()
-        b_test_db = QPushButton("🔌 测试连接"); b_test_db.setObjectName("secondary_button")
-        b_test_db.clicked.connect(self._test_matdb_platform)
-        r6.addWidget(b_test_db)
-        b_save_db = QPushButton("💾 保存配置"); b_save_db.setObjectName("primary_button")
-        b_save_db.clicked.connect(self._save_matdb_platform_cfg)
-        r6.addWidget(b_save_db)
-        self.lbl_db_status = QLabel(""); self.lbl_db_status.setObjectName("muted_text"); r6.addWidget(self.lbl_db_status)
-        r6.addStretch(); l6.addLayout(r6)
-        l6.addStretch(); tabs.addTab(p6, "🗄️ 数据库")
+        # ── Tab 5: 旺店通 ERP（已移除，ERP 配置由服务端统一管理）──
 
         layout.addWidget(tabs, 1)
         # Load feishu config
         self.load_feishu_config()
-        # Load ERP and DB config
-        try: self.load_erp_platform_cfg()
-        except Exception: pass
-        try: self.load_matdb_platform_cfg()
-        except Exception: pass
 
     def setup_digital_human_page(self):
             layout = QVBoxLayout(self.page_digital_human)
@@ -761,16 +674,15 @@ class PageSetupMixin:
             config_layout = QVBoxLayout(card)
             config_layout.setContentsMargins(30, 30, 30, 30)
         
-            # Backend Selection
-            config_layout.addWidget(QLabel("选择生成后端:"))
-            self.backend_selector = QComboBox()
-            self.backend_selector.addItems(["ComfyUI (本地/局域网)", "RunningHub (云端)"])
-            self.backend_selector.currentIndexChanged.connect(self.on_backend_changed)
-            config_layout.addWidget(self.backend_selector)
+	        # Backend Selection
+            config_layout.addWidget(QLabel("生成后端:"))
+            self.backend_label = QLabel("ComfyUI (本地/局域网)")
+            self.backend_label.setObjectName("muted_text")
+            config_layout.addWidget(self.backend_label)
         
             config_layout.addSpacing(15)
 
-            # --- ComfyUI Section (Local Inputs) ---
+            # --- ComfyUI Section ---
             self.comfy_section = QWidget()
             comfy_layout = QVBoxLayout(self.comfy_section)
             comfy_layout.setContentsMargins(0, 0, 0, 0)
@@ -802,7 +714,7 @@ class PageSetupMixin:
             aud_row.addWidget(btn_sel_aud)
             comfy_layout.addLayout(aud_row)
         
-            self.btn_run_local = QPushButton("🚀 提交本地生成任务")
+            self.btn_run_local = mdi_button("提交本地生成任务", "rocket")
             self.btn_run_local.setObjectName("action_button")
             self.btn_run_local.setEnabled(False)
             self.btn_run_local.setFixedHeight(50)
@@ -812,23 +724,6 @@ class PageSetupMixin:
         
             config_layout.addWidget(self.comfy_section)
 
-            # --- RunningHub Section ---
-            self.rh_section = QWidget()
-            self.rh_section.setVisible(False)
-            rh_layout = QVBoxLayout(self.rh_section)
-            rh_layout.setContentsMargins(0, 0, 0, 0)
-        
-            rh_layout.addWidget(QLabel("说明: 云端应用请在内置浏览器中完成图片和语音的上传。"))
-            rh_layout.addSpacing(10)
-        
-            btn_open_web = QPushButton("🌐 打开 RunningHub 数字人应用 (网页版)")
-            btn_open_web.setObjectName("action_button")
-            btn_open_web.setFixedHeight(60)
-            btn_open_web.clicked.connect(self.open_rh_web_interface)
-            rh_layout.addWidget(btn_open_web)
-        
-            config_layout.addWidget(self.rh_section)
-        
             layout.addWidget(card)
             layout.addStretch()
         
@@ -845,7 +740,7 @@ class PageSetupMixin:
             mon_card.setObjectName("card")
             mon_card.setFixedHeight(80)
             mon_layout = QHBoxLayout(mon_card)
-            mon_layout.addWidget(QLabel("📊 系统资源监控:"))
+            mon_layout.addWidget(QLabel("📊 系统资源:"))
             self.cpu_label = QLabel("CPU: --%")
             self.ram_label = QLabel("内存: --%")
             self.gpu_label = QLabel("显存: --")
@@ -855,30 +750,143 @@ class PageSetupMixin:
             mon_layout.addStretch()
             layout.addWidget(mon_card)
         
-            # --- Bottom: Task List ---
+            # --- Task List ---
             task_card = QFrame()
             task_card.setObjectName("card")
             task_layout = QVBoxLayout(task_card)
         
             header = QHBoxLayout()
-            header.addWidget(QLabel("📋 ComfyUI 任务列表"))
-            btn_refresh = QPushButton("🔄 同步服务器任务")
-            btn_refresh.setFixedWidth(120)
-            btn_refresh.clicked.connect(self.refresh_server_tasks)
+            header.addWidget(QLabel("📋 任务队列"))
+            self.lbl_task_status = QLabel("")
+            self.lbl_task_status.setObjectName("muted_text")
+            header.addWidget(self.lbl_task_status, 1)
+            btn_sync = mdi_button("同步服务端", "refresh")
+            btn_sync.setFixedWidth(100)
+            btn_sync.clicked.connect(self._sync_server_tasks_async)
+            header.addWidget(btn_sync)
+            btn_clear = mdi_button("清除已完成", "close")
+            btn_clear.setFixedWidth(100)
+            btn_clear.clicked.connect(self._clear_done_tasks)
+            header.addWidget(btn_clear)
             header.addStretch()
-            header.addWidget(btn_refresh)
             task_layout.addLayout(header)
         
-            self.task_table = QTableWidget(0, 4)
-            self.task_table.setHorizontalHeaderLabels(["任务 ID", "状态", "进度", "操作"])
-            self.task_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-            self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-            self.task_table.setColumnWidth(3, 150)
+            self.task_table = QTableWidget(0, 7)
+            self.task_table.setHorizontalHeaderLabels(["任务 ID", "任务类型", "来源", "状态", "进度", "时间", "操作"])
+            self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+            self.task_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+            self.task_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+            self.task_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
+            self.task_table.setColumnWidth(0, 180)
+            self.task_table.setColumnWidth(1, 120)
+            self.task_table.setColumnWidth(3, 120)
+            self.task_table.setColumnWidth(5, 140)
+            self.task_table.setColumnWidth(6, 100)
+            self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             task_layout.addWidget(self.task_table)
         
             layout.addWidget(task_card, 1)
-        
-            self.task_outputs = {}
+    
+    def _sync_server_tasks_async(self):
+        """异步版本：HTTP 请求放 Worker 线程，UI 更新回主线程。"""
+        from utils.thread_worker import TaskWorker as Worker
+
+        def _fetch():
+            """仅做 HTTP 请求，返回数据，不碰 UI。"""
+            import requests as _req
+            import socket as _socket
+            try:
+                from config.paths import AI_CONFIG_FILE
+                import json as _json
+                base_url = "http://192.168.111.18:8000"
+                if os.path.isfile(AI_CONFIG_FILE):
+                    with open(AI_CONFIG_FILE, "r") as f:
+                        cfg = _json.load(f)
+                    url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                    if url:
+                        base_url = url
+                resp = _req.get(f"{base_url}/tasks", timeout=10)
+                if resp.status_code != 200:
+                    return None
+                tasks = resp.json()
+                if not isinstance(tasks, list):
+                    return None
+
+                # 获取本机 IP
+                local_ip = ""
+                try:
+                    s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                    s.connect((base_url.replace("http://", "").replace("https://", "").split(":")[0], 80))
+                    local_ip = s.getsockname()[0]
+                    s.close()
+                except Exception:
+                    pass
+
+                # 过滤本机任务
+                my_tasks = []
+                for t in tasks:
+                    task_ip = (t.get("client_ip") or "").strip()
+                    if local_ip and task_ip and task_ip != local_ip:
+                        continue
+                    my_tasks.append(t)
+                return my_tasks
+            except Exception as e:
+                print(f"同步服务端任务失败: {e}")
+                return None
+
+        def _on_done(tasks):
+            """主线程回调：更新 UI。"""
+            if not tasks:
+                return
+            existing = set()
+            for row in range(self.task_table.rowCount()):
+                item = self.task_table.item(row, 0)
+                if item:
+                    existing.add(item.text())
+
+            added = 0
+            import datetime as _dt
+            for t in tasks:
+                tid = (t.get("id") or "")[:12]
+                if not tid or tid in existing:
+                    continue
+                created_ts = t.get("created_at") or t.get("started_at") or 0
+                time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M") if created_ts else ""
+                row = self.task_table.rowCount()
+                self.task_table.insertRow(row)
+                self.task_table.setItem(row, 0, QTableWidgetItem(tid))
+                self.task_table.setItem(row, 1, QTableWidgetItem(t.get("type", "未知")))
+                source_item = QTableWidgetItem("服务端")
+                source_item.setForeground(QColor("#60a5fa"))
+                self.task_table.setItem(row, 2, source_item)
+                status = t.get("status", "unknown")
+                status_map = {"completed": "✅ 完成", "processing": "⏳ 处理中", "pending": "⏳ 排队中", "failed": "❌ 失败", "error": "❌ 错误"}
+                self.task_table.setItem(row, 3, QTableWidgetItem(status_map.get(status, status)))
+                p_bar = QProgressBar()
+                p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
+                p_bar.setTextVisible(True)
+                self.task_table.setCellWidget(row, 4, p_bar)
+                self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
+                self.task_table.setCellWidget(row, 6, QWidget())
+                existing.add(tid)
+                added += 1
+
+            if added > 0:
+                self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
+
+        self._sync_worker = Worker(_fetch)
+        self._sync_worker.finished.connect(_on_done)
+        self._sync_worker.start()
+    
+    def _clear_done_tasks(self):
+        """清除所有已完成/失败的任务行。"""
+        for row in range(self.task_table.rowCount() - 1, -1, -1):
+            status_text = self.task_table.item(row, 3).text() if self.task_table.item(row, 3) else ""
+            if "完成" in status_text or "失败" in status_text or "错误" in status_text:
+                self.task_table.removeRow(row)
 
     def setup_accounts_page(self):
             layout = QVBoxLayout(self.page_accounts)
@@ -889,7 +897,7 @@ class PageSetupMixin:
             heading.setObjectName("heading")
             header.addWidget(heading)
         
-            btn_add = QPushButton("➕ 添加新账户")
+            btn_add = mdi_button("添加新账户", "plus")
             btn_add.setObjectName("primary_button")
             btn_add.setFixedWidth(150)
             btn_add.clicked.connect(self.trigger_add_account)
@@ -913,7 +921,7 @@ class PageSetupMixin:
             layout.setContentsMargins(40, 40, 40, 40)
         
             header = QHBoxLayout()
-            self.detail_back_btn = QPushButton("⬅ 返回列表")
+            self.detail_back_btn = mdi_button("返回列表", "left")
             self.detail_back_btn.clicked.connect(lambda: self.switch_page(8))
             header.addWidget(self.detail_back_btn)
         
@@ -922,7 +930,7 @@ class PageSetupMixin:
             header.addWidget(self.detail_title)
             header.addStretch()
         
-            self.detail_refresh_btn = QPushButton("🔄 刷新数据")
+            self.detail_refresh_btn = mdi_button("刷新数据", "refresh")
             self.detail_refresh_btn.setFixedWidth(120)
             self.detail_refresh_btn.clicked.connect(lambda: self.refresh_account_videos(self.current_selected_account))
             header.addWidget(self.detail_refresh_btn)
@@ -969,9 +977,30 @@ class PageSetupMixin:
         # Tab 1: 日志
         p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
         l1 = QVBoxLayout(p1); l1.setContentsMargins(16,16,16,16)
-        h1 = QHBoxLayout(); l1.addLayout(h1)
-        b = QPushButton("🔄 刷新"); b.setObjectName("primary_button"); b.setFixedWidth(90); b.clicked.connect(self.refresh_logs); h1.addWidget(b); h1.addStretch()
+        frow = QHBoxLayout(); l1.addLayout(frow)
+        b = mdi_button("刷新", "refresh"); b.setObjectName("primary_button"); b.setFixedWidth(90); b.clicked.connect(self.refresh_logs); frow.addWidget(b)
+        frow.addWidget(QLabel("  级别:"))
+        self.log_level_filter = QComboBox()
+        self.log_level_filter.addItems(["全部", "INFO", "WARNING", "ERROR", "DEBUG"])
+        self.log_level_filter.currentIndexChanged.connect(self.refresh_logs)
+        frow.addWidget(self.log_level_filter)
+        frow.addWidget(QLabel("关键词:"))
+        self.log_keyword_input = QLineEdit()
+        self.log_keyword_input.setPlaceholderText("输入关键词过滤，如 [ASR]")
+        self.log_keyword_input.setMinimumWidth(160)
+        self.log_keyword_input.returnPressed.connect(self.refresh_logs)
+        frow.addWidget(self.log_keyword_input)
+        self.btn_server_log = mdi_button("服务端", "server")
+        self.btn_server_log.setObjectName("secondary_button")
+        self.btn_server_log.setCheckable(True)
+        self.btn_server_log.setChecked(False)
+        self.btn_server_log.clicked.connect(self.refresh_logs)
+        frow.addWidget(self.btn_server_log)
+        frow.addStretch()
         self.log_viewer = QTextEdit(); self.log_viewer.setReadOnly(True); self.log_viewer.setObjectName("log_viewer"); l1.addWidget(self.log_viewer, 1)
+        # 右键菜单：清空日志
+        self.log_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_viewer.customContextMenuRequested.connect(self._log_viewer_context_menu)
         l1.addWidget(QLabel("完整日志: .runtime/logs/app.log"))
         tabs.addTab(p1, "📊 日志")
 
@@ -989,18 +1018,187 @@ class PageSetupMixin:
         QTimer.singleShot(200, self._refresh_help_sysinfo)
         tabs.addTab(p2, "🖥️ 系统信息")
 
-        # Tab 3: 版本
+        # Tab 3: 关于与版本
         p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
-        l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30); l3.setSpacing(8)
+        l3 = QVBoxLayout(p3); l3.setContentsMargins(30, 20, 30, 20); l3.setSpacing(14)
+
+        # Brand / Developer Info Card
+        brand_card = QFrame()
+        brand_card.setObjectName("brand_card")
+        brand_card.setStyleSheet("""
+            #brand_card {
+                background-color: #1a1a24;
+                border: 1px solid #2e2e38;
+                border-radius: 12px;
+            }
+        """)
+        brand_layout = QVBoxLayout(brand_card)
+        brand_layout.setContentsMargins(20, 20, 20, 20)
+        brand_layout.setSpacing(10)
+
+        app_title = QLabel("🔩 螺丝钉-电商智能体矩阵")
+        app_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        brand_layout.addWidget(app_title)
+
+        dev_info = QLabel("此智能体由 <b>大怪工作室</b> 开发")
+        dev_info.setStyleSheet("font-size: 13px; color: #a1a1aa;")
+        brand_layout.addWidget(dev_info)
+
+        contact_info = QLabel("📞 联系电话：<span style='color: #3b82f6; font-weight: bold;'>17361907260</span>（微信同号）")
+        contact_info.setStyleSheet("font-size: 13px; color: #e4e4e7;")
+        brand_layout.addWidget(contact_info)
+        
+        l3.addWidget(brand_card)
+
+        # Get machine code and license signature info
+        from utils.license import get_machine_id
+        machine_id = get_machine_id()
+        
+        license_status = "已激活 (客户端免激活)"
+        licensee_name = "服务端统一授权验证"
+        expiry_date = "自适应计算服务端授权状态"
+
+        # License Info Card
+        license_card = QFrame()
+        license_card.setObjectName("license_card")
+        license_card.setStyleSheet("""
+            #license_card {
+                background-color: #1a1a24;
+                border: 1px solid #2e2e38;
+                border-radius: 12px;
+            }
+        """)
+        license_layout = QVBoxLayout(license_card)
+        license_layout.setContentsMargins(20, 16, 20, 16)
+        license_layout.setSpacing(10)
+
+        license_title = QLabel("🔑 软件授权与激活")
+        license_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #10b981; margin-bottom: 4px;")
+        license_layout.addWidget(license_title)
+
+        # Machine ID Row with Copy button
+        mac_row = QHBoxLayout()
+        mac_row.setContentsMargins(0, 0, 0, 0)
+        mac_lbl = QLabel("本机机器码:")
+        mac_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        mac_val = QLineEdit(machine_id)
+        mac_val.setReadOnly(True)
+        mac_val.setStyleSheet("color: #3b82f6; font-size: 12px; font-family: monospace; background: #15151e; border: 1px solid #2e2e38; border-radius: 4px; padding: 2px 6px;")
+        
+        btn_copy = QPushButton("📋 复制机器码")
+        btn_copy.setFixedWidth(100)
+        btn_copy.setStyleSheet("""
+            QPushButton {
+                background-color: #27272a;
+                color: #ffffff;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 3px 6px;
+            }
+            QPushButton:hover {
+                background-color: #3f3f46;
+                border-color: #3b82f6;
+            }
+        """)
+        
+        def copy_mac():
+            QApplication.clipboard().setText(machine_id)
+            QMessageBox.information(self, "复制成功", "机器码已成功复制到剪贴板！")
+            
+        btn_copy.clicked.connect(copy_mac)
+        
+        mac_row.addWidget(mac_lbl)
+        mac_row.addWidget(mac_val, 1)
+        mac_row.addWidget(btn_copy)
+        license_layout.addLayout(mac_row)
+
+        # License status row
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_lbl = QLabel("授权状态:")
+        status_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        
+        status_val = QLabel(license_status)
+        if "已激活" in license_status:
+            status_val.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold;")
+        else:
+            status_val.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold;")
+            
+        status_row.addWidget(status_lbl)
+        status_row.addWidget(status_val, 1)
+        license_layout.addLayout(status_row)
+
+        # Licensee row
+        licensee_row = QHBoxLayout()
+        licensee_row.setContentsMargins(0, 0, 0, 0)
+        licensee_lbl = QLabel("激活签名:")
+        licensee_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        licensee_val = QLabel(licensee_name)
+        licensee_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        licensee_row.addWidget(licensee_lbl)
+        licensee_row.addWidget(licensee_val, 1)
+        license_layout.addLayout(licensee_row)
+
+        # Expiration row
+        expire_row = QHBoxLayout()
+        expire_row.setContentsMargins(0, 0, 0, 0)
+        expire_lbl = QLabel("有效期至:")
+        expire_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+        expire_val = QLabel(expiry_date)
+        expire_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        expire_row.addWidget(expire_lbl)
+        expire_row.addWidget(expire_val, 1)
+        license_layout.addLayout(expire_row)
+
+        l3.addWidget(license_card)
+
+        # System & Version Info Card
+        version_card = QFrame()
+        version_card.setObjectName("version_card")
+        version_card.setStyleSheet("""
+            #version_card {
+                background-color: #15151e;
+                border: 1px solid #26262e;
+                border-radius: 10px;
+            }
+        """)
+        version_layout = QVBoxLayout(version_card)
+        version_layout.setContentsMargins(20, 16, 20, 16)
+        version_layout.setSpacing(8)
+
+        version_title = QLabel("📋 系统与版本信息")
+        version_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #3b82f6; margin-bottom: 4px;")
+        version_layout.addWidget(version_title)
+
         import sys as _s, platform as _p
-        l3.addWidget(QLabel(f"应用版本: v2.0.0 RC"))
-        l3.addWidget(QLabel(f"Python: {_s.version}"))
-        l3.addWidget(QLabel(f"系统: {_p.system()} {_p.release()}"))
-        try: from PySide6 import __version__ as _v; l3.addWidget(QLabel(f"PySide6: {_v}"))
-        except Exception: pass
-        l3.addWidget(QLabel(f"工作目录: {WORKSPACE_ROOT}"))
+        def add_version_row(label, val):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(label)
+            lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
+            v_val = QLabel(val)
+            v_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+            v_val.setWordWrap(True)
+            row.addWidget(lbl)
+            row.addWidget(v_val, 1)
+            version_layout.addLayout(row)
+
+        add_version_row("应用版本:", "v2.0.0 RC")
+        add_version_row("Python 版本:", _s.version)
+        add_version_row("运行系统:", f"{_p.system()} {_p.release()} ({_p.version()})")
+        
+        try:
+            from PySide6 import __version__ as _v
+            add_version_row("PySide6 版本:", _v)
+        except Exception:
+            pass
+            
+        add_version_row("工作目录:", WORKSPACE_ROOT)
+        
+        l3.addWidget(version_card)
         l3.addStretch()
-        tabs.addTab(p3, "📋 版本")
+        tabs.addTab(p3, "ℹ️ 关于")
 
         # Tab 4: 外观主题
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30, 30, 30, 30)
@@ -1049,7 +1247,7 @@ class PageSetupMixin:
                     import subprocess, sys
                     r = subprocess.run(["nvidia-smi","--query-gpu=name,memory.total","--format=csv,noheader,nounits"],
                         capture_output=True, text=True, timeout=5,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=='win32' else 0)
+                        creationflags=subprocess.CREATE_NO_WINDOW)
                     w.setText(f"显卡: {r.stdout.strip()}")
                 except Exception:
                     w.setText("显卡: 检测中...")
@@ -1064,7 +1262,14 @@ class PageSetupMixin:
 
     def setup_backup_page(self):
         layout = QVBoxLayout(self.page_backup)
-        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
+        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(16)
+
+        # ── 系统工具 ──
+        sys_label = QLabel("🖥️ 系统工具")
+        sys_label.setObjectName("section_label")
+        sys_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #9ca3af; padding: 0;")
+        layout.addWidget(sys_label)
+
         tabs = QTabWidget()
         tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
@@ -1083,136 +1288,192 @@ class PageSetupMixin:
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
         tabs.addTab(p3, "💾 备份管理")
 
-        layout.addWidget(tabs, 1)
+        layout.addWidget(tabs)
 
-    # ── 素材资源配置 ──
-    def _res_choose_mat_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "选择文件下载位置", self.res_mat_dir.text())
+    def _setup_local_config_tab(self, parent_widget):
+        """本地配置 Tab：设置本地缓存/生成目录。"""
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("📁 本地缓存配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
+
+        hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        dir_row = QHBoxLayout()
+        dir_row.addWidget(QLabel("缓存目录:"))
+        self.local_cache_dir_input = QLineEdit()
+        self.local_cache_dir_input.setPlaceholderText("默认为 outputs 目录，可自定义...")
+        dir_row.addWidget(self.local_cache_dir_input, 1)
+        btn_browse = QPushButton("浏览...")
+        btn_browse.clicked.connect(lambda: self._browse_local_cache_dir())
+        dir_row.addWidget(btn_browse)
+        layout.addLayout(dir_row)
+
+        self.local_cache_status = QLabel("")
+        self.local_cache_status.setObjectName("muted_text")
+        layout.addWidget(self.local_cache_status)
+
+        # 加载已有配置
+        if os.path.isfile(_LOCAL_CFG):
+            try:
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                self.local_cache_dir_input.setText(data.get("cache_dir", ""))
+                self.local_cache_status.setText("已加载配置")
+            except Exception:
+                pass
+
+        btn_save = QPushButton("💾 保存")
+        btn_save.setObjectName("primary_button")
+        btn_save.setFixedWidth(90)
+        btn_save.clicked.connect(lambda: self._save_local_config())
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_save)
+        layout.addLayout(btn_row)
+        layout.addStretch()
+
+    def _browse_local_cache_dir(self):
+        d = QFileDialog.getExistingDirectory(self.local_cache_dir_input, "选择本地缓存目录")
         if d:
-            import json
-            from config.paths import DATA_DIR
-            cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
-            with open(cfg, "w", encoding="utf-8") as f:
-                json.dump({"materials_dir": d}, f, ensure_ascii=False, indent=2)
-            self.res_mat_dir.setText(d)
-            QMessageBox.information(self, "提示", f"下载目录已设置为:\n{d}\n重启后生效。")
+            self.local_cache_dir_input.setText(d)
 
-    def _res_reset_mat_dir(self):
-        from config.paths import DATA_DIR, KNOWLEDGE_MATERIALS_DIR
-        cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
+    def _save_local_config(self):
+        from config.paths import CONFIG_DIR
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        cache_dir = self.local_cache_dir_input.text().strip()
         try:
-            if os.path.exists(cfg): os.remove(cfg)
-        except Exception: pass
-        self.res_mat_dir.setText(KNOWLEDGE_MATERIALS_DIR)
-        QMessageBox.information(self, "提示", "已恢复默认下载目录。")
+            with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
+                _json.dump({"cache_dir": cache_dir}, f, indent=2, ensure_ascii=False)
+            self.local_cache_status.setText("✅ 已保存")
+        except Exception as e:
+            self.local_cache_status.setText(f"❌ 保存失败: {e}")
 
-    def _res_add_index_dir(self):
-        """添加 NAS 共享目录：弹文件夹选择本地映射路径，再确认 NAS 共享文件夹名。"""
-        d = QFileDialog.getExistingDirectory(self, "选择 NAS 映射到本地的目录", "")
-        if not d:
-            return
-        # 默认 nas_folder 取最后一级目录名
-        default_folder = os.path.basename(d.rstrip("\\/")) or d
-        folder, ok = QInputDialog.getText(
-            self, "NAS 共享文件夹名",
-            f"该目录在 NAS 上的共享文件夹名：\n（本地路径：{d}）",
-            text=default_folder
-        )
-        if not ok:
-            return
-        item = QListWidgetItem(f"{d}  ➔  {folder.strip() or default_folder}")
-        item.setData(Qt.UserRole, {"local_path": d, "nas_folder": folder.strip() or default_folder})
-        self.res_index_dirs.addItem(item)
-
-    def _res_del_index_dir(self):
-        for item in self.res_index_dirs.selectedItems():
-            self.res_index_dirs.takeItem(self.res_index_dirs.row(item))
-
-    def _res_save_nas_config(self):
-        """保存 NAS 配置：nas_root + index_directories（local_path/nas_folder 映射）。"""
-        import json
+    def get_local_cache_dir(self):
+        """获取配置的本地缓存目录，未配置返回空。"""
         from config.paths import CONFIG_DIR
-        cfg = os.path.join(CONFIG_DIR, "material_index_config.json")
-        data = {}
-        if os.path.isfile(cfg):
-            with open(cfg, "r", encoding="utf-8") as f:
-                try: data = json.load(f)
-                except Exception: data = {}
-        data["nas_root"] = self.res_nas_root.text().strip()
-        # 正确存 local_path/nas_folder 映射（修掉旧 bug：nas_folder 误写成 local_path）
-        dirs = []
-        for i in range(self.res_index_dirs.count()):
-            it = self.res_index_dirs.item(i)
-            ud = it.data(Qt.UserRole)
-            if isinstance(ud, dict):
-                dirs.append({"local_path": ud["local_path"], "nas_folder": ud["nas_folder"]})
-            else:
-                # 兼容：纯文本项当成本地路径，nas_folder 取末级名
-                txt = it.text()
-                dirs.append({"local_path": txt, "nas_folder": os.path.basename(txt.rstrip("\\/")) or txt})
-        data["index_directories"] = dirs
-        os.makedirs(os.path.dirname(cfg), exist_ok=True)
-        with open(cfg, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        QMessageBox.information(self, "提示", "NAS 目录配置保存成功。")
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        try:
+            if os.path.isfile(_LOCAL_CFG):
+                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                d = data.get("cache_dir", "").strip()
+                if d and os.path.isdir(d):
+                    return d
+        except Exception:
+            pass
+        return ""
 
-    def _res_add_local_dir(self):
-        """添加本机磁盘目录。"""
-        d = QFileDialog.getExistingDirectory(self, "选择本机素材目录", "")
-        if d:
-            self.res_local_dirs.addItem(d)
+    def _setup_video_config_tab(self, parent_widget):
+        """视频配置 Tab：管理 LUT 还原文件映射（文件名 → LUT 路径）。"""
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
 
-    def _res_del_local_dir(self):
-        for item in self.res_local_dirs.selectedItems():
-            self.res_local_dirs.takeItem(self.res_local_dirs.row(item))
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
-    def _res_save_local_config(self):
-        """保存本机磁盘目录配置：local_directories（纯路径列表）。"""
-        import json
-        from config.paths import CONFIG_DIR
-        cfg = os.path.join(CONFIG_DIR, "material_index_config.json")
-        data = {}
-        if os.path.isfile(cfg):
-            with open(cfg, "r", encoding="utf-8") as f:
-                try: data = json.load(f)
-                except Exception: data = {}
-        data["local_directories"] = [self.res_local_dirs.item(i).text() for i in range(self.res_local_dirs.count())]
-        os.makedirs(os.path.dirname(cfg), exist_ok=True)
-        with open(cfg, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        QMessageBox.information(self, "提示", "本机目录配置保存成功。")
+        title = QLabel("🎬 视频 LUT 还原配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
 
-    def _res_load_configs(self):
-        import json
-        from config.paths import DATA_DIR, CONFIG_DIR, KNOWLEDGE_MATERIALS_DIR
-        mat_dir = KNOWLEDGE_MATERIALS_DIR
-        cfg = os.path.join(DATA_DIR, "knowledge_dir.json")
-        if os.path.isfile(cfg):
+        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用。\n"
+                       "格式支持：.cube / .3dl / .lut")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        # 列表
+        self.lut_list = QListWidget()
+        self.lut_list.setAlternatingRowColors(True)
+        layout.addWidget(self.lut_list, 1)
+
+        # 按钮行
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton("➕ 添加 LUT 文件")
+        btn_add.setObjectName("primary_button")
+        btn_add.clicked.connect(self._add_lut_entry)
+        btn_row.addWidget(btn_add)
+
+        btn_del = QPushButton("🗑 删除选中")
+        btn_del.setObjectName("secondary_button")
+        btn_del.clicked.connect(self._del_lut_entry)
+        btn_row.addWidget(btn_del)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        # 状态
+        self.lut_status = QLabel("")
+        self.lut_status.setObjectName("muted_text")
+        layout.addWidget(self.lut_status)
+
+        # 加载已有配置
+        self._load_lut_config()
+
+    def _load_lut_config(self):
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+        self.lut_list.clear()
+        if os.path.isfile(VIDEO_CONFIG_FILE):
             try:
-                with open(cfg, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                if d.get("materials_dir"): mat_dir = d["materials_dir"]
-            except Exception: pass
-        self.res_mat_dir.setText(mat_dir)
-        cfg2 = os.path.join(CONFIG_DIR, "material_index_config.json")
-        if os.path.isfile(cfg2):
-            try:
-                with open(cfg2, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                # NAS 卡片
-                self.res_nas_root.setText(d.get("nas_root", ""))
-                self.res_index_dirs.clear()
-                for dd in d.get("index_directories", []):
-                    if isinstance(dd, dict):
-                        lp, nf = dd.get("local_path", ""), dd.get("nas_folder", "")
-                        item = QListWidgetItem(f"{lp}  ➔  {nf}" if nf else lp)
-                        item.setData(Qt.UserRole, {"local_path": lp, "nas_folder": nf})
-                        self.res_index_dirs.addItem(item)
-                    else:
-                        self.res_index_dirs.addItem(str(dd))
-                # 本机卡片
-                self.res_local_dirs.clear()
-                for dd in d.get("local_directories", []):
-                    self.res_local_dirs.addItem(str(dd))
-            except Exception: pass
+                with open(VIDEO_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                for name, path in data.items():
+                    item = QListWidgetItem(f"{name}  →  {path}")
+                    item.setData(Qt.UserRole, {"name": name, "path": path})
+                    self.lut_list.addItem(item)
+                self.lut_status.setText(f"已加载 {self.lut_list.count()} 个 LUT 配置")
+            except Exception as e:
+                self.lut_status.setText(f"加载失败: {e}")
 
+    def _add_lut_entry(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self.lut_list, "选择 LUT 还原文件", "",
+            "LUT 文件 (*.cube *.3dl *.lut);;所有文件 (*.*)")
+        if not path:
+            return
+        name = os.path.splitext(os.path.basename(path))[0]
+        name, ok = QInputDialog.getText(self.lut_list, "LUT 名称",
+                                         "输入此 LUT 的显示名称（如 S-Log3、D-Log）：",
+                                         text=name)
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        # 写入列表
+        item = QListWidgetItem(f"{name}  →  {path}")
+        item.setData(Qt.UserRole, {"name": name, "path": path})
+        self.lut_list.addItem(item)
+        self._save_lut_config()
+
+    def _del_lut_entry(self):
+        for item in self.lut_list.selectedItems():
+            self.lut_list.takeItem(self.lut_list.row(item))
+        self._save_lut_config()
+
+    def _save_lut_config(self):
+        from config.paths import VIDEO_CONFIG_FILE
+        import json as _json
+        data = {}
+        for i in range(self.lut_list.count()):
+            item = self.lut_list.item(i)
+            d = item.data(Qt.UserRole)
+            if d:
+                data[d["name"]] = d["path"]
+        try:
+            with open(VIDEO_CONFIG_FILE, "w", encoding="utf-8") as f:
+                _json.dump(data, f, indent=2, ensure_ascii=False)
+            self.lut_status.setText(f"已保存 {len(data)} 个 LUT 配置")
+        except Exception as e:
+            self.lut_status.setText(f"保存失败: {e}")

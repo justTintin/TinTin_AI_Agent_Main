@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
+from utils.hwaccel import get_video_encode_args
 
 
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ def _escape_lut_path(path):
     """将 LUT 文件路径转义为 FFmpeg filter 可接受的格式（Windows 冒号需转义）。"""
     p = path.replace("\\", "/")
     # Windows 盘符冒号：C:/... → C\:/...
-    if sys.platform == "win32" and len(p) > 1 and p[1] == ":":
+    if len(p) > 1 and p[1] == ":":
         p = p[0] + "\\:" + p[2:]
     return p
 
@@ -84,7 +85,7 @@ class VideoLutWorker(BaseWorker):
                         cmd = [
                             ffmpeg, "-y", "-i", src,
                             "-vf", f"lut3d='{lut_esc}'",
-                            "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+                            *get_video_encode_args(crf=18, preset="superfast"),
                             "-c:a", "copy",
                             dst,
                         ]
@@ -100,12 +101,12 @@ class VideoLutWorker(BaseWorker):
                             ffmpeg, "-y", "-i", src,
                             "-filter_complex", fc,
                             "-map", "[out]", "-map", "0:a?",
-                            "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+                            *get_video_encode_args(crf=18, preset="superfast"),
                             "-c:a", "copy",
                             dst,
                         ]
 
-                    creationflags = 0x08000000 if sys.platform == "win32" else 0
+                    creationflags = 0x08000000
                     r = subprocess.run(
                         cmd, capture_output=True, text=True,
                         creationflags=creationflags)
@@ -329,8 +330,7 @@ class VideoLutPage(BasePage):
     def _open_output(self):
         out = self.output_dir_edit.text().strip()
         if out and os.path.isdir(out):
-            if sys.platform == "win32":
-                os.startfile(out)
+            os.startfile(out)
 
     # ── 开始转换 ─────────────────────────────────────────────────────────────
 

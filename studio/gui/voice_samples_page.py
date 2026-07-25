@@ -35,6 +35,31 @@ class PunctuationLLMWorker(BaseWorker):
         except Exception as e:
             self.error.emit(str(e))
 
+
+class RemoteWhisperWorker(BaseWorker):
+    """调用远程服务端 /whisper/transcribe API 进行音频转写"""
+    finished = Signal(str, str)  # (text, audio_path)
+
+    def __init__(self, audio_path, server_url):
+        super().__init__()
+        self.audio_path = audio_path
+        self.server_url = server_url.rstrip("/")
+
+    def do_work(self):
+        import requests
+        url = f"{self.server_url}/whisper/transcribe"
+        log.info(f"[Whisper] 上传音频到服务端: {url}, 文件: {self.audio_path}")
+        with open(self.audio_path, "rb") as f:
+            files = {"file": (os.path.basename(self.audio_path), f, "audio/wav")}
+            data = {"language": "auto", "fmt": "txt"}
+            resp = requests.post(url, files=files, data=data, timeout=300)
+        if resp.status_code != 200:
+            raise RuntimeError(f"服务端返回错误 HTTP {resp.status_code}: {resp.text[:200]}")
+        text = resp.text.strip()
+        log.info(f"[Whisper] 转写完成, 文本长度: {len(text)}")
+        self.finished.emit(text, self.audio_path)
+
+
 def load_voice_samples():
     os.makedirs(VOICE_SAMPLES_DIR, exist_ok=True)
     if not os.path.exists(METADATA_PATH):
@@ -424,30 +449,28 @@ class VoiceSamplesPage(BasePage):
 
         self.status_label.setText(f"正在识别样本音频文本 (ID: {sample_id})...")
 
-        from config.paths import TMP_DIR, WHISPER_MODELS_DIR
-        from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
+        # 读取远程 Whisper 服务地址
+        from config.paths import AI_CONFIG_FILE
+        whisper_url = ""
+        try:
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                whisper_url = (cfg.get("whisper_api_url") or cfg.get("compute_server_url") or "").strip()
+        except Exception:
+            pass
+        if not whisper_url:
+            self.status_label.setText("❌ 未配置 Whisper 服务地址")
+            QMessageBox.critical(self.parent_widget, "配置错误", "ai_config.json 中未配置 whisper_api_url 或 compute_server_url")
+            self._load_table_data()
+            return
 
-        os.makedirs(TMP_DIR, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(wav_path))[0]
-        temp_audio_path = os.path.join(TMP_DIR, f"transcribe_{base_name}_audio.wav")
-        temp_srt_path = os.path.join(TMP_DIR, f"transcribe_{base_name}.srt")
-
-        worker = WhisperXTranscribeWorker(
-            video_path=wav_path,
-            audio_path=temp_audio_path,
-            output_path=temp_srt_path,
-            model_name="large-v3",
-            language=None,
-            task_type="transcribe",
-            multi_mode=False,
-            download_root=WHISPER_MODELS_DIR,
-            device_mode="auto"
-        )
+        worker = RemoteWhisperWorker(audio_path=wav_path, server_url=whisper_url)
         self.transcribe_workers[sample_id] = worker
 
-        def on_finished(srt_content, path):
+        def on_finished(text_content, path):
             self.status_label.setText("✅ 识别参考音频文本完成")
-            plain_text = self._clean_srt_to_text(srt_content)
+            plain_text = text_content.strip()
             
             def save_text(text_val):
                 samples = load_voice_samples()
@@ -461,14 +484,6 @@ class VoiceSamplesPage(BasePage):
                     del self.transcribe_workers[sample_id]
                 
                 self._load_table_data()
-
-                try:
-                    if os.path.exists(temp_audio_path):
-                        os.remove(temp_audio_path)
-                    if os.path.exists(temp_srt_path):
-                        os.remove(temp_srt_path)
-                except Exception:
-                    pass
 
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 

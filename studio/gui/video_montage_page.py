@@ -290,23 +290,66 @@ class VideoMontagePage(BasePage):
                 self._populate_default_mix_videos()
             else:
                 self._update_final_inputs_label()
+    # [2·基础设施]  _cleanup_stale_montage_outputs
+    def _cleanup_stale_montage_outputs(self, confirmed_paths):
+        """进入第③步前，清理 outputs 目录里不属于本次确认列表的旧 montage_concat_* 产物。
+
+        避免历次合成的旧视频累积进来（否则第③步配音列表会把历史视频全扫进来）。
+        安全边界：只删 montage_concat_ 前缀的文件（混剪专属命名），保留本次确认列表
+        里的视频及其附属文件（.txt / _sources.txt / .meta.json）。
+        """
+        if not confirmed_paths:
+            return
+        try:
+            out_dir = os.path.dirname(os.path.abspath(confirmed_paths[0]))
+        except Exception:
+            return
+        if not out_dir or not os.path.isdir(out_dir):
+            return
+        # 本次确认列表的视频 stem 集合（去掉扩展名），用于保留附属文件
+        keep_stems = set()
+        for p in confirmed_paths:
+            mp4_stem = os.path.splitext(os.path.abspath(p))[0]
+            keep_stems.add(mp4_stem)
+            # 附属文件 stem（_sources.txt → 多 _sources；.meta.json → 多 .meta）
+            keep_stems.add(mp4_stem + "_sources")
+            keep_stems.add(mp4_stem + ".meta")
+        try:
+            for f in os.listdir(out_dir):
+                if not f.startswith("montage_concat_"):
+                    continue  # 只动混剪专属命名，不碰用户其它视频
+                full = os.path.abspath(os.path.join(out_dir, f))
+                stem = os.path.splitext(full)[0]  # 去掉最后一个扩展名
+                if stem in keep_stems:
+                    continue  # 属于本次确认列表，保留
+                try:
+                    os.remove(full)
+                    log.info(f"[清理旧产物] 删除 {f}")
+                except Exception as e:
+                    log.warning(f"[清理旧产物] 删除失败 {f}: {e}")
+        except Exception as e:
+            log.warning(f"清理旧混剪产物失败: {e}")
+
     # [2·基础设施]  _on_enter_step_3
     def _on_enter_step_3(self):
         dir_path = ""
         confirmed_paths = self._collect_assembled_paths() if hasattr(self, "_collect_assembled_paths") else []
         if confirmed_paths:
             dir_path = os.path.dirname(confirmed_paths[0])
-        
+            # 清理 outputs 里不属于本次确认列表的旧 montage_concat_* 产物，
+            # 避免第③步配音列表把历次合成的旧视频全扫进来（34个变9个的根因）。
+            self._cleanup_stale_montage_outputs(confirmed_paths)
+
         if not dir_path:
             src_dir = self.folder_path_input.text().strip()
             if src_dir:
                 dir_path = self._get_out_montage_dir(src_dir)
-        
+
         if dir_path and os.path.exists(dir_path):
             self.voice_video_dir_input.blockSignals(True)
             self.voice_video_dir_input.setText(dir_path)
             self.voice_video_dir_input.blockSignals(False)
-        
+
         self._scan_voice_video_dir()
 
         # 纯远程模式：从 ai_config 读取已保存的远程 TTS API 地址回填
@@ -813,7 +856,7 @@ class VideoMontagePage(BasePage):
         self.btn_confirm_all.setEnabled(False)
         self.btn_confirm_all.clicked.connect(self._confirm_all_precompose)
         confirm_row.addWidget(self.btn_confirm_all)
-        self.btn_batch_scene_copy = QPushButton("合成视频生成文案")
+        self.btn_batch_scene_copy = QPushButton("生成口播文案")
         self.btn_batch_scene_copy.setObjectName("secondary_button")
         self.btn_batch_scene_copy.setFixedHeight(35)
         self.btn_batch_scene_copy.setToolTip(
@@ -1640,6 +1683,13 @@ class VideoMontagePage(BasePage):
                 video_basename = os.path.splitext(os.path.basename(video_path))[0]
                 video_dir = os.path.dirname(video_path)
                 video_workspace_dir = os.path.join(video_dir, video_basename)
+                # 镜头分析 sidecar 缓存：按镜头内容指纹命中，恢复 score/景别/产品/型号
+                try:
+                    from utils.shot_analysis_cache import ShotAnalysisCache
+                    self._shot_cache = ShotAnalysisCache(video_workspace_dir, video_basename)
+                except Exception as e:
+                    log.warning(f"初始化镜头分析缓存失败: {e}")
+                    self._shot_cache = None
                 srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
                 if not os.path.exists(srt_path):
                     srt_path = os.path.join(video_dir, f"{video_basename}.srt")
@@ -1690,11 +1740,29 @@ class VideoMontagePage(BasePage):
                     if desc:
                         self.split_descriptions[norm_path] = desc
 
-                    # 缓存先占位（后台异步评分）
+                    # 尝试命中镜头分析 sidecar 缓存：恢复 score/景别/产品/型号/描述
+                    cached = None
+                    if getattr(self, "_shot_cache", None):
+                        try:
+                            cached = self._shot_cache.get(norm_path)
+                        except Exception:
+                            cached = None
+
+                    # 缓存优先于 SRT/文件名解析的画面描述
+                    if cached:
+                        c_desc = cached.get("desc") or ""
+                        if c_desc:
+                            desc = c_desc
+                            self.split_descriptions[norm_path] = desc
+
+                    # 缓存先占位（后台异步评分）；命中缓存则预填已有字段
                     self.split_clips_cache[norm_path] = {
                         "filename": display_name, "time_str": time_str,
-                        "desc": desc, "duration": 0.0, "score": None,
-                        "shot_type": "", "product": "", "model": "",
+                        "desc": desc, "duration": 0.0,
+                        "score": cached.get("score") if cached else None,
+                        "shot_type": (cached.get("shot_type", "") if cached else ""),
+                        "product": (cached.get("product", "") if cached else ""),
+                        "model": (cached.get("model", "") if cached else ""),
                     }
 
                     # Col 0: Checkbox
@@ -1718,7 +1786,7 @@ class VideoMontagePage(BasePage):
                     self.split_result_table.setItem(idx, 2, file_item)
 
                     # Col 3: 景别 (shot type)
-                    shot_item = QTableWidgetItem("")
+                    shot_item = QTableWidgetItem(cached.get("shot_type", "") if cached else "")
                     shot_item.setFlags(shot_item.flags() & ~Qt.ItemIsEditable)
                     shot_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 3, shot_item)
@@ -1735,22 +1803,34 @@ class VideoMontagePage(BasePage):
                     self.split_result_table.setItem(idx, 5, desc_item)
 
                     # Col 6: 产品
-                    prod_item = QTableWidgetItem("")
+                    prod_item = QTableWidgetItem(cached.get("product", "") if cached else "")
                     prod_item.setFlags(prod_item.flags() & ~Qt.ItemIsEditable)
                     self.split_result_table.setItem(idx, 6, prod_item)
 
                     # Col 7: 型号
-                    model_item = QTableWidgetItem("")
+                    model_item = QTableWidgetItem(cached.get("model", "") if cached else "")
                     model_item.setFlags(model_item.flags() & ~Qt.ItemIsEditable)
                     self.split_result_table.setItem(idx, 7, model_item)
 
-                    # Col 8: 评分 — 等待服务端分析后回填
-                    score_item = QTableWidgetItem("—")
+                    # Col 8: 评分 — 命中缓存则回填，否则等待服务端分析
+                    cached_score = cached.get("score") if cached else None
+                    if cached_score is not None:
+                        score_item = QTableWidgetItem(f"{cached_score:.1f}" if cached_score >= 0 else "—")
+                        if cached_score >= 8.0:
+                            score_item.setForeground(QColor("#2ecc71"))
+                        elif cached_score >= 6.0:
+                            score_item.setForeground(QColor("#f1c40f"))
+                        elif cached_score >= 0:
+                            score_item.setForeground(QColor("#e74c3c"))
+                    else:
+                        score_item = QTableWidgetItem("—")
                     score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
                     score_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 8, score_item)
 
-                    self._pending_score_rows.append((idx, norm_path))
+                    # 已命中缓存的镜头不进后台评分队列（已有评分，避免重复调服务端）
+                    if not cached:
+                        self._pending_score_rows.append((idx, norm_path))
                     initial_desc_lines.append(desc)
                 
                 # Update rewritten_srt_display
@@ -3043,14 +3123,23 @@ class VideoMontagePage(BasePage):
             )
             return
 
-        from config.paths import TMP_DIR, WHISPER_MODELS_DIR
+        # 远程 ASR 模式：需配置 ASR 服务地址
+        from utils.asr_client import read_asr_url
+        asr_url = read_asr_url()
+        if not asr_url:
+            QMessageBox.warning(
+                self.parent_widget,
+                "未配置 ASR 服务",
+                "未配置远程 ASR 服务地址，无法进行语音转写。\n"
+                "请在系统设置中填写 Whisper API 地址或计算服务地址。"
+            )
+            return
+
         video_dir = os.path.dirname(video_path)
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
         video_workspace_dir = os.path.join(video_dir, video_basename)
         os.makedirs(video_workspace_dir, exist_ok=True)
-        
-        # Audio temp path inside TMP_DIR
-        audio_path = os.path.join(TMP_DIR, f"{video_basename}_raw_audio.wav")
+
         # Subtitle output in the workspace directory
         output_srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
 
@@ -3058,24 +3147,35 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 0)  # 不确定进度（远程转写无逐帧进度）
+        self.stage_label.setText("⏳ 正在调用远程 ASR 转写视频音频...")
 
-        from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
-        self.transcribe_raw_worker = WhisperXTranscribeWorker(
-            video_path=video_path,
-            audio_path=audio_path,
-            output_path=output_srt_path,
-            model_name="large-v3",
-            language=None,  # Auto detect
-            task_type="transcribe",
-            multi_mode=False,
-            download_root=WHISPER_MODELS_DIR,
-            device_mode="cuda"  # Default to CUDA for speed
-        )
+        # 远程 ASR worker：transcribe_remote → segments → 写 SRT
+        class RemoteTranscribeWorker(BaseWorker):
+            finished = Signal(str, str)   # srt_content, srt_path
+            error = Signal(str)
 
-        self.transcribe_raw_worker.stage.connect(lambda t: self.stage_label.setText(t))
-        self.transcribe_raw_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
+            def __init__(self, video_path, srt_path):
+                super().__init__()
+                self.video_path = video_path
+                self.srt_path = srt_path
+
+            def do_work(self):
+                try:
+                    from utils.asr_client import transcribe_remote, segments_to_srt
+                    segments = transcribe_remote(
+                        self.video_path, asr_url,
+                        language="", task_type="transcribe",
+                    )
+                    srt_content = segments_to_srt(segments)
+                    with open(self.srt_path, "w", encoding="utf-8") as f:
+                        f.write(srt_content)
+                    self.finished.emit(srt_content, self.srt_path)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        self.transcribe_raw_worker = RemoteTranscribeWorker(video_path, output_srt_path)
+
         self.transcribe_raw_worker.finished.connect(self._on_transcribe_raw_finished)
         self.transcribe_raw_worker.error.connect(self._on_transcribe_raw_error)
         self.transcribe_raw_worker.start()
@@ -3315,7 +3415,7 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "btn_gen_script"):
             self.btn_gen_script.setVisible(is_script)
 
-        # 「合成视频生成文案」按钮：仅在随机洗牌模式下可见
+        # 「生成口播文案」按钮：仅在随机洗牌模式下可见
         if hasattr(self, "btn_batch_scene_copy"):
             self.btn_batch_scene_copy.setVisible(not is_script)
 
@@ -4633,6 +4733,18 @@ class VideoMontagePage(BasePage):
                 if desc:
                     clip["desc"] = desc
 
+        # 持久化到 sidecar JSON：保存 score/景别/产品/型号/描述/其他维度，
+        # 避免重新打开应用或对同一视频重新分割后只剩"画面描述"。
+        if getattr(self, "_shot_cache", None):
+            try:
+                self._shot_cache.upsert(path, {
+                    "score": score, "desc": desc,
+                    "shot_type": shot_type, "product": product, "model": model,
+                    "extra": extra,
+                })
+            except Exception as e:
+                log.warning(f"镜头分析结果写缓存失败({path}): {e}")
+
         self._refresh_step1_row_visual(idx)
     # [3·分割]  _on_analysis_all_done
     def _on_analysis_all_done(self, ok, fail):
@@ -5289,6 +5401,10 @@ class VideoMontagePage(BasePage):
             return
         txt = os.path.splitext(out_path)[0] + ".txt"
         if not os.path.exists(txt):
+            QMessageBox.information(
+                self.parent_widget, "尚未生成口播文案",
+                f"该视频尚未生成口播文案。\n\n请点击底部「生成口播文案」按钮，"
+                f"选择产品信息后由 AI 根据画面生成口播文案。")
             return
         try:
             with open(txt, "r", encoding="utf-8") as f:
@@ -5355,9 +5471,13 @@ class VideoMontagePage(BasePage):
         return None
     # [4·文案脚本]  _assembled_copy_preview
     def _assembled_copy_preview(self, path):
-        """获取文案的文字预览（前30字），无文案返回空串。"""
+        """获取口播文案的文字预览（前30字）。
+
+        未生成口播文案（.txt 不存在）时返回占位提示，便于用户在列表里一眼看出
+        哪些视频还没生成口播文案。
+        """
         if not path:
-            return ""
+            return "未生成口播文案"
         txt = os.path.splitext(path)[0] + ".txt"
         try:
             if os.path.exists(txt) and os.path.getsize(txt) > 0:
@@ -5366,7 +5486,7 @@ class VideoMontagePage(BasePage):
                 return content[:30] + ("…" if len(content) > 30 else "")
         except Exception:
             pass
-        return ""
+        return "未生成口播文案"
     # [5·拼接合成]  _on_assembled_double_clicked
     def _on_assembled_double_clicked(self, item):
         """双击预合成列表项：展示完整口播文案。"""
@@ -5392,7 +5512,10 @@ class VideoMontagePage(BasePage):
             confirmed = plan.get("confirmed") and bool(out_path)
             has_copy = bool(out_path and self._assembled_has_copy(out_path))
             status_txt = "✅已合成" if confirmed else "⏳待确认"
-            copy_mark = " 📄" if has_copy else ""
+            # 文案预览：统一用 _assembled_copy_preview（和 _add_assembled_row 一致）
+            # 已生成显示前30字，未生成显示占位，避免刷新后文字预览丢失
+            copy_preview = self._assembled_copy_preview(out_path) if out_path else "未生成口播文案"
+            copy_mark = f"  📝{copy_preview}" if copy_preview else ""
             file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
             item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
             if has_copy:
@@ -5445,7 +5568,7 @@ class VideoMontagePage(BasePage):
             return
         has_unconfirmed = any(not p.get("confirmed") for p in self.precompose_plans)
         self.btn_confirm_all.setEnabled(has_unconfirmed)
-        # 确认合成视频全部完成后，将绿色背景转移到「合成视频生成文案」按钮
+        # 确认合成视频全部完成后，将绿色背景转移到「生成口播文案」按钮
         if hasattr(self, "btn_batch_scene_copy"):
             if not has_unconfirmed and self.btn_batch_scene_copy.isEnabled():
                 self.btn_batch_scene_copy.setObjectName("action_button")
@@ -5748,15 +5871,55 @@ class VideoMontagePage(BasePage):
             scenes.append(desc or "")
         return scenes
     # [4·文案脚本]  _ensure_shared_product_info
+    def _load_shared_product_info(self):
+        """从磁盘加载上次保存的产品信息（跨会话保留）。失败返回 None。"""
+        try:
+            import json as _json
+            from config.paths import CONFIG_DIR
+            cache_file = os.path.join(CONFIG_DIR, "product_info_cache.json")
+            if os.path.isfile(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
+                # 校验为 4 元组结构
+                if isinstance(data, dict) and all(
+                    isinstance(data.get(k), str) for k in ("brand", "product", "model", "extra")
+                ):
+                    return (data["brand"], data["product"], data["model"], data["extra"])
+        except Exception as e:
+            log.warning(f"加载产品信息缓存失败: {e}")
+        return None
+
+    def _save_shared_product_info(self, info):
+        """把产品信息持久化到磁盘，下次启动仍可预填。"""
+        try:
+            import json as _json
+            from config.paths import CONFIG_DIR
+            cache_file = os.path.join(CONFIG_DIR, "product_info_cache.json")
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            data = {"brand": info[0], "product": info[1], "model": info[2], "extra": info[3]}
+            with open(cache_file, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log.warning(f"保存产品信息缓存失败: {e}")
+
     def _ensure_shared_product_info(self, force=False):
         """获取一次共用的产品背景信息（品牌/产品/型号/卖点），缓存后全局复用。
 
         返回 (brand, product, model_name, extra)；用户取消时返回 None。
+        force=True 时【无条件弹窗】（跳过缓存），用于「生成口播文案」批量按钮，
+        确保用户每次点击都能看到并修改产品信息。
+        缓存优先级：内存 > 磁盘（跨会话保留）。
         """
         cached = getattr(self, "_shared_product_info", None)
+        if cached is None:
+            # 内存无缓存时，尝试从磁盘加载（跨会话保留上次填写内容）
+            cached = self._load_shared_product_info()
+            if cached is not None:
+                self._shared_product_info = cached
         if cached is not None and not force:
             return cached
 
+        # force=True 或无缓存：直接弹窗（预填上次内容便于微调）
         dlg = ProductCopyInputDialog(self.parent_widget)
         if cached is not None:
             # 复用上次填写的内容，便于微调
@@ -5765,10 +5928,21 @@ class VideoMontagePage(BasePage):
             dlg.product_in.setText(p)
             dlg.model_in.setText(m)
             dlg.extra_in.setPlainText(e)
-        if dlg.exec() != QDialog.Accepted:
+        # 诊断：确认对话框构造完成、parent 有效
+        log.info(f"[批量文案] 准备 exec 对话框, parent={self.parent_widget!r}, cached={cached is not None}")
+        try:
+            result = dlg.exec()
+        except Exception as e:
+            log.exception(f"[批量文案] dlg.exec() 抛异常: {e}")
+            return None
+        log.info(f"[批量文案] dlg.exec() 返回={result}, Accepted={QDialog.Accepted}")
+        if result != QDialog.Accepted:
+            log.info(f"[批量文案] 用户未确认（返回 {result}），中止")
             return None
         info = dlg.get_values()
         self._shared_product_info = info
+        self._save_shared_product_info(info)  # 持久化，下次启动可预填
+        log.info(f"[批量文案] 已采集产品信息: {info}")
         return info
     # [4·文案脚本]  _gen_copy_for_assembled
     def _gen_copy_for_assembled(self, path):
@@ -5827,7 +6001,7 @@ class VideoMontagePage(BasePage):
             if reply != QMessageBox.Yes:
                 return
 
-        info = self._ensure_shared_product_info()
+        info = self._ensure_shared_product_info(force=True)
         if info is None:
             return
         brand, product, model_name, extra = info
@@ -5864,6 +6038,7 @@ class VideoMontagePage(BasePage):
     def _batch_gen_copy_by_scene(self):
         """一键为所有已生成的组合视频，按各自画面镜头描述生成口播文案（共用一份产品背景）。
         如果镜头缺少画面描述（如原视频无声音未生成），先用视觉 LLM 自动补生成描述。"""
+        log.info("[批量文案] 「生成口播文案」按钮已点击，进入 handler")
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model = (cfg.get("llm_model", "") or "deepseek-v4-flash").strip()
         if not model:
@@ -5878,24 +6053,29 @@ class VideoMontagePage(BasePage):
             return
 
         targets = paths
-        existing = [p for p in paths if self._assembled_has_copy(p)]
-        if existing:
-            reply = QMessageBox.question(
-                self.parent_widget, "已有部分文案",
-                f"共 {len(paths)} 个视频，其中 {len(existing)} 个已存在文案。\n\n"
-                f"是 = 覆盖并重新生成全部\n否 = 只为缺失文案的视频生成\n取消 = 不操作",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
-            if reply == QMessageBox.Cancel:
-                return
-            if reply == QMessageBox.No:
-                targets = [p for p in paths if not self._assembled_has_copy(p)]
-                if not targets:
-                    QMessageBox.information(self.parent_widget, "无需生成", "所有视频都已存在文案。")
-                    return
+        # 注：预合成视频生成时已自带画面描述拼接的 .txt（concat_workers 写入），
+        # 因此 _assembled_has_copy 对每个视频恒为 True，原先的“已有部分文案”中间框
+        # 会每次都弹并极易误点“取消/否”导致产品窗没机会弹出。这里直接进入产品信息采集，
+        # 让用户先选产品，再统一覆盖生成口播文案。
 
+        # 强制每次都弹产品信息对话框（预填上次内容），确保用户能输入/修改产品信息。
+        # 加诊断日志：万一某环境下不弹窗，能从日志定位卡在哪一步。
+        log.info(f"[批量文案] 进入产品信息采集 force=True, 缓存={getattr(self, '_shared_product_info', None)!r}")
         info = self._ensure_shared_product_info(force=True)
         if info is None:
+            log.info("[批量文案] 用户取消了产品信息对话框，中止")
             return
+        log.info(f"[批量文案] 产品信息已采集: brand={info[0]!r}, product={info[1]!r}, model={info[2]!r}")
+        # 若用户什么都没填直接点生成，给出确认（产品信息可选，不强制阻断）
+        if not any(info):
+            reply = QMessageBox.question(
+                self.parent_widget, "未填写产品信息",
+                "你没有填写任何产品信息（品牌/产品/型号/卖点）。\n\n"
+                "是 = 仍然生成（AI 仅根据画面自由发挥，可能不够精准）\n"
+                "否 = 返回填写",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return  # 用户回去填写；重新点按钮会再次弹窗（force=True）
 
         # 检查所有目标视频的镜头是否有画面描述，收集缺失描述的镜头
         missing_desc_clips = set()

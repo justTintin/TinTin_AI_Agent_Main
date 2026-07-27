@@ -82,9 +82,10 @@ class VideoLutWorker(BaseWorker):
 
                     if use_full_lut:
                         # 完整 LUT，简单 -vf
+                        # format=yuv420p：源素材常为 10-bit Log，AMF 等硬件编码器不支持 10-bit 输入
                         cmd = [
                             ffmpeg, "-y", "-i", src,
-                            "-vf", f"lut3d='{lut_esc}'",
+                            "-vf", f"lut3d='{lut_esc}',format=yuv420p",
                             *get_video_encode_args(crf=18, preset="superfast"),
                             "-c:a", "copy",
                             dst,
@@ -95,7 +96,7 @@ class VideoLutWorker(BaseWorker):
                         fc = (
                             f"[0:v]split[orig][forlut];"
                             f"[forlut]lut3d='{lut_esc}'[lutted];"
-                            f"[orig][lutted]blend=all_expr='{blend_expr}'[out]"
+                            f"[orig][lutted]blend=all_expr='{blend_expr}',format=yuv420p[out]"
                         )
                         cmd = [
                             ffmpeg, "-y", "-i", src,

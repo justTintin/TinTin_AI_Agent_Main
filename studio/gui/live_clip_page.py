@@ -226,7 +226,7 @@ def embed_cover_to_video(cover_path, video_path, out_path, cover_duration=2):
         "-filter_complex",
         f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
         f"trim=duration={cover_duration},fps={fps},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v0];"
-        f"[1:v]fps={fps}[v1];"
+        f"[1:v]fps={fps},format=yuv420p[v1];"
         f"[v0][v1]concat=n=2:v=1:a=0[v];"
         f"[1:a]adelay={cover_duration*1000}:all=1[a]",
         "-map", "[v]", "-map", "[a]",
@@ -525,9 +525,13 @@ class VideoClipWorker(BaseWorker):
                     if success and os.path.exists(temp_srt) and os.path.getsize(temp_srt) > 0:
                         cwd_dir = os.path.dirname(temp_srt)
                         rel_srt = os.path.basename(temp_srt)
-                        vf_args = ["-vf", f"subtitles={rel_srt}"]
+                        # format=yuv420p：源素材可能是 10-bit，AMF 等硬件编码器不支持 10-bit 输入
+                        vf_args = ["-vf", f"subtitles={rel_srt},format=yuv420p"]
                     else:
                         temp_srt = None
+                else:
+                    # 不烧字幕也显式转 8-bit，防御 10-bit 源素材
+                    vf_args = ["-vf", "format=yuv420p"]
                 
                 abs_video = os.path.abspath(self.video_path)
                 abs_out = os.path.abspath(out)
@@ -548,6 +552,45 @@ class VideoClipWorker(BaseWorker):
                         os.remove(temp_srt)
                     except Exception:
                         pass
+
+                # GPU 编码器失败时回退 libx264 重试一次
+                if r.returncode != 0 and "-c:v" in cmd:
+                    enc_idx = cmd.index("-c:v")
+                    enc_name = cmd[enc_idx + 1] if enc_idx + 1 < len(cmd) else ""
+                    if enc_name != "libx264":
+                        log.warning(f"[切片] GPU编码器 {enc_name} 失败，回退 libx264 重试: {title}")
+                        fallback_cmd = list(cmd)
+                        # 替换编码器及其参数为 libx264
+                        fallback_cmd[enc_idx + 1] = "libx264"
+                        # 移除 GPU 特有参数 (-preset p3, -cq, -rc vbr_hq 等)
+                        clean = [fallback_cmd[0]]
+                        skip_next = False
+                        for ci, arg in enumerate(fallback_cmd[1:], 1):
+                            if skip_next:
+                                skip_next = False
+                                continue
+                            if arg in ("-preset", "-cq", "-qp_i", "-qp_p", "-global_quality", "-rc"):
+                                skip_next = True
+                                continue
+                            if arg in ("vbr_hq", "speed", "quality", "balanced"):
+                                continue
+                            clean.append(arg)
+                        # 插入 libx264 标准参数
+                        try:
+                            vi = clean.index("-c:v")
+                            clean[vi + 1] = "libx264"
+                            clean.insert(vi + 2, "-preset")
+                            clean.insert(vi + 3, "fast")
+                            clean.insert(vi + 4, "-crf")
+                            clean.insert(vi + 5, "23")
+                        except (ValueError, IndexError):
+                            pass
+                        r = subprocess.run(clean, capture_output=True, text=True, encoding="utf-8",
+                                           errors="ignore", startupinfo=_startupinfo(), cwd=cwd_dir)
+
+                if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) == 0:
+                    stderr_tail = (r.stderr or "")[-300:]
+                    log.error(f"[切片] 第{i+1}/{total}个片段失败: {title}\n  cmd={cmd}\n  stderr={stderr_tail}")
                         
                 if os.path.exists(out) and os.path.getsize(out) > 0:
                     results.append({
@@ -1917,6 +1960,7 @@ class LiveClipPage(BasePage):
         os.makedirs(TMP_DIR, exist_ok=True)
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
+        self._audio_meta_path = os.path.join(TMP_DIR, f"{vname}_audio.meta")
 
         def _do_transcribe(audio_path):
             log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
@@ -1971,9 +2015,23 @@ class LiveClipPage(BasePage):
             self._tw.error.connect(self._on_err)
             self._tw.start()
 
-        # 音频缓存：存在且未勾选"重新提取"则跳过
+        # 音频缓存：存在且未勾选"重新提取"且视频源未变更则跳过
         reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
+        cache_valid = False
         if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
+            # 校验缓存对应的视频源是否一致（mtime + size）
+            try:
+                vstat = os.stat(video_path)
+                cur_meta = f"{vstat.st_mtime_ns}_{vstat.st_size}_{video_path}"
+                if os.path.exists(self._audio_meta_path):
+                    with open(self._audio_meta_path, "r", encoding="utf-8") as mf:
+                        saved_meta = mf.read().strip()
+                    cache_valid = (saved_meta == cur_meta)
+                if not cache_valid:
+                    log.info(f"[LiveClip] 视频源已变更，缓存音频失效，重新提取")
+            except Exception:
+                cache_valid = False
+        if cache_valid:
             log.info(f"[LiveClip] 使用缓存音频: {self.audio_path}")
             self.btn_analyze.setEnabled(False)
             self.btn_stop.setEnabled(True)
@@ -2004,7 +2062,19 @@ class LiveClipPage(BasePage):
         self._workers.append(self._audio_worker)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)
-        self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
+
+        def _on_audio_extracted(p):
+            # 提取完成后保存视频源元数据，供下次缓存校验
+            try:
+                vstat = os.stat(video_path)
+                meta = f"{vstat.st_mtime_ns}_{vstat.st_size}_{video_path}"
+                with open(self._audio_meta_path, "w", encoding="utf-8") as mf:
+                    mf.write(meta)
+            except Exception:
+                pass
+            _do_transcribe(p)
+
+        self._audio_worker.finished.connect(_on_audio_extracted)
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
 

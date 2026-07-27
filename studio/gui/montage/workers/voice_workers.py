@@ -2,6 +2,10 @@
 """智能混剪 - 配音阶段 Worker：声音克隆（TTS）。"""
 import os
 import time
+import base64
+import subprocess
+import traceback
+import requests
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -393,11 +397,29 @@ class VoiceCloneWorker(BaseWorker):
                 detail = "\n".join(
                     f"· 第 {r + 1} 个：{m}" for r, _v, m in self.failures[:8])
                 more = "" if len(self.failures) <= 8 else f"\n…… 等共 {len(self.failures)} 个失败"
+                # 检测 CUDA 上下文损坏类错误，给出针对性提示（与本地显卡无关）
+                all_msgs = " ".join(m for _r, _v, m in self.failures).lower()
+                if "cuda" in all_msgs and ("illegal" in all_msgs or "illegaladdress" in all_msgs
+                                           or "illegal memory" in all_msgs):
+                    cause_hint = (
+                        "检测到 VoxCPM 服务端 CUDA 错误（illegal memory access）。\n"
+                        "这是服务端 GPU 显存越界/上下文损坏，【与本地显卡无关】（TTS 推理在服务端 NVIDIA GPU 上运行）。\n"
+                        "建议：请到运行 VoxCPM 服务的机器上重启该服务（停止/启动服务），重启前该错误会持续。"
+                    )
+                elif "503" in all_msgs or "显存不足" in all_msgs or "out of memory" in all_msgs:
+                    cause_hint = (
+                        "常见原因：VoxCPM 服务显存不足（503）。\n"
+                        "建议：① 缩短配音文案；② 确认无其它大模型占用显存后重试；"
+                        "③ 稍候重试（服务会自动回收显存）。"
+                    )
+                else:
+                    cause_hint = (
+                        "常见原因：VoxCPM 服务崩溃 / 显存不足 / 文案过长。\n"
+                        "建议：① 确认 VoxCPM API 服务仍在运行（可点「停止/启动服务」重启）；"
+                        "② 缩短配音文案；③ 稀候重试。"
+                    )
                 self.error.emit(
-                    "全部声音克隆均失败。\n"
-                    "常见原因：VoxCPM 服务崩溃 / 显存不足 / 文案过长。\n"
-                    "建议：① 确认 VoxCPM API 服务仍在运行（可点「停止/启动服务」重启）；"
-                    "② 缩短配音文案；③ 稍候重试。\n\n"
+                    f"全部声音克隆均失败。\n{cause_hint}\n\n"
                     f"{detail}{more}")
                 return
 

@@ -241,8 +241,11 @@ class BestClipWorker(BaseWorker):
         dur = max(0.1, end - start)
 
         creationflags = 0x08000000
+        # format=yuv420p：源素材可能是 10-bit（yuv420p10le/HDR），AMF 等硬件编码器
+        # 不支持 10-bit 输入，必须在滤镜链显式转 8-bit。
         cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path,
-               "-t", f"{dur:.3f}", *get_video_encode_args(crf=18, preset="veryfast"),
+               "-t", f"{dur:.3f}", "-vf", "format=yuv420p",
+               *get_video_encode_args(crf=18, preset="veryfast"),
                "-pix_fmt", "yuv420p", "-c:a", "aac",
                "-movflags", "+faststart", out_path]
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
@@ -335,10 +338,10 @@ class ServerClipAnalysisWorker(BaseWorker):
             try:
                 pr = requests.get(poll_url, timeout=15)
             except Exception as e:
-                log.warning(f"[镜头分析] {fname} 轮询请求异常: {e}")
+                log.warning(f"[镜头分析] {fname} task_id={task_id} 轮询请求异常: {e}")
                 continue
             if pr.status_code != 200:
-                log.warning(f"[镜头分析] {fname} 轮询 HTTP {pr.status_code}")
+                log.warning(f"[镜头分析] {fname} task_id={task_id} 轮询 HTTP {pr.status_code}")
                 continue
             try:
                 pdata = pr.json()
@@ -367,7 +370,7 @@ class ServerClipAnalysisWorker(BaseWorker):
             if status in ("failed", "error", "cancelled"):
                 err_msg = (task_obj.get("error_msg") or task_obj.get("error")
                            or task_obj.get("message") or "未知错误")
-                raise RuntimeError(f"服务端任务失败: {err_msg}")
+                raise RuntimeError(f"服务端任务失败(task_id={task_id}): {err_msg}")
 
             # pending / running / 其他 → 继续轮询
 
@@ -571,7 +574,7 @@ class BeatDetectWorker(BaseWorker):
                 try:
                     pr = requests.get(poll_url, timeout=15)
                 except Exception as e:
-                    log.warning(f"[音乐卡点] 轮询异常: {e}")
+                    log.warning(f"[音乐卡点] task_id={task_id} 轮询异常: {e}")
                     continue
                 if pr.status_code != 200:
                     continue
@@ -583,7 +586,7 @@ class BeatDetectWorker(BaseWorker):
                 task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
                 status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
                 if status != last_status:
-                    log.info(f"[音乐卡点] status={status}")
+                    log.info(f"[音乐卡点] task_id={task_id} status={status}")
                     last_status = status
 
                 if status in ("completed", "done", "success", "finished"):
@@ -600,12 +603,12 @@ class BeatDetectWorker(BaseWorker):
                 if status in ("failed", "error", "cancelled"):
                     err = (task_obj.get("error_msg") or task_obj.get("error")
                            or task_obj.get("message") or "未知")
-                    raise RuntimeError(f"任务失败: {err}")
+                    raise RuntimeError(f"任务失败(task_id={task_id}): {err}")
 
             raise RuntimeError(f"轮询超时({self._POLL_TIMEOUT:.0f}s), task={task_id}")
         except Exception as e:
-            log.error(f"[音乐卡点] 失败: {e}")
-            self.error.emit(str(e))
+            log.error(f"[音乐卡点] task_id={task_id if 'task_id' in dir() else 'N/A'} 失败: {e}")
+            self.error.emit(f"[task_id={task_id if 'task_id' in dir() else 'N/A'}] {e}")
 
     @staticmethod
     def _extract_beats(payload):
@@ -745,7 +748,7 @@ class BeatVideoGenWorker(BaseWorker):
             try:
                 pr = requests.get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
             except Exception as e:
-                log.warning(f"[卡点成片] 轮询异常: {e}")
+                log.warning(f"[卡点成片] task_id={tid} 轮询异常: {e}")
                 continue
             if pr.status_code != 200:
                 continue
@@ -762,14 +765,14 @@ class BeatVideoGenWorker(BaseWorker):
                 err = (task_obj.get("error_msg") or task_obj.get("error")
                        or task_obj.get("message") or "未知")
                 for r in results:
-                    r["error"] = f"服务端生成失败: {err}"
-                log.error(f"[卡点成片] 生成失败: {err}")
+                    r["error"] = f"服务端生成失败(task_id={tid}): {err}"
+                log.error(f"[卡点成片] task_id={tid} 生成失败: {err}")
                 self.all_done.emit(results)
                 return
 
         if result is None:
             for r in results:
-                r["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）"
+                r["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）, task_id={tid}"
             self.all_done.emit(results)
             return
 
@@ -785,11 +788,11 @@ class BeatVideoGenWorker(BaseWorker):
                     local = self._download(tid, file_ref, i)
                     results[i]["ok"] = True
                     results[i]["path"] = local
-                    log.info(f"[卡点成片] 变体{i + 1} 下载完成: {local}")
+                    log.info(f"[卡点成片] task_id={tid} 变体{i + 1} 下载完成: {local}")
                     self.video_ready.emit(i, local)
                 except Exception as e:
-                    log.error(f"[卡点成片] 变体{i + 1} 下载失败: {e}")
-                    results[i]["error"] = f"下载失败: {e}"
+                    log.error(f"[卡点成片] task_id={tid} 变体{i + 1} 下载失败: {e}")
+                    results[i]["error"] = f"下载失败(task_id={tid}): {e}"
                 self.progress.emit(int(50 + (i + 1) / total_v * 50),
                                    f"下载视频 {i + 1}/{total_v}")
         else:
@@ -799,11 +802,11 @@ class BeatVideoGenWorker(BaseWorker):
                 local = self._download(tid, file_ref, 0)
                 results[0]["ok"] = True
                 results[0]["path"] = local
-                log.info(f"[卡点成片] 成片下载完成: {local}")
+                log.info(f"[卡点成片] task_id={tid} 成片下载完成: {local}")
                 self.video_ready.emit(0, local)
             except Exception as e:
-                log.error(f"[卡点成片] 成片下载失败: {e}")
-                results[0]["error"] = f"下载失败: {e}"
+                log.error(f"[卡点成片] task_id={tid} 成片下载失败: {e}")
+                results[0]["error"] = f"下载失败(task_id={tid}): {e}"
 
         self.progress.emit(100, "全部完成")
         self.all_done.emit(results)

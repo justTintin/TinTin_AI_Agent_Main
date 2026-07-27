@@ -90,7 +90,9 @@ class VideoConcatWorker(BaseWorker):
 
         # 2) 转码：缩放/填充黑边/统一 30fps，软编 libx264 superfast crf23
         norm_out = os.path.join(temp_dir, f"norm_{i:04d}.mp4")
-        vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30"
+        # format=yuv420p：源素材可能是 10-bit（yuv420p10le/HDR），AMF 等硬件编码器
+        # 不支持 10-bit 输入，必须在滤镜链显式转 8-bit，否则转码全部失败。
+        vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p"
         cmd = [
             ffmpeg_path, "-y", "-i", clip_abspath,
             "-vf", vf_filter,
@@ -353,7 +355,7 @@ class VideoConcatWorker(BaseWorker):
                         norm_out = None
                     except Exception as e:
                         # 未预期错误也按跳过处理，避免整个合成失败
-                        log.warning(f"标准化转码异常，跳过: {clip}\n{e}")
+                        log.warning(f"标准化转码异常，跳过: {clip}\n{e}", exc_info=True)
                         skipped_clips.append(clip)
                         self.stage.emit(f"⚠ 转码失败，跳过: {os.path.basename(clip)}")
                         norm_out = None
@@ -446,14 +448,6 @@ class VideoConcatWorker(BaseWorker):
                     for _ in range(extra_needed):
                         batch_clips.append(random.choice(normalized_list))
                 
-                # Generate combined script for this batch
-                batch_desc_lines = []
-                for n_clip in batch_clips:
-                    desc = norm_to_desc.get(n_clip, "").strip()
-                    if desc:
-                        batch_desc_lines.append(desc)
-                batch_script = "\n".join(batch_desc_lines)
-
                 out_file = os.path.join(self.output_dir, f"montage_concat_{random.randint(1000, 9999)}_{batch_idx+1}.mp4")
 
                 # 使用 xfade 滤镜实现转场动画（非 copy 模式，需要重新编码）
@@ -471,13 +465,10 @@ class VideoConcatWorker(BaseWorker):
                     if r.returncode != 0:
                         raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
                 
-                # Save the combined script to a companion .txt file next to the video
-                txt_file = os.path.splitext(out_file)[0] + ".txt"
-                try:
-                    with open(txt_file, "w", encoding="utf-8") as tf:
-                        tf.write(batch_script)
-                except Exception as e:
-                    log.warning(f"保存视频合成文案失败: {e}")
+                # 注：不再在合成视频时把画面描述拼接写入 .txt。
+                # 该 .txt 是「口播文案」专属文件，只有用户点「生成口播文案」按钮由 AI 生成后才填充。
+                # 画面描述已保存在内存 split_descriptions/split_clips_cache + _sources.txt 中，
+                # 生成口播文案时由 _get_video_scene_descriptions 正常读取，不受影响。
 
                 # Save the list of original source clips that make up this generated video
                 sources_file = os.path.splitext(out_file)[0] + "_sources.txt"

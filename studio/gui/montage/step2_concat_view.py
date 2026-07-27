@@ -251,7 +251,7 @@ class Step2ConcatView(BaseStepView):
         self.main_page.btn_confirm_all.clicked.connect(self.main_page._confirm_all_precompose)
         confirm_row.addWidget(self.main_page.btn_confirm_all)
         
-        self.main_page.btn_batch_scene_copy = QPushButton("合成视频生成文案")
+        self.main_page.btn_batch_scene_copy = QPushButton("生成口播文案")
         self.main_page.btn_batch_scene_copy.setObjectName("secondary_button")
         self.main_page.btn_batch_scene_copy.setFixedHeight(35)
         self.main_page.btn_batch_scene_copy.setToolTip(

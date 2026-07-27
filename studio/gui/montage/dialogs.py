@@ -3,7 +3,8 @@
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
                                QListWidget, QListWidgetItem, QDialogButtonBox, QPlainTextEdit, QWidget,
-                               QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox)
+                               QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
+                               QLineEdit)
 from PySide6.QtCore import Qt
 from gui.montage.widgets import ReadOnlyDoubleClickLineEdit
 

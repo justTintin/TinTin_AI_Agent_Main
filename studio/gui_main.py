@@ -718,7 +718,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.page_media_library = QWidget()
         self.content_stack.addWidget(self.page_media_library)
 
-        # 32: Dreamina (即梦生成) Page
+        # 32: Material Generation (素材生成) Page
         self.page_dreamina = QWidget()
         self.setup_dreamina_page()
         self.content_stack.addWidget(self.page_dreamina)
@@ -987,16 +987,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.refresh_creator_queue_table()
             if hasattr(self, "cg_status_label"):
                 self.cg_status_label.setText("已移除")
-
-    def select_image(self):
-        file, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
-        if file:
-            self.img_path_input.setText(file)
-
-    def select_audio(self):
-        file, _ = QFileDialog.getOpenFileName(self, "选择音频", "", "Audio (*.mp3 *.wav)")
-        if file:
-            self.aud_path_input.setText(file)
 
 
 
@@ -1403,8 +1393,17 @@ if __name__ == "__main__":
 
         splash.close()
         window.show()
-            
+
         log.info("MainWindow shown successfully.")
+
+        # 启动时后台清理中间产物（不阻塞 UI；NAS 上大量文件时清理耗时）
+        try:
+            from threading import Thread
+            from utils.asset_cleanup import cleanup_on_startup
+            Thread(target=cleanup_on_startup, daemon=True, name="startup-cleanup").start()
+        except Exception as e:
+            log.warning(f"启动清理任务未能启动: {e}")
+
         sys.exit(app.exec())
     except Exception as e:
         import traceback

@@ -23,17 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
-from config.paths import DATA_DIR, EXTENSION_SRC_DIR, APPS_DIR
+from config.paths import EXTENSION_DIR
 from utils.extension_bridge import DEFAULT_PORT
 from utils.logger_utils import log
 from utils.extension_bridge import DEFAULT_PORT, get_bridge
 
-# 扩展源码模块（apps/browser-extension/，随 apps/ 打包分发）
-EXT_SOURCE_DIR = EXTENSION_SRC_DIR
-# 浏览器实际加载的稳定目录（独立目录，不入库、不随数据目录迁移）
-EXT_INSTALL_DIR = os.path.join(APPS_DIR, "extension")
-# 旧安装位置（studio/data/extension），存在时自动迁移
-_EXT_INSTALL_DIR_LEGACY = os.path.join(DATA_DIR, "extension")
+# 扩展模块目录（apps/browser-extension/）—— 源码即浏览器加载点，无需复制副本
+EXT_DIR = EXTENSION_DIR
 
 
 # ── 浏览器检测 ────────────────────────────────────────────────────────────────
@@ -103,20 +99,21 @@ def detect_browsers() -> list:
 
 
 def ensure_extension_installed() -> str:
-    """把扩展源码同步到稳定安装目录（apps/extension），返回该目录路径。"""
-    if not os.path.isdir(EXT_SOURCE_DIR):
-        raise FileNotFoundError(f"扩展源码目录不存在: {EXT_SOURCE_DIR}")
-    if os.path.isdir(EXT_INSTALL_DIR):
-        shutil.rmtree(EXT_INSTALL_DIR, ignore_errors=True)
-    shutil.copytree(EXT_SOURCE_DIR, EXT_INSTALL_DIR)
-    # 旧位置迁移后清理（浏览器加载路径以 apps/extension 为准）
-    if os.path.isdir(_EXT_INSTALL_DIR_LEGACY) and \
-            os.path.normcase(EXT_INSTALL_DIR) != os.path.normcase(_EXT_INSTALL_DIR_LEGACY):
+    """校验扩展目录就绪并返回其路径（apps/browser-extension/，浏览器直接加载）。
+
+    源码目录即加载点，无需复制副本（Chrome 开发者模式加载未打包扩展只读不写）。
+    旧的 apps/extension 副本若存在则清理，避免双目录混淆。
+    """
+    if not os.path.isdir(EXT_DIR) or not os.path.isfile(os.path.join(EXT_DIR, "manifest.json")):
+        raise FileNotFoundError(f"扩展目录不存在或缺少 manifest.json: {EXT_DIR}")
+    # 清理历史遗留的复制副本（apps/extension），统一用 browser-extension 作为加载点
+    legacy_copy = os.path.join(os.path.dirname(EXT_DIR), "extension")
+    if os.path.isdir(legacy_copy) and os.path.normcase(legacy_copy) != os.path.normcase(EXT_DIR):
         try:
-            shutil.rmtree(_EXT_INSTALL_DIR_LEGACY, ignore_errors=True)
+            shutil.rmtree(legacy_copy, ignore_errors=True)
         except Exception:
             pass
-    return EXT_INSTALL_DIR
+    return EXT_DIR
 
 
 class ExtensionPage(BasePage):
@@ -407,8 +404,8 @@ class ExtensionPage(BasePage):
             self.show_error(f"打开扩展目录失败：{e}")
 
     def _copy_ext_path(self):
-        QGuiApplication.clipboard().setText(EXT_INSTALL_DIR)
-        self.show_info(f"扩展路径已复制：\n{EXT_INSTALL_DIR}")
+        QGuiApplication.clipboard().setText(EXT_DIR)
+        self.show_info(f"扩展路径已复制：\n{EXT_DIR}")
 
     # ── 桥接服务动作 ──
     def _validate_sync_pair(self) -> bool:

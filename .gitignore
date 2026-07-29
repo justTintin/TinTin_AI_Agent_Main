@@ -110,9 +110,12 @@ apps/asset-browser/bin/node.exe
 apps/asset-browser/bin/v2rayN/bin/xray/config_generated.json
 apps/asset-browser/bin/ffmpeg.exe
 
-# Browser extension install dir (runtime copy synced from apps/browser-extension
-# by ensure_extension_installed(); browser loads it from here)
+# Browser extension runtime artifacts (源码在 apps/browser-extension/，直接作为加载点)
+# 这些是历史遗留的 .crx 打包产物（ext_installer 已废弃）和旧复制副本
 apps/extension/
+apps/extension.crx
+apps/extension.pem
+apps/extension_store/
 
 # Studio logs
 studio/logs/

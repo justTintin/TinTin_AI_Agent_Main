@@ -610,8 +610,11 @@ class ExtensionBridge(QObject):
         if ffmpeg:
             base_cmd += ["--ffmpeg-location", os.path.dirname(ffmpeg)]
 
-        # cookies 策略：扩展导出的 cookies 文件优先（不受浏览器锁库/App-Bound 加密限制），
-        # 其次配置的浏览器，未配置则失败后自动回退 chrome→edge
+        # cookies 策略：
+        # 1) 扩展导出的 cookies 文件优先（不受浏览器锁库/App-Bound 加密限制）
+        # 2) 仅当用户【显式配置】了 cookies_browser 时，才用该浏览器读取 cookies；
+        #    未配置则不试任何浏览器（无脑试 edge/chrome/firefox 会在浏览器运行时
+        #    因 cookie 数据库被锁而逐个失败、浪费大量时间，最后还得回退无 cookie）。
         cookie_file = ""
         if item.get("cookies"):
             try:
@@ -624,16 +627,9 @@ class ExtensionBridge(QObject):
         cookie_tries = []
         if cookie_file:
             cookie_tries.append(("file", cookie_file))
-        # cookies 源重试链：用户配置的浏览器优先 → Edge → Chrome → Firefox
         configured = (self.config.get("cookies_browser") or "").strip().lower()
-        config_ok = configured in ("chrome", "edge", "firefox", "brave", "opera")
-        default_order = ["edge", "chrome", "firefox"]
-        if config_ok and configured in default_order:
-            default_order.remove(configured)
-            default_order.insert(0, configured)
-        for ck in default_order:
-            if not any(k == "browser" and v == ck for k, v in cookie_tries):
-                cookie_tries.append(("browser", ck))
+        if configured in ("chrome", "edge", "firefox", "brave", "opera"):
+            cookie_tries.append(("browser", configured))
 
         # 构造可选的 extractor-args：有 PO Token 时用 web 客户端绑定 token（合法格式），
         # 否则不强制 player_client —— 让 yt-dlp 用内置多客户端策略（实测最稳，能拿到格式）
@@ -643,6 +639,7 @@ class ExtensionBridge(QObject):
             return []  # 默认客户端：不传 extractor-args（web/tv_embedded/mweb 客户端实测拿不到格式）
 
         last_err = ""
+        found = ""
         for kind, val in cookie_tries:
             cmd = list(base_cmd) + _extractor_args(po_token)
             if kind == "file":

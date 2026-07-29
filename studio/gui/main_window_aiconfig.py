@@ -46,24 +46,8 @@ from PySide6.QtGui import QFont
 
 class AIConfigMixin:
     def save_llm_config(self):
-        self.ai_config["llm_provider"] = self.llm_provider_combo.currentData()
-        self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
-        self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
-        self.ai_config["llm_model"] = self.llm_model_input.text().strip()
-        vision_url = self.llm_vision_api_url_input.text().strip()
-        vision_model = self.llm_vision_model_input.currentText().strip()
-        self.ai_config["llm_vision_api_url"] = vision_url
-        self.ai_config["llm_vision_model"] = vision_model
-        # 统一服务端地址
-        server_url = getattr(self, "compute_server_input", None)
-        if server_url:
-            self.ai_config["compute_server_url"] = server_url.text().strip()
-        # Whisper ASR 地址（纯远程模式）
-        whisper_url = getattr(self, "whisper_api_url_input", None)
-        self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
-        # CLIP embedding 服务地址（纯远程模式）
-        clip_url = getattr(self, "clip_api_url_input", None)
-        self.ai_config["clip_api_url"] = clip_url.text().strip() if clip_url else ""
+        # 关键：先从所有 UI 收集最新值，避免保存时用过期内存值覆盖其它字段
+        self._collect_all_config_from_ui()
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -74,39 +58,66 @@ class AIConfigMixin:
             log.error(f"保存大模型配置失败: {e}")
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
-    def _save_all_ai_config(self):
-        """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
-        # 收集所有配置（不弹消息框）
-        self.ai_config["llm_provider"] = self.llm_provider_combo.currentData()
-        self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
-        self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
-        self.ai_config["llm_model"] = self.llm_model_input.text().strip()
-        vision_url = self.llm_vision_api_url_input.text().strip()
-        vision_model = self.llm_vision_model_input.currentText().strip()
-        self.ai_config["llm_vision_api_url"] = vision_url
-        self.ai_config["llm_vision_model"] = vision_model
+    def _collect_all_config_from_ui(self):
+        """从所有 UI 输入框收集当前值到 self.ai_config（不写文件）。
+
+        关键修复：任何保存按钮在写文件前都必须先调用本方法，
+        否则会用过期的内存值覆盖用户在其它 Tab 已修改但未保存的字段。
+        所有 getattr 都容忍控件不存在（不同页面加载顺序）。
+        """
+        # ComfyUI / VoiceClone 直连地址
+        comfyui_input = getattr(self, "comfyui_input", None)
+        if comfyui_input is not None:
+            self.ai_config["comfyui_addr"] = comfyui_input.text().strip()
+        voice_clone_input = getattr(self, "voice_clone_input", None)
+        if voice_clone_input is not None:
+            self.ai_config["voice_clone_addr"] = voice_clone_input.text().strip()
+        # LLM 文本模型
+        if getattr(self, "llm_provider_combo", None) is not None:
+            self.ai_config["llm_provider"] = self.llm_provider_combo.currentData()
+        if getattr(self, "llm_api_key_input", None) is not None:
+            self.ai_config["llm_api_key"] = self.llm_api_key_input.text().strip()
+        if getattr(self, "llm_api_url_input", None) is not None:
+            self.ai_config["llm_api_url"] = self.llm_api_url_input.text().strip()
+        if getattr(self, "llm_model_input", None) is not None:
+            self.ai_config["llm_model"] = self.llm_model_input.text().strip()
+        # 视觉模型
+        if getattr(self, "llm_vision_api_url_input", None) is not None:
+            self.ai_config["llm_vision_api_url"] = self.llm_vision_api_url_input.text().strip()
+        if getattr(self, "llm_vision_model_input", None) is not None:
+            self.ai_config["llm_vision_model"] = self.llm_vision_model_input.currentText().strip()
         # 统一服务端地址
         server_url = getattr(self, "compute_server_input", None)
-        if server_url:
+        if server_url is not None:
             self.ai_config["compute_server_url"] = server_url.text().strip()
-        # Whisper ASR 地址
+        # Whisper / CLIP
         whisper_url = getattr(self, "whisper_api_url_input", None)
-        self.ai_config["whisper_api_url"] = whisper_url.text().strip() if whisper_url else ""
-        # CLIP embedding 服务地址
+        if whisper_url is not None:
+            self.ai_config["whisper_api_url"] = whisper_url.text().strip()
         clip_url = getattr(self, "clip_api_url_input", None)
-        self.ai_config["clip_api_url"] = clip_url.text().strip() if clip_url else ""
-        # VoxCPM 配置
+        if clip_url is not None:
+            self.ai_config["clip_api_url"] = clip_url.text().strip()
+        # OCR（服务端 /material/ocr）
+        ocr_url = getattr(self, "ocr_api_url_input", None)
+        if ocr_url is not None:
+            self.ai_config["ocr_api_url"] = ocr_url.text().strip()
+        # VoxCPM
         vox_url = getattr(self, "vox_api_url_input", None)
-        if vox_url:
+        if vox_url is not None:
             self.ai_config["vox_api_url"] = vox_url.text().strip()
         vox_timesteps = getattr(self, "vox_timesteps_spin", None)
-        vox_cfg = getattr(self, "vox_cfg_spin", None)
-        if vox_timesteps:
+        if vox_timesteps is not None:
             self.ai_config["vox_timesteps"] = vox_timesteps.value()
-        if vox_cfg:
+        vox_cfg = getattr(self, "vox_cfg_spin", None)
+        if vox_cfg is not None:
             self.ai_config["vox_cfg"] = vox_cfg.value()
         self.ai_config["vox_source"] = "remote"
         self.ai_config["vox_mode"] = "api"
+
+    def _save_all_ai_config(self):
+        """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
+        # 关键：先从所有 UI 收集最新值，避免用过期内存值覆盖
+        self._collect_all_config_from_ui()
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -135,6 +146,10 @@ class AIConfigMixin:
         c = getattr(self, "clip_api_url_input", None)
         if c:
             c.setText(url)
+        # PaddleOCR — 始终与统一地址同步（服务端 /material/ocr）
+        o = getattr(self, "ocr_api_url_input", None)
+        if o:
+            o.setText(url)
         # VoxCPM — 追加 /voxcpm/tts 后缀后同步
         v = getattr(self, "vox_api_url_input", None)
         if v:
@@ -193,6 +208,7 @@ class AIConfigMixin:
             "compute_server_url": "http://192.168.111.19:8000",
             "whisper_api_url": "",
             "clip_api_url": "",
+            "ocr_api_url": "",
             "vox_api_url": "",
             "vox_source": "remote",
             "vox_mode": "api",
@@ -223,9 +239,9 @@ class AIConfigMixin:
         self.ai_config = default_config
 
     def save_ai_config(self):
-        self.ai_config["comfyui_addr"] = self.comfyui_input.text().strip()
-        self.ai_config["voice_clone_addr"] = self.voice_clone_input.text().strip()
-        
+        # 关键：先从所有 UI 收集最新值，避免保存时用过期内存值覆盖其它字段
+        self._collect_all_config_from_ui()
+
         try:
             os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
             with open(self.ai_config_file, 'w', encoding='utf-8') as f:
@@ -486,6 +502,40 @@ class AIConfigMixin:
             except Exception as e:
                 self.clip_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
                 self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
+            if sender: sender.setEnabled(True)
+
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _test_ocr_connection(self):
+        """测试远程服务端 OCR 连接（调 /material/status 探测 /material/ocr 可用性）。"""
+        sender = self.sender()
+        if sender: sender.setEnabled(False)
+        self.ocr_status_lbl.setText("正在测试...")
+        self.ocr_status_lbl.setStyleSheet("color: #f39c12;")
+
+        api_url = self.ocr_api_url_input.text().strip()
+        if not api_url:
+            self.ocr_status_lbl.setText("⚠️ 请填写 OCR 服务地址")
+            self.ocr_status_lbl.setStyleSheet("color: #f39c12;")
+            if sender: sender.setEnabled(True)
+            return
+
+        def _run():
+            import requests
+            try:
+                base = api_url.rstrip("/")
+                # 探测 /material/status（与 check_server_ocr 一致）
+                r = requests.get(f"{base}/material/status", timeout=5)
+                if r.status_code == 200:
+                    self.ocr_status_lbl.setText("✅ 连接成功（/material/ocr 可用）")
+                    self.ocr_status_lbl.setStyleSheet("color: #2ecc71;")
+                else:
+                    self.ocr_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
+            except Exception as e:
+                self.ocr_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
             if sender: sender.setEnabled(True)
 
         import threading

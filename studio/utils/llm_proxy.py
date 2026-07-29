@@ -21,6 +21,7 @@ import json
 
 from utils.logger_utils import log
 from utils.http_client import resilient_post
+from utils.api_error import ApiError
 
 
 def _read_config() -> dict:
@@ -96,7 +97,8 @@ def llm_chat(
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
-        raise RuntimeError(f"LLM 服务端返回 HTTP {resp.status_code}: {err}")
+        raise ApiError(url, method="POST", params=payload,
+                       status_code=resp.status_code, response_text=resp.text, service="llm")
 
     data = resp.json()
     # 兼容 OpenAI 格式和自定义格式
@@ -156,7 +158,8 @@ def llm_chat_messages(
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
-        raise RuntimeError(f"LLM 服务端返回 HTTP {resp.status_code}: {err}")
+        raise ApiError(url, method="POST", params=payload,
+                       status_code=resp.status_code, response_text=resp.text, service="llm")
 
     data = resp.json()
     content = (

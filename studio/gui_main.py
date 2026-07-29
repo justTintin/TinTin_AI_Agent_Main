@@ -145,7 +145,7 @@ try:
                                  QListWidgetItem, QGridLayout, QFileDialog, 
                                  QProgressBar, QComboBox, QInputDialog, QSplitter,
                                  QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox)
+                                 QSpinBox, QSystemTrayIcon, QMenu)
     from PySide6.QtGui import QIcon, QFont, QPixmap, QSyntaxHighlighter, QTextCharFormat, QColor
     from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent, QSharedMemory
 except ImportError as e:
@@ -284,6 +284,15 @@ class SystemStatusOverlay(QWidget):
             sep.setObjectName("status_separator")
             return sep
             
+        # 服务器资源监控放最前面（更醒目），AI 服务状态在后
+        layout.addWidget(self.gpu_lbl)
+        layout.addWidget(self.cpu_lbl)
+        layout.addWidget(create_sep())
+        layout.addWidget(self.ram_lbl)
+        layout.addWidget(create_sep())
+        layout.addWidget(self.net_lbl)
+        layout.addWidget(create_sep())
+
         layout.addWidget(self.ollama_lbl)
         layout.addWidget(create_sep())
         layout.addWidget(self.vision_lbl)
@@ -293,15 +302,6 @@ class SystemStatusOverlay(QWidget):
         layout.addWidget(self.clip_lbl)
         layout.addWidget(create_sep())
         layout.addWidget(self.clone_lbl)
-        layout.addWidget(create_sep())
-        
-        layout.addWidget(self.cpu_lbl)
-        layout.addWidget(create_sep())
-        layout.addWidget(self.ram_lbl)
-        layout.addWidget(create_sep())
-        layout.addWidget(self.gpu_lbl)
-        layout.addWidget(create_sep())
-        layout.addWidget(self.net_lbl)
         
         self.setFixedSize(895, 26)
         
@@ -404,6 +404,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         
         self._update_splash("正在构建主界面 UI 元素 (组件较多，可能耗时数秒)...", 65)
         self.setup_ui()
+        self._setup_tray()
         
         # System status overlay
         self.status_overlay = SystemStatusOverlay(self)
@@ -470,7 +471,58 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             h = self.status_overlay.height()
             self.status_overlay.move(self.width() - w - margin_right, margin_top)
 
+    def _setup_tray(self):
+        """系统托盘：关闭窗口时最小化到托盘，仅托盘「退出」走确认关闭流程。"""
+        self._tray_quit = False
+        self._tray_hint_shown = False
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon = None
+            return
+        self.tray_icon = QSystemTrayIcon(self)
+        icon_path = os.path.join(PROJECT_ROOT, "assets", "app_icon.png")
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+        self.tray_icon.setToolTip("螺丝钉-电商智能体矩阵")
+        menu = QMenu()
+        act_show = menu.addAction("显示主界面")
+        act_show.triggered.connect(self._restore_from_tray)
+        act_quit = menu.addAction("退出")
+        act_quit.triggered.connect(self._quit_from_tray)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self):
+        # 标记为真正退出，closeEvent 走原有的确认对话框
+        self._tray_quit = True
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.close()
+
     def closeEvent(self, event):
+        # 点窗口 X：最小化到托盘，不退出（仅托盘右键「退出」才真正关闭）
+        if not getattr(self, "_tray_quit", False):
+            if getattr(self, "tray_icon", None) and self.tray_icon.isVisible():
+                event.ignore()
+                self.hide()
+                if not self._tray_hint_shown:
+                    self._tray_hint_shown = True
+                    self.tray_icon.showMessage(
+                        "螺丝钉-电商智能体矩阵",
+                        "程序已最小化到系统托盘，右键托盘图标选择「退出」可关闭。",
+                        QSystemTrayIcon.Information, 3000)
+                return
+
         # Pop up confirmation dialog
         reply = QMessageBox.question(
             self,
@@ -516,11 +568,21 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception:
             pass
         try:
+            if hasattr(self, "extension_bridge") and self.extension_bridge:
+                self.extension_bridge.stop()
+        except Exception:
+            pass
+        try:
             from core.creator_browser_controller import close_all_active_browsers
             close_all_active_browsers()
         except Exception:
             pass
 
+        try:
+            if getattr(self, "tray_icon", None):
+                self.tray_icon.hide()
+        except Exception:
+            pass
         try:
             super().closeEvent(event)
         except Exception:
@@ -778,6 +840,20 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_scheduled_tasks_page()
         self.content_stack.addWidget(self.page_scheduled_tasks)
 
+        # 44: Extension Plugins (扩展插件) Page —— 浏览器采集扩展管理
+        self.page_extension = QWidget()
+        self.setup_extension_page()
+        self.content_stack.addWidget(self.page_extension)
+
+        # 浏览器扩展桥接服务：按配置随客户端自动启动
+        try:
+            from utils.extension_bridge import get_bridge
+            self.extension_bridge = get_bridge()
+            if self.extension_bridge.config.get("auto_start", True):
+                self.extension_bridge.start()
+        except Exception as e:
+            log.error(f"[扩展桥接] 自动启动失败: {e}")
+
         # 进入定时任务页时刷新（拉取最新服务端状态）
         def _on_page_change(idx):
             if idx == 43 and hasattr(self, "scheduled_tasks_tool"):
@@ -829,6 +905,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                     self.dreamina_assets_tool._scan_local_files()
                 except Exception as e:
                     log.error(f"刷新即梦素材列表失败: {e}")
+        elif index == 44: # 扩展插件
+            if hasattr(self, "extension_tool"):
+                self.extension_tool.refresh()
         elif index == 38: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()

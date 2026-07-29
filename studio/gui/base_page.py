@@ -79,7 +79,10 @@ class BasePage:
         QMessageBox.warning(self.parent_widget, title, message)
 
     def show_error(self, message, title="错误"):
-        QMessageBox.critical(self.parent_widget, title, message)
+        # 用统一 ErrorDialog（可滚动 + 复制日志），替代 QMessageBox.critical
+        # 避免长错误信息（traceback/多失败项/接口响应）撑满屏幕、无法滚动、无法复制
+        from gui.error_dialog import show_error_dialog
+        show_error_dialog(self.parent_widget, title, message)
 
     def confirm(self, message, title="确认"):
         return QMessageBox.question(

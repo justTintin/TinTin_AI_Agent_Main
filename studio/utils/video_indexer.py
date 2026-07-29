@@ -79,6 +79,83 @@ def probe_color_metadata(video_path: str, ffprobe_path: str = "") -> dict:
         return {}
 
 
+# 图片扩展名（用于 probe_media_size 走 PIL 分支）
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def probe_media_size(path):
+    """读取单个媒体文件的像素尺寸 (width, height)。
+
+    图片走 PIL.Image.open().size；视频走 ffprobe。
+    失败返回 None。二进制路径解析与 probe_color_metadata 一致。
+    """
+    if not path or not os.path.isfile(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+
+    # ── 图片：PIL ──
+    if ext in _IMAGE_EXTS:
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+            if w and h:
+                return int(w), int(h)
+        except Exception:
+            return None
+        return None
+
+    # ── 视频：ffprobe（复用 probe_color_metadata 的二进制解析套路）──
+    import subprocess
+    from utils.platform_utils import find_ffprobe
+    ffprobe_path = find_ffprobe()
+    if not ffprobe_path or not os.path.isfile(ffprobe_path):
+        from utils.platform_utils import find_ffmpeg
+        ff = find_ffmpeg()
+        if ff:
+            ffprobe_path = ff.replace("ffmpeg", "ffprobe")
+    if not ffprobe_path or not os.path.isfile(ffprobe_path):
+        return None
+    cmd = [
+        ffprobe_path, "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json", path,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                           creationflags=0x08000000)
+        if r.returncode != 0:
+            return None
+        streams = json.loads(r.stdout).get("streams") or []
+        if not streams:
+            return None
+        w = int(streams[0].get("width") or 0)
+        h = int(streams[0].get("height") or 0)
+        if w and h:
+            return w, h
+    except Exception:
+        return None
+    return None
+
+
+def classify_aspect(w, h):
+    """按像素宽高分类画面比例，返回 "1:1" / "16:9" / "9:16"。
+
+    阈值：16:9≈1.78、9:16≈0.56、1:1=1.0；
+    0.08 容差覆盖常见拍摄抖动（4:3=1.33 判为 16:9，符合偏横屏直觉）。
+    """
+    if not w or not h:
+        return "1:1"
+    r = w / h
+    if abs(r - 1.0) < 0.08:   # 方屏
+        return "1:1"
+    if r > 1.2:               # 横屏
+        return "16:9"
+    if r < 0.83:              # 竖屏
+        return "9:16"
+    return "1:1"              # 近似方形兜底
+
+
 def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
     """检测视频是否为 Log/灰片，需要 LUT 还原。
 

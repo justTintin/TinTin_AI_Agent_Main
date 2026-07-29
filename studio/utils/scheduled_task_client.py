@@ -78,7 +78,9 @@ def create_task(task_type, title, params, schedule=None, timeout=15):
     try:
         r = requests.post(f"{_server_url()}/scheduled/tasks", json=body, timeout=timeout)
         if r.status_code == 200:
-            return r.json().get("id")
+            new_id = r.json().get("id")
+            log.info(f"[定时任务] create_task 成功, task_id={new_id}, type={task_type}")
+            return new_id
         log.warning(f"[定时任务] create_task HTTP {r.status_code}: {r.text[:150]}")
     except Exception as e:
         log.warning(f"[定时任务] create_task 失败: {e}")
@@ -109,9 +111,9 @@ def evolution_feedback(task_id, feedback, timeout=10):
                           timeout=timeout)
         if r.status_code == 200:
             return r.json().get("status") == "updated"
-        log.warning(f"[定时任务] evolution_feedback HTTP {r.status_code}: {r.text[:120]}")
+        log.warning(f"[定时任务] evolution_feedback task_id={task_id} HTTP {r.status_code}: {r.text[:120]}")
     except Exception as e:
-        log.warning(f"[定时任务] evolution_feedback 失败: {e}")
+        log.warning(f"[定时任务] evolution_feedback task_id={task_id} 失败: {e}")
     return False
 
 

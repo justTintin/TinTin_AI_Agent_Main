@@ -645,3 +645,135 @@ class ClipSelectionDialog(QDialog):
     def get_clips(self):
         return self.clips
 
+
+
+class ArrangeMaterialsDialog(QDialog):
+    """整理已选镜头素材：列出当前素材，支持逐个删除、清空全部。
+
+    与 FinalMixedVideosDialog 保持一致的 QListWidget + 行内控件样式。
+    调用方通过 get_result_paths() 取得删除/调整后的最终素材路径列表。
+    """
+    def __init__(self, parent, paths):
+        super().__init__(parent)
+        self.setWindowTitle("🗂 整理已选镜头素材")
+        self.setMinimumSize(560, 380)
+        self.resize(640, 480)
+
+        # Theme-consistent dialog（沿用 FinalMixedVideosDialog 风格）
+        self.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #2e2e32;
+                border-radius: 8px;
+                padding: 5px;
+            }
+            QPushButton#primary_button {
+                font-weight: 700;
+            }
+            QPushButton#delete_btn {
+                color: #e74c3c;
+                font-weight: bold;
+            }
+            QPushButton#delete_btn:hover {
+                color: #ff6b6b;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        self.header_lbl = QLabel()
+        self.header_lbl.setStyleSheet("font-size: 14px; color: #2ecc71;")
+        layout.addWidget(self.header_lbl)
+
+        tip_lbl = QLabel("提示：点击右侧「删除」可移除单个素材；底部「清空全部」可一键移除。")
+        tip_lbl.setStyleSheet("font-size: 12px; color: #9ca3af;")
+        tip_lbl.setWordWrap(True)
+        layout.addWidget(tip_lbl)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSpacing(4)
+        layout.addWidget(self.list_widget)
+
+        self._paths = list(paths) if paths else []
+        self._rebuild_list()
+
+        footer_layout = QHBoxLayout()
+        self.count_lbl = QLabel()
+        self.count_lbl.setStyleSheet("font-size: 12px; color: #9ca3af;")
+        footer_layout.addWidget(self.count_lbl)
+        footer_layout.addStretch()
+
+        btn_clear = QPushButton("清空全部")
+        btn_clear.setObjectName("secondary_button")
+        btn_clear.clicked.connect(self._clear_all)
+        footer_layout.addWidget(btn_clear)
+
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setObjectName("secondary_button")
+        btn_cancel.clicked.connect(self.reject)
+        footer_layout.addWidget(btn_cancel)
+
+        btn_ok = QPushButton("确定")
+        btn_ok.setObjectName("primary_button")
+        btn_ok.clicked.connect(self.accept)
+        footer_layout.addWidget(btn_ok)
+
+        layout.addLayout(footer_layout)
+        self._refresh_counts()
+
+    def _rebuild_list(self):
+        """根据 self._paths 重建列表行（带序号 + 文件名 + 删除按钮）。"""
+        self.list_widget.clear()
+        for idx, path in enumerate(self._paths, start=1):
+            item = QListWidgetItem()
+            item_widget = QWidget()
+            item_layout = QHBoxLayout(item_widget)
+            item_layout.setContentsMargins(8, 4, 8, 4)
+            item_layout.setSpacing(10)
+
+            idx_lbl = QLabel(f"{idx}.")
+            idx_lbl.setStyleSheet("color: #6b7280; font-size: 12px;")
+            idx_lbl.setFixedWidth(28)
+            item_layout.addWidget(idx_lbl)
+
+            name_lbl = QLabel(os.path.basename(path))
+            name_lbl.setStyleSheet("font-size: 13px; font-weight: bold;")
+            name_lbl.setToolTip(path)
+            item_layout.addWidget(name_lbl, 1)
+
+            btn_del = QPushButton("删除")
+            btn_del.setObjectName("delete_btn")
+            # 默认参数绑定循环变量，避免闭包指向最后一项
+            btn_del.clicked.connect(lambda checked=False, p=path: self._delete_one(p))
+            item_layout.addWidget(btn_del)
+
+            item.setSizeHint(item_widget.sizeHint())
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, item_widget)
+
+    def _delete_one(self, path):
+        """删除指定路径的素材（如有重复仅删首个匹配）。"""
+        try:
+            self._paths.remove(path)
+        except ValueError:
+            pass
+        self._rebuild_list()
+        self._refresh_counts()
+
+    def _clear_all(self):
+        if not self._paths:
+            return
+        self._paths = []
+        self._rebuild_list()
+        self._refresh_counts()
+
+    def _refresh_counts(self):
+        n = len(self._paths)
+        self.header_lbl.setText(f"✨ 当前已选 <b>{n}</b> 个素材，可在下方删除或调整")
+        self.count_lbl.setText(f"剩余 {n} 个素材")
+
+    def get_result_paths(self):
+        """返回删除/调整后的最终素材路径列表（按当前顺序）。"""
+        return list(self._paths)
+

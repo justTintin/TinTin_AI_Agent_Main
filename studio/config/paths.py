@@ -36,7 +36,27 @@ LOG_DIR = os.path.join(RUNTIME_DIR, "logs")
 TMP_DIR = os.path.join(RUNTIME_DIR, "tmp")
 COOKIES_DIR = os.path.join(RUNTIME_DIR, "cookies")
 ACCOUNTS_DIR = os.path.join(PROJECT_ROOT, "accounts")
-OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
+
+# ── 输出总目录（可在「系统设置 → 本地配置」中自定义）────────────────────
+_DEFAULT_OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
+_LOCAL_CFG_FILE = os.path.join(PROJECT_ROOT, "config", "local_config.json")
+
+def _resolve_outputs_dir():
+    """优先读取 local_config.json 中用户配置的 output_dir，否则回退默认值。"""
+    try:
+        if os.path.isfile(_LOCAL_CFG_FILE):
+            import json as _json
+            with open(_LOCAL_CFG_FILE, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            d = (data.get("output_dir") or data.get("cache_dir") or "").strip()
+            if d:
+                os.makedirs(d, exist_ok=True)
+                return d
+    except Exception:
+        pass
+    return _DEFAULT_OUTPUTS_DIR
+
+OUTPUTS_DIR = _resolve_outputs_dir()
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
@@ -63,15 +83,12 @@ VOICE_SAMPLES_BUNDLE_DIR = os.path.join(BUNDLE_ASSETS_DIR, "voice_samples")
 APPS_DIR = os.path.join(WORKSPACE_ROOT, "apps")
 PW_BROWSERS_DIR = os.path.join(APPS_DIR, "pw-browsers")
 WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
-VSR_DIR = os.path.join(APPS_DIR, "vsr-v1.1.1-windows-nvidia-cuda")
+# 注：vsr-v1.1.1（旧版去字幕，已废弃删除）现统一指向 v1.4.0。
+# VSR_DIR 仅为兼容旧代码（subtitle_removal_page 孤儿页）保留别名。
 VSR_V14_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0")
-PADDLEOCR_VENV_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0", "Python")
-PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe")
-if not os.path.isfile(PADDLEOCR_PYTHON):
-    from utils.platform_utils import find_python
-    PADDLEOCR_PYTHON = find_python()
-PADDLEOCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "video_ocr_backend.py")
-IMAGE_FOLDER_OCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "image_folder_ocr_backend.py")
+VSR_DIR = VSR_V14_DIR
+# OCR 已迁移至服务端 POST /material/ocr，不再使用本地 PaddleOCR 环境/脚本。
+# 原 PADDLEOCR_VENV_DIR/PADDLEOCR_PYTHON/PADDLEOCR_SCRIPT/IMAGE_FOLDER_OCR_SCRIPT 已移除。
 REMBG_DIR = os.path.join(APPS_DIR, "rembg")
 # 只读资源：assets 下的内置浏览器包（frozen 时在 _BUNDLE_DIR）
 BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")

@@ -9,6 +9,7 @@ import requests
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
+from utils.api_error import ApiError
 from gui.montage.utils_media import find_ffmpeg, get_media_duration
 
 
@@ -152,9 +153,12 @@ class VoiceCloneWorker(BaseWorker):
             try:
                 res = requests.post(self.voice_api_url, json=payload, timeout=180)
                 if res.status_code == 503:
-                    raise RuntimeError(f"接口繁忙/显存不足 (503): {res.text[:200]}")
+                    # 503：服务端繁忙/资源不足，不猜测具体原因，只显示服务端响应
+                    raise ApiError(self.voice_api_url, method="POST", params=payload,
+                                   status_code=503, response_text=res.text, service="voxcpm")
                 if res.status_code != 200:
-                    raise RuntimeError(f"接口返回错误 ({res.status_code}): {res.text[:200]}")
+                    raise ApiError(self.voice_api_url, method="POST", params=payload,
+                                   status_code=res.status_code, response_text=res.text, service="voxcpm")
                 return res.content
             except requests.exceptions.RequestException as e:
                 # 连接被重置/超时：服务可能崩溃，等待恢复后重试
@@ -166,19 +170,21 @@ class VoiceCloneWorker(BaseWorker):
                     if not self._wait_for_server_recovery(max_wait=20.0):
                         time.sleep(2.0)
                     continue
-                raise RuntimeError(f"连接失败（已重试 {max_attempts} 次）：{e}") from e
-            except RuntimeError as e:
+                raise ApiError(self.voice_api_url, method="POST", params=payload,
+                               cause=e, note=f"连接失败（已重试 {max_attempts} 次）", service="voxcpm")
+            except ApiError as e:
                 last_err = e
-                # 仅对 503（显存不足）重试，其它确定性错误直接抛出
-                if "503" in str(e) and attempt < max_attempts:
+                # 仅对 503（服务端繁忙）重试，其它确定性错误直接抛出
+                if e.status_code == 503 and attempt < max_attempts:
                     self.stage.emit(
-                        f"第 {row_idx + 1} 个声音{label}显存不足，稍后重试 "
+                        f"第 {row_idx + 1} 个声音{label}服务端繁忙(503)，稍后重试 "
                         f"({attempt}/{max_attempts - 1})...")
                     self._wait_for_server_recovery(max_wait=15.0)
                     time.sleep(2.0)
                     continue
                 raise
-        raise RuntimeError(f"合成失败：{last_err}")
+        raise ApiError(self.voice_api_url, method="POST", params=payload,
+                       cause=last_err, note="合成失败", service="voxcpm")
 
     @staticmethod
     def _split_sentences(text):
@@ -393,33 +399,13 @@ class VoiceCloneWorker(BaseWorker):
             self.progress.emit(100)
 
             if self.failures and not results:
-                # 全部失败：作为整体错误抛出，给出明确原因与处置建议
-                detail = "\n".join(
-                    f"· 第 {r + 1} 个：{m}" for r, _v, m in self.failures[:8])
-                more = "" if len(self.failures) <= 8 else f"\n…… 等共 {len(self.failures)} 个失败"
-                # 检测 CUDA 上下文损坏类错误，给出针对性提示（与本地显卡无关）
-                all_msgs = " ".join(m for _r, _v, m in self.failures).lower()
-                if "cuda" in all_msgs and ("illegal" in all_msgs or "illegaladdress" in all_msgs
-                                           or "illegal memory" in all_msgs):
-                    cause_hint = (
-                        "检测到 VoxCPM 服务端 CUDA 错误（illegal memory access）。\n"
-                        "这是服务端 GPU 显存越界/上下文损坏，【与本地显卡无关】（TTS 推理在服务端 NVIDIA GPU 上运行）。\n"
-                        "建议：请到运行 VoxCPM 服务的机器上重启该服务（停止/启动服务），重启前该错误会持续。"
-                    )
-                elif "503" in all_msgs or "显存不足" in all_msgs or "out of memory" in all_msgs:
-                    cause_hint = (
-                        "常见原因：VoxCPM 服务显存不足（503）。\n"
-                        "建议：① 缩短配音文案；② 确认无其它大模型占用显存后重试；"
-                        "③ 稍候重试（服务会自动回收显存）。"
-                    )
-                else:
-                    cause_hint = (
-                        "常见原因：VoxCPM 服务崩溃 / 显存不足 / 文案过长。\n"
-                        "建议：① 确认 VoxCPM API 服务仍在运行（可点「停止/启动服务」重启）；"
-                        "② 缩短配音文案；③ 稀候重试。"
-                    )
+                # 全部失败：逐条显示接口URL+参数+服务端错误（不猜测原因）
+                detail = "\n\n".join(
+                    f"· 第 {r + 1} 个：\n{m}" for r, _v, m in self.failures[:8])
+                more = "" if len(self.failures) <= 8 else f"\n\n…… 等共 {len(self.failures)} 个失败"
                 self.error.emit(
-                    f"全部声音克隆均失败。\n{cause_hint}\n\n"
+                    f"全部声音克隆均失败（共 {len(self.failures)} 个）。"
+                    f"下方为每个失败请求的接口与错误详情：\n\n"
                     f"{detail}{more}")
                 return
 

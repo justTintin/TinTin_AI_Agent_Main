@@ -11,6 +11,7 @@ import tempfile
 from typing import Optional, Callable
 
 from utils.logger_utils import log
+from utils.api_error import ApiError
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -218,9 +219,17 @@ def transcribe_remote(
 
         if resp.status_code != 200:
             log.error(f"[ASR] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")
-            raise RuntimeError(f"远程 ASR 返回 HTTP {resp.status_code}: {resp.text[:200]}")
+            raise ApiError(url, method="POST", params=data,
+                           status_code=resp.status_code, response_text=resp.text, service="whisper")
 
         result = resp.json()
+        # 服务端可能以 HTTP 200 + {"error": "..."} 返回业务错误（如模型加载失败）。
+        # 若不拦截，会被误判成“转写结果为空”，上层静默保存空文案，用户看不到任何报错。
+        err_msg = result.get("error") if isinstance(result, dict) else None
+        if err_msg:
+            log.error(f"[ASR] 服务端返回业务错误: {err_msg}")
+            raise RuntimeError(f"远程 ASR 服务异常: {err_msg}")
+
         segments = result.get("segments") or result.get("result", {}).get("segments") or []
         if not segments:
             # 某些实现可能直接返回 {"text": "..."} 无 segments

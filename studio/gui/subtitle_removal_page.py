@@ -901,6 +901,7 @@ class SubtitleRemovalPage(BasePage):
                     task_id = result.get("task_id", "")
                     if not task_id:
                         raise RuntimeError("服务端未返回任务 ID")
+                    log.info(f"[去字幕] task_id={task_id}，开始轮询...")
 
                     # 轮询 GET /tasks/unified/{task_id} 等待完成（统一接口）
                     poll_url = f"{base_url}/tasks/unified/{task_id}"
@@ -926,8 +927,8 @@ class SubtitleRemovalPage(BasePage):
                             return
                         if status in ("failed", "error"):
                             err = pdata.get("error") or pdata.get("message") or "未知错误"
-                            raise RuntimeError(f"去字幕任务失败: {err}")
-                    raise RuntimeError("去字幕任务超时(600s)")
+                            raise RuntimeError(f"去字幕任务失败(task_id={task_id}): {err}")
+                    raise RuntimeError(f"去字幕任务超时(600s), task_id={task_id}")
                 except Exception as e:
                     self.error.emit(str(e))
 
@@ -950,7 +951,8 @@ class SubtitleRemovalPage(BasePage):
         self.lbl_server_status.setText(f"❌ 失败: {msg[:80]}")
         self.btn_start.setEnabled(True)
         self.chk_server_mode.setEnabled(True)
-        QMessageBox.critical(self.parent_widget, "错误", f"服务端处理失败:\n{msg}")
+        from gui.error_dialog import show_error_dialog
+        show_error_dialog(self.parent_widget, "服务端处理失败", f"服务端处理失败:\n{msg}")
 
     def start_removal(self):
         video_path = self.video_path_input.text().strip()
@@ -971,7 +973,8 @@ class SubtitleRemovalPage(BasePage):
         # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
         if not os.path.exists(vsr_python):
             vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
+        # v1.4.0 入口脚本在根目录 vsr_run.py（v1.1.1 在 resources/ 下，已废弃）
+        vsr_script = os.path.join(vsr_dir, "vsr_run.py")
 
         if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
             QMessageBox.critical(

@@ -36,18 +36,22 @@ class Step4FinalView(BaseStepView):
         row_bgm.addWidget(btn_sel_bgm)
         card_layout.addLayout(row_bgm)
 
-        # BGM parameters slider (volume)
+        # BGM parameters slider (gain)：100%=原音量，可放大到200%，可减到0%
         row_vol = QHBoxLayout()
-        row_vol.addWidget(QLabel(" BGM 音量比例 (0-100%):"))
+        row_vol.addWidget(QLabel(" BGM 增益 (0-200%, 100%=原音量):"))
         self.main_page.bgm_volume_slider = QSlider(Qt.Horizontal)
-        self.main_page.bgm_volume_slider.setRange(0, 100)
-        self.main_page.bgm_volume_slider.setValue(15)
+        self.main_page.bgm_volume_slider.setRange(0, 200)
+        self.main_page.bgm_volume_slider.setValue(100)
         self.main_page.bgm_volume_slider.setFixedWidth(200)
-        
-        self.main_page.lbl_bgm_vol = QLabel("15 %")
+
+        self.main_page.lbl_bgm_vol = QLabel("100 %")
         self.main_page.lbl_bgm_vol.setFixedWidth(50)
+        # valueChanged：既更新标签，又实时改变播放音量（拖动即生效）
         self.main_page.bgm_volume_slider.valueChanged.connect(
             lambda v: self.main_page.lbl_bgm_vol.setText(f"{v} %")
+        )
+        self.main_page.bgm_volume_slider.valueChanged.connect(
+            self.main_page._on_bgm_volume_changed
         )
         row_vol.addWidget(self.main_page.bgm_volume_slider)
         row_vol.addWidget(self.main_page.lbl_bgm_vol)
@@ -58,15 +62,15 @@ class Step4FinalView(BaseStepView):
         row_bgm_play = QHBoxLayout()
         row_bgm_play.setSpacing(8)
         self.main_page.btn_bgm_play = mdi_button("", "play")
-        self.main_page.btn_bgm_play.setFixedWidth(44)
-        self.main_page.btn_bgm_play.setFixedHeight(24)
+        self.main_page.btn_bgm_play.setFixedWidth(56)
+        self.main_page.btn_bgm_play.setFixedHeight(28)
         self.main_page.btn_bgm_play.setToolTip("播放/暂停")
         self.main_page.btn_bgm_play.clicked.connect(self.main_page._toggle_bgm_play)
         row_bgm_play.addWidget(self.main_page.btn_bgm_play)
 
         self.main_page.btn_bgm_stop = mdi_button("", "stop")
-        self.main_page.btn_bgm_stop.setFixedWidth(44)
-        self.main_page.btn_bgm_stop.setFixedHeight(24)
+        self.main_page.btn_bgm_stop.setFixedWidth(56)
+        self.main_page.btn_bgm_stop.setFixedHeight(28)
         self.main_page.btn_bgm_stop.setToolTip("停止播放")
         self.main_page.btn_bgm_stop.clicked.connect(self.main_page._stop_bgm_play)
         row_bgm_play.addWidget(self.main_page.btn_bgm_stop)
@@ -102,7 +106,7 @@ class Step4FinalView(BaseStepView):
         card_layout.addLayout(row_bgm_play)
 
         # Run Final mix
-        self.main_page.btn_final_assemble = mdi_button("开始智能音视配乐一键合成", "celebration")
+        self.main_page.btn_final_assemble = mdi_button("开始混音合成", "celebration")
         self.main_page.btn_final_assemble.setObjectName("action_button")
         self.main_page.btn_final_assemble.setFixedHeight(40)
         self.main_page.btn_final_assemble.clicked.connect(self.main_page._start_final_mix)

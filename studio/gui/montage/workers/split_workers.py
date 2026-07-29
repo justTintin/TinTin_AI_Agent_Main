@@ -6,6 +6,7 @@ import traceback
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
+from utils.api_error import ApiError
 from utils.hwaccel import get_video_encode_args
 from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 
@@ -728,11 +729,15 @@ class BeatVideoGenWorker(BaseWorker):
         # ── 第 1 步：提交单个 /montage/beat 任务（音乐+素材仅上传一次）──
         self.progress.emit(5, "正在上传音乐与素材...")
         try:
-            tid = self._submit_one(spec)
+            videos = self._prepare_videos(spec)
+            submit_spec = dict(spec)
+            submit_spec["videos"] = videos
+            tid = self._submit_one(submit_spec)
         except Exception as e:
             log.error(f"[卡点成片] 提交失败: {e}")
             for r in results:
-                r["error"] = f"提交失败: {e}"
+                # ApiError 已含"调用接口失败 + 接口 + 参数 + 错误"，无需额外前缀
+                r["error"] = str(e) if isinstance(e, ApiError) else f"提交失败: {e}"
             self.all_done.emit(results)
             return
         log.info(f"[卡点成片] 已提交 task_id={tid}, variant_count={n_variants}")
@@ -811,6 +816,58 @@ class BeatVideoGenWorker(BaseWorker):
         self.progress.emit(100, "全部完成")
         self.all_done.emit(results)
 
+    _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+
+    def _prepare_videos(self, spec):
+        """上传前预处理素材：图片转成静态视频片段（服务端只接受视频）。
+        图片片段时长默认 2 秒，可由 spec['image_duration'] 指定（随音乐节拍变化）。"""
+        videos = [v for v in (spec.get("videos") or []) if v and os.path.isfile(v)]
+        try:
+            img_dur = max(0.5, float(spec.get("image_duration") or 2.0))
+        except (TypeError, ValueError):
+            img_dur = 2.0
+        out_dir = os.path.join(self.download_dir, "img_clips")
+        prepared = []
+        n_img = 0
+        for v in videos:
+            if os.path.splitext(v)[1].lower() in self._IMAGE_EXTS:
+                if n_img == 0:
+                    self.progress.emit(8, "正在转换图片素材...")
+                clip = self._image_to_clip(v, out_dir, img_dur)
+                prepared.append(clip)
+                n_img += 1
+                log.info(f"[卡点成片] 图片转片段: {os.path.basename(v)} -> {clip} ({img_dur:.1f}s)")
+            else:
+                prepared.append(v)
+        if n_img:
+            log.info(f"[卡点成片] 共转换 {n_img} 张图片为 {img_dur:.1f}s 静态片段")
+        return prepared
+
+    def _image_to_clip(self, image_path, out_dir, duration):
+        """ffmpeg 将单张图片转成带静音音轨的 mp4 静态片段，结果按时长缓存复用。"""
+        os.makedirs(out_dir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(image_path))[0]
+        out_path = os.path.join(out_dir, f"{stem}_img{duration:.1f}s.mp4")
+        if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+            return out_path
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            raise RuntimeError("未检测到 ffmpeg，无法转换图片素材。")
+        dur = max(0.5, float(duration))
+        # 尺寸归一到偶数（yuv420p 要求），附带静音音轨便于服务端混音
+        cmd = [ffmpeg, "-y", "-loop", "1", "-i", image_path,
+               "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+               "-t", f"{dur:.3f}",
+               "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+               "-c:a", "aac", "-shortest", "-movflags", "+faststart", out_path]
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           errors="ignore", creationflags=0x08000000)
+        if r.returncode != 0 or not os.path.exists(out_path):
+            tail = (r.stderr or "")[-300:]
+            raise RuntimeError(f"图片转视频失败({os.path.basename(image_path)}):\n{tail}")
+        return out_path
+
     def _submit_one(self, spec):
         """提交单个 /montage/beat 任务，返回 task_id。"""
         import requests
@@ -825,7 +882,8 @@ class BeatVideoGenWorker(BaseWorker):
         # 组装表单参数（仅传非空项）
         data = {}
         for key in ("count", "time_limit", "variant_count", "min_duration", "max_duration",
-                    "width", "height", "fps", "crf", "transition", "transition_duration"):
+                    "width", "height", "fps", "crf", "transition", "transition_duration",
+                    "aspect_ratio"):
             v = spec.get(key)
             if v is None or v == "":
                 continue
@@ -848,15 +906,29 @@ class BeatVideoGenWorker(BaseWorker):
                 except Exception:
                     pass
 
+        # 提交给 ApiError 的参数：music 文件名 + 镜头数 + 变体数 + 表单参数（脱敏由 ApiError 完成）
+        beat_url = f"{self.server_url}/montage/beat"
+        error_params = {
+            "music": os.path.basename(music),
+            "video_count": len(videos),
+            "variant_count": spec.get("variant_count", 1),
+        }
+        error_params.update(data)
+
         if resp.status_code not in (200, 201, 202):
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            raise ApiError(beat_url, method="POST", params=error_params,
+                           status_code=resp.status_code, response_text=resp.text, service="montage")
         try:
             body = resp.json()
         except Exception:
-            raise RuntimeError(f"响应非 JSON: {resp.text[:200]}")
+            raise ApiError(beat_url, method="POST", params=error_params,
+                           response_text=resp.text, service="montage",
+                           note="响应非 JSON")
         tid = body.get("id") or body.get("task_id") or body.get("job_id") or ""
         if not tid:
-            raise RuntimeError(f"未返回任务 id: {str(body)[:200]}")
+            raise ApiError(beat_url, method="POST", params=error_params,
+                           status_code=resp.status_code, response_text=resp.text, service="montage",
+                           note="未返回任务 id")
         return tid
 
     def _download(self, task_id, file_ref, index):

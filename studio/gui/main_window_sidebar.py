@@ -291,6 +291,7 @@ class SidebarMixin:
             ("平台接入", 23, "link"),
             ("资源配置", 22, "download"),
             ("运行环境", 37, "server"),
+            ("🧩 扩展插件", 44, None),
             ("❓ 帮助", 6, None),
         ]
         for text, index, icon_name in other_menus:

@@ -18,6 +18,7 @@
 import time
 import requests
 from utils.logger_utils import log
+from utils.api_error import ApiError
 
 # ── 熔断器 ─────────────────────────────────────────────────
 
@@ -84,14 +85,51 @@ def resilient_post(url, *, service="default", timeout=30, **kwargs):
     return _do_request("POST", url, service=service, timeout=timeout, **kwargs)
 
 
+def _extract_params(kwargs):
+    """从 requests 的 kwargs 里提取有意义的请求参数（供 ApiError 脱敏展示）。
+
+    合并 json/data/files(仅文件名)/headers，让错误信息能看到「带了什么参数」。
+    mask_params 会对敏感字段（api_key/Authorization 等）自动脱敏。
+    """
+    params = {}
+    if "json" in kwargs and kwargs["json"]:
+        try:
+            params.update(kwargs["json"])
+        except Exception:
+            params["json"] = str(kwargs["json"])[:100]
+    if "data" in kwargs and kwargs["data"]:
+        d = kwargs["data"]
+        if isinstance(d, dict):
+            params.update(d)
+        else:
+            params["data"] = str(d)[:100]
+    if "files" in kwargs and kwargs["files"]:
+        # files 是 {field: (filename, fileobj, ...)}，只显示文件名
+        try:
+            files_info = {}
+            for field, val in kwargs["files"].items():
+                if isinstance(val, (tuple, list)) and val:
+                    files_info[field] = val[0]  # filename
+                else:
+                    files_info[field] = str(val)[:50]
+            params["_files"] = files_info
+        except Exception:
+            params["_files"] = "(文件)"
+    if "headers" in kwargs and kwargs["headers"]:
+        params["_headers"] = dict(kwargs["headers"])
+    return params
+
+
 def _do_request(method, url, *, service="default", timeout=10,
                 circuit_breaker=True, **kwargs):
+    params_for_error = _extract_params(kwargs)
     last_err = None
     for attempt in range(_MAX_RETRIES):
         # 熔断检查
         if circuit_breaker and not _allow_request(service):
-            raise requests.exceptions.ConnectionError(
-                f"服务 {service} 已熔断，请稍后重试（等待恢复中）"
+            raise ApiError(
+                url, method=method, params=params_for_error,
+                note=f"服务 {service} 已熔断（连续失败 {_FAILURE_THRESHOLD} 次），请稍后重试",
             )
 
         try:
@@ -125,4 +163,7 @@ def _do_request(method, url, *, service="default", timeout=10,
     # 重试用完
     if circuit_breaker:
         _on_failure(service)
-    raise last_err
+    raise ApiError(
+        url, method=method, params=params_for_error,
+        cause=last_err, note=f"已重试 {_MAX_RETRIES} 次后仍失败",
+    )

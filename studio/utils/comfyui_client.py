@@ -297,3 +297,205 @@ def system_stats(ai_config):
         return resp.json() if resp.status_code == 200 else {}
     except Exception:
         return {}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  应用注册层（/apps 架构）— 对接 docs/comfyui-integration.md 第 4、6.1 节
+#
+#  实测约定（2026-07）：
+#    · 应用发现/执行/状态查询 走服务端代理 8000：/apps、/apps/{id}/run、/apps/{id}/status/{id}
+#    · 文件上传/下载走 ComfyUI 直连 8188：/upload/image（multipart field=image）、/view
+#      （8000 代理的 /comfyui/upload/image 实测 422，故上传下载用直连地址）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _comfyui_direct_addr(ai_config: dict) -> str | None:
+    """解析 ComfyUI 直连地址（用于上传/下载）。
+
+    优先级：服务端 status 返回里的 host → ai_config.comfyui_addr → 本地 8188。
+    服务端 /comfyui/status 返回的 host 字段指向真实 ComfyUI 实例。
+    """
+    # 1. 优先从服务端 status 拿到真实 ComfyUI host
+    proxy = _read_proxy_addr()
+    if proxy:
+        try:
+            r = requests.get(f"{proxy}/comfyui/status", timeout=5)
+            if r.status_code == 200:
+                host = (r.json().get("host") or "").strip().rstrip("/")
+                if host and not host.startswith("http"):
+                    host = f"http://{host}"
+                if host and is_alive(host):
+                    return host
+        except Exception:
+            pass
+    # 2. 外部直连
+    external = (ai_config or {}).get("comfyui_addr", "").strip().rstrip("/")
+    if external and is_alive(external):
+        return external
+    # 3. 本地
+    if is_alive(LOCAL_ADDR):
+        return LOCAL_ADDR
+    return None
+
+
+class ComfyUIClient:
+    """对接应用注册层（/apps）的客户端。
+
+    addr = 服务端地址（默认从 ai_config.compute_server_url 解析），用于 /apps 发现与执行。
+    上传/下载自动用 ComfyUI 直连地址（见 _comfyui_direct_addr）。
+    """
+
+    def __init__(self, server_addr: str = "", ai_config: dict | None = None):
+        self.server_addr = (server_addr or _read_proxy_addr() or "").rstrip("/")
+        self.ai_config = ai_config or {}
+
+    # ── 地址 ──
+    def _direct(self) -> str | None:
+        """ComfyUI 直连地址（上传/下载用）。惰性解析并缓存。"""
+        cached = getattr(self, "_direct_cache", None)
+        if cached is None:
+            self._direct_cache = _comfyui_direct_addr(self.ai_config)
+        return self._direct_cache
+
+    def _app_url(self, path: str) -> str:
+        return f"{self.server_addr}/apps/{path.lstrip('/')}"
+
+    # ── 健康检查 ──
+    def is_alive(self) -> bool:
+        if not self.server_addr:
+            return False
+        try:
+            r = requests.get(f"{self.server_addr}/apps", timeout=5)
+            return r.status_code == 200
+        except requests.exceptions.RequestException:
+            return False
+
+    # ── 应用发现 ──
+    def list_apps(self) -> list:
+        """GET /apps — 已发布应用列表（摘要）。"""
+        r = resilient_get(self._app_url(""), timeout=10, service="comfyui", circuit_breaker=False)
+        if r.status_code == 200:
+            return r.json().get("apps", [])
+        raise RuntimeError(f"GET /apps 失败 HTTP {r.status_code}: {r.text[:200]}")
+
+    def get_app(self, app_id: str) -> dict:
+        """GET /apps/{app_id} — 应用详情（含完整 input/output schema）。"""
+        r = resilient_get(self._app_url(app_id), timeout=10, service="comfyui", circuit_breaker=False)
+        if r.status_code == 200:
+            return r.json()
+        raise RuntimeError(f"GET /apps/{app_id} 失败 HTTP {r.status_code}: {r.text[:200]}")
+
+    # ── 文件上传/下载（走 ComfyUI 直连）──
+    def upload_file(self, file_path: str, accept: str = "image") -> str:
+        """上传文件到 ComfyUI input 目录，返回服务端文件名。
+
+        实测 ComfyUI 原生 /upload/image 接受 multipart，field 名固定为 'image'
+        （无论图片/音频/视频，ComfyUI 统一用 image 字段）。
+        :param accept: image|audio|video（目前 ComfyUI 原生都用 'image' field）
+        """
+        addr = self._direct()
+        if not addr:
+            raise RuntimeError("无可用 ComfyUI 直连地址，无法上传文件。")
+        url = f"{addr}/upload/image"
+        with open(file_path, "rb") as f:
+            resp = resilient_post(
+                url, files={"image": (os.path.basename(file_path), f)},
+                data={"type": "input", "subfolder": ""},
+                timeout=120, service="comfyui",
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(f"上传失败 HTTP {resp.status_code}: {resp.text[:200]}")
+        name = resp.json().get("name")
+        if not name:
+            raise RuntimeError(f"上传响应缺少 name 字段: {resp.text[:200]}")
+        log.info(f"[ComfyUI] 上传成功: {file_path} → {name}")
+        return name
+
+    def download_output(self, filename: str, file_type: str = "output", subfolder: str = "") -> bytes:
+        """下载生成的文件，返回二进制内容。"""
+        addr = self._direct()
+        if not addr:
+            raise RuntimeError("无可用 ComfyUI 直连地址，无法下载文件。")
+        url = view_url(addr, filename, file_type, subfolder)
+        resp = requests.get(url, timeout=120)
+        resp.raise_for_status()
+        return resp.content
+
+    def output_url(self, filename: str, file_type: str = "output", subfolder: str = "") -> str:
+        """返回生成文件的下载 URL（供浏览器/播放器直接访问）。"""
+        addr = self._direct()
+        if not addr:
+            raise RuntimeError("无可用 ComfyUI 直连地址。")
+        return view_url(addr, filename, file_type, subfolder)
+
+    def submit_raw_prompt(self, workflow_json: dict) -> str:
+        """直接提交原始 ComfyUI workflow（走 /comfyui/run 代理），返回 prompt_id。
+
+        仅供"无对应 /apps 应用、需手动改节点后提交"的场景使用（如视频工具）。
+        正常应用请优先用 run_app()。
+        """
+        if not self.server_addr:
+            raise RuntimeError("无服务端地址，无法提交 workflow。")
+        url = _proxy_url(self.server_addr, "run")
+        resp = resilient_post(url, json={"prompt": workflow_json}, timeout=30, service="comfyui")
+        if resp.status_code != 200:
+            raise RuntimeError(f"提交 workflow 失败 HTTP {resp.status_code}: {resp.text[:200]}")
+        prompt_id = resp.json().get("prompt_id")
+        if not prompt_id:
+            raise RuntimeError(f"提交响应缺少 prompt_id: {resp.text[:200]}")
+        return prompt_id
+
+    # ── 应用执行 ──
+    def run_app(self, app_id: str, params: dict) -> str:
+        """POST /apps/{app_id}/run — 执行应用，返回 prompt_id。
+
+        :param params: 应用参数（文件类参数需先 upload_file 拿到文件名再传入）。
+        """
+        url = self._app_url(f"{app_id}/run")
+        resp = resilient_post(url, json={"params": params}, timeout=30, service="comfyui")
+        if resp.status_code != 200:
+            raise RuntimeError(f"执行应用 {app_id} 失败 HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        prompt_id = data.get("prompt_id")
+        if not prompt_id:
+            raise RuntimeError(f"执行响应缺少 prompt_id: {data}")
+        log.info(f"[ComfyUI] 应用 {app_id} 已提交, prompt_id={prompt_id}")
+        return prompt_id
+
+    def get_status(self, app_id: str, prompt_id: str) -> dict:
+        """GET /apps/{app_id}/status/{prompt_id} — 查询执行状态。
+
+        返回 {"status": "running|completed|failed", "progress"?, "outputs"?, "error"?}。
+        """
+        url = self._app_url(f"{app_id}/status/{prompt_id}")
+        r = resilient_get(url, timeout=15, service="comfyui", circuit_breaker=False)
+        if r.status_code == 200:
+            return r.json()
+        raise RuntimeError(f"查询状态失败 HTTP {r.status_code}: {r.text[:200]}")
+
+    def wait_for_result(self, app_id: str, prompt_id: str,
+                        interval: float = 3.0, timeout: float = 1800.0,
+                        progress_cb=None) -> dict:
+        """轮询直到执行完成（completed/failed），返回最终 status 响应。
+
+        :param progress_cb: 可选回调 fn(status_dict) 用于上报进度。
+        """
+        deadline = time.time() + timeout
+        last = None
+        while time.time() < deadline:
+            last = self.get_status(app_id, prompt_id)
+            st = last.get("status")
+            if progress_cb:
+                try:
+                    progress_cb(last)
+                except Exception:
+                    pass
+            if st == "completed" or st == "failed":
+                return last
+            time.sleep(interval)
+        raise RuntimeError(f"等待应用 {app_id} 执行超时（{timeout}s），最后状态: {last}")
+
+
+def get_client(ai_config: dict | None = None) -> ComfyUIClient:
+    """工厂：根据 ai_config 创建 ComfyUIClient。"""
+    return ComfyUIClient(server_addr=_read_proxy_addr() or "", ai_config=ai_config or {})

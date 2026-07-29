@@ -580,13 +580,17 @@ class StepBeatView(BaseStepView):
         dir_row = QHBoxLayout()
         dir_row.addWidget(QLabel("镜头素材:"))
         self.main_page.beat_materials_input = QLineEdit()
-        self.main_page.beat_materials_input.setPlaceholderText("选择一个或多个视频素材（服务端自动分割并指派）...")
+        self.main_page.beat_materials_input.setPlaceholderText("选择一个或多个视频/图片素材（图片默认 2 秒，随音乐卡点变化）...")
         self.main_page.beat_materials_input.setReadOnly(True)
         dir_row.addWidget(self.main_page.beat_materials_input, 1)
         btn_sel_materials = QPushButton("选择素材")
         btn_sel_materials.setObjectName("secondary_button")
         btn_sel_materials.clicked.connect(self.main_page._beat_select_materials)
         dir_row.addWidget(btn_sel_materials)
+        btn_arrange_materials = QPushButton("整理素材")
+        btn_arrange_materials.setObjectName("secondary_button")
+        btn_arrange_materials.clicked.connect(self.main_page._beat_arrange_materials)
+        dir_row.addWidget(btn_arrange_materials)
         dir_row.addSpacing(16)
         dir_row.addWidget(QLabel("导出目录:"))
         self.main_page.beat_out_dir_input = QLineEdit()
@@ -607,12 +611,25 @@ class StepBeatView(BaseStepView):
         settings_row.addStretch()
         settings_row.addWidget(QLabel("时长:"))
         self.main_page.beat_duration_combo = QComboBox()
-        for _sec in (15, 30, 45, 60, 90, 120, 180):
+        for _sec in (10, 15, 20, 30):
             self.main_page.beat_duration_combo.addItem(f"{_sec} 秒", _sec)
-        self.main_page.beat_duration_combo.setCurrentIndex(1)  # 默认 30 秒
+        self.main_page.beat_duration_combo.setCurrentIndex(1)  # 默认 15 秒
         self.main_page.beat_duration_combo.setFixedWidth(80)
         self.main_page.beat_duration_combo.setToolTip("每个成片的时长上限（传给服务端 time_limit）")
         settings_row.addWidget(self.main_page.beat_duration_combo)
+
+        settings_row.addSpacing(12)
+        settings_row.addWidget(QLabel("画面比例:"))
+        self.main_page.beat_aspect_combo = QComboBox()
+        self.main_page.beat_aspect_combo.addItem("方屏 1:1", "1:1")
+        self.main_page.beat_aspect_combo.addItem("横屏 16:9", "16:9")
+        self.main_page.beat_aspect_combo.addItem("竖屏 9:16", "9:16")
+        self.main_page.beat_aspect_combo.setCurrentIndex(0)  # 默认 1:1
+        self.main_page.beat_aspect_combo.setFixedWidth(110)
+        self.main_page.beat_aspect_combo.setToolTip("成片画面比例（选择素材后自动检测；不一致时需手动选择）")
+        self.main_page.beat_aspect_combo.currentIndexChanged.connect(
+            lambda _i: self._beat_apply_preview_aspect(self.main_page.beat_aspect_combo.currentData() or "1:1"))
+        settings_row.addWidget(self.main_page.beat_aspect_combo)
 
         settings_row.addSpacing(12)
         settings_row.addWidget(QLabel("转场:"))
@@ -673,9 +690,10 @@ class StepBeatView(BaseStepView):
         # 右侧：播放器面板（幻灯片预览，位于三个片段右侧）
         preview_panel = QFrame()
         preview_panel.setObjectName("preview_panel")
-        preview_panel.setFixedWidth(300)
+        preview_panel.setMaximumWidth(560)
         preview_panel.setStyleSheet(
             "#preview_panel { border: 1px solid #333; border-radius: 4px; background: #16161f; }")
+        self.preview_panel = preview_panel
         pvbox = QVBoxLayout(preview_panel)
         pvbox.setContentsMargins(8, 8, 8, 8)
         pvbox.setSpacing(6)
@@ -684,10 +702,13 @@ class StepBeatView(BaseStepView):
         pvbox.addWidget(self.main_page.beat_preview_title)
         # 视频预览（播放服务端下载的卡点视频）
         self.main_page.beat_preview_video = QVideoWidget()
-        self.main_page.beat_preview_video.setMinimumSize(280, 360)
+        self.main_page.beat_preview_video.setMinimumSize(200, 150)
+        self.main_page.beat_preview_video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.main_page.beat_preview_video.setStyleSheet("background: #000;")
         pvbox.addWidget(self.main_page.beat_preview_video, 1)
         body.addWidget(preview_panel)
+        # 按默认比例（1:1）初始化预览面板尺寸
+        self._beat_apply_preview_aspect("1:1")
 
         card_layout.addLayout(body, 1)
 
@@ -716,6 +737,26 @@ class StepBeatView(BaseStepView):
         self.main_page.btn_beat_confirm.clicked.connect(self.main_page._beat_export_videos)
         nav_row.addWidget(self.main_page.btn_beat_confirm)
         layout.addLayout(nav_row)
+
+    # ──────────────── 预览面板比例自适应 ────────────────
+
+    def _beat_apply_preview_aspect(self, ratio):
+        """按画面比例调整右侧预览面板宽度与视频控件尺寸。
+
+        QVideoWidget 自身用 KeepAspectRatio 渲染（视频内容不会变形），故只需让外层
+        容器尺寸匹配当前比例，即可保证三种比例都能正常显示、无明显黑边。
+        """
+        if not hasattr(self, "preview_panel"):
+            return
+        panel_w, video_h = {
+            "9:16": (300, 480),   # 竖屏：窄而高（300-16=284, 284/480≈9:16）
+            "16:9": (520, 293),   # 横屏：宽而矮（504/293≈16:9）
+            "1:1":  (380, 380),   # 方屏：正方形
+        }.get(ratio, (380, 380))
+        self.preview_panel.setFixedWidth(panel_w)
+        vw = self.main_page.beat_preview_video
+        # panel_w-16（左右内边距）让视频控件横向贴满；setFixedSize 锁定精确比例
+        vw.setFixedSize(panel_w - 16, video_h)
 
     # ──────────────── 波形提取 ────────────────
 

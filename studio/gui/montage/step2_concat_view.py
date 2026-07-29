@@ -65,9 +65,9 @@ class Step2ConcatView(BaseStepView):
         self.main_page.lbl_duration_limit = QLabel("时长限制:")
         row_params1.addWidget(self.main_page.lbl_duration_limit)
         self.main_page.duration_limit_combo = QComboBox()
-        for sec in [20, 30, 40, 50, 60]:
+        for sec in [10, 20, 30, 40, 50]:
             self.main_page.duration_limit_combo.addItem(f"{sec} 秒", sec)
-        self.main_page.duration_limit_combo.setCurrentIndex(1)
+        self.main_page.duration_limit_combo.setCurrentIndex(2)  # 默认 30 秒
         self.main_page.duration_limit_combo.setFixedWidth(80)
         self.main_page.duration_limit_combo.setToolTip("每个预合成视频的总时长上限（实际不超此值的 1.1 倍）")
         row_params1.addWidget(self.main_page.duration_limit_combo)

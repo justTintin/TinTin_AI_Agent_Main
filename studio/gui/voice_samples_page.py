@@ -424,31 +424,47 @@ class VoiceSamplesPage(BasePage):
 
         self.status_label.setText(f"正在识别样本音频文本 (ID: {sample_id})...")
 
-        from config.paths import TMP_DIR, WHISPER_MODELS_DIR
-        from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
+        # 远程 ASR worker：transcribe_remote → segments → segments_to_plain
+        class RemoteAsrSampleWorker(BaseWorker):
+            finished = Signal(list)
+            error = Signal(str)
 
-        os.makedirs(TMP_DIR, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(wav_path))[0]
-        temp_audio_path = os.path.join(TMP_DIR, f"transcribe_{base_name}_audio.wav")
-        temp_srt_path = os.path.join(TMP_DIR, f"transcribe_{base_name}.srt")
+            def __init__(self, audio_path):
+                super().__init__()
+                self.audio_path = audio_path
 
-        worker = WhisperXTranscribeWorker(
-            video_path=wav_path,
-            audio_path=temp_audio_path,
-            output_path=temp_srt_path,
-            model_name="large-v3",
-            language=None,
-            task_type="transcribe",
-            multi_mode=False,
-            download_root=WHISPER_MODELS_DIR,
-            device_mode="auto"
-        )
+            def do_work(self):
+                try:
+                    from utils.asr_client import transcribe_remote, read_asr_url
+                    segments = transcribe_remote(
+                        self.audio_path, read_asr_url(),
+                        language="", task_type="transcribe",
+                    )
+                    self.finished.emit(segments)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        worker = RemoteAsrSampleWorker(wav_path)
         self.transcribe_workers[sample_id] = worker
 
-        def on_finished(srt_content, path):
+        def on_finished(segments):
             self.status_label.setText("✅ 识别参考音频文本完成")
-            plain_text = self._clean_srt_to_text(srt_content)
-            
+            from utils.asr_client import segments_to_plain
+            plain_text = segments_to_plain(segments)
+
+            # 识别结果为空（音频无人声 / 服务端未返回内容）：给出提示，不静默保存空文案
+            if not plain_text.strip():
+                self.status_label.setText("⚠️ 未识别到文字")
+                if sample_id in self.transcribe_workers:
+                    del self.transcribe_workers[sample_id]
+                self._load_table_data()
+                QMessageBox.warning(
+                    self.parent_widget, "未识别到文字",
+                    "音频转写完成，但未识别出任何文字内容。\n\n"
+                    "可能原因：音频中没有人声 / 音质过差 / 服务端 Whisper 模型异常。"
+                )
+                return
+
             def save_text(text_val):
                 samples = load_voice_samples()
                 for s in samples:
@@ -456,33 +472,25 @@ class VoiceSamplesPage(BasePage):
                         s["ref_text"] = text_val
                         break
                 save_voice_samples(samples)
-                
+
                 if sample_id in self.transcribe_workers:
                     del self.transcribe_workers[sample_id]
-                
-                self._load_table_data()
 
-                try:
-                    if os.path.exists(temp_audio_path):
-                        os.remove(temp_audio_path)
-                    if os.path.exists(temp_srt_path):
-                        os.remove(temp_srt_path)
-                except Exception:
-                    pass
+                self._load_table_data()
 
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
             if llm_model and plain_text.strip():
                 self.status_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
                 self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
-                
+
                 def on_punc_done(punctuated_text):
                     save_text(punctuated_text)
-                
+
                 def on_punc_err(err):
                     log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
                     save_text(plain_text)
-                
+
                 self.punc_worker.finished.connect(on_punc_done)
                 self.punc_worker.error.connect(on_punc_err)
                 self.punc_worker.start()

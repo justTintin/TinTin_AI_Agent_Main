@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """智能混剪 - 文案/脚本生成 Worker：标点补全、AI 改写、产品文案、场景文案、
 脚本生成、批量改写、脚本匹配。"""
+import os
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log

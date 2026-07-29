@@ -51,12 +51,17 @@ class ServicesMixin:
 
     def _save_voxcpm_config_silent(self):
         try:
-            if hasattr(self, 'ai_config'):
-                self.ai_config["vox_api_url"] = self.vox_api_url_input.text().strip()
-                self.ai_config["vox_source"] = "remote"  # 纯远程
-                self.ai_config["vox_mode"] = "api"       # 纯 API 调用
-                self.ai_config["vox_timesteps"] = self.vox_timesteps_spin.value()
-                self.ai_config["vox_cfg"] = self.vox_cfg_spin.value()
+            if hasattr(self, "ai_config"):
+                # 关键：先从所有 UI 收集最新值，避免保存时用过期内存值覆盖其它字段
+                # （否则会把它Tab的旧地址写回文件，例如 comfyui_addr 被重置为旧值）
+                if hasattr(self, "_collect_all_config_from_ui"):
+                    self._collect_all_config_from_ui()
+                else:
+                    self.ai_config["vox_api_url"] = self.vox_api_url_input.text().strip()
+                    self.ai_config["vox_source"] = "remote"  # 纯远程
+                    self.ai_config["vox_mode"] = "api"       # 纯 API 调用
+                    self.ai_config["vox_timesteps"] = self.vox_timesteps_spin.value()
+                    self.ai_config["vox_cfg"] = self.vox_cfg_spin.value()
                 try:
                     import json
                     os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)

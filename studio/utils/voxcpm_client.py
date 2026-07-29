@@ -12,6 +12,7 @@ import requests
 from utils.http_client import resilient_post
 
 from utils.logger_utils import log
+from utils.api_error import ApiError
 
 
 def _read_vox_url() -> str:
@@ -70,13 +71,11 @@ def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
     try:
         r = resilient_post(url, json=payload, timeout=timeout, service="voxcpm")
         log.info(f"[VoxCPM] 响应 HTTP {r.status_code} ({len(r.content)//1024}KB)")
-    except requests.exceptions.RequestException:
+    except ApiError:
+        raise  # resilient_post 已封装为 ApiError（含 URL+参数），直接透传
+    except requests.exceptions.RequestException as e:
         log.error(f"[VoxCPM] 连接失败: {url}")
-        raise RuntimeError(
-            f"无法连接 VoxCPM 远程服务（{url}）。"
-            "请到『大模型配置』→『声音克隆』页检查 API 地址是否正确，"
-            "并确认远程服务已启动。"
-        )
+        raise ApiError(url, method="POST", params=payload, cause=e, service="voxcpm")
 
     if r.status_code != 200:
         msg = ""
@@ -84,7 +83,9 @@ def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
             msg = r.json().get("error", "")
         except Exception:
             pass
-        raise RuntimeError(f"TTS 失败（HTTP {r.status_code}）：{msg or r.text[:200]}")
+        raise ApiError(url, method="POST", params=payload,
+                       status_code=r.status_code,
+                       response_text=msg or r.text, service="voxcpm")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "wb") as f:

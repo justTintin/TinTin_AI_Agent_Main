@@ -136,21 +136,23 @@ class AIGenMixin:
 
     def run_video_tool_task(self):
         if not hasattr(self, 'vt_current_workflow_data') or not self.vt_current_workflow_data:
-            QMessageBox.warning(self, "错误", "请先选择并加载工作流。")
-            return
-            
-        video_path = self.vt_video_path_input.text().strip()
-        if not video_path:
-            QMessageBox.warning(self, "错误", "请先选择视频文件。")
+            QMessageBox.warning(self.parent_widget, "错误", "请先选择并加载工作流。")
             return
 
-        self.log_area.setText("正在上传视频并提交任务...")
-        
+        video_path = self.vt_video_path_input.text().strip()
+        if not video_path:
+            QMessageBox.warning(self.parent_widget, "错误", "请先选择视频文件。")
+            return
+
+        self.workflow_status.setText("⏳ 正在上传视频并提交任务...")
+
         def run_task():
             try:
-                # 1. 上传视频（外部不可用时自动拉起本地 ComfyUI）
+                client = comfy.get_client(self.ai_config)
+
+                # 1. 上传视频
                 log.info(f"Uploading video to ComfyUI: {video_path}")
-                upload_name = comfy.upload_file(self.ai_config, video_path, kind="video")
+                upload_name = client.upload_file(video_path, accept="video")
                 if not upload_name:
                     return False, "视频上传失败（无可用 ComfyUI 后端或上传出错）"
 
@@ -170,18 +172,19 @@ class AIGenMixin:
                     wf_str = wf_str.replace("input_video.mp4", upload_name)
                     modified_wf = json.loads(wf_str)
 
-                # 3. 提交到 ComfyUI（后端已在上一步解析就绪，无需再次启动）
-                return comfy.submit_prompt(self.ai_config, modified_wf, auto_start=False)
+                # 3. 提交（视频工具无对应 /apps 应用，走原始 workflow 提交）
+                prompt_id = client.submit_raw_prompt(modified_wf)
+                return True, prompt_id
             except Exception as e:
                 return False, str(e)
 
         def on_finished(result):
             success, info = result
             if success:
-                QMessageBox.information(self, "成功", f"任务已提交！ID: {info}")
+                QMessageBox.information(self.parent_widget, "成功", f"任务已提交！ID: {info}")
                 self.add_task_to_list(info, status="正在处理")
             else:
-                QMessageBox.critical(self, "错误", info)
+                QMessageBox.critical(self.parent_widget, "错误", info)
 
         self.start_worker(run_task, on_finished)
 
@@ -406,8 +409,9 @@ class AIGenMixin:
         self.start_worker(run_task, on_finished)
 
     def upload_to_comfyui(self, server_addr, file_path):
-        # 兼容旧签名（server_addr 已忽略）；统一走 comfyui_client，含外部→本地回退
-        return comfy.upload_file(self.ai_config, file_path)
+        # 兼容旧签名（server_addr 已忽略）；统一走 ComfyUIClient
+        client = comfy.get_client(self.ai_config)
+        return client.upload_file(file_path)
 
     def load_comfyui_workflow(self):
         workflow_path = os.path.join(PROJECT_ROOT, "assets", "workflow", "数字人-上传图片和声音--20260113-api.json")
@@ -425,55 +429,55 @@ class AIGenMixin:
             QMessageBox.critical(self, "错误", f"加载工作流失败: {e}")
 
     def run_comfyui_task(self):
-        if not self.current_workflow_data:
+        """执行当前选中的 AI 应用：收集动态表单参数 → 上传文件类输入 → run_app。"""
+        app_detail = getattr(self, '_ai_current_app', None)
+        if not app_detail or not app_detail.get('id'):
+            QMessageBox.warning(self.parent_widget, "未选择应用", "请先在左侧列表选择一个 AI 应用。")
             return
-            
-        img_file = self.img_path_input.text().strip()
-        aud_file = self.aud_path_input.text().strip()
-        
-        if not img_file or not aud_file:
-            QMessageBox.warning(self, "输入限制", "请先选择图片和音频文件。")
-            return
-            
-        self.log_area.setText(f"正在上传文件并提交任务...")
-        self.workflow_status.setText("⏳ 正在处理...")
+
+        app_id = app_detail['id']
+        app_name = app_detail.get('name', app_id)
+
+        # 校验必填项
+        params, file_inputs = self._collect_ai_app_params()
+        for inp in app_detail.get('inputs', []):
+            if inp.get('required'):
+                val = params.get(inp.get('key'))
+                if val in (None, "", []):
+                    QMessageBox.warning(self.parent_widget, "参数缺失", f"请填写必填项：{inp.get('label', inp.get('key'))}")
+                    return
+
+        self.workflow_status.setText(f"⏳ 正在执行「{app_name}」...")
+        self.btn_run_local.setEnabled(False)
 
         def run_task():
             try:
-                # 1. 上传图片（外部不可用时自动拉起本地 ComfyUI）
-                log.info(f"Uploading image: {img_file}")
-                server_img = comfy.upload_file(self.ai_config, img_file, kind="image")
-                if not server_img: return False, "图片上传失败"
+                client = comfy.get_client(self.ai_config)
 
-                # 2. 上传音频（后端已就绪，无需再次启动）
-                log.info(f"Uploading audio: {aud_file}")
-                server_aud = comfy.upload_file(self.ai_config, aud_file, kind="audio",
-                                               auto_start=False)
-                if not server_aud: return False, "音频上传失败"
+                # 1. 上传文件类输入，把本地路径替换为服务端文件名
+                for key, path, accept in file_inputs:
+                    if not path:
+                        continue
+                    log.info(f"[AI应用] 上传 {key}: {path}")
+                    server_name = client.upload_file(path, accept=accept or 'image')
+                    params[key] = server_name
 
-                # 3. Modify Workflow Nodes
-                # Node 284: LoadImage
-                if "284" in self.current_workflow_data:
-                    self.current_workflow_data["284"]["inputs"]["image"] = server_img
-                # Node 311: VHS_LoadAudioUpload
-                if "311" in self.current_workflow_data:
-                    self.current_workflow_data["311"]["inputs"]["audio"] = server_aud
-
-                # 4. 提交 workflow
-                return comfy.submit_prompt(self.ai_config, self.current_workflow_data,
-                                           auto_start=False)
+                # 2. 执行应用
+                prompt_id = client.run_app(app_id, params)
+                return True, prompt_id
             except Exception as e:
                 return False, str(e)
 
         def on_finished(result):
+            self.btn_run_local.setEnabled(True)
             success, info = result
             if success:
-                self.workflow_status.setText("✅ 任务提交成功")
+                self.workflow_status.setText(f"✅ 「{app_name}」任务已提交")
                 self.add_task_to_list(info)
-                QMessageBox.information(self, "成功", f"任务已提交！ID: {info}")
+                QMessageBox.information(self.parent_widget, "成功", f"任务已提交！\n应用：{app_name}\nID: {info}")
             else:
                 self.workflow_status.setText("❌ 失败")
-                QMessageBox.critical(self, "错误", f"任务启动失败: {info}")
+                QMessageBox.critical(self.parent_widget, "错误", f"任务启动失败: {info}")
 
         self.worker = Worker(run_task)
         self.worker.finished.connect(on_finished)

@@ -17,6 +17,8 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from utils.logger_utils import log
 from gui.montage.workers.split_workers import BeatDetectWorker, BeatVideoGenWorker
+from gui.montage.dialogs import ArrangeMaterialsDialog
+from utils.video_indexer import probe_media_size, classify_aspect
 
 
 class BeatMontageController(QObject):
@@ -104,10 +106,14 @@ class BeatMontageController(QObject):
             self.step_beat.load_music(path)
 
     def _beat_select_materials(self):
-        """选择一个或多个视频素材（与智能混剪一致，去重追加）。"""
+        """选择一个或多个视频/图片素材（与智能混剪一致，去重追加）。
+        图片素材在上传前会自动转成静态视频片段（默认 2 秒，随音乐节拍变化）。"""
         file_paths, _ = QFileDialog.getOpenFileNames(
-            self.parent_widget, "选择视频素材", "",
-            "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v);;所有文件 (*.*)")
+            self.parent_widget, "选择视频/图片素材", "",
+            "媒体文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v "
+            "*.jpg *.jpeg *.png *.bmp *.webp);;"
+            "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v);;"
+            "图片文件 (*.jpg *.jpeg *.png *.bmp *.webp);;所有文件 (*.*)")
         if not file_paths:
             return
         existing = set(os.path.abspath(p) for p in self._beat_clips_list)
@@ -119,6 +125,15 @@ class BeatMontageController(QObject):
             existing.add(ap)
             self._beat_clips_list.append(ap)
             added += 1
+        self._beat_apply_clips_display(
+            f"已选择 {len(self._beat_clips_list)} 个镜头素材（本次新增 {added} 个，图片将自动转为静态片段）"
+        )
+
+    def _beat_apply_clips_display(self, status_msg=""):
+        """统一刷新镜头素材的展示：数量标签 + 输入框预览文本 + 状态栏文案。
+
+        供选择/整理素材共用，避免重复逻辑。
+        """
         self._beat_refresh_clips_info()
         n = len(self._beat_clips_list)
         if n:
@@ -126,7 +141,62 @@ class BeatMontageController(QObject):
             self.beat_materials_input.setText(f"{names}{' ...' if n > 3 else ''}")
         else:
             self.beat_materials_input.setText("")
-        self.beat_status_lbl.setText(f"已选择 {n} 个镜头素材（本次新增 {added} 个）")
+        if status_msg:
+            self.beat_status_lbl.setText(status_msg)
+        # 选择/整理素材后自动检测画面比例（涵盖两个入口）
+        self._beat_auto_detect_aspect()
+
+    def _beat_auto_detect_aspect(self):
+        """自动检测全部素材画面比例：一致则设下拉；不一致提示用户手动选。
+
+        探测全部失败时静默跳过（不阻塞流程，保留当前下拉值）。
+        """
+        if not hasattr(self, "beat_aspect_combo"):
+            return
+        clips = self._beat_clips_list
+        if not clips:
+            return
+        ratios = set()
+        for p in clips:
+            size = probe_media_size(p)
+            if size:
+                ratios.add(classify_aspect(size[0], size[1]))
+        if not ratios:
+            # 探测全部失败（如 ffprobe 缺失）——静默跳过
+            return
+        if len(ratios) == 1:
+            target = next(iter(ratios))
+            for i in range(self.beat_aspect_combo.count()):
+                if self.beat_aspect_combo.itemData(i) == target:
+                    self.beat_aspect_combo.setCurrentIndex(i)
+                    break
+            self.beat_status_lbl.setText(f"📐 已自动识别画面比例：{target}")
+        else:
+            QMessageBox.warning(
+                self.parent_widget, "画面比例不一致",
+                "检测到所选素材的画面比例不一致（横屏 / 竖屏 / 方屏 混选），\n"
+                "请在「画面比例」下拉框中手动选择目标成片比例。")
+
+    def _beat_arrange_materials(self):
+        """整理已选镜头素材：弹出对话框，支持删除单个/清空全部。
+
+        仅在对话框「确定」后写回 self._beat_clips_list。
+        """
+        if not self._beat_clips_list:
+            QMessageBox.information(self.parent_widget, "整理素材", "暂无可整理的镜头素材，请先选择素材。")
+            return
+        dlg = ArrangeMaterialsDialog(self.parent_widget, list(self._beat_clips_list))
+        if dlg.exec() != ArrangeMaterialsDialog.Accepted:
+            return
+        new_paths = dlg.get_result_paths()
+        removed = len(self._beat_clips_list) - len(new_paths)
+        self._beat_clips_list = new_paths
+        if new_paths:
+            self._beat_apply_clips_display(
+                f"已整理镜头素材，当前 {len(new_paths)} 个（本次移除 {removed} 个）"
+            )
+        else:
+            self._beat_apply_clips_display("已清空全部镜头素材")
 
     def _beat_browse_out_dir(self):
         d = QFileDialog.getExistingDirectory(self.parent_widget, "选择视频导出目录", "")
@@ -146,7 +216,7 @@ class BeatMontageController(QObject):
         clips = self._beat_refresh_clips_info()
         if not clips:
             QMessageBox.warning(self.parent_widget, "未选择镜头",
-                                "请先选择镜头素材（视频文件）。")
+                                "请先选择镜头素材（视频或图片文件）。")
             return
         server_url = self._get_compute_server_url()
         if not server_url:
@@ -323,6 +393,15 @@ class BeatMontageController(QObject):
             except (TypeError, ValueError):
                 time_limit = 0.0
 
+        # 图片素材片段时长：默认 2 秒；若已有节拍数据，按最长节拍间隔自适应加长，
+        # 保证图片片段能填满任意卡点时隙（上限 4 秒，服务端会再按拍点裁切）
+        image_duration = 2.0
+        beats = sorted(getattr(self, "_beat_data_full", []) or [])
+        if len(beats) > 1:
+            intervals = [b2 - b1 for b1, b2 in zip(beats, beats[1:]) if b2 > b1]
+            if intervals:
+                image_duration = max(2.0, min(4.0, max(intervals) + 0.05))
+
         spec = {
             "music": music_path,            # 整段音乐，仅上传一次
             "videos": clips,                # 全部素材，仅上传一次
@@ -331,6 +410,8 @@ class BeatMontageController(QObject):
             "transition": transition,
             "min_duration": 0.8,
             "max_duration": 3.0,
+            "image_duration": round(image_duration, 2),
+            "aspect_ratio": (self.beat_aspect_combo.currentData() or "1:1") if hasattr(self, "beat_aspect_combo") else "1:1",
         }
 
         self._beat_video_files = [None] * n_variants
@@ -376,14 +457,26 @@ class BeatMontageController(QObject):
             self.beat_status_lbl.setText(
                 f"✅ 已生成 {ok}/{len(results)} 个卡点视频，播放片段即可预览，点击「导出视频」保存")
         else:
-            self.beat_status_lbl.setText("❌ 卡点视频生成失败，请检查服务端")
+            # 全失败：弹出对话框，显示每个变体的失败原因（含接口URL+参数+错误）
+            self.beat_status_lbl.setText("❌ 卡点视频生成失败")
+            failed = [r for r in results if not r.get("ok")]
+            detail = "\n\n".join(
+                f"· 变体{r.get('index', 0) + 1}：{r.get('error', '未知错误') or '未知错误'}"
+                for r in failed[:8]
+            )
+            more = "" if len(failed) <= 8 else f"\n\n…… 等共 {len(failed)} 个失败"
+            QMessageBox.critical(
+                self.parent_widget, "卡点成片失败",
+                f"全部 {len(results)} 个变体生成失败。失败详情：\n\n{detail}{more}")
 
     def _beat_on_gen_error(self, err):
         if hasattr(self, "progress_bar"):
             self.progress_bar.setVisible(False)
         self.btn_beat_detect.setEnabled(True)
-        self.beat_status_lbl.setText("❌ 卡点视频生成失败")
+        self.beat_status_lbl.setText(f"❌ 卡点视频生成失败: {err[:80]}")
         log.error(f"[卡点成片] 生成失败: {err}")
+        from gui.error_dialog import show_error_dialog
+        show_error_dialog(self.parent_widget, "卡点成片失败", f"卡点视频生成失败：\n\n{err}")
 
     # ═══════════════════════════════════════════════════════════
     #  播放协调（视频输出路由到共享预览）

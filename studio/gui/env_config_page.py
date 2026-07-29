@@ -401,59 +401,37 @@ class EnvConfigPage(BasePage):
             info["ffmpeg_ok"] = False
             info["ffmpeg_path"] = "未在系统环境或软件目录中检测到 ffmpeg.exe"
 
-        # 6. VSR Subtitle Remover
+        # 6. VSR Subtitle Remover（统一使用 v1.4.0，旧版 v1.1.1 已废弃删除）
         vsr_dir = VSR_DIR
         vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
+        # v1.4.0 入口脚本在根目录 vsr_run.py（v1.1.1 在 resources/ 下，已废弃）
+        vsr_script = os.path.join(vsr_dir, "vsr_run.py")
         if os.path.isdir(vsr_dir) and os.path.isfile(vsr_python) and os.path.isfile(vsr_script):
             info["vsr_ok"] = True
             info["vsr_status"] = f"已就绪 (内嵌环境: {vsr_python})"
         else:
             info["vsr_ok"] = False
-            info["vsr_status"] = "未就绪 (缺少 apps/vsr-v1.1.1-windows-nvidia-cuda 主目录或内嵌 Python 环境)"
+            info["vsr_status"] = "未就绪 (缺少 apps/vsr-v1.4.0 主目录或内嵌 Python 环境)"
 
         # 8. VoxCPM（纯远程模式）
         info["voxcpm_installed"] = True
         info["voxcpm_ok"] = True
         info["voxcpm_status"] = "远程模式（由 ai_config 配置 vox_api_url）"
 
-        # 9. PaddleOCR Isolated Environment & Models
-        from config.paths import PADDLEOCR_PYTHON, PADDLEOCR_SCRIPT
+        # 9. OCR 服务端连通性（已从本地 PaddleOCR 迁移至服务端 POST /material/ocr）
+        from utils.ocr_client import check_server_ocr
         info["paddleocr_ok"] = False
-        info["paddleocr_status"] = "未安装"
-        if os.path.isfile(PADDLEOCR_PYTHON):
-            try:
-                # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
-                paddleocr_src = os.path.abspath(os.path.join(WORKSPACE_ROOT, "apps", "PaddleOCR"))
-                cmd_str = f"import sys; sys.path.insert(0, r'{paddleocr_src}'); import paddleocr, paddlex, aiohttp"
-                result = subprocess.run(
-                    [PADDLEOCR_PYTHON, "-c", cmd_str],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                if result.returncode == 0:
-                    info["paddleocr_ok"] = True
-                    info["paddleocr_status"] = "已就绪"
-                else:
-                    err = result.stderr.strip() or result.stdout.strip()
-                    last_line = err.splitlines()[-1] if err else "未知错误"
-                    info["paddleocr_status"] = f"依赖缺失: {last_line}"
-            except Exception as e:
-                info["paddleocr_status"] = f"依赖缺失: {str(e)}"
-        else:
-            info["paddleocr_status"] = "未安装 (缺少专属虚拟环境)"
-
-        local_paddlex_dir = os.path.join(APPS_DIR, "PaddleOCR", "paddle-models", "official_models")
-        info["paddleocr_models_dir"] = local_paddlex_dir
-        found_p_models = []
-        if os.path.isdir(local_paddlex_dir):
-            for fn in os.listdir(local_paddlex_dir):
-                sub_path = os.path.join(local_paddlex_dir, fn)
-                if os.path.isdir(sub_path):
-                    found_p_models.append(fn)
-        info["paddleocr_models"] = found_p_models if found_p_models else ["暂无集成模型 (运行或一键集成时会自动加载)"]
+        info["paddleocr_status"] = "未连接"
+        try:
+            if check_server_ocr():
+                info["paddleocr_ok"] = True
+                info["paddleocr_status"] = "已就绪（服务端 /material/ocr）"
+            else:
+                info["paddleocr_status"] = "未连接（服务端离线或 /material/ocr 不可用）"
+        except Exception as e:
+            info["paddleocr_status"] = f"检测失败: {e}"
+        info["paddleocr_models_dir"] = ""
+        info["paddleocr_models"] = ["OCR 由服务端提供，无需本地模型"]
 
         # 10. Hardware Info
         try:

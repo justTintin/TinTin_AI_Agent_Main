@@ -1467,7 +1467,8 @@ class ClipListItemWidget(QFrame):
         self.btn_slice_single.setEnabled(True)
         self.btn_slice_single.setText("单独切片")
         self.pbar_slice.setVisible(False)
-        QMessageBox.critical(self.main_page.parent_widget, "错误", f"单独切片失败:\n{err}")
+        from gui.error_dialog import show_error_dialog
+        show_error_dialog(self.main_page.parent_widget, "单独切片失败", f"单独切片失败:\n{err}")
         
     def on_individual_clip_done(self, results):
         if not results:

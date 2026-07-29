@@ -154,9 +154,9 @@ class RunningHubManager:
                 data = res.json()
                 if data.get("code") == 0:
                     return data.get("data", {})
-            log.error(f"Failed to get RunningHub task status: {res.text}")
+            log.error(f"Failed to get RunningHub task status (task_id={task_id}): {res.text}")
         except Exception as e:
-            log.error(f"Error fetching RunningHub task status: {e}")
+            log.error(f"Error fetching RunningHub task status (task_id={task_id}): {e}")
         return None
 
     def upload_file(self, file_path):

@@ -168,9 +168,25 @@ class PageSetupMixin:
         self.terminal_tool.setup()
 
     def setup_dreamina_page(self):
+        layout = QVBoxLayout(self.page_dreamina)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(0)
+        tabs = QTabWidget()
+        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
+
+        # Tab 1: 即梦生成
         from gui.dreamina_page import DreaminaPage
-        self.dreamina_tool = DreaminaPage(self.page_dreamina, self)
-        self.dreamina_tool.setup()
+        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
+        self.dreamina_tool = DreaminaPage(p1, self); self.dreamina_tool.setup()
+        tabs.addTab(p1, "🎨 即梦生成")
+
+        # Tab 2: 产品生图
+        from gui.product_image_page import ProductImagePage
+        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        self.product_image_tool = ProductImagePage(p2, self); self.product_image_tool.setup()
+        tabs.addTab(p2, "🆕 产品生图")
+
+        layout.addWidget(tabs)
 
     def setup_dreamina_assets_page(self):
         from gui.dreamina_assets_page import DreaminaAssetsPage
@@ -206,6 +222,11 @@ class PageSetupMixin:
         from gui.marketing_detect_page import MarketingDetectPage
         self.marketing_detect_tool = MarketingDetectPage(self.page_marketing_detect, self)
         self.marketing_detect_tool.setup()
+
+    def setup_extension_page(self):
+        from gui.extension_page import ExtensionPage
+        self.extension_tool = ExtensionPage(self.page_extension, self)
+        self.extension_tool.setup()
 
 
     def setup_video_tools_page(self):
@@ -501,27 +522,24 @@ class PageSetupMixin:
         self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); lg3.addWidget(self.llm_vox_status_val)
         scroll_layout.addWidget(g3)
 
-        # ───── Ollama ─────
-        g4 = QGroupBox("🖥️ Ollama 远程视觉服务"); g4.setObjectName("model_groupbox"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        # ───── 视觉模型（Ollama 托管）—— 合并原「Ollama 远程视觉服务」与「当前视觉模型」两个分组 ─────
+        g4 = QGroupBox("👁️ 视觉模型（Ollama）"); g4.setObjectName("model_groupbox"); g4.setProperty("section", "vision"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        # 状态行：连通状态 + 已下载模型列表 + 刷新按钮
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
-            setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl), r.addStretch())))
-        lg4.addLayout(_row(lambda r: (
+            setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl),
             setattr(self,'btn_ollama_refresh',mdi_button("刷新", "refresh")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
-            r.addWidget(self.btn_ollama_refresh), r.addStretch())))
-
-        # ── 视觉模型配置（Ollama 托管的视觉模型）──
-        g_vm = QGroupBox("👁️ 当前视觉模型（由 Ollama 提供）"); g_vm.setObjectName("model_groupbox"); g_vm.setProperty("section", "vision"); lg_vm = QVBoxLayout(g_vm); lg_vm.setSpacing(10)
-        _inp(lg_vm, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
-        _rl(lg_vm, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
+            r.addWidget(self.btn_ollama_refresh))))
+        # 地址 + 模型选择
+        _inp(lg4, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
+        _rl(lg4, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
             self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
-            self.llm_vision_model_input.lineEdit().setPlaceholderText("启动 Ollama 后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
+            self.llm_vision_model_input.lineEdit().setPlaceholderText("刷新后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
         rr_vm = QHBoxLayout(); rr_vm.addStretch()
         b_vm_test = mdi_button("测试连接", "search"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
         b_vm_save = mdi_button("保存", "save"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
-        lg_vm.addLayout(rr_vm)
-        self.vision_status_lbl = QLabel(""); lg_vm.addWidget(self.vision_status_lbl)
+        lg4.addLayout(rr_vm)
+        self.vision_status_lbl = QLabel(""); lg4.addWidget(self.vision_status_lbl)
         scroll_layout.addWidget(g4)
-        scroll_layout.addWidget(g_vm)
 
         # ───── Whisper ─────
         g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
@@ -534,16 +552,18 @@ class PageSetupMixin:
         self.whisper_status_lbl = QLabel(""); self.whisper_status_lbl.setObjectName("muted_text"); lg5.addWidget(self.whisper_status_lbl)
         scroll_layout.addWidget(g5)
 
-        # ───── PaddleOCR ─────
-        g6 = QGroupBox("🔍 PaddleOCR 文本识别"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
-        _rl(lg6, "环境:", lambda r: (setattr(self,'llm_paddle_status_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_status_val)))
-        _rl(lg6, "模型:", lambda r: (setattr(self,'llm_paddle_models_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_models_val)))
-        setattr(self,'paddle_stage_label',QLabel("系统就绪")); self.paddle_stage_label.setObjectName("muted_text"); lg6.addWidget(self.paddle_stage_label)
-        setattr(self,'paddle_progress_bar',QProgressBar()); self.paddle_progress_bar.setVisible(False); self.paddle_progress_bar.setRange(0,100); lg6.addWidget(self.paddle_progress_bar)
-        lg6.addLayout(_row(lambda r: (setattr(self,'btn_refresh_paddle',mdi_button("刷新", "refresh")), self.btn_refresh_paddle.setObjectName("secondary_button"), self.btn_refresh_paddle.clicked.connect(self.refresh_llm_page_status),
-            setattr(self,'btn_install_paddle',mdi_button("一键部署/修复", "rocket")), self.btn_install_paddle.setObjectName("primary_button"), self.btn_install_paddle.clicked.connect(self.start_paddle_repair),
-            r.addWidget(self.btn_refresh_paddle), r.addWidget(self.btn_install_paddle), r.addStretch())))
-        setattr(self,'paddle_log_view',QTextEdit()); self.paddle_log_view.setObjectName("log_viewer"); self.paddle_log_view.setReadOnly(True); self.paddle_log_view.setFixedHeight(100); self.paddle_log_view.setPlaceholderText("部署日志..."); lg6.addWidget(self.paddle_log_view)
+        # ───── PaddleOCR（服务端 OCR，与 Whisper/CLIP 一致的远程配置样式）─────
+        g6 = QGroupBox("🔍 PaddleOCR 文本识别（服务端 OCR）"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
+        paddle_desc = QLabel("OCR 已切换为纯服务端模式，由算力服务端 POST /material/ocr 完成识别，无需本地模型或专属环境。"); paddle_desc.setObjectName("muted_text"); paddle_desc.setWordWrap(True); lg6.addWidget(paddle_desc)
+        _rl(lg6, "OCR 服务地址:", lambda r: (setattr(self,'ocr_api_url_input',QLineEdit()), self.ocr_api_url_input.setPlaceholderText("http://192.168.x.x:8000（与统一服务端地址同步）"), r.addWidget(self.ocr_api_url_input)))
+        lg6.addLayout(_row(lambda r: (r.addStretch(),
+            setattr(self,'btn_test_ocr',mdi_button("测试连接", "search")), self.btn_test_ocr.setObjectName("secondary_button"), self.btn_test_ocr.setFixedWidth(110), self.btn_test_ocr.clicked.connect(self._test_ocr_connection),
+            r.addWidget(self.btn_test_ocr),
+            setattr(self,'btn_save_ocr',mdi_button("保存", "save")), self.btn_save_ocr.setObjectName("primary_button"), self.btn_save_ocr.setFixedWidth(90), self.btn_save_ocr.clicked.connect(self.save_llm_config), r.addWidget(self.btn_save_ocr))))
+        # 兼容旧字段：状态/模型（env_config 仍会更新 llm_paddle_status_val）
+        _rl(lg6, "状态:", lambda r: (setattr(self,'llm_paddle_status_val',QLabel("正在检测...")), r.addWidget(self.llm_paddle_status_val)))
+        _rl(lg6, "模型:", lambda r: (setattr(self,'llm_paddle_models_val',QLabel("由服务端提供")), r.addWidget(self.llm_paddle_models_val)))
+        self.ocr_status_lbl = QLabel(""); self.ocr_status_lbl.setObjectName("muted_text"); lg6.addWidget(self.ocr_status_lbl)
         scroll_layout.addWidget(g6)
 
         # ───── CLIP ─────
@@ -582,6 +602,7 @@ class PageSetupMixin:
             getattr(self, "vox_api_url_input", None),
             getattr(self, "whisper_api_url_input", None),
             getattr(self, "clip_api_url_input", None),
+            getattr(self, "ocr_api_url_input", None),
         ]:
             if inp:
                 inp.setReadOnly(True)
@@ -730,6 +751,18 @@ class PageSetupMixin:
             self.current_workflow_data = None
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
+
+    def select_image(self):
+        """数字人 ComfyUI：选择人物图片。"""
+        file, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
+        if file:
+            self.img_path_input.setText(file)
+
+    def select_audio(self):
+        """数字人 ComfyUI：选择驱动语音。"""
+        file, _ = QFileDialog.getOpenFileName(self, "选择音频", "", "Audio (*.mp3 *.wav)")
+        if file:
+            self.aud_path_input.setText(file)
 
     def setup_task_list_page(self):
             layout = QVBoxLayout(self.page_task_list)
@@ -1288,7 +1321,71 @@ class PageSetupMixin:
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
         tabs.addTab(p3, "💾 备份管理")
 
+        p4 = QWidget(); p4.setStyleSheet("QWidget { background: transparent; }")
+        self._setup_system_tab(p4)
+        tabs.addTab(p4, "⚙️ 系统配置")
+
         layout.addWidget(tabs)
+
+    def _setup_system_tab(self, parent_widget):
+        """系统配置 Tab：开机自动运行等系统级开关。"""
+        from config.paths import CONFIG_DIR
+        from utils import autostart as _autostart
+        import json as _json
+        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+
+        layout = QVBoxLayout(parent_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("⚙️ 系统配置")
+        title.setObjectName("heading")
+        layout.addWidget(title)
+
+        hint = QLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。")
+        hint.setObjectName("muted_text")
+        layout.addWidget(hint)
+
+        # 开机自动运行（默认开启）
+        self.autostart_chk = QCheckBox("🚀 开机自动运行（登录 Windows 后自动启动本程序）")
+        self.autostart_chk.setChecked(True)
+        layout.addWidget(self.autostart_chk)
+
+        self.autostart_status = QLabel("")
+        self.autostart_status.setObjectName("muted_text")
+        layout.addWidget(self.autostart_status)
+
+        def _load_cfg() -> dict:
+            if os.path.isfile(_LOCAL_CFG):
+                try:
+                    with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                        return _json.load(f)
+                except Exception:
+                    pass
+            return {}
+
+        def _on_autostart_toggled(checked):
+            data = _load_cfg()
+            data["auto_start"] = bool(checked)
+            try:
+                os.makedirs(CONFIG_DIR, exist_ok=True)
+                with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
+                    _json.dump(data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                self.autostart_status.setText(f"❌ 配置保存失败: {e}")
+                return
+            ok = _autostart.set_enabled(checked)
+            self.autostart_status.setText(
+                "✅ 已开启开机自启" if (checked and ok)
+                else "已关闭开机自启" if not checked
+                else "❌ 注册表写入失败")
+
+        self.autostart_chk.toggled.connect(_on_autostart_toggled)
+
+        # 加载配置（默认 True）并同步一次注册表
+        self.autostart_chk.setChecked(bool(_load_cfg().get("auto_start", True)))
+        _autostart.set_enabled(self.autostart_chk.isChecked())
+        layout.addStretch()
 
     def _setup_local_config_tab(self, parent_widget):
         """本地配置 Tab：设置本地缓存/生成目录。"""
@@ -1354,8 +1451,16 @@ class PageSetupMixin:
         _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
         cache_dir = self.local_cache_dir_input.text().strip()
         try:
+            data = {}
+            if os.path.isfile(_LOCAL_CFG):
+                try:
+                    with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
+                        data = _json.load(f)
+                except Exception:
+                    data = {}
+            data["cache_dir"] = cache_dir
             with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
-                _json.dump({"cache_dir": cache_dir}, f, indent=2, ensure_ascii=False)
+                _json.dump(data, f, indent=2, ensure_ascii=False)
             self.local_cache_status.setText("✅ 已保存")
         except Exception as e:
             self.local_cache_status.setText(f"❌ 保存失败: {e}")

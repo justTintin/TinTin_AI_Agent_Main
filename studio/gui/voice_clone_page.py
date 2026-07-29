@@ -58,14 +58,47 @@ class SentenceSplitterLLMWorker(BaseWorker):
             system_prompt = (
                 "你是一个短视频文案拆句专家。请把输入的文本段落拆分成适合逐句进行克隆配音合成的句子列表。\n"
                 "规则：\n"
-                "1. 优先按照【大句】与【语义完整性】进行拆分，避免拆得过碎（不要把连贯的短句强行拆开），也不要过长。\n"
-                "2. 主要依据句号（。）、感叹号（！）、问号（？）以及换行进行拆分。如果某个大句字数过长（例如超过30字），可在逗号（，）等语义停顿处进行合理切分，使每一行句意相对完整独立。\n"
-                "3. 每行输出一句话，不需要任何编号、Markdown标记或前缀，严格保持原文文字内容，绝对不能漏字或改字，只做合理的断句换行。"
+                "1. 第一原则是【句意完整】与【长度合理】。每一行必须是一个语义完整、能独立朗读的句子，长度一般在 10~40 字之间为宜。\n"
+                "2. 主要依据句号（。）、感叹号（！）、问号（？）以及换行进行拆分。\n"
+                "3. 【严禁拆得过碎】：绝对不要把一个连贯句子的半句、短促词、或仅 5~8 个字的残片单独拆成一行。宁可让某一行偏长一点，也不要为了多分行而把句子拆碎。\n"
+                "4. 只有当一个句子【确实过长】（明显超过 50 字、一口气无法顺畅朗读）时，才允许在自然的逗号、分号等停顿处切分；30 字并不是硬性上限，短一点或长一点都没关系，关键看是否通顺完整。\n"
+                "5. 输出格式：每行一句话，每行行首不要自己添加行号或序号（不要写 1. 2. 3. 这种）。\n"
+                "6. 【绝对忠实原文】：必须严格保持原文的每一个字，绝对不能漏字、改字、删字。特别强调——原文里【本来就有】的编号、序号、序数词（如“（一）”“（二）”“第一条”“其一”等）属于正文内容，必须原样保留在对应句子中，绝不允许删除或简化。\n"
+                "7. 只做合理的断句换行，不要对原文做任何总结、改写或润色。"
             )
-            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=25)
+            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=120)
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class RemoteAsrWorker(BaseWorker):
+    """远程 ASR 转写 worker：调 transcribe_remote 返回含 word 级对齐的 segments。
+
+    替代已删除的 apps.whisperx 本地子进程。服务端 /whisper/transcribe（fmt=json）
+    返回 segments[].words[] = [{word, start, end}, ...]，可直接用于精确对齐切音频。
+    """
+    finished = Signal(list)   # segments: [{"start","end","text","words"?}, ...]
+    error = Signal(str)
+
+    def __init__(self, audio_path, language=None, task_type="transcribe"):
+        super().__init__()
+        self.audio_path = audio_path
+        self.language = language
+        self.task_type = task_type
+
+    def do_work(self):
+        try:
+            from utils.asr_client import transcribe_remote, read_asr_url
+            asr_url = read_asr_url()
+            segments = transcribe_remote(
+                self.audio_path, asr_url,
+                language=self.language or "",
+                task_type=self.task_type,
+            )
+            self.finished.emit(segments)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -84,7 +117,8 @@ class VoiceClonePage(BasePage):
         self.row_edits = {}
         self.voice_worker = None
         self.dub_worker = None
-        
+        self._synthesize_merge = False  # 本次批量克隆是否在生成后合并为整体音频
+
         self._media_player = None
         self._audio_output = None
 
@@ -276,6 +310,14 @@ class VoiceClonePage(BasePage):
         self.btn_split_text.clicked.connect(self._split_and_populate_manually)
         row_table_header.addWidget(self.btn_split_text)
 
+        # 拆分填充策略说明按钮（紧挨一键拆分填充）
+        btn_split_help = QPushButton("❓")
+        btn_split_help.setFixedSize(24, 24)
+        btn_split_help.setStyleSheet("padding: 0px; font-size: 12px;")
+        btn_split_help.setToolTip("点击查看“一键拆分填充”的智能合并策略说明")
+        btn_split_help.clicked.connect(self._show_split_strategy_help)
+        row_table_header.addWidget(btn_split_help)
+
         btn_add_row = mdi_button("添加行", "plus")
         btn_add_row.setObjectName("secondary_button")
         btn_add_row.setStyleSheet("padding: 4px 10px; font-size: 12px;")
@@ -324,11 +366,19 @@ class VoiceClonePage(BasePage):
 
         # 7. Action buttons row
         row_actions = QHBoxLayout()
-        self.btn_synthesize_voice = mdi_button("开始批量克隆人声合成", "voice")
-        self.btn_synthesize_voice.setObjectName("action_button")
-        self.btn_synthesize_voice.setFixedHeight(35)
-        self.btn_synthesize_voice.clicked.connect(self._start_synthesize_voice)
-        row_actions.addWidget(self.btn_synthesize_voice, 1)
+        self.btn_synthesize_split = mdi_button("分行克隆声音", "voice")
+        self.btn_synthesize_split.setObjectName("action_button")
+        self.btn_synthesize_split.setFixedHeight(35)
+        self.btn_synthesize_split.setToolTip("按表格每一行文案，逐行单独克隆生成各自的声音文件。")
+        self.btn_synthesize_split.clicked.connect(lambda: self._run_synthesize(merge=False))
+        row_actions.addWidget(self.btn_synthesize_split, 1)
+
+        self.btn_synthesize_merge = mdi_button("合成克隆声音", "voice")
+        self.btn_synthesize_merge.setObjectName("primary_button")
+        self.btn_synthesize_merge.setFixedHeight(35)
+        self.btn_synthesize_merge.setToolTip("逐行克隆后，将所有声音合并为一个整体声音文件（voice_merged.wav）。")
+        self.btn_synthesize_merge.clicked.connect(lambda: self._run_synthesize(merge=True))
+        row_actions.addWidget(self.btn_synthesize_merge, 1)
         card_layout.addLayout(row_actions)
 
         # Populate reference voice samples
@@ -667,61 +717,36 @@ class VoiceClonePage(BasePage):
         self.btn_transcribe_ref.setText("⏳ 正在识别文本...")
         self.stage_label.setText("正在识别参考音频文本...")
 
-        from config.paths import TMP_DIR, WHISPER_MODELS_DIR
-        from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
+        self.transcribe_worker = RemoteAsrWorker(ref_audio, language=None, task_type="transcribe")
 
-        os.makedirs(TMP_DIR, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(ref_audio))[0]
-        temp_audio_path = os.path.join(TMP_DIR, f"transcribe_{base_name}_audio.wav")
-        temp_srt_path = os.path.join(TMP_DIR, f"transcribe_{base_name}.srt")
-
-        self.transcribe_worker = WhisperXTranscribeWorker(
-            video_path=ref_audio,
-            audio_path=temp_audio_path,
-            output_path=temp_srt_path,
-            model_name="large-v3",
-            language=None,
-            task_type="transcribe",
-            multi_mode=False,
-            download_root=WHISPER_MODELS_DIR,
-            device_mode="auto"
-        )
-
-        def on_finished(srt_content, path):
+        def on_finished(segments):
             self.btn_transcribe_ref.setEnabled(True)
             self.btn_transcribe_ref.setText("识别参考音频文本")
             self.stage_label.setText("✅ 识别参考音频文本完成")
-            
-            plain_text = self._clean_srt_to_text(srt_content)
-            
+
+            from utils.asr_client import segments_to_plain
+            plain_text = segments_to_plain(segments)
+
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
-            
+
             if llm_model and plain_text.strip():
                 self.stage_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
                 self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
-                
+
                 def on_punc_done(punctuated_text):
                     self.ref_text_input.setPlainText(punctuated_text)
                     self.stage_label.setText("✅ 识别与标点优化完成")
-                
+
                 def on_punc_err(err):
                     log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
                     self.ref_text_input.setPlainText(plain_text)
                     self.stage_label.setText("✅ 识别完成（标点优化失败）")
-                
+
                 self.punc_worker.finished.connect(on_punc_done)
                 self.punc_worker.error.connect(on_punc_err)
                 self.punc_worker.start()
             else:
                 self.ref_text_input.setPlainText(plain_text)
-            
-            try:
-                if os.path.exists(temp_audio_path):
-                    os.remove(temp_audio_path)
-                if os.path.exists(temp_srt_path):
-                    os.remove(temp_srt_path)
-            except Exception:
-                pass
 
         def on_error(err):
             self.btn_transcribe_ref.setEnabled(True)
@@ -747,6 +772,39 @@ class VoiceClonePage(BasePage):
             text_lines.append(line)
         return ' '.join(text_lines)
 
+    def _show_split_strategy_help(self):
+        """弹窗展示“一键拆分填充”的智能拆分与合并策略说明。"""
+        # 动态展示当前样本推算出的单行字数上限，让用户直观理解
+        try:
+            max_chars = self._estimate_max_chars()
+            chars_info = f"\n\n📊 当前样本推算的单行字数上限：约 {max_chars} 字（安全时长 15 秒）。"
+        except Exception:
+            chars_info = ""
+
+        QMessageBox.information(
+            self.parent_widget,
+            "一键拆分填充 · 智能策略说明",
+            "【功能】把上方“待克隆整体文案”智能拆分成逐行配音文案，自动填入下方列表。\n\n"
+            "【拆分流程】\n"
+            "1. 优先调用 AI（大模型）进行智能断句，保证每行语义完整、长度合理；\n"
+            "   AI 不可用时自动退回本地规则（按句号、问号、感叹号、换行）拆分。\n"
+            "2. 若已先生成整体克隆音频（voice_whole.wav），会同时分析音频时间戳，"
+            "把整段音频按行切成对应的小音频文件。\n\n"
+            "【智能合并策略】（避免每行过短、碎句过多）\n"
+            "· 合并长度不是固定的，而是根据【样本声音语速动态推算】：\n"
+            "    单行最大字数 ≈ 15秒 × (样本文案字数 ÷ 样本音频时长)\n"
+            "· 只要相邻两行合并后不超过该上限，就会自动合并成一行；\n"
+            "· 超过上限才断开另起新行。\n"
+            "· 拿不到样本时，按中文播音常见语速 4字/秒 兜底（15秒 ≈ 60字）。\n\n"
+            "【为什么限制 15 秒】\n"
+            "VoxCPM 单次声音克隆生成的音频，安全区为 15~17 秒，不能超过 20 秒。"
+            "因此每行文案念出来不能太长，否则克隆会失败或质量下降。\n\n"
+            "【防漏字保护】\n"
+            "AI 拆分后会校验字数：若输出比原文少（疑似漏字、误删编号等），"
+            "会自动退回本地规则拆分，确保“（一）（二）”等原文编号一字不丢。"
+            f"{chars_info}"
+        )
+
     def _split_and_populate_manually(self):
         text = self.clone_text_input.toPlainText().strip()
         if not text:
@@ -761,75 +819,57 @@ class VoiceClonePage(BasePage):
         if os.path.exists(whole_audio_path):
             self.btn_split_text.setEnabled(False)
             self.btn_split_text.setText("⏳ 智能识别拆分中...")
-            self.stage_label.setText("⏳ 正在使用 WhisperX 分析整段音频时间戳...")
-            
-            from config.paths import TMP_DIR, WHISPER_MODELS_DIR
-            from apps.whisperx.whisperx_worker import WhisperXTranscribeWorker
-            
-            os.makedirs(TMP_DIR, exist_ok=True)
-            temp_audio_path = os.path.join(TMP_DIR, "align_whole_audio.wav")
-            temp_srt_path = os.path.join(TMP_DIR, "align_whole.srt")
-            
-            self.align_worker = WhisperXTranscribeWorker(
-                video_path=whole_audio_path,
-                audio_path=temp_audio_path,
-                output_path=temp_srt_path,
-                model_name="large-v3",
-                language=None,
-                task_type="transcribe",
-                multi_mode=False,
-                download_root=WHISPER_MODELS_DIR,
-                device_mode="auto"
-            )
-            
-            def on_align_finished(srt_content, srt_path):
+            self.stage_label.setText("⏳ 正在调用远程 ASR 分析整段音频时间戳...")
+
+            self.align_worker = RemoteAsrWorker(whole_audio_path, language=None, task_type="transcribe")
+
+            def on_align_finished(segments):
                 self.btn_split_text.setEnabled(True)
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ 音频时间戳分析完成，正在裁切音频并填充列表...")
-                
+
                 llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
-                
+
                 if llm_model:
                     self.stage_label.setText("⏳ 正在使用 AI 模型智能拆分整体文案...")
                     self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
-                    
+
                     def on_split_done(result_text):
                         lines = [line.strip() for line in result_text.split('\n') if line.strip()]
-                        self._process_alignment_and_populate(lines, srt_content, whole_audio_path, out_voice_dir, srt_path)
+                        # 校验 LLM 是否漏字（如误删编号），漏字则退回本地规则拆分
+                        fallback = self._validate_llm_split(text, lines)
+                        if fallback is not None:
+                            lines = fallback
+                        lines = self._merge_short_fragments(lines)
+                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
                         self.stage_label.setText("✅ 整体克隆语音智能拆分并裁切填充完成！")
                         QMessageBox.information(self.parent_widget, "提示", f"成功通过 AI 智能拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
-                        
+
                     def on_split_err(err):
                         log.warning(f"AI 智能拆分失败: {err}，退回本地分句。")
                         lines = self._split_text_into_sentences(text)
-                        self._process_alignment_and_populate(lines, srt_content, whole_audio_path, out_voice_dir, srt_path)
+                        lines = self._merge_short_fragments(lines)
+                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
                         self.stage_label.setText("✅ 整体克隆语音本地拆分并裁切填充完成！")
                         QMessageBox.information(self.parent_widget, "提示", f"AI 拆分失败，已通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
-                        
+
                     self.split_worker.finished.connect(on_split_done)
                     self.split_worker.error.connect(on_split_err)
                     self.split_worker.start()
                 else:
                     lines = self._split_text_into_sentences(text)
-                    self._process_alignment_and_populate(lines, srt_content, whole_audio_path, out_voice_dir, srt_path)
+                    lines = self._merge_short_fragments(lines)
+                    self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
                     self.stage_label.setText("✅ 整体克隆语音本地拆分并裁切填充完成！")
                     QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
-                
-                try:
-                    if os.path.exists(temp_audio_path):
-                        os.remove(temp_audio_path)
-                    if os.path.exists(temp_srt_path):
-                        os.remove(temp_srt_path)
-                except Exception:
-                    pass
-                    
+
             def on_align_error(err):
                 self.btn_split_text.setEnabled(True)
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("❌ 识别音频时间戳失败")
                 QMessageBox.warning(self.parent_widget, "识别失败", f"分析整段音频失败，已退回纯文本拆分模式。\n错误：{err}")
                 self._split_and_populate_text_only(text)
-                
+
             self.align_worker.finished.connect(on_align_finished)
             self.align_worker.error.connect(on_align_error)
             self.align_worker.start()
@@ -843,7 +883,7 @@ class VoiceClonePage(BasePage):
         temp_text = text
         for d in delimiters:
             temp_text = temp_text.replace(d, "\n")
-        
+
         parts = temp_text.split("\n")
         sentences = []
         for p in parts:
@@ -852,13 +892,114 @@ class VoiceClonePage(BasePage):
                 sentences.append(p)
         return sentences
 
+    @staticmethod
+    def _count_chars(s):
+        """统计有效字数：中文+字母数字，忽略标点空白。"""
+        return sum(1 for c in s if c.isalnum())
+
+    # ── 动态合并参数 ──
+    # VoxCPM 单次克隆生成的音频，安全区 15~17 秒，不能超过 20 秒。
+    # 因此“每行最长多少字”不应是固定值，而要由样本语速反推：
+    #   语速 = 样本文案字数 / 样本音频时长
+    #   单行最大字数 = 安全时长上限(15s) × 语速
+    _SAFE_DUR_SEC = 15.0   # 单行预估时长上限（保守，远离 20s 红线）
+    _FALLBACK_CHARS_PER_SEC = 4.0  # 兜底语速：拿不到样本时按 4 字/秒（中文播音常见语速）
+
+    def _estimate_max_chars(self):
+        """根据当前选中的样本，推算“单行配音文案最多多少字”才不超 15 秒。
+
+        优先用 样本音频时长 + 参考文案字数 推算真实语速；
+        拿不到（未选样本/未填文案/读时长失败）时退回兜底 4 字/秒。
+        """
+        try:
+            from gui.montage.utils_media import get_media_duration
+            ref_audio = self.get_ref_audio_path()
+            ref_text = self.ref_text_input.toPlainText().strip()
+            if ref_audio and os.path.exists(ref_audio):
+                dur = get_media_duration(ref_audio)
+                n = self._count_chars(ref_text)
+                if dur > 0 and n > 0:
+                    chars_per_sec = n / dur
+                    max_chars = int(self._SAFE_DUR_SEC * chars_per_sec)
+                    # 兜底保护：语速异常时也别太小或太大
+                    max_chars = max(10, min(max_chars, 120))
+                    log.info(f"[拆分合并] 样本语速 {chars_per_sec:.2f} 字/秒 ({n}字/{dur:.1f}秒)，单行上限 {max_chars} 字")
+                    return max_chars
+        except Exception as e:
+            log.warning(f"[拆分合并] 推算样本语速失败，用兜底 {self._FALLBACK_CHARS_PER_SEC} 字/秒: {e}")
+        fallback = int(self._SAFE_DUR_SEC * self._FALLBACK_CHARS_PER_SEC)  # 60 字
+        return fallback
+
+    def _merge_short_fragments(self, lines, max_chars=None):
+        """按“单行预估时长 ≤ 安全上限”贪心合并相邻短句。
+
+        :param max_chars: 单行最大有效字数（由 _estimate_max_chars 推算）。
+                          超过该值不合并；相邻两行合并后未超则合并。
+        策略：顺序遍历，若“当前行 + 下一行”合并后字数 ≤ max_chars，就并入当前行；
+        否则当前行定稿、下一行开新行。同时仍会处理明显过短的残片（保证不会留极短行）。
+        合并仅改变行数与文字，A 路音频对齐会基于合并后的新句子重新匹配 word 序列，不影响切音频。
+        """
+        if not lines:
+            return []
+        if max_chars is None:
+            max_chars = self._estimate_max_chars()
+        # 最小阈值：低于此值视为残片，强制与相邻行合并（避免 5~8 字碎行）
+        min_len = max(8, max_chars // 4)
+
+        # 第1遍：贪心向后合并（相邻两行合起来不超 max_chars 就并）
+        merged = []
+        for s in lines:
+            s = s.strip()
+            if not s:
+                continue
+            if merged and self._count_chars(merged[-1]) + self._count_chars(s) <= max_chars:
+                merged[-1] = merged[-1] + " " + s
+            else:
+                merged.append(s)
+
+        # 第2遍：清理仍过短的残片（并入相邻行）
+        if len(merged) >= 2:
+            cleaned = []
+            for s in merged:
+                if cleaned and self._count_chars(s) < min_len:
+                    # 当前行过短：优先并入前句；若前句已满则并入后句（下一轮处理）
+                    if self._count_chars(cleaned[-1]) + self._count_chars(s) <= max_chars:
+                        cleaned[-1] = cleaned[-1] + " " + s
+                    else:
+                        cleaned.append(s)
+                else:
+                    cleaned.append(s)
+            # 末尾过短则并入前句
+            if len(cleaned) >= 2 and self._count_chars(cleaned[-1]) < min_len:
+                cleaned[-2] = cleaned[-2] + " " + cleaned[-1]
+                cleaned.pop()
+            merged = cleaned
+        return merged
+
+    def _validate_llm_split(self, original_text, llm_lines):
+        """校验 LLM 拆分是否忠实原文（没漏字/删字）。
+
+        小模型常会自作主张删除“（一）（二）”这类编号或改写原文。
+        用有效字数（中文+字母数字）做容错比对：若 LLM 输出字数明显少于原文（<90%），
+        判定为漏字，返回本地规则拆分结果作为兜底；否则返回 None 表示校验通过。
+        """
+        orig_count = self._count_chars(original_text)
+        llm_count = sum(self._count_chars(l) for l in llm_lines)
+        # 阈值 99%：严格防漏字。_count_chars 只数中文+字母数字，已排除空格和标点，
+        # 所以标点/空白差异不会误判；只要 LLM 输出的实质文字少于原文 99% 即判定漏字，退回本地拆分。
+        if orig_count > 0 and llm_count < orig_count * 0.99:
+            log.warning(f"AI 拆分疑似漏字（原文 {orig_count} 字，AI 输出 {llm_count} 字），退回本地规则拆分。")
+            return self._split_text_into_sentences(original_text)
+        return None
+
     def _populate_sentences_to_table(self, text):
         sentences = self._split_text_into_sentences(text)
         if not sentences:
             return
-            
+
+        sentences = self._merge_short_fragments(sentences)
         self._clear_table()
-        
+
         for s in sentences:
             row_idx = self.voice_table.rowCount()
             self.voice_table.insertRow(row_idx)
@@ -866,7 +1007,7 @@ class VoiceClonePage(BasePage):
             edit = self.row_edits.get(row_idx)
             if edit:
                 edit.setText(s)
-                
+
         self._adjust_table_height()
 
 
@@ -1022,7 +1163,8 @@ class VoiceClonePage(BasePage):
             QMessageBox.warning(self.parent_widget, "路径无效", "请选择有效的音频输出目录。")
             return
 
-        self.btn_synthesize_voice.setEnabled(False)
+        self.btn_synthesize_split.setEnabled(False)
+        self.btn_synthesize_merge.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -1061,7 +1203,12 @@ class VoiceClonePage(BasePage):
         self.voice_worker.error.connect(self._on_voice_error)
         self.voice_worker.start()
 
-    def _start_synthesize_voice(self):
+    def _run_synthesize(self, merge=False):
+        """批量逐行克隆人声。
+
+        :param merge: False=分行克隆（每行单独一个声音文件）；
+                      True=合成克隆（逐行生成后再合并为一个整体声音文件 voice_merged.wav）。
+        """
         if self.voice_worker and self.voice_worker.isRunning():
             return
 
@@ -1096,10 +1243,14 @@ class VoiceClonePage(BasePage):
         for i in range(self.voice_table.rowCount()):
             self._on_row_progress(i, 0)
 
-        self.btn_synthesize_voice.setEnabled(False)
+        self._synthesize_merge = merge
+        self.btn_synthesize_split.setEnabled(False)
+        self.btn_synthesize_merge.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        mode_hint = "合成克隆（将合并为一个整体音频）" if merge else "分行克隆（每行单独一个音频）"
+        self.stage_label.setText(f"⏳ 正在逐行克隆人声 [{mode_hint}]...")
 
         cfg = getattr(self.main_window, "ai_config", {}) or {}
         model_path = cfg.get("vox_model_path", "")
@@ -1128,7 +1279,8 @@ class VoiceClonePage(BasePage):
         self.voice_worker.start()
 
     def _on_voice_finished(self, results):
-        self.btn_synthesize_voice.setEnabled(True)
+        self.btn_synthesize_split.setEnabled(True)
+        self.btn_synthesize_merge.setEnabled(True)
         self.progress_bar.setValue(100)
         self.stage_label.setText("✅ 克隆人声音频生成完成！")
 
@@ -1136,12 +1288,12 @@ class VoiceClonePage(BasePage):
             try:
                 row_idx = int(vid.split("_")[1])
                 self.generated_voice_paths[row_idx] = wav
-                
+
                 lbl_status = self.voice_table.cellWidget(row_idx, 3)
                 if isinstance(lbl_status, QLabel):
                     lbl_status.setText(os.path.basename(wav))
                     lbl_status.setStyleSheet("color: #2ecc71; font-size: 12px; padding: 4px;")
-                    
+
                 act_widget = self.voice_table.cellWidget(row_idx, 4)
                 if act_widget:
                     for btn in act_widget.findChildren(QPushButton):
@@ -1149,36 +1301,41 @@ class VoiceClonePage(BasePage):
                             btn.setEnabled(True)
             except Exception as e:
                 log.warning(f"更新行 {vid} 状态失败: {e}")
-            
-        # Collect all generated wav paths in row order
-        valid_wav_paths = []
-        for idx in sorted(self.generated_voice_paths.keys()):
-            wav_path = self.generated_voice_paths[idx]
-            if wav_path and os.path.exists(wav_path):
-                valid_wav_paths.append(wav_path)
 
+        # 仅当选择“合成克隆声音”时，才把所有分句音频合并为一个整体音频
         merged_msg = ""
-        if len(valid_wav_paths) > 1:
-            self.stage_label.setText("⏳ 正在合并所有音频文件...")
-            prefix_str = self._get_file_prefix()
-            merged_filename = f"{prefix_str}voice_merged.wav"
-            out_voice_dir = self.voice_video_dir_input.text().strip()
-            merged_wav_path = os.path.abspath(os.path.join(out_voice_dir, merged_filename))
-            
-            if self._merge_wav_files(valid_wav_paths, merged_wav_path):
-                merged_msg = f"\n\n同时已自动将所有分句音频合并导出为整体音频：\n{merged_filename}"
-                self.stage_label.setText("✅ 克隆人声音频及合并整体音频生成完成！")
+        if getattr(self, "_synthesize_merge", False):
+            valid_wav_paths = []
+            for idx in sorted(self.generated_voice_paths.keys()):
+                wav_path = self.generated_voice_paths[idx]
+                if wav_path and os.path.exists(wav_path):
+                    valid_wav_paths.append(wav_path)
+
+            if len(valid_wav_paths) > 1:
+                self.stage_label.setText("⏳ 正在合并所有音频文件...")
+                prefix_str = self._get_file_prefix()
+                merged_filename = f"{prefix_str}voice_merged.wav"
+                out_voice_dir = self.voice_video_dir_input.text().strip()
+                merged_wav_path = os.path.abspath(os.path.join(out_voice_dir, merged_filename))
+
+                if self._merge_wav_files(valid_wav_paths, merged_wav_path):
+                    merged_msg = f"\n\n已将所有分句音频合并导出为整体音频：\n{merged_filename}"
+                    self.stage_label.setText("✅ 克隆人声音频及合并整体音频生成完成！")
+                else:
+                    self.stage_label.setText("⚠️ 音频生成完成，但合并失败")
+                    merged_msg = "\n\n（合并失败，分句音频已单独生成）"
             else:
-                self.stage_label.setText("⚠️ 音频生成完成，但合并失败")
+                merged_msg = "\n\n（仅有 1 行音频，无需合并）"
 
         QMessageBox.information(
             self.parent_widget,
             "合成成功",
-            f"批量人声克隆合成完毕，共生成 {len(results)} 个音频文件。{merged_msg}"
+            f"克隆人声合成完毕，共生成 {len(results)} 个音频文件。{merged_msg}"
         )
 
     def _on_voice_error(self, err):
-        self.btn_synthesize_voice.setEnabled(True)
+        self.btn_synthesize_split.setEnabled(True)
+        self.btn_synthesize_merge.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 合成失败")
@@ -1189,7 +1346,8 @@ class VoiceClonePage(BasePage):
                 "❌ 无法连接到 VoxCPM 服务。\n\n请前往「🤖 大模型配置」→「声音克隆配置」页面检查：\n1. VoxCPM 服务是否已启动\n2. API 接口地址是否正确\n3. 模型路径是否正确"
             )
         else:
-            QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
+            from gui.error_dialog import show_error_dialog
+            show_error_dialog(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
     def hideEvent(self, event):
         super().hideEvent(event)
@@ -1433,8 +1591,14 @@ class VoiceClonePage(BasePage):
                 self.btn_split_text.setEnabled(True)
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("✅ AI 智能拆分完成")
-                
+
                 lines = [line.strip() for line in result_text.split('\n') if line.strip()]
+                # 校验 LLM 是否漏字（如误删编号），漏字则退回本地规则拆分
+                fallback = self._validate_llm_split(text, lines)
+                if fallback is not None:
+                    lines = fallback
+                    self.stage_label.setText("⚠️ AI 拆分疑似漏字，已自动退回本地规则拆分")
+                lines = self._merge_short_fragments(lines)
                 self._clear_table()
                 for s in lines:
                     row_idx = self.voice_table.rowCount()
@@ -1462,18 +1626,15 @@ class VoiceClonePage(BasePage):
             self._populate_sentences_to_table(text)
             QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地标点规则拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")
 
-    def _process_alignment_and_populate(self, lines, srt_content, whole_audio_path, out_voice_dir, srt_path=None):
-        alignments = None
-        if srt_path:
-            json_path = srt_path.rsplit(".", 1)[0] + ".json"
-            alignments = self._get_alignments_from_json(lines, json_path)
-            
+    def _process_alignment_and_populate(self, lines, segments, whole_audio_path, out_voice_dir):
+        # 优先用 segments 的 word 级时间戳做精确对齐
+        alignments = self._get_alignments_from_segments(lines, segments)
+
         if not alignments:
-            # Fallback to SRT segment-level alignment
-            srt_segments = self._parse_srt(srt_content)
-            if srt_segments:
-                alignments = self._align_segments(lines, srt_segments)
-                
+            # 退回 segment 级线性插值（segments 本身已含 start/end/text）
+            if segments:
+                alignments = self._align_segments(lines, segments)
+
         if not alignments:
             # Fallback to text-only population without audios
             self._clear_table()
@@ -1686,7 +1847,61 @@ class VoiceClonePage(BasePage):
                 alignments.append((start_time, end_time))
             else:
                 alignments.append((0.0, 0.0))
-                
+
+        return alignments
+
+    def _get_alignments_from_segments(self, lines, segments):
+        """基于远程 ASR 返回的 segments（含 word 级时间戳）做句子对齐。
+
+        数据源：segments[i].words[j] = {"word","start","end"}（与旧本地 WhisperX 一致）。
+        算法与 _get_alignments_from_json 相同：按字符数贪婪累积到目标句子的 85% 即取首尾 word 时间戳。
+        若所有 segment 都无 words 字段，返回 None（调用方退回 SRT 级插值）。
+        """
+        all_words = []
+        for seg in segments or []:
+            for word_info in (seg.get("words") or []):
+                if "start" in word_info and "end" in word_info:
+                    all_words.append({
+                        'word': (word_info.get('word') or '').strip(),
+                        'start': float(word_info['start']),
+                        'end': float(word_info['end'])
+                    })
+
+        if not all_words:
+            return None
+
+        alignments = []
+        word_idx = 0
+        num_words = len(all_words)
+
+        for s_text in lines:
+            s_clean = "".join(c for c in s_text if c.isalnum()).lower()
+            if not s_clean:
+                alignments.append((0.0, 0.0))
+                continue
+
+            matched_words = []
+            accumulated_chars = ""
+
+            while word_idx < num_words:
+                word_info = all_words[word_idx]
+                w_text = word_info['word']
+                w_clean = "".join(c for c in w_text if c.isalnum()).lower()
+
+                accumulated_chars += w_clean
+                matched_words.append(word_info)
+                word_idx += 1
+
+                if len(accumulated_chars) >= len(s_clean) * 0.85:
+                    break
+
+            if matched_words:
+                start_time = max(0.0, matched_words[0]['start'] - 0.05)
+                end_time = matched_words[-1]['end'] + 0.05
+                alignments.append((start_time, end_time))
+            else:
+                alignments.append((0.0, 0.0))
+
         return alignments
 
     def _check_whole_audio_exists(self):

@@ -37,6 +37,11 @@ DEFAULT_PORT = 51233
 MAX_RECORDS = 200
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024  # 512 MB 上限，防止误采超大文件
 SCAN_MIN_INTERVAL = 60.0  # 触发服务端扫描的最小间隔（秒）
+STALL_TIMEOUT = 90  # yt-dlp 无输出超时（秒）：超过则判定卡死（如 YouTube 反爬），主动终止
+
+
+class _DownloadStalled(RuntimeError):
+    """yt-dlp 下载卡死（无进度/解析阶段超时），需向上传播以跳过后续直链兜底。"""
 
 _CONFIG_FILE = os.path.join(DATA_DIR, "extension_bridge.json")
 _RECORDS_FILE = os.path.join(DATA_DIR, "extension_collected.json")
@@ -361,10 +366,13 @@ class ExtensionBridge(QObject):
             except Exception:
                 pass
         with self._dl_lock:
+            now = time.time()
             self._dl_tasks[task_id] = {
                 "id": task_id, "url": url, "media_type": item.get("media_type") or "file",
                 "filename": initial_name, "percent": -1, "received": 0, "total": 0,
-                "speed_str": "", "status": "queued", "error": "", "ts": time.time(),
+                "speed_str": "", "status": "queued", "error": "",
+                "ts": now,           # 任务创建时间（排序用）
+                "status_ts": now,    # 状态变更时间（清理 done/fail 任务用）
                 "proc_id": -1,  # 子进程 PID，供取消时终止
             }
         self._queue.put((task_id, {
@@ -389,6 +397,7 @@ class ExtensionBridge(QObject):
             proc_id = t.get("proc_id", -1)
             t["status"] = "fail"
             t["error"] = "用户取消"
+            t["status_ts"] = time.time()  # 标记变更时间，供 tasks_snapshot 清理
         if proc_id > 0:
             try:
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc_id)],
@@ -410,11 +419,16 @@ class ExtensionBridge(QObject):
                        "page_url": "", "page_title": "", "referer": "", "cookies": ""})
 
     def tasks_snapshot(self):
-        """下载任务快照（供扩展轮询进度）；已完成/失败超过 2 分钟的自动清理。"""
+        """下载任务快照（供扩展轮询进度）；已完成/失败超过 30 秒的自动清理。
+
+        清理按 status_ts（状态变更时间）判断，而非任务创建时间 ts——
+        这样取消/失败的任务会在变更后 30 秒消失，而不是创建满 2 分钟才消失。
+        """
         now = time.time()
         with self._dl_lock:
             stale = [tid for tid, t in self._dl_tasks.items()
-                     if t["status"] in ("done", "fail") and now - t["ts"] > 120]
+                     if t["status"] in ("done", "fail")
+                     and now - t.get("status_ts", t["ts"]) > 30]
             for tid in stale:
                 self._dl_tasks.pop(tid, None)
             tasks = sorted(self._dl_tasks.values(), key=lambda t: t["ts"], reverse=True)
@@ -425,6 +439,9 @@ class ExtensionBridge(QObject):
             t = self._dl_tasks.get(task_id)
             if t is not None:
                 t.update(kwargs)
+                # status 变化时记录变更时间（供 tasks_snapshot 清理 done/fail 任务）
+                if "status" in kwargs:
+                    t["status_ts"] = time.time()
 
     def _upd_task_speed(self, task_id, received, total_now, elapsed):
         speed_bps = received / max(elapsed, 0.001)
@@ -710,7 +727,14 @@ class ExtensionBridge(QObject):
     _ytdlp_last_error = ""
 
     def _run_ytdlp(self, cmd: list, task_id: str = "") -> str:
-        """执行一次 yt-dlp 下载（带进度解析+速度解析），成功返回文件路径，失败返回 ""。"""
+        """执行一次 yt-dlp 下载（带进度解析+速度解析），成功返回文件路径，失败返回 ""。
+
+        内置无进度超时（两种卡死场景）：
+        1) 进程无任何输出超过 STALL_TIMEOUT 秒（网络完全无响应）
+        2) 进程有输出但长时间停留在解析阶段（如 YouTube 反爬时反复
+           "Downloading webpage"），超过 STALL_TIMEOUT 秒仍未进入实际下载
+        命中任一即主动终止子进程，避免 UI 永久卡在"下载中 0%"。
+        """
         try:
             start_ts = time.time()
             proc = subprocess.Popen(
@@ -723,7 +747,22 @@ class ExtensionBridge(QObject):
                     if t:
                         t["proc_id"] = proc.pid
             tail = []
-            for line in proc.stdout:
+            last_output_ts = time.time()
+            download_started = False  # 是否已进入实际下载（看到 [download] 进度）
+            stalled = False
+            while True:
+                line = proc.stdout.readline()
+                if line == "":
+                    # EOF：进程输出结束
+                    if proc.poll() is not None:
+                        break
+                    # 进程还活着但无输出 → 检查是否卡死（场景1）
+                    if time.time() - last_output_ts > STALL_TIMEOUT:
+                        stalled = True
+                        break
+                    time.sleep(0.2)
+                    continue
+                last_output_ts = time.time()
                 line = line.strip()
                 if line:
                     tail.append(line)
@@ -736,7 +775,25 @@ class ExtensionBridge(QObject):
                     self._upd_task(task_id, speed_str=f"{sm.group(1)} {sm.group(2)}/s")
                 if task_id and ("[Merger]" in line or "Merging formats" in line):
                     self._upd_task(task_id, status="merging")
-            proc.wait(timeout=3600)
+                # 标记已进入实际下载阶段（看到下载进度或 Destination 行）
+                if m or "[download]" in line or "[Merger]" in line or "Destination" in line:
+                    download_started = True
+                # 场景2：有输出但长时间停留在解析阶段未进入下载
+                # （YouTube 反爬时反复输出 Downloading webpage，但永远到不了 download 阶段）
+                if not download_started and time.time() - start_ts > STALL_TIMEOUT:
+                    stalled = True
+                    break
+            if stalled:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                self._ytdlp_last_error = f"下载卡住无响应（{STALL_TIMEOUT}秒无进度，可能被站点反爬拦截，建议配置 cookies）"
+                log.error(f"[扩展桥接] yt-dlp 无进度超时终止: {self._ytdlp_last_error}")
+                # 抛专用异常向上传播：让 _download_one 直接标记 fail 并保留此错误信息，
+                # 避免后续 _direct_download 覆盖成"无效媒体响应"等无关错误
+                raise _DownloadStalled(self._ytdlp_last_error)
+            proc.wait(timeout=300)
             if proc.returncode == 0:
                 found = self._find_new_file(start_ts)
                 if found:
@@ -744,6 +801,8 @@ class ExtensionBridge(QObject):
                         self._upd_task(task_id, filename=os.path.basename(found), percent=99)
                     return found
             self._ytdlp_last_error = tail[-1] if tail else "未知错误"
+        except _DownloadStalled:
+            raise  # stall 异常向上传播，由 _download_one 处理
         except Exception as e:
             self._ytdlp_last_error = str(e)
             log.error(f"[扩展桥接] yt-dlp 异常: {e}")

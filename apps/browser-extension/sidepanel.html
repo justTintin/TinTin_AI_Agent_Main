@@ -36,13 +36,24 @@
   .t-stat button { padding: 1px 8px; font-size: 11px; margin: 0; }
   #task-sec { display: none; }
   #info { color: #888; font-size: 11px; margin-top: 8px; word-break: break-all; }
+  .cfg-toggle { font-size: 11px; color: #3b82f6; cursor: pointer; margin-left: auto; }
+  #cfg-row { display: none; margin-bottom: 8px; gap: 4px; align-items: center; }
+  #cfg-row input { width: 100%; box-sizing: border-box; background: #141519; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+  #cfg-row #cfg-port { width: 70px; flex-shrink: 0; }
+  #cfg-row button { padding: 4px 10px; font-size: 12px; flex-shrink: 0; }
 </style>
 </head>
 <body>
   <div class="row">
     <span class="dot" id="dot"></span>
     <span id="status">检测客户端…</span>
+    <span class="cfg-toggle" id="cfg-toggle">⚙ 设置</span>
     <button id="open-dir" class="ghost" title="打开素材保存目录">📂 打开目录</button>
+  </div>
+  <div id="cfg-row">
+    <input id="cfg-host" placeholder="127.0.0.1">
+    <input id="cfg-port" type="number" placeholder="51233">
+    <button id="cfg-save" class="ghost">保存</button>
   </div>
   <div class="toolbar">
     <button id="sniff" title="扫描当前页面的图片/视频">🔍 素材嗅探</button>

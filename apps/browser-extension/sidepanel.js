@@ -6,10 +6,50 @@ let _filter = "all";  // all | image | video（视频含音频流）
 
 // ── 客户端连接状态 ──
 function refreshStatus() {
+  $("status").textContent = "检测客户端…";
+  let done = false;
+  // 超时兜底：service worker 休眠未唤醒时 sendMessage 回调可能永不触发，
+  // 5 秒后强制显示"未连接"，避免 UI 永远卡在"检测客户端…"
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true;
+    $("dot").className = "dot err";
+    $("status").textContent = "未连接客户端（点击 ⚙ 设置检查端口）";
+  }, 5000);
   chrome.runtime.sendMessage({ type: "ping_bridge" }, (resp) => {
-    const ok = resp && resp.ok;
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    // lastError: service worker 未注册/未唤醒时 resp 为 undefined
+    if (chrome.runtime.lastError || !resp) {
+      $("dot").className = "dot err";
+      $("status").textContent = "未连接客户端（插件后台未就绪，请刷新页面重试）";
+      return;
+    }
+    const ok = resp.ok;
     $("dot").className = "dot " + (ok ? "ok" : "err");
-    $("status").textContent = ok ? "已连接客户端" : "未连接客户端";
+    $("status").textContent = ok ? "已连接客户端" : "未连接客户端（点击 ⚙ 设置端口）";
+  });
+}
+
+// ── 客户端地址/端口配置 ──
+async function loadCfg() {
+  const cfg = await chrome.storage.sync.get(["host", "port"]);
+  $("cfg-host").value = cfg.host || "127.0.0.1";
+  $("cfg-port").value = cfg.port || 51233;
+}
+
+function toggleCfg() {
+  const row = $("cfg-row");
+  row.style.display = row.style.display === "flex" ? "none" : "flex";
+}
+
+function saveCfg() {
+  const host = $("cfg-host").value.trim() || "127.0.0.1";
+  const port = Number($("cfg-port").value) || 51233;
+  chrome.storage.sync.set({ host, port }, () => {
+    $("status").textContent = "设置已保存，正在重连…";
+    refreshStatus();
   });
 }
 
@@ -356,3 +396,20 @@ function refreshTasks() {
     }
   });
 }
+
+// ── 配置区事件绑定 ──
+$("cfg-toggle").addEventListener("click", toggleCfg);
+$("cfg-save").addEventListener("click", saveCfg);
+
+// ── 初始化（之前缺失：refreshStatus/refreshNet/refreshTasks 从未被调用，
+//    导致状态永远卡在"检测客户端…"、任务进度和网络嗅探都不刷新）──
+loadCfg().then(() => {
+  refreshStatus();
+  refreshNet();
+  refreshTasks();
+});
+// 网络嗅探 & 任务进度定时刷新
+setInterval(refreshNet, 2000);
+setInterval(refreshTasks, 2000);
+// 扩展（service worker）重新唤醒时，刷新一次连接状态
+chrome.runtime.onStartup.addListener && chrome.runtime.onStartup.addListener(refreshStatus);

@@ -9,25 +9,25 @@ async function getBridge() {
   };
 }
 
-async function pingHost(host, port) {
+async function pingHost(host, port, timeoutMs = 1500) {
   try {
-    const r = await fetch(`http://${host}:${port}/ping`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`http://${host}:${port}/ping`, { signal: AbortSignal.timeout(timeoutMs) });
     if (r.ok) return { host, port };
   } catch (e) { /* ignore */ }
   return null;
 }
 
 async function discoverBridge() {
-  // 尝试存储的端口 → 默认端口 → 4096-65535 范围随机走？ → 先试默认范围
+  // 尝试存储的端口 → 默认端口 → 常见候选端口
   const cfg = await chrome.storage.sync.get(["host", "port"]);
   const host = (cfg.host || "127.0.0.1").trim();
-  const candidates = [Number(cfg.port) || 51233, 51233, 49337, 54321, 51000];
-  for (const port of [...new Set(candidates)]) {
-    const r = await pingHost(host, port);
-    if (r) {
-      await chrome.storage.sync.set({ host: r.host, port: r.port });
-      return r;
-    }
+  const candidates = [...new Set([Number(cfg.port) || 51233, 51233, 49337, 54321, 51000])];
+  // 并行探测所有候选端口（串行最坏要 5×超时；并行命中即返回，未监听端口 ECONNREFUSED 很快）
+  const results = await Promise.all(candidates.map((p) => pingHost(host, p)));
+  const hit = results.find((r) => r);
+  if (hit) {
+    await chrome.storage.sync.set({ host: hit.host, port: hit.port });
+    return hit;
   }
   return null;
 }

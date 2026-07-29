@@ -14,7 +14,17 @@ function setStatus(ok, text) {
 }
 
 function refreshStatus() {
+  let done = false;
+  // 超时兜底：service worker 休眠未唤醒时回调可能不触发，5 秒后强制提示
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true;
+    setStatus(false, "未连接客户端（插件后台未就绪，请刷新页面重试）");
+  }, 5000);
   chrome.runtime.sendMessage({ type: "ping_bridge" }, (resp) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
     if (chrome.runtime.lastError || !resp || !resp.ok) {
       setStatus(false, "未连接客户端（请先启动螺丝钉客户端）");
       $("info").textContent = "";

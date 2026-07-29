@@ -110,7 +110,7 @@ apps/asset-browser/bin/node.exe
 apps/asset-browser/bin/v2rayN/bin/xray/config_generated.json
 apps/asset-browser/bin/ffmpeg.exe
 
-# Browser extension install dir (runtime copy synced from studio/assets/extension
+# Browser extension install dir (runtime copy synced from apps/browser-extension
 # by ensure_extension_installed(); browser loads it from here)
 apps/extension/
 

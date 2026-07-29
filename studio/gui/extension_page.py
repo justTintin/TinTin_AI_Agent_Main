@@ -23,13 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
-from config.paths import BUNDLE_ASSETS_DIR, DATA_DIR, APPS_DIR
+from config.paths import DATA_DIR, EXTENSION_SRC_DIR, APPS_DIR
 from utils.extension_bridge import DEFAULT_PORT
 from utils.logger_utils import log
 from utils.extension_bridge import DEFAULT_PORT, get_bridge
 
-# 扩展源码（只读资源，打包时随 assets 一起分发）
-EXT_SOURCE_DIR = os.path.join(BUNDLE_ASSETS_DIR, "extension")
+# 扩展源码模块（apps/browser-extension/，随 apps/ 打包分发）
+EXT_SOURCE_DIR = EXTENSION_SRC_DIR
 # 浏览器实际加载的稳定目录（独立目录，不入库、不随数据目录迁移）
 EXT_INSTALL_DIR = os.path.join(APPS_DIR, "extension")
 # 旧安装位置（studio/data/extension），存在时自动迁移

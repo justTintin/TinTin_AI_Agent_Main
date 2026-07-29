@@ -102,6 +102,8 @@ VOXCPM2_DIR = os.path.join(APPS_DIR, "voxcpm2")
 QWEN_IMAGE_LAYERED_DIR = os.path.join(APPS_DIR, "Qwen-Image-Layered")
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 ASSET_BROWSER_DIR = os.path.join(APPS_DIR, "asset-browser")
+# 浏览器扩展源码模块（随 apps/ 一起打包分发；运行时复制到 EXT_INSTALL_DIR 供浏览器加载）
+EXTENSION_SRC_DIR = os.path.join(APPS_DIR, "browser-extension")
 MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
 # JSON 元数据目录（固定项目内部，kb_items.json / kb_sync.json 存放于此）
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")

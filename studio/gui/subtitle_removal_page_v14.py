@@ -360,7 +360,9 @@ class RemoteVSRWorkerV14(QThread):
             self._base_url = base_url
 
             is_smart = not self.sub_areas
-            self.status_updated.emit("正在上传视频到服务端...")
+            self.status_updated.emit("准备上传视频到服务端...")
+            self.progress_updated.emit(0)
+            self.log_received.emit(f"[INFO] 连接服务端: {base_url}")
             desc = "智能去除（服务端自动检测）" if is_smart else f"选区去除 {self.sub_areas[:60]}"
             self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  mode={self.inpaint_mode}  {desc}")
 
@@ -397,7 +399,9 @@ class RemoteVSRWorkerV14(QThread):
             self.progress_updated.emit(10)
 
             poll_url = f"{base_url}/tasks/unified/{task_id}"
+            poll_start = _time.time()
             deadline = _time.time() + 3600  # 长视频去字幕耗时久，最多等待 60 分钟
+            _last_heartbeat = 0
             while _time.time() < deadline:
                 if self.is_aborted:
                     self.finished.emit(False, "用户终止运行。")
@@ -421,6 +425,12 @@ class RemoteVSRWorkerV14(QThread):
                         mapped = max(10, min(95, int(10 + pct * 0.85)))
                         self.progress_updated.emit(mapped)
                         self.log_received.emit(f"[进度] 服务端 {pct:.0f}% → 客户端 {mapped}%")
+                    else:
+                        # 服务端没返回进度时，每 10 秒打印一次心跳日志，避免界面像卡住
+                        elapsed = int(_time.time() - poll_start)
+                        if elapsed - _last_heartbeat >= 10:
+                            _last_heartbeat = elapsed
+                            self.log_received.emit(f"[等待] 服务端处理中，已等待 {elapsed} 秒...")
                 except Exception:
                     pass
                 if status in ("completed", "done", "success"):
@@ -455,10 +465,16 @@ class RemoteVSRWorkerV14(QThread):
         os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
         with requests.get(dl_url, stream=True, timeout=600) as r:
             r.raise_for_status()
+            total = int(r.headers.get("content-length", 0))
+            downloaded = 0
             with open(self.output_path, "wb") as f:
                 for chunk in r.iter_content(1024 * 512):
                     if chunk:
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            mapped = 95 + int(downloaded * 5 / total)
+                            self.progress_updated.emit(min(99, mapped))
         self.progress_updated.emit(100)
         self.finished.emit(True, self.output_path)
 
@@ -953,21 +969,25 @@ class SubtitleRemovalPageV14(BasePage):
 
         self.lama_fast_chk = QCheckBox("⚡ LAMA极速模式 (直接擦除，忽略精细过渡)")
         self.lama_fast_chk.setChecked(False)
+        self.lama_fast_chk.setVisible(False)
         local_layout.addWidget(self.lama_fast_chk)
 
         self.h264_chk = QCheckBox("📱 使用 H.264 兼容编码 (方便移动端/手机播放)")
         self.h264_chk.setChecked(True)
+        self.h264_chk.setVisible(False)
         local_layout.addWidget(self.h264_chk)
 
         self.server_mode_chk = QCheckBox("🌐 使用服务端处理 (不占本机显卡)")
         self.server_mode_chk.setChecked(True)
-        self.server_mode_chk.setToolTip("勾选后视频上传服务端处理（算法由服务端自动匹配）。\n取消则用本机显卡处理（仅标注选区模式支持本地）。")
+        self.server_mode_chk.setEnabled(False)
+        self.server_mode_chk.setToolTip("视频将上传服务端处理，算法由服务端自动匹配。")
         local_layout.addWidget(self.server_mode_chk)
 
         # STTN batch size control（本地模式才需要）
         batch_row = QHBoxLayout()
         batch_lbl = QLabel("🎞️ STTN 每批处理帧数:")
         batch_lbl.setStyleSheet("font-size: 12px; color: #a1a1aa;")
+        batch_lbl.setVisible(False)
         batch_row.addWidget(batch_lbl)
         from PySide6.QtWidgets import QSpinBox
         self.sttn_max_load_spinbox = QSpinBox()
@@ -980,6 +1000,7 @@ class SubtitleRemovalPageV14(BasePage):
             "处理 4K 或高分辨率视频时如崩溃，\n"
             "请将此值降低到 10~20（减少 GPU 显存占用）。"
         )
+        self.sttn_max_load_spinbox.setVisible(False)
         self.sttn_max_load_spinbox.setStyleSheet("""
             QSpinBox {
                 background-color: #1a1a24;
@@ -995,6 +1016,7 @@ class SubtitleRemovalPageV14(BasePage):
         batch_row.addWidget(self.sttn_max_load_spinbox)
         batch_hint = QLabel("帧  (4K视频建议10~20)")
         batch_hint.setStyleSheet("font-size: 11px; color: #71717a;")
+        batch_hint.setVisible(False)
         batch_row.addWidget(batch_hint)
         batch_row.addStretch()
         local_layout.addLayout(batch_row)
@@ -1178,19 +1200,15 @@ class SubtitleRemovalPageV14(BasePage):
         self.watermark_container.setVisible(is_watermark)
 
     def _on_mode_switched(self, _idx):
-        """切换智能/标注模式：显隐选区管理区 + 本地选项区，刷新预览。"""
+        """切换智能/标注模式：显隐选区管理区，两种模式都强制走服务端。"""
         is_select = self._is_select_mode()
-        # 选区管理区（列表/添加删除）在标注模式显示；坐标滑块不再需要（四边形直接拖角点编辑）
-        for w in [getattr(self, "box_manage_group", None),
-                  getattr(self, "local_opts_container", None)]:
-            if w is not None:
-                w.setVisible(is_select)
-        # 智能识别必须走服务端（本地 CLI 无自动检测能力）
-        if not is_select:
-            self.server_mode_chk.setChecked(True)
-            self.server_mode_chk.setEnabled(False)
-        else:
-            self.server_mode_chk.setEnabled(True)
+        # 选区管理区只在标注模式显示；坐标滑块已废弃
+        box_group = getattr(self, "box_manage_group", None)
+        if box_group is not None:
+            box_group.setVisible(is_select)
+        # 服务端处理固定开启，不暴露本地选项
+        self.server_mode_chk.setChecked(True)
+        self.server_mode_chk.setEnabled(False)
         self.update_preview()
 
     def _update_box_list_widget(self):

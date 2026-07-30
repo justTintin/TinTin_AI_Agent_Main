@@ -5,9 +5,7 @@ import shutil
 import subprocess
 import traceback
 import time
-import gc
 import av
-from collections import deque
 from PIL import Image, ImageDraw
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
@@ -15,8 +13,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
 from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
-from config.paths import TMP_DIR, VSR_V14_DIR
-from utils.platform_utils import python_binary
+from config.paths import TMP_DIR
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -40,247 +37,6 @@ def _rect_to_quad(x, y, w, h):
 def _quad_to_relative_polygon(quad, fw, fh):
     """四点像素 → 相对坐标四点 [[x_rel,y_rel],...]（服务端 polygon 格式）。"""
     return [[round(p[0] / fw, 4), round(p[1] / fh, 4)] for p in quad]
-
-
-class SubtitleRemovalWorkerV14(QThread):
-    progress_updated = Signal(int)
-    status_updated = Signal(str)
-    log_received = Signal(str)
-    finished = Signal(bool, str)
-
-    def __init__(self, vsr_python, vsr_script, video_path, boxes, mode, skip_detect, lama_fast, h264, preview_path, max_load_num=0):
-        """
-        :param boxes: list of (ymin, ymax, xmin, xmax) tuples
-        :param max_load_num: STTN max frames per batch. 0 = use backend default (50).
-        """
-        super().__init__()
-        self.vsr_python = vsr_python
-        self.vsr_script = vsr_script
-        self.video_path = video_path
-        self.boxes = boxes
-        self.mode = mode
-        self.skip_detect = skip_detect
-        self.lama_fast = lama_fast
-        self.h264 = h264
-        self.preview_path = preview_path
-        self.max_load_num = max_load_num
-        self.process = None
-        self.is_aborted = False
-        # 尾部日志缓存：崩溃时（returncode=-1 等）将其附在错误信息里，
-        # 让用户在失败弹窗中看到真实异常（如 CUDA out of memory 的 traceback）。
-        # 只保留最近若干行，避免长视频内存膨胀。
-        self._log_lines = deque(maxlen=25)
-
-    def _emit_log(self, line):
-        """同时发送日志信号（前端 log_view 显示）并缓存尾部行，供失败时定位真实原因。"""
-        self.log_received.emit(line)
-        self._log_lines.append(line)
-
-    def _get_tail_log_text(self):
-        """返回缓存的尾部日志文本（已去空白行/空行）。"""
-        return "\n".join(l for l in self._log_lines if l and l.strip())
-
-    def run(self):
-        num_boxes = len(self.boxes)
-        if num_boxes == 0:
-            self.finished.emit(False, "错误: 未指定任何字幕擦除选区。")
-            return
-
-        current_input = self.video_path
-        temp_files_to_clean = []
-
-        base_dir = os.path.dirname(self.video_path)
-        vd_name = os.path.splitext(os.path.basename(self.video_path))[0]
-        ext = os.path.splitext(self.video_path)[1].lower()
-        is_pic = ext in [".jpg", ".jpeg", ".png", ".bmp"]
-
-        # Final output
-        if is_pic:
-            final_output = os.path.join(base_dir, "no_sub", f"{vd_name}{ext}")
-        else:
-            final_output = os.path.join(base_dir, f"{vd_name}_no_sub.mp4")
-
-        self.is_aborted = False
-        success = True
-        err_msg = ""
-
-        # Hide console window on Windows
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0 # SW_HIDE
-
-        for idx, box in enumerate(self.boxes):
-            if self.is_aborted:
-                success = False
-                err_msg = "用户终止运行。"
-                break
-
-            ymin, ymax, xmin, xmax = box
-            
-            # Determine output path for this step
-            if idx == num_boxes - 1:
-                current_output = final_output
-            else:
-                suffix = ext
-                current_output = os.path.join(TMP_DIR, f"vsr_temp_{idx}_{int(time.time())}{suffix}")
-                temp_files_to_clean.append(current_output)
-
-            cmd = [
-                self.vsr_python,
-                self.vsr_script,
-                "--video", current_input,
-                "--ymin", str(ymin),
-                "--ymax", str(ymax),
-                "--xmin", str(xmin),
-                "--xmax", str(xmax),
-                "--mode", self.mode,
-                "--preview_path", self.preview_path,
-                "--output", current_output
-            ]
-            if self.skip_detect:
-                cmd.append("--skip_detect")
-            if self.lama_fast:
-                cmd.append("--lama_fast")
-            if self.h264:
-                cmd.append("--h264")
-            if self.max_load_num > 0 and self.max_load_num != 50:
-                cmd.extend(["--max_load_num", str(self.max_load_num)])
-
-            self.status_updated.emit(f"正在处理第 {idx+1}/{num_boxes} 个字幕选区...")
-            self._emit_log(f"\n[INFO] 开始处理选区 {idx+1}/{num_boxes}: (YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax})")
-            self._emit_log(f"[INFO] 执行后端命令: {' '.join(cmd)}")
-
-            try:
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="ignore",
-                    startupinfo=startupinfo,
-                    bufsize=1,
-                    cwd=os.path.dirname(self.vsr_script),
-                    env=dict(os.environ, QPT_MODE="Debug")
-                )
-
-                while self.process.poll() is None:
-                    if self.is_aborted:
-                        # 异步终止，不阻塞工作线程
-                        try:
-                            si = subprocess.STARTUPINFO()
-                            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                            si.wShowWindow = 0
-                            subprocess.Popen(
-                                ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                startupinfo=si
-                            )
-                        except Exception:
-                            pass
-                        break
-                        
-                    line = self.process.stdout.readline()
-                    if not line:
-                        continue
-                    line = line.strip()
-                    self._emit_log(line)
-
-                    if line.startswith("[PROGRESS]"):
-                        try:
-                            prog = int(line.split()[1])
-                            # Overall progress calculation
-                            overall_prog = int((idx * 100 + prog) / num_boxes)
-                            self.progress_updated.emit(overall_prog)
-                        except Exception:
-                            pass
-                    elif line.startswith("[STARTING]"):
-                        self.status_updated.emit(f"AI 正在深度擦除第 {idx+1}/{num_boxes} 个选区字幕...")
-
-                # Read remaining output
-                for line in self.process.stdout:
-                    line = line.strip()
-                    self._emit_log(line)
-                    if line.startswith("[PROGRESS]"):
-                        try:
-                            prog = int(line.split()[1])
-                            overall_prog = int((idx * 100 + prog) / num_boxes)
-                            self.progress_updated.emit(overall_prog)
-                        except Exception:
-                            pass
-
-                ret_code = self.process.returncode
-                if ret_code != 0:
-                    success = False
-                    # 将无符号退出码归一化为有符号，便于解读
-                    try:
-                        rc_signed = ret_code if ret_code < 0 else (ret_code - 0x100000000 if ret_code > 0xFFFF else ret_code)
-                    except Exception:
-                        rc_signed = ret_code
-                    if rc_signed == -1 or ret_code == 4294967295:
-                        rc_hint = "（-1：引擎进程崩溃/被强杀，常见于 GPU 显存不足或原生库异常）"
-                    elif rc_signed == 2:
-                        rc_hint = "（2：后端捕获到异常，详见下方日志）"
-                    elif rc_signed == 1:
-                        rc_hint = "（1：去字幕未正常完成）"
-                    else:
-                        rc_hint = ""
-                    tail = self._get_tail_log_text()
-                    err_msg = (
-                        f"选区 {idx+1} 处理失败，错误码: {ret_code}{rc_hint}。\n"
-                        f"—— 引擎最后输出（可据此定位真实原因）——\n{tail}"
-                    )
-                    break
-
-                # Input of next step is output of current step
-                current_input = current_output
-
-            except Exception as e:
-                success = False
-                err_msg = f"处理选区 {idx+1} 时发生异常: {str(e)}"
-                break
-
-        # Cleanup intermediate temp files
-        for fpath in temp_files_to_clean:
-            if os.path.exists(fpath):
-                try:
-                    os.remove(fpath)
-                except Exception:
-                    pass
-
-        if success:
-            self.finished.emit(True, final_output)
-        else:
-            self.finished.emit(False, err_msg)
-
-    def stop(self):
-        self.is_aborted = True
-        if self.process:
-            try:
-                # 异步运行 taskkill 防止 GUI 主线程卡死
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0 # SW_HIDE
-                subprocess.Popen(
-                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=startupinfo
-                )
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
-            finally:
-                # 进程终止后释放 GPU 缓存
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                except Exception:
-                    pass
 
 
 class _ProgressFileReader:
@@ -954,73 +710,7 @@ class SubtitleRemovalPageV14(BasePage):
         bottom_container_layout.setContentsMargins(24, 0, 24, 0)
         bottom_container_layout.setSpacing(14)
 
-        # 本地处理选项容器（算法/编码/帧数等，仅"标注选区+本地"时显示；算法由服务端匹配，故不再让用户选）
-        # 保留 mode_combo（隐藏，仅供本地 worker 取值，默认 sttn）
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("STTN", "sttn")
-        self.mode_combo.addItem("Lama", "lama")
-        self.mode_combo.addItem("ProPainter", "propainter")
-        self.mode_combo.setVisible(False)  # 算法由服务端匹配，本地默认 sttn，不暴露给用户
-
-        self.local_opts_container = QWidget()
-        local_layout = QVBoxLayout(self.local_opts_container)
-        local_layout.setContentsMargins(0, 0, 0, 0)
-        local_layout.setSpacing(10)
-
-        self.lama_fast_chk = QCheckBox("⚡ LAMA极速模式 (直接擦除，忽略精细过渡)")
-        self.lama_fast_chk.setChecked(False)
-        self.lama_fast_chk.setVisible(False)
-        local_layout.addWidget(self.lama_fast_chk)
-
-        self.h264_chk = QCheckBox("📱 使用 H.264 兼容编码 (方便移动端/手机播放)")
-        self.h264_chk.setChecked(True)
-        self.h264_chk.setVisible(False)
-        local_layout.addWidget(self.h264_chk)
-
-        self.server_mode_chk = QCheckBox("🌐 使用服务端处理 (不占本机显卡)")
-        self.server_mode_chk.setChecked(True)
-        self.server_mode_chk.setEnabled(False)
-        self.server_mode_chk.setToolTip("视频将上传服务端处理，算法由服务端自动匹配。")
-        local_layout.addWidget(self.server_mode_chk)
-
-        # STTN batch size control（本地模式才需要）
-        batch_row = QHBoxLayout()
-        batch_lbl = QLabel("🎞️ STTN 每批处理帧数:")
-        batch_lbl.setStyleSheet("font-size: 12px; color: #a1a1aa;")
-        batch_lbl.setVisible(False)
-        batch_row.addWidget(batch_lbl)
-        from PySide6.QtWidgets import QSpinBox
-        self.sttn_max_load_spinbox = QSpinBox()
-        self.sttn_max_load_spinbox.setRange(5, 300)
-        self.sttn_max_load_spinbox.setValue(50)
-        self.sttn_max_load_spinbox.setSingleStep(5)
-        self.sttn_max_load_spinbox.setToolTip(
-            "控制 STTN 每批次处理的视频帧数。\n"
-            "默认 50 帧，适用于 1080p 以下视频。\n"
-            "处理 4K 或高分辨率视频时如崩溃，\n"
-            "请将此值降低到 10~20（减少 GPU 显存占用）。"
-        )
-        self.sttn_max_load_spinbox.setVisible(False)
-        self.sttn_max_load_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: #1a1a24;
-                color: #e4e4e7;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                padding: 2px 4px;
-                font-size: 12px;
-                min-width: 60px;
-            }
-            QSpinBox:focus { border-color: #3b82f6; }
-        """)
-        batch_row.addWidget(self.sttn_max_load_spinbox)
-        batch_hint = QLabel("帧  (4K视频建议10~20)")
-        batch_hint.setStyleSheet("font-size: 11px; color: #71717a;")
-        batch_hint.setVisible(False)
-        batch_row.addWidget(batch_hint)
-        batch_row.addStretch()
-        local_layout.addLayout(batch_row)
-        bottom_container_layout.addWidget(self.local_opts_container)
+        # 视频去字幕统一走服务端处理，不再暴露本地算法/编码/帧数等设置
 
         bottom_container_layout.addStretch(1)
 
@@ -1207,8 +897,6 @@ class SubtitleRemovalPageV14(BasePage):
         if box_group is not None:
             box_group.setVisible(is_select)
         # 服务端处理固定开启，不暴露本地选项
-        self.server_mode_chk.setChecked(True)
-        self.server_mode_chk.setEnabled(False)
         self.update_preview()
 
     def _update_box_list_widget(self):
@@ -1389,71 +1077,8 @@ class SubtitleRemovalPageV14(BasePage):
             QMessageBox.warning(self.parent_widget, "参数错误", "请先设置至少一个擦除选区！")
             return
 
-        # 智能去除必须走服务端（本地 CLI 无自动检测能力）；选区去除按 server_mode_chk 决定
-        if is_smart or self.server_mode_chk.isChecked():
-            self._start_remote_removal(video_path)
-            return
-
-        # 本地模式：本地 CLI 只支持矩形，四边形退化为其 AABB 像素
-        worker_boxes = []
-        for quad in self.boxes:
-            x, y, w, h = _quad_aabb(quad)
-            worker_boxes.append((y, y + h, x, x + w))
-
-        vsr_dir = VSR_V14_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", python_binary())
-        # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
-        if not os.path.exists(vsr_python):
-            vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        vsr_script = os.path.join(vsr_dir, "vsr_run.py")
-
-        if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
-            QMessageBox.critical(
-                self.parent_widget,
-                "文件丢失",
-                f"未能定位到 1.4 去字幕包的 Python 环境或脚本，请检查：\n\n{vsr_dir}"
-            )
-            return
-
-        # Remove previous preview file
-        if os.path.exists(self.preview_img_path):
-            try:
-                os.remove(self.preview_img_path)
-            except Exception:
-                pass
-
-        # Disable controls during execution
-        self._lock_controls()
-
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.log_view.clear()
-
-        # Instantiate background worker
-        # 本地模式：去水印=跳过检测(整框强制重绘)，去字幕=精准检测；算法默认 sttn
-        self.worker = SubtitleRemovalWorkerV14(
-            vsr_python=vsr_python,
-            vsr_script=vsr_script,
-            video_path=video_path,
-            boxes=worker_boxes,
-            mode=self.mode_combo.currentData(),
-            skip_detect=(self._get_purpose() == "watermark"),
-            lama_fast=self.lama_fast_chk.isChecked(),
-            h264=self.h264_chk.isChecked(),
-            preview_path=self.preview_img_path,
-            max_load_num=self.sttn_max_load_spinbox.value()
-        )
-        self.worker.progress_updated.connect(self.on_worker_progress)
-        self.worker.status_updated.connect(self.on_worker_status)
-        self.worker.log_received.connect(self.on_worker_log)
-        self.worker.finished.connect(self.on_worker_finished)
-        self.worker.start()
-
-        # Timer to poll preview frames from file (runs every 400ms)
-        self.timer = QTimer()
-        self.timer.setInterval(400)
-        self.timer.timeout.connect(self.poll_preview_image)
-        self.timer.start()
+        # 视频去字幕统一走服务端处理
+        self._start_remote_removal(video_path)
 
     def _lock_controls(self):
         self.btn_start.setEnabled(False)
@@ -1468,10 +1093,6 @@ class SubtitleRemovalPageV14(BasePage):
         self.box_list_widget.setEnabled(False)
         self.purpose_combo.setEnabled(False)
         self.mode_switch.setEnabled(False)
-        self.lama_fast_chk.setEnabled(False)
-        self.h264_chk.setEnabled(False)
-        self.server_mode_chk.setEnabled(False)
-        self.sttn_max_load_spinbox.setEnabled(False)
         self.seek_slider.setEnabled(False)
         self.btn_prev_frame.setEnabled(False)
         self.btn_next_frame.setEnabled(False)
@@ -1618,10 +1239,6 @@ class SubtitleRemovalPageV14(BasePage):
         self.box_list_widget.setEnabled(True)
         self.purpose_combo.setEnabled(True)
         self.mode_switch.setEnabled(True)
-        self.lama_fast_chk.setEnabled(True)
-        self.h264_chk.setEnabled(True)
-        self.server_mode_chk.setEnabled(True)
-        self.sttn_max_load_spinbox.setEnabled(True)
         self.progress_bar.setValue(0)
 
         # Restore seek controls based on if it's a video

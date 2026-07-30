@@ -13,7 +13,6 @@ import os
 import shutil
 import subprocess
 import winreg
-import json
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
@@ -445,7 +444,6 @@ class ExtensionPage(BasePage):
             int(self.bridge.config.get("port") or DEFAULT_PORT) != self.spin_port.value()
             and self.bridge.is_running
         )
-        proxy = self.edit_proxy.text().strip()
         self.bridge.update_config(
             port=self.spin_port.value(),
             save_dir=self.edit_save_dir.text().strip(),
@@ -454,27 +452,13 @@ class ExtensionPage(BasePage):
             nas_sync_dir=self.edit_nas_dir.text().strip(),
             cookies_browser=self.combo_cookies.currentData(),
             auto_subtitle=self.chk_auto_subtitle.isChecked(),
-            proxy=proxy,
+            proxy=self.edit_proxy.text().strip(),
         )
-        self._sync_proxy_to_ai_config(proxy)
         if restart_needed:
             self.bridge.stop()
             self.bridge.start()
         self._refresh_bridge_status()
         self.show_info("桥接配置已保存。")
-
-    def _sync_proxy_to_ai_config(self, proxy):
-        """把代理地址同步到全局 ai_config，供去字幕/去水印等服务端请求复用。"""
-        try:
-            cfg = getattr(self.main_window, "ai_config", None) or {}
-            cfg["proxy"] = proxy
-            ai_config_file = getattr(self.main_window, "ai_config_file", None)
-            if ai_config_file:
-                os.makedirs(os.path.dirname(ai_config_file), exist_ok=True)
-                with open(ai_config_file, "w", encoding="utf-8") as f:
-                    json.dump(cfg, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            log.error(f"同步代理配置到 ai_config 失败: {e}")
 
     def _toggle_bridge(self):
         if self.bridge.is_running:
@@ -487,7 +471,6 @@ class ExtensionPage(BasePage):
         self._refresh_bridge_status()
 
     def _save_bridge_config_silent(self):
-        proxy = self.edit_proxy.text().strip()
         self.bridge.update_config(
             port=self.spin_port.value(),
             save_dir=self.edit_save_dir.text().strip(),
@@ -496,9 +479,8 @@ class ExtensionPage(BasePage):
             nas_sync_dir=self.edit_nas_dir.text().strip(),
             cookies_browser=self.combo_cookies.currentData(),
             auto_subtitle=self.chk_auto_subtitle.isChecked(),
-            proxy=proxy,
+            proxy=self.edit_proxy.text().strip(),
         )
-        self._sync_proxy_to_ai_config(proxy)
 
     def _update_engine(self):
         """后台更新 yt-dlp（YouTube 解析规则频繁变化，需保持最新）。"""

@@ -878,23 +878,14 @@ class SubtitleRemovalPage(BasePage):
                     from config.paths import AI_CONFIG_FILE
                     import json as _json
                     base_url = ""
-                    proxy_cfg = ""
                     if os.path.isfile(AI_CONFIG_FILE):
                         with open(AI_CONFIG_FILE, "r") as f:
                             cfg = _json.load(f)
                         url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
                         if url:
                             base_url = url
-                        proxy_cfg = (cfg.get("proxy") or "").strip()
                     if not base_url:
                         raise RuntimeError("未配置统一服务端地址（compute_server_url），请在系统设置中填写。")
-
-                    proxies = None
-                    if proxy_cfg:
-                        if "://" not in proxy_cfg:
-                            proxy_cfg = "http://" + proxy_cfg
-                        proxies = {"http": proxy_cfg, "https": proxy_cfg}
-                        log.info(f"[去字幕] 使用代理: {proxy_cfg}")
 
                     # 上传文件（服务端文档: docs/SERVER_API.md §VSR）
                     # sub_areas 格式: [[ymin,ymax,xmin,xmax], ...]
@@ -905,7 +896,7 @@ class SubtitleRemovalPage(BasePage):
                             "inpaint_mode": self.mode,
                             "sub_areas": sub_areas,
                         }
-                        r = _req.post(f"{base_url}/vsr/remove", files=files, data=data, proxies=proxies, timeout=600)
+                        r = _req.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=600)
                         if r.status_code != 200:
                             raise RuntimeError(f"服务端返回 {r.status_code}: {r.text[:200]}")
                     result = r.json()
@@ -920,7 +911,7 @@ class SubtitleRemovalPage(BasePage):
                     while _time.time() < deadline:
                         _time.sleep(3)
                         try:
-                            pr = _req.get(poll_url, proxies=proxies, timeout=15)
+                            pr = _req.get(poll_url, timeout=15)
                         except Exception:
                             continue
                         if pr.status_code != 200:

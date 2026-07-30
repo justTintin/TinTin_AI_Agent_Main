@@ -58,6 +58,13 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 _HLS_RE = re.compile(r"\.m3u8(\?|#|$)", re.IGNORECASE)
 
+# requests 用 socks5 代理需 PySocks 依赖（yt-dlp/ffmpeg 子进程不受影响，自带 socks 支持）
+try:
+    import socks  # noqa: F401  PySocks
+    _HAS_PYSOCKS = True
+except Exception:
+    _HAS_PYSOCKS = False
+
 # 平台识别（按页面域名归组素材目录）
 _PLATFORM_MAP = [
     ("douyin.com", "抖音"), ("iesdouyin.com", "抖音"),
@@ -104,6 +111,56 @@ def _find_ffmpeg() -> str:
     return found or ""
 
 
+def _find_node() -> str:
+    """定位 node.js（YouTube n 签名挑战求解需要 JS 运行时；yt_dlp_ejs 求解脚本已内置）。
+
+    优先素材浏览器自带的 node.exe（与 yt-dlp / ffmpeg 同目录），其次 PATH。
+    YouTube 新版播放器需要 JS 运行时解 n 参数签名，否则只能拿到 storyboard（缩略图）、
+    报 "n challenge solving failed" / "Only images are available"。
+    """
+    c = os.path.join(APPS_DIR, "asset-browser", "bin", "node.exe")
+    if os.path.isfile(c):
+        return c
+    found = shutil.which("node") or shutil.which("node.exe")
+    return found or ""
+
+
+def _normalize_proxy(addr: str) -> str:
+    """规整用户填写的代理地址为 yt-dlp/requests 可识别的形式。
+
+    只填了 host:port 时默认按 http 补全（http 代理兼容性最好：yt-dlp/ffmpeg/
+    requests 原生支持，无需 PySocks 依赖；Clash 的混合端口、v2rayN 的 http
+    端口都是 http 代理）。已带 scheme(http/https/socks5/socks5h) 则原样返回。
+
+    若你的代理软件只开了 socks5 端口，请显式写成 socks5://127.0.0.1:端口。
+    """
+    addr = (addr or "").strip()
+    if not addr:
+        return ""
+    if "://" not in addr:
+        addr = "http://" + addr
+    return addr
+
+
+def _build_dl_env(proxy: str) -> dict:
+    """构造下载子进程的环境变量：注入代理（全链路继承）。
+
+    以环境变量方式注入 —— yt-dlp / ffmpeg / requests 统一继承，无需分别传命令行参数。
+    同时设置 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 三个变量，覆盖不同库的读取约定
+    （requests 读 HTTP_PROXY/HTTPS_PROXY；yt-dlp 两者都读；socks 代理用 ALL_PROXY）。
+    """
+    env = os.environ.copy()
+    p = _normalize_proxy(proxy)
+    if p:
+        env["HTTP_PROXY"] = p
+        env["HTTPS_PROXY"] = p
+        env["http_proxy"] = p
+        env["https_proxy"] = p
+        env["ALL_PROXY"] = p
+        env["all_proxy"] = p
+    return env
+
+
 def default_config() -> dict:
     return {
         "port": DEFAULT_PORT,
@@ -117,6 +174,11 @@ def default_config() -> dict:
         "cookies_browser": "",
         # 视频下载完成后自动生成字幕（调用服务端 Whisper）
         "auto_subtitle": False,
+        # 代理地址（用户自己的代理软件暴露的本地端口），如 socks5://127.0.0.1:1080
+        # 留空不走代理。YouTube 等需翻墙站点必填，否则 yt-dlp 直连超时、反复卡在
+        # "Downloading webpage"，最终被判卡死而失败。
+        # 以运行环境（环境变量）方式注入：yt-dlp/ffmpeg/requests 全链路统一继承。
+        "proxy": "",
     }
 
 
@@ -540,8 +602,14 @@ class ExtensionBridge(QObject):
         headers = {"User-Agent": _UA}
         if item["referer"]:
             headers["Referer"] = item["referer"]
+        proxy = _normalize_proxy(self.config.get("proxy", ""))
+        # requests 用 socks 代理需 PySocks 依赖；未装时对 requests 跳过 socks 代理
+        # （不影响 yt-dlp/ffmpeg 子进程——它们已通过运行环境 env 统一走代理）。
+        proxies = None
+        if proxy and not (proxy.startswith("socks") and not _HAS_PYSOCKS):
+            proxies = {"http": proxy, "https": proxy}
         with requests.get(url, headers=headers, stream=True,
-                          timeout=(10, 60), allow_redirects=True) as resp:
+                          timeout=(10, 60), allow_redirects=True, proxies=proxies) as resp:
             resp.raise_for_status()
             ctype = resp.headers.get("Content-Type", "")
             # 媒体流校验：返回 HTML/JSON/文本说明是错误页或无效探测流，不是真实媒体
@@ -626,6 +694,15 @@ class ExtensionBridge(QObject):
         ffmpeg = _find_ffmpeg()
         if ffmpeg:
             base_cmd += ["--ffmpeg-location", os.path.dirname(ffmpeg)]
+
+        # JS 运行时（YouTube n 签名挑战求解必需）：
+        # 新版 yt-dlp 默认只启用 deno 运行时，未装 deno 时 YouTube 的 n 参数签名无法解开，
+        # 导致 "n challenge solving failed" → 只拿到 storyboard 缩略图 → "Only images are available"。
+        # 用内置 node.exe 作为 JS 运行时（yt_dlp_ejs 挑战求解脚本已内置，0.8.0）。
+        # 注意：必须 --no-js-runtimes 先清默认，再显式启用 node，否则默认的 deno 优先级会盖过。
+        node_bin = _find_node()
+        if node_bin:
+            base_cmd += ["--no-js-runtimes", "--js-runtimes", f"node:{node_bin}"]
 
         # cookies 策略：
         # 1) 扩展导出的 cookies 文件优先（不受浏览器锁库/App-Bound 加密限制）
@@ -740,7 +817,8 @@ class ExtensionBridge(QObject):
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="ignore",
-                creationflags=subprocess.CREATE_NO_WINDOW)
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                env=_build_dl_env(self.config.get("proxy", "")))
             if task_id:
                 with self._dl_lock:
                     t = self._dl_tasks.get(task_id)
@@ -840,7 +918,8 @@ class ExtensionBridge(QObject):
                 "-bsf:a", "aac_adtstoasc", out_path]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                               creationflags=subprocess.CREATE_NO_WINDOW,
+                               env=_build_dl_env(self.config.get("proxy", "")))
             if r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
                 return out_path
             tail = (r.stderr or "").strip().splitlines()

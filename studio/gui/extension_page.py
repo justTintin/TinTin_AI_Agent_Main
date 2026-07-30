@@ -276,6 +276,22 @@ class ExtensionPage(BasePage):
         row2c.addStretch()
         lay.addLayout(row2c)
 
+        row2e = QHBoxLayout()
+        row2e.addWidget(QLabel("代理地址:"))
+        self.edit_proxy = QLineEdit(self.bridge.config.get("proxy") or "")
+        self.edit_proxy.setPlaceholderText("127.0.0.1:7890（留空=不走代理；socks5端口请写 socks5://host:port）")
+        self.edit_proxy.setToolTip(
+            "YouTube 等需翻墙站点，yt-dlp 直连会超时卡死。填写你代理软件的本地端口，\n"
+            "以运行环境方式注入：yt-dlp/ffmpeg 全链路统一走代理。\n\n"
+            "填写规则：\n"
+            "• 直接写 127.0.0.1:端口 → 默认按 http 代理（推荐，兼容 Clash 混合端口/v2rayN http端口）\n"
+            "• 代理只开了 socks5 端口 → 显式写 socks5://127.0.0.1:端口\n"
+            "• 已带 http:// 或 socks5:// 前缀则按你写的\n"
+            "• B站/抖音等国内站点留空即可"
+        )
+        row2e.addWidget(self.edit_proxy, 1)
+        lay.addLayout(row2e)
+
         row2d = QHBoxLayout()
         self.chk_auto_subtitle = QCheckBox("📝 视频下载后自动生成字幕（调用服务端 Whisper，与视频同目录保存 .srt 并同步 NAS）")
         self.chk_auto_subtitle.setChecked(bool(self.bridge.config.get("auto_subtitle", False)))
@@ -436,6 +452,7 @@ class ExtensionPage(BasePage):
             nas_sync_dir=self.edit_nas_dir.text().strip(),
             cookies_browser=self.combo_cookies.currentData(),
             auto_subtitle=self.chk_auto_subtitle.isChecked(),
+            proxy=self.edit_proxy.text().strip(),
         )
         if restart_needed:
             self.bridge.stop()
@@ -462,6 +479,7 @@ class ExtensionPage(BasePage):
             nas_sync_dir=self.edit_nas_dir.text().strip(),
             cookies_browser=self.combo_cookies.currentData(),
             auto_subtitle=self.chk_auto_subtitle.isChecked(),
+            proxy=self.edit_proxy.text().strip(),
         )
 
     def _update_engine(self):

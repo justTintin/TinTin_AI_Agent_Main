@@ -10,6 +10,17 @@
    "status": "fail",
    "error": "无效的媒体响应(text/html; charset=utf-8)，该流地址已失效或需要整页解析下载",
    "synced": ""
+  },
+  {
+   "time": "2026-07-30 13:56:21",
+   "url": "https://www.youtube.com/watch?v=4crWfJFeKG8",
+   "media_type": "video",
+   "page_url": "https://www.youtube.com/watch?v=4crWfJFeKG8",
+   "page_title": "[Head-to-Head] Kimi K3 vs. GPT & Fable - YouTube",
+   "filename": "",
+   "status": "fail",
+   "error": "下载卡住无响应（90秒无进度，可能被站点反爬拦截，建议配置 cookies）",
+   "synced": ""
   }
  ]
 }

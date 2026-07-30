@@ -18,6 +18,30 @@ from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_V14_DIR
 from utils.platform_utils import python_binary
 
+
+# ═══════════════════════════════════════════════════════════════
+# 四边形选区辅助函数（选区统一用四点四边形表示：[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]，视频原始帧像素）
+# ═══════════════════════════════════════════════════════════════
+
+def _quad_aabb(quad):
+    """四点四边形 → 轴对齐外接框 (x, y, w, h)。本地 CLI 只支持矩形，用 AABB 退化。"""
+    xs = [p[0] for p in quad]
+    ys = [p[1] for p in quad]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
+def _rect_to_quad(x, y, w, h):
+    """矩形 [x,y,w,h] → 顺时针四点四边形（左上→右上→右下→左下）。"""
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+
+
+def _quad_to_relative_polygon(quad, fw, fh):
+    """四点像素 → 相对坐标四点 [[x_rel,y_rel],...]（服务端 polygon 格式）。"""
+    return [[round(p[0] / fw, 4), round(p[1] / fh, 4)] for p in quad]
+
+
 class SubtitleRemovalWorkerV14(QThread):
     progress_updated = Signal(int)
     status_updated = Signal(str)
@@ -267,15 +291,16 @@ class RemoteVSRWorkerV14(QThread):
     log_received = Signal(str)
     finished = Signal(bool, str)
 
-    def __init__(self, video_path, boxes, inpaint_mode, output_path):
+    def __init__(self, video_path, sub_areas, inpaint_mode, output_path):
         """
-        :param boxes: list of (ymin, ymax, xmin, xmax) tuples
+        :param sub_areas: 服务端 sub_areas JSON 字符串。空串=""智能去除；
+                          选区去除为四边形相对坐标 [[[x_rel,y_rel]×4], ...]
         :param inpaint_mode: 服务端算法名 sttn_det/sttn_auto/lama/propainter
         :param output_path: 结果下载后的本地保存路径
         """
         super().__init__()
         self.video_path = video_path
-        self.boxes = boxes
+        self.sub_areas = sub_areas
         self.inpaint_mode = inpaint_mode
         self.output_path = output_path
         self.is_aborted = False
@@ -311,15 +336,15 @@ class RemoteVSRWorkerV14(QThread):
                 return
             self._base_url = base_url
 
-            # sub_areas 格式: [[ymin,ymax,xmin,xmax], ...]（对齐服务端 box 支持）
-            sub_areas = _json.dumps([list(b) for b in self.boxes])
+            is_smart = not self.sub_areas
             self.status_updated.emit("正在上传视频到服务端...")
-            self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  选区数={len(self.boxes)} mode={self.inpaint_mode}")
+            desc = "智能去除（服务端自动检测）" if is_smart else f"选区去除 {self.sub_areas[:60]}"
+            self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  mode={self.inpaint_mode}  {desc}")
             self.progress_updated.emit(5)
 
             with open(self.video_path, "rb") as f:
                 files = {"file": (os.path.basename(self.video_path), f, "video/mp4")}
-                data = {"inpaint_mode": self.inpaint_mode, "sub_areas": sub_areas}
+                data = {"inpaint_mode": self.inpaint_mode, "sub_areas": self.sub_areas}
                 r = requests.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
             if r.status_code != 200:
                 self.finished.emit(False, f"服务端返回 {r.status_code}: {r.text[:300]}")
@@ -392,8 +417,8 @@ class RemoteVSRWorkerV14(QThread):
 
 
 class InteractivePreviewLabelV14(QLabel):
-    boundsChanged = Signal(int, int, int, int, int) # index, x, y, w, h
-    selectionChanged = Signal(int) # active_index
+    boundsChanged = Signal(int)  # index — 选区四点变化，页面读 self.boxes[idx]
+    selectionChanged = Signal(int)  # active_index
     resized = Signal()
 
     def __init__(self, parent=None):
@@ -402,21 +427,22 @@ class InteractivePreviewLabelV14(QLabel):
         self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")
         self.setMinimumSize(400, 300)
         self.setMouseTracking(True)
-        
-        self.boxes = [] # Each item is a list: [x, y, w, h]
+
+        self.boxes = []  # 每个元素是四点四边形 [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]（视频原始帧像素，顺时针）
         self.active_box_index = -1
-        
+
         self.frame_w = 0
         self.frame_h = 0
-        
+
         self.target_w = 0
         self.target_h = 0
         self.px_offset_x = 0
         self.px_offset_y = 0
-        
-        self.drag_mode = None
+
+        self.drag_mode = None      # None | 'move' | 'vertex-N' (N=0..3) | 'draw'
         self.drag_start_pos = None
-        self.drag_start_rect = None
+        self.drag_start_quad = None  # 拖动起始时的四点副本（帧坐标）
+        self.draw_start = None       # 新画矩形起始点（widget 坐标）
 
     def sizeHint(self):
         return QSize(400, 300)
@@ -425,120 +451,101 @@ class InteractivePreviewLabelV14(QLabel):
         self.boxes = boxes
         self.active_box_index = active_index
 
+    def _widget_to_frame(self, pos):
+        """widget 像素坐标 → 视频原始帧像素坐标。"""
+        if self.target_w <= 0 or self.target_h <= 0:
+            return None
+        fx = (pos.x() - self.px_offset_x) * self.frame_w / self.target_w
+        fy = (pos.y() - self.px_offset_y) * self.frame_h / self.target_h
+        return (int(fx), int(fy))
+
+    def _point_in_quad(self, px, py, quad):
+        """点是否在四边形内（射线法）。"""
+        n = len(quad)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = quad[i]
+            xj, yj = quad[j]
+            if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi):
+                inside = not inside
+            j = i
+        return inside
+
     def get_handle_under_mouse(self, pos):
+        """返回 (handle, idx)。handle: 'vertex-N'（N=0..3，仅激活框）/ 'move'（任意框内）/ None。"""
         if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0 or not self.boxes:
             return None, -1
-            
+
         mx, my = pos.x(), pos.y()
         w_ratio = self.target_w / self.frame_w
         h_ratio = self.target_h / self.frame_h
-        threshold = 10 # pixels
-        
-        # Check active box first
+        threshold = 10  # widget 像素
+
+        # 激活框优先
         box_indices = list(range(len(self.boxes)))
-        if self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
+        if 0 <= self.active_box_index < len(self.boxes):
             box_indices.remove(self.active_box_index)
             box_indices.insert(0, self.active_box_index)
-            
+
         for idx in box_indices:
-            x, y, w, h = self.boxes[idx]
-            rx0 = self.px_offset_x + x * w_ratio
-            ry0 = self.px_offset_y + y * h_ratio
-            rx1 = self.px_offset_x + (x + w) * w_ratio
-            ry1 = self.px_offset_y + (y + h) * h_ratio
-            
-            near_left = abs(mx - rx0) < threshold
-            near_right = abs(mx - rx1) < threshold
-            near_top = abs(my - ry0) < threshold
-            near_bottom = abs(my - ry1) < threshold
-            
+            quad = self.boxes[idx]
             is_active = (idx == self.active_box_index)
-            
+            # 激活框：先检测 4 个顶点手柄
             if is_active:
-                if near_left and near_top:
-                    return 'top-left', idx
-                if near_right and near_top:
-                    return 'top-right', idx
-                if near_left and near_bottom:
-                    return 'bottom-left', idx
-                if near_right and near_bottom:
-                    return 'bottom-right', idx
-                    
-                if near_left and ry0 <= my <= ry1:
-                    return 'left', idx
-                if near_right and ry0 <= my <= ry1:
-                    return 'right', idx
-                if near_top and rx0 <= mx <= rx1:
-                    return 'top', idx
-                if near_bottom and rx0 <= mx <= rx1:
-                    return 'bottom', idx
-            
-            if rx0 < mx < rx1 and ry0 < my < ry1:
+                for vi, (vx, vy) in enumerate(quad):
+                    rx = self.px_offset_x + vx * w_ratio
+                    ry = self.px_offset_y + vy * h_ratio
+                    if abs(mx - rx) < threshold and abs(my - ry) < threshold:
+                        return f'vertex-{vi}', idx
+            # 所有框：检测四边形内部（射线法，帧坐标）
+            fpt = self._widget_to_frame(pos)
+            if fpt and self._point_in_quad(fpt[0], fpt[1], quad):
                 return 'move', idx
-                
         return None, -1
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            handle, idx = self.get_handle_under_mouse(event.pos())
-            if handle is not None:
-                if idx != self.active_box_index:
-                    self.active_box_index = idx
-                    self.selectionChanged.emit(idx)
-                self.drag_mode = handle
-                self.drag_start_pos = event.pos()
-                self.drag_start_rect = list(self.boxes[idx])
+        if event.button() != Qt.LeftButton:
+            return
+        handle, idx = self.get_handle_under_mouse(event.pos())
+        if handle is not None:
+            if idx != self.active_box_index:
+                self.active_box_index = idx
+                self.selectionChanged.emit(idx)
+            self.drag_mode = handle
+            self.drag_start_pos = event.pos()
+            self.drag_start_quad = [list(p) for p in self.boxes[idx]]
 
     def mouseMoveEvent(self, event):
+        # 顶点/整体移动拖动
         if self.drag_mode is not None and self.drag_start_pos is not None and self.active_box_index >= 0:
-            delta_x_widget = event.pos().x() - self.drag_start_pos.x()
-            delta_y_widget = event.pos().y() - self.drag_start_pos.y()
-            
-            w_ratio = self.frame_w / self.target_w
-            h_ratio = self.frame_h / self.target_h
-            
-            delta_x = int(delta_x_widget * w_ratio)
-            delta_y = int(delta_y_widget * h_ratio)
-            
-            sx, sy, sw, sh = self.drag_start_rect
-            
+            cur = self._widget_to_frame(event.pos())
+            start = self._widget_to_frame(self.drag_start_pos)
+            if not cur or not start:
+                return
+            dx = cur[0] - start[0]
+            dy = cur[1] - start[1]
+            sq = self.drag_start_quad  # 起始四点
+
             if self.drag_mode == 'move':
-                nx = sx + delta_x
-                ny = sy + delta_y
-                nx = max(0, min(nx, self.frame_w - sw))
-                ny = max(0, min(ny, self.frame_h - sh))
-                self.boxes[self.active_box_index] = [nx, ny, sw, sh]
-            else:
-                x0 = sx
-                y0 = sy
-                x1 = sx + sw
-                y1 = sy + sh
-                
-                min_size = 10
-                
-                if 'left' in self.drag_mode:
-                    x0 = max(0, min(x0 + delta_x, x1 - min_size))
-                if 'right' in self.drag_mode:
-                    x1 = min(self.frame_w, max(x1 + delta_x, x0 + min_size))
-                if 'top' in self.drag_mode:
-                    y0 = max(0, min(y0 + delta_y, y1 - min_size))
-                if 'bottom' in self.drag_mode:
-                    y1 = min(self.frame_h, max(y1 + delta_y, y0 + min_size))
-                    
-                self.boxes[self.active_box_index] = [x0, y0, x1 - x0, y1 - y0]
-                
-            bx = self.boxes[self.active_box_index]
-            self.boundsChanged.emit(self.active_box_index, bx[0], bx[1], bx[2], bx[3])
+                # 整体平移：clamp 使 AABB 不出帧
+                aabb = _quad_aabb(sq)
+                nx = max(-aabb[0], min(dx, self.frame_w - aabb[0] - aabb[2]))
+                ny = max(-aabb[1], min(dy, self.frame_h - aabb[1] - aabb[3]))
+                self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]
+            elif self.drag_mode.startswith('vertex-'):
+                vi = int(self.drag_mode.split('-')[1])
+                new_quad = [list(p) for p in sq]
+                new_quad[vi] = [max(0, min(self.frame_w, cur[0])),
+                                max(0, min(self.frame_h, cur[1]))]
+                self.boxes[self.active_box_index] = new_quad
+
+            self.boundsChanged.emit(self.active_box_index)
         else:
-            handle, idx = self.get_handle_under_mouse(event.pos())
-            if handle in ('top-left', 'bottom-right'):
-                self.setCursor(Qt.SizeFDiagCursor)
-            elif handle in ('top-right', 'bottom-left'):
-                self.setCursor(Qt.SizeBDiagCursor)
-            elif handle in ('left', 'right'):
-                self.setCursor(Qt.SizeHorCursor)
-            elif handle in ('top', 'bottom'):
-                self.setCursor(Qt.SizeVerCursor)
+            # 光标提示
+            handle, _ = self.get_handle_under_mouse(event.pos())
+            if handle and handle.startswith('vertex-'):
+                self.setCursor(Qt.SizeAllCursor)
             elif handle == 'move':
                 self.setCursor(Qt.SizeAllCursor)
             else:
@@ -548,7 +555,7 @@ class InteractivePreviewLabelV14(QLabel):
         if event.button() == Qt.LeftButton:
             self.drag_mode = None
             self.drag_start_pos = None
-            self.drag_start_rect = None
+            self.drag_start_quad = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -742,8 +749,19 @@ class SubtitleRemovalPageV14(BasePage):
         controls_layout.setContentsMargins(0, 20, 0, 20)
         controls_layout.setSpacing(14)
 
+        # ── 去除模式切换：智能去除（服务端自动检测）/ 选区去除（手画四边形）──
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("去除模式:"))
+        self.mode_switch = QComboBox()
+        self.mode_switch.addItem("🤖 智能去除（自动检测，无需画框）", "smart")
+        self.mode_switch.addItem("✏️ 选区去除（手画四边形选区）", "select")
+        self.mode_switch.currentIndexChanged.connect(self._on_mode_switched)
+        mode_row.addWidget(self.mode_switch, 1)
+        controls_layout.addLayout(mode_row)
+
         # Combined Subtitle Area Manager & Editor (Visual Design Optimized)
         box_manage_group = QFrame()
+        self.box_manage_group = box_manage_group
         box_manage_group.setObjectName("box_manage_group")
         box_manage_group.setStyleSheet("#box_manage_group { background-color: #26262a; border-top: 1px solid #2e2e32; border-bottom: 1px solid #2e2e32; border-radius: 0px; }")
         box_manage_layout = QVBoxLayout(box_manage_group)
@@ -801,8 +819,10 @@ class SubtitleRemovalPageV14(BasePage):
         sep.setStyleSheet("background-color: #2e2e32; max-height: 1px;")
         box_manage_layout.addWidget(sep)
 
-        # Coordinate sliders
-        sliders_layout = QVBoxLayout()
+        # Coordinate sliders（包在容器里，智能去除模式下整体隐藏）
+        self.sliders_container = QWidget()
+        sliders_layout = QVBoxLayout(self.sliders_container)
+        sliders_layout.setContentsMargins(0, 0, 0, 0)
         sliders_layout.setSpacing(14)
 
         def create_slider_row(label_text, slider, val_lbl):
@@ -837,7 +857,7 @@ class SubtitleRemovalPageV14(BasePage):
         self.h_val_lbl = QLabel("1")
         sliders_layout.addLayout(create_slider_row("字幕选区高 H:", self.h_slider, self.h_val_lbl))
 
-        box_manage_layout.addLayout(sliders_layout)
+        box_manage_layout.addWidget(self.sliders_container)
         controls_layout.addWidget(box_manage_group)
 
         # Options & action buttons (bottom of control card)
@@ -1051,14 +1071,14 @@ class SubtitleRemovalPageV14(BasePage):
             self.y_slider.blockSignals(False)
             self.h_slider.blockSignals(False)
 
-            # Initialize first default box
+            # Initialize first default box（四点四边形，默认为字幕带矩形）
             self.boxes = [
-                [
+                _rect_to_quad(
                     int(self.frame_width * 0.05),
                     int(self.frame_height * 0.78),
                     int(self.frame_width * 0.90),
-                    int(self.frame_height * 0.21)
-                ]
+                    int(self.frame_height * 0.21),
+                )
             ]
             self.active_box_index = 0
             self._update_box_list_widget()
@@ -1077,11 +1097,35 @@ class SubtitleRemovalPageV14(BasePage):
             self.original_frame = None
             self.preview_label.setText(f"预览加载失败: {e}")
 
+    def _is_smart_mode(self):
+        """智能去除模式：不画框，服务端自动检测字幕。"""
+        return getattr(self, "mode_switch", None) is not None and self.mode_switch.currentData() == "smart"
+
+    def _is_select_mode(self):
+        """选区去除模式：用户画四边形选区。"""
+        return not self._is_smart_mode()
+
+    def _on_mode_switched(self, _idx):
+        """切换智能/选区模式：显隐选区管理区，刷新预览。"""
+        is_select = self._is_select_mode()
+        # 选区管理区（列表/滑块/添加删除）仅在选区模式显示
+        for w in [getattr(self, "box_manage_group", None),
+                  getattr(self, "sliders_container", None)]:
+            if w is not None:
+                w.setVisible(is_select)
+        # 智能去除必须走服务端（本地 CLI 无自动检测能力），强制勾选并禁用切换
+        if not is_select:
+            self.server_mode_chk.setChecked(True)
+            self.server_mode_chk.setEnabled(False)
+        else:
+            self.server_mode_chk.setEnabled(True)
+        self.update_preview()
+
     def _update_box_list_widget(self):
         self.box_list_widget.blockSignals(True)
         self.box_list_widget.clear()
-        for idx, box in enumerate(self.boxes):
-            x, y, w, h = box
+        for idx, quad in enumerate(self.boxes):
+            x, y, w, h = _quad_aabb(quad)
             self.box_list_widget.addItem(f"选区 {idx+1}: X={x}, Y={y}, W={w}, H={h}")
         if self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
             self.box_list_widget.setCurrentRow(self.active_box_index)
@@ -1090,7 +1134,7 @@ class SubtitleRemovalPageV14(BasePage):
 
     def _sync_sliders_to_active_box(self):
         if self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
-            x, y, w, h = self.boxes[self.active_box_index]
+            x, y, w, h = _quad_aabb(self.boxes[self.active_box_index])
             
             self.x_slider.blockSignals(True)
             self.w_slider.blockSignals(True)
@@ -1125,23 +1169,18 @@ class SubtitleRemovalPageV14(BasePage):
     def _add_box(self):
         if not self.video_path_input.text().strip() or self.original_frame is None:
             return
-            
-        default_box = [
-            int(self.frame_width * 0.05),
-            int(self.frame_height * 0.78),
-            int(self.frame_width * 0.90),
-            int(self.frame_height * 0.21)
-        ]
-        
+
+        x = int(self.frame_width * 0.05)
+        y = int(self.frame_height * 0.78)
+        w = int(self.frame_width * 0.90)
+        h = int(self.frame_height * 0.21)
         if self.boxes:
-            last_box = self.boxes[-1]
-            default_box[0] = last_box[0]
-            default_box[2] = last_box[2]
-            # Shift vertically upwards slightly so it doesn't overlap completely
-            default_box[1] = max(0, last_box[1] - 40)
-            default_box[3] = last_box[3]
-            
-        self.boxes.append(default_box)
+            lx, ly, lw, lh = _quad_aabb(self.boxes[-1])
+            x = lx
+            w = lw
+            y = max(0, ly - 40)  # 上移避免完全重叠
+            h = lh
+        self.boxes.append(_rect_to_quad(x, y, w, h))
         self.active_box_index = len(self.boxes) - 1
         self._update_box_list_widget()
         self.update_preview()
@@ -1158,23 +1197,19 @@ class SubtitleRemovalPageV14(BasePage):
     def update_preview(self):
         if self.worker and self.worker.isRunning():
             return
-            
-        if self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
+
+        # 选区去除模式下，滑块控制激活框的 AABB（顶点拖动后同步滑块；滑块拖动则改 AABB）
+        if self._is_select_mode() and self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
             x = self.x_slider.value()
             w = self.w_slider.value()
             y = self.y_slider.value()
             h = self.h_slider.value()
-
-            # Update text labels
             self.x_val_lbl.setText(str(x))
             self.w_val_lbl.setText(str(w))
             self.y_val_lbl.setText(str(y))
             self.h_val_lbl.setText(str(h))
-
-            # Update active box
-            self.boxes[self.active_box_index] = [x, y, w, h]
-            
-            # Update list item text quietly
+            # 滑块改动 → 重置激活框为该 AABB 的矩形四点
+            self.boxes[self.active_box_index] = _rect_to_quad(x, y, w, h)
             self.box_list_widget.blockSignals(True)
             item = self.box_list_widget.item(self.active_box_index)
             if item:
@@ -1206,19 +1241,22 @@ class SubtitleRemovalPageV14(BasePage):
             # PIL resize
             resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
-            # Draw all bounding boxes
+            # 绘制四边形选区（智能去除模式下不画）
             draw = ImageDraw.Draw(resized_img)
-            for idx, box in enumerate(self.boxes):
-                bx, by, bw, bh = box
-                rx0 = int(bx * target_w / w_img)
-                ry0 = int(by * target_h / h_img)
-                rx1 = int((bx + bw) * target_w / w_img)
-                ry1 = int((by + bh) * target_h / h_img)
-                
-                if idx == self.active_box_index:
-                    draw.rectangle([rx0, ry0, rx1, ry1], outline="#00ff00", width=3)
-                else:
-                    draw.rectangle([rx0, ry0, rx1, ry1], outline="#00ffff", width=2)
+            if self._is_select_mode():
+                for idx, quad in enumerate(self.boxes):
+                    # 帧坐标 → 显示坐标
+                    pts = [(int(p[0] * target_w / w_img), int(p[1] * target_h / h_img)) for p in quad]
+                    is_active = (idx == self.active_box_index)
+                    outline = "#00ff00" if is_active else "#00ffff"
+                    width = 3 if is_active else 2
+                    draw.polygon(pts, outline=outline, width=width)
+                    # 激活框：在 4 个顶点画小方块手柄
+                    if is_active:
+                        hs = 5  # 手柄半边长
+                        for (hx, hy) in pts:
+                            draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
+                                           fill="#00ff00", outline="#ffffff")
 
             # Convert to QImage
             rgb_img = resized_img.convert("RGB")
@@ -1226,30 +1264,27 @@ class SubtitleRemovalPageV14(BasePage):
             qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)
             self.preview_label.setPixmap(QPixmap.fromImage(qImg))
 
-    def _on_label_bounds_changed(self, idx, x, y, w, h):
+    def _on_label_bounds_changed(self, idx):
+        """label 上顶点拖动/整体移动后，同步滑块到激活四边形的 AABB。"""
         self.active_box_index = idx
-        self.boxes[idx] = [x, y, w, h]
-        
+        quad = self.boxes[idx]
+        x, y, w, h = _quad_aabb(quad)
         self.x_slider.blockSignals(True)
         self.w_slider.blockSignals(True)
         self.y_slider.blockSignals(True)
         self.h_slider.blockSignals(True)
-
         self.x_slider.setValue(x)
         self.w_slider.setValue(w)
         self.y_slider.setValue(y)
         self.h_slider.setValue(h)
-
         self.x_val_lbl.setText(str(x))
         self.w_val_lbl.setText(str(w))
         self.y_val_lbl.setText(str(y))
         self.h_val_lbl.setText(str(h))
-
         self.x_slider.blockSignals(False)
         self.w_slider.blockSignals(False)
         self.y_slider.blockSignals(False)
         self.h_slider.blockSignals(False)
-        
         # Update list item text quietly
         self.box_list_widget.blockSignals(True)
         item = self.box_list_widget.item(idx)
@@ -1257,7 +1292,6 @@ class SubtitleRemovalPageV14(BasePage):
             item.setText(f"选区 {idx+1}: X={x}, Y={y}, W={w}, H={h}")
         self.box_list_widget.setCurrentRow(idx)
         self.box_list_widget.blockSignals(False)
-        
         self.update_preview()
 
     def _on_label_selection_changed(self, idx):
@@ -1273,20 +1307,22 @@ class SubtitleRemovalPageV14(BasePage):
             QMessageBox.warning(self.parent_widget, "参数错误", "请先选择有效的输入视频或图片！")
             return
 
-        if not self.boxes:
+        # 选区去除模式必须至少有一个选区；智能去除模式不需要
+        is_smart = self._is_smart_mode()
+        if not is_smart and not self.boxes:
             QMessageBox.warning(self.parent_widget, "参数错误", "请先设置至少一个擦除选区！")
             return
 
-        # Convert [x, y, w, h] to (ymin, ymax, xmin, xmax) for the backend
-        worker_boxes = []
-        for box in self.boxes:
-            bx, by, bw, bh = box
-            worker_boxes.append((by, by + bh, bx, bx + bw))
-
-        # 服务端模式：上传视频 + 全部选区到 /vsr/remove
-        if self.server_mode_chk.isChecked():
-            self._start_remote_removal(video_path, worker_boxes)
+        # 智能去除必须走服务端（本地 CLI 无自动检测能力）；选区去除按 server_mode_chk 决定
+        if is_smart or self.server_mode_chk.isChecked():
+            self._start_remote_removal(video_path)
             return
+
+        # 本地模式：本地 CLI 只支持矩形，四边形退化为其 AABB 像素
+        worker_boxes = []
+        for quad in self.boxes:
+            x, y, w, h = _quad_aabb(quad)
+            worker_boxes.append((y, y + h, x, x + w))
 
         vsr_dir = VSR_V14_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
@@ -1363,8 +1399,8 @@ class SubtitleRemovalPageV14(BasePage):
         self.btn_prev_frame.setEnabled(False)
         self.btn_next_frame.setEnabled(False)
 
-    def _start_remote_removal(self, video_path, worker_boxes):
-        """服务端模式：上传视频 + 全部选区 sub_areas 到 /vsr/remove。"""
+    def _start_remote_removal(self, video_path):
+        """服务端模式：上传视频到 /vsr/remove。智能去除传空 sub_areas，选区去除传四边形相对坐标。"""
         # 算法映射（服务端 inpaint_mode: sttn_det/sttn_auto/lama/propainter）
         mode = self.mode_combo.currentData()
         if mode == "lama":
@@ -1374,6 +1410,14 @@ class SubtitleRemovalPageV14(BasePage):
         else:
             # STTN：勾选跳过检测(去水印模式)→sttn_auto；未勾选(精准检测)→sttn_det
             inpaint_mode = "sttn_auto" if self.skip_detect_chk.isChecked() else "sttn_det"
+
+        # 智能去除模式：空 sub_areas，服务端自动检测字幕；选区去除模式：四边形相对坐标
+        if self._is_smart_mode():
+            sub_areas = ""
+        else:
+            # 每个四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
+            polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]
+            sub_areas = _json.dumps(polys)
 
         base_dir = os.path.dirname(video_path)
         vd_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -1390,7 +1434,7 @@ class SubtitleRemovalPageV14(BasePage):
 
         self.worker = RemoteVSRWorkerV14(
             video_path=video_path,
-            boxes=worker_boxes,
+            sub_areas=sub_areas,
             inpaint_mode=inpaint_mode,
             output_path=output_path,
         )

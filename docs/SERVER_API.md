@@ -434,13 +434,43 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 |------|------|------|------|
 | file | binary | — | 视频文件 |
 | inpaint_mode | string | "sttn_det" | 算法：sttn_det/sttn_auto/lama/propainter |
-| sub_areas | string | "" | 字幕区域 JSON `[[ymin,ymax,xmin,xmax]]` |
+| sub_areas | string | "" | 字幕区域 JSON，三种格式见下 |
 
-**异步**：返回 task_id → `GET /tasks/unified/{task_id}` 查询（统一接口） → `GET /vsr/download/{filename}` 下载
+**`sub_areas` 三种格式**（均为**相对坐标** 0~1，非像素）：
+- **空字符串 `""`**：智能去除，服务端自动检测字幕位置（对应客户端"智能去除"模式）
+- **矩形** `[[ymin_rel, ymax_rel, xmin_rel, xmax_rel]]`，例：`[[0.88, 0.99, 0.15, 0.85]]`
+- **多边形（不规则四边形，用于斜水印）** `[[[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]]]`，四点相对坐标，例：`[[[[0.1,0.1],[0.9,0.1],[0.9,0.9],[0.1,0.9]]]]`
+
+> 客户端 `subtitle_removal_page_v14.py` 现用四边形格式提交（支持斜水印）；本地 CLI 模式仍用矩形像素（四边形退化为其 AABB 外接框）。
+
+**异步**：返回 `{"task_id","status":"pending","message"}` → 轮询 `GET /vsr/result/{task_id}`（status: pending→running→completed）→ `GET /vsr/download/{filename}` 下载
+
+### `POST /vsr/detect` — 自动检测字幕框
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| file | binary | — | 视频文件 |
+| interval | number | 1.0 | 采样间隔（秒） |
+
+异步返回 task_id，轮询 `GET /vsr/result/{task_id}`，完成后 `result.boxes[]` 结构：
+```json
+{
+  "video": {"width":640,"height":360,"fps":25.0,"frame_count":50,"duration":2.0},
+  "sampled_frames": 2, "frames_with_text": 2,
+  "boxes": [{
+    "xmin":226,"xmax":411,"ymin":327,"ymax":355,        // 像素坐标
+    "xmin_rel":0.3531,"xmax_rel":0.6422,"ymin_rel":0.9083,"ymax_rel":0.9861,  // 相对坐标
+    "polygon":[[0.3531,0.9083],[0.6422,0.9083],[0.6422,0.9861],[0.3531,0.9861]]  // 四点相对坐标
+  }]
+}
+```
 
 | 端点 | Method | 说明 |
 |------|--------|------|
-| `/vsr/detect` | POST | 自动检测字幕区域（返回 boxes） |
+| `/vsr/remove` | POST | 去字幕（支持空/矩形/多边形 sub_areas） |
+| `/vsr/detect` | POST | 自动检测字幕区域（返回 boxes+polygon） |
+| `/vsr/analyze` | POST | 视频分析（file, interval, sub_areas） |
+| `/vsr/result/{task_id}` | GET | 查询任务结果（status/progress/log/result） |
+| `/vsr/download/{filename}` | GET | 下载结果视频 |
 | `/vsr/health` | GET | VSR 服务健康检查 |
 
 ---
@@ -609,5 +639,5 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 | `POST /material/beat_detect` | `POST /audio/beatmap` | 音乐卡点接口在 audio 模块，非 material |
 | 轮询 `GET /material/beat_detect/{task_id}` | `GET /tasks/{task_id}` | 通用任务轮询路径 |
 | 轮询 `GET /material/score_clip/{task_id}` | `GET /tasks/unified/{task_id}` | 统一任务查询接口 |
-| VSR 参数 `ymin/ymax/xmin/xmax` 分开传 | `sub_areas` JSON 字符串 | 格式: `[[ymin,ymax,xmin,xmax]]` |
-| VSR 跳过轮询直接拼 download URL | 先轮询 `GET /tasks/unified/{task_id}` | 等完成后再取文件名下载 |
+| VSR 参数 `ymin/ymax/xmin/xmax` 分开传 | `sub_areas` JSON 字符串 | 三种格式：空(智能)/矩形/多边形，均为相对坐标（见 §七） |
+| VSR 跳过轮询直接拼 download URL | 先轮询 `GET /vsr/result/{task_id}` | 等完成后再取文件名下载 |

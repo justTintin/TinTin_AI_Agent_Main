@@ -526,7 +526,7 @@ class VideoMontagePage(BasePage):
         self.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.btn_next_to_step_2.setObjectName("primary_button")
         self.btn_next_to_step_2.setEnabled(True)
-        self.btn_next_to_step_2.clicked.connect(lambda: self._go_to_step(1))
+        self.btn_next_to_step_2.clicked.connect(self._go_next_to_step2)
         nav_row.addWidget(self.btn_next_to_step_2)
         layout.addLayout(nav_row)
 

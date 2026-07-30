@@ -1442,8 +1442,19 @@ class VideoMontagePage(BasePage):
             added += 1
 
         log.info(f"[DIAG _select_folder] selected={len(file_paths)} added={added} list_count={self.video_list.count()}")
-        if self.video_list.count() > 0 and self.video_list.currentItem() is None:
-            self.video_list.setCurrentRow(0)
+        # 多素材时走合并视图：收集列表中所有视频各自的 per-video splits 目录，
+        # 并清空当前选中项与 processing_video_path，使 _check_split_clips_exist
+        # 走「合并扫描」分支展示全部素材的分镜片段（否则会只显示列表第一项的片段）。
+        all_splits_dirs = []
+        for i in range(self.video_list.count()):
+            _p = self.video_list.item(i).text().strip()
+            if _p:
+                _vdir = os.path.dirname(_p)
+                _vbase = os.path.splitext(os.path.basename(_p))[0]
+                all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
+        self._last_merged_splits_dirs = all_splits_dirs
+        self.processing_video_path = ""
+        self.video_list.setCurrentItem(None)
         self._refresh_source_root_hint()
         self._check_split_clips_exist()
         if added == 0:
@@ -4968,20 +4979,40 @@ class VideoMontagePage(BasePage):
         self._go_to_step(1)
     # [3·分割]  _sync_step1_checkboxes_to_clips
     def _sync_step1_checkboxes_to_clips(self):
-        """从步骤1表格的checkbox列同步勾选状态到 _available_concat_clips。"""
+        """从步骤1表格重建 _available_concat_clips 并同步勾选状态。
+
+        多素材合并分割后，_scan_concat_src_dir 只能扫单个目录，会导致第②步
+        只看到第一个视频的片段。这里直接从步骤1表格（已含全部合并片段）重建列表，
+        确保进入第②步能看到全部勾选的镜头。
+        """
         tbl = getattr(self, "split_result_table", None)
         if tbl is None:
             return
-        checked_paths = set()
+        # 先记录第②步里用户已手动勾选的（进入第②步后保留其选择）
+        prev_checked = {c.get("path") for c in getattr(self, "_available_concat_clips", [])
+                        if c.get("checked")}
+        new_clips = []
         for r in range(tbl.rowCount()):
             chk_item = tbl.item(r, 0)
             file_item = tbl.item(r, 2)
-            if chk_item and file_item and chk_item.checkState() == Qt.Checked:
-                path = file_item.data(Qt.UserRole)
-                if path:
-                    checked_paths.add(path)
-        for clip in getattr(self, "_available_concat_clips", []):
-            clip["checked"] = clip.get("path") in checked_paths
+            if not file_item:
+                continue
+            path = file_item.data(Qt.UserRole)
+            if not path:
+                continue
+            cache = getattr(self, "split_clips_cache", {}).get(path, {})
+            # 勾选状态：以步骤1表格为准；若第②步之前勾过也保留，避免来回切换丢勾选
+            checked = (bool(chk_item) and chk_item.checkState() == Qt.Checked) or (path in prev_checked)
+            new_clips.append({
+                "path": path,
+                "filename": cache.get("filename") or file_item.text(),
+                "time_str": cache.get("time_str", ""),
+                "desc": cache.get("desc", ""),
+                "duration": cache.get("duration", 0.0),
+                "score": cache.get("score"),
+                "checked": checked,
+            })
+        self._available_concat_clips = new_clips
         self._update_concat_count_lbl()
     # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):

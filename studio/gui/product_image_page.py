@@ -217,9 +217,9 @@ class ProductImagePage(BasePage):
 
     @property
     def _server_url(self):
-        """获取服务端地址。"""
+        """获取服务端地址（跟随 compute_server_url，未配置返回空串）。"""
         url = (self.ai_config.get("compute_server_url") or "").strip().rstrip("/")
-        return url or "http://192.168.111.19:8000"
+        return url
 
     def setup(self):
         root = QVBoxLayout(self.parent_widget)

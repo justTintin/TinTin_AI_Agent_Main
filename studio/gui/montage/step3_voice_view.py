@@ -38,9 +38,17 @@ class Step3VoiceView(BaseStepView):
         card_layout.addLayout(row_vid_dir)
 
         # 远程 TTS API 地址输入框（纯远程模式；保存时同步到 ai_config）
+        # 初值跟随系统设置里的 vox_api_url（与 compute_server_url 一致），
+        # 配置为空时用占位符提示，不写死任何地址。
         self.main_page.api_url_input = QLineEdit()
-        self.main_page.api_url_input.setText("http://192.168.111.18:8000/voxcpm/tts")
-        self.main_page.api_url_input.setPlaceholderText("http://192.168.111.18:8000/voxcpm/tts")
+        try:
+            _cfg = getattr(self.main_page.main_window, "ai_config", {}) or {}
+        except Exception:
+            _cfg = {}
+        _saved_vox = (_cfg.get("vox_api_url") or "").strip()
+        if _saved_vox:
+            self.main_page.api_url_input.setText(_saved_vox)
+        self.main_page.api_url_input.setPlaceholderText("跟随系统设置 → VoxCPM/TTS 地址（形如 http://<服务端>:8000/voxcpm/tts）")
 
         # 2a. Reference Voice Row
         row_voice = QHBoxLayout()

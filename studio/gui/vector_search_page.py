@@ -38,7 +38,7 @@ def _get_server_url():
                 return url
     except Exception:
         pass
-    return "http://192.168.111.28:8000"
+    return ""
 
 
 def _serve_url(material_id):

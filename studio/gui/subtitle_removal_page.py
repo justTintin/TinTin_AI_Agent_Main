@@ -877,13 +877,15 @@ class SubtitleRemovalPage(BasePage):
                 try:
                     from config.paths import AI_CONFIG_FILE
                     import json as _json
-                    base_url = "http://192.168.111.18:8000"
+                    base_url = ""
                     if os.path.isfile(AI_CONFIG_FILE):
                         with open(AI_CONFIG_FILE, "r") as f:
                             cfg = _json.load(f)
                         url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
                         if url:
                             base_url = url
+                    if not base_url:
+                        raise RuntimeError("未配置统一服务端地址（compute_server_url），请在系统设置中填写。")
 
                     # 上传文件（服务端文档: docs/SERVER_API.md §VSR）
                     # sub_areas 格式: [[ymin,ymax,xmin,xmax], ...]

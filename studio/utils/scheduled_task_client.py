@@ -32,7 +32,7 @@ def _server_url():
                 return url
     except Exception:
         pass
-    return "http://192.168.111.19:8000"
+    return ""
 
 
 # ── 同步 API（供 Worker 调用，全部带超时）──────────────────────────────────

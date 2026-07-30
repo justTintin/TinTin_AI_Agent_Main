@@ -920,9 +920,10 @@ class VideoMontagePage(BasePage):
         card_layout.addLayout(row_vid_dir)
 
         # 远程 TTS API 地址输入框（纯远程模式；保存时同步到 ai_config）
+        # 初值跟随 ai_config.vox_api_url，不写死地址（页面激活时 _on_page_voice 等
+        # 方法会再次回填，此处仅给空值+占位符）。
         self.api_url_input = QLineEdit()
-        self.api_url_input.setText("http://192.168.111.18:8000/voxcpm/tts")
-        self.api_url_input.setPlaceholderText("http://192.168.111.18:8000/voxcpm/tts")
+        self.api_url_input.setPlaceholderText("跟随系统设置 → VoxCPM/TTS 地址（形如 http://<服务端>:8000/voxcpm/tts）")
 
         # 2a. Reference Voice Row
         row_voice = QHBoxLayout()
@@ -4687,11 +4688,10 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "无镜头文件", "表格中没有可用的镜头片段文件。")
             return
 
-        server_url = self._get_material_server_url()
+        server_url = self._get_compute_server_url()
         if not server_url:
             QMessageBox.warning(self.parent_widget, "未配置服务端",
-                                "请先在「环境配置」中配置素材服务地址（material_api_url）"
-                                "或算力服务端地址（compute_server_url）。")
+                                "请先在「系统设置」中配置统一服务端地址（compute_server_url）。")
             return
 
         if getattr(self, "_analysis_worker", None) and self._analysis_worker.isRunning():
@@ -4731,30 +4731,6 @@ class VideoMontagePage(BasePage):
         except Exception:
             pass
         return ""
-    # [2·基础设施]  _get_material_server_url
-    def _get_material_server_url(self):
-        """素材管理服务地址：/material/* 接口（score_clip/search/ocr 等）部署在素材服务上。
-        优先读 material_api_url，未配置时回退 compute_server_url（与文档 README/SETUP 一致）。"""
-        cfg = {}
-        try:
-            cfg = getattr(self.main_window, "ai_config", {}) or {}
-        except Exception:
-            cfg = {}
-        url = (cfg.get("material_api_url") or "").strip().rstrip("/")
-        if url:
-            return url
-        try:
-            from config.paths import AI_CONFIG_FILE
-            import json as _json
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    file_cfg = _json.load(f)
-                url = (file_cfg.get("material_api_url") or "").strip().rstrip("/")
-                if url:
-                    return url
-        except Exception:
-            pass
-        return self._get_compute_server_url()
     # [3·分割]  _on_analysis_item_ready
     def _on_analysis_item_ready(self, idx, result):
         """服务端分析完成一个镜头，回填表格。result = {score, desc, extra}"""
@@ -4880,7 +4856,7 @@ class VideoMontagePage(BasePage):
                 f"请求目标：{srv}/material/score_clip\n\n"
                 f"可能原因：\n"
                 f"· 该地址上的 /material/score_clip 接口未部署或未启动\n"
-                f"· 素材服务地址（material_api_url）配置错误，请求被发到了其他服务\n"
+                f"· 统一服务端地址（compute_server_url）配置错误，请到「系统设置」核对\n"
                 f"· 服务端返回了 HTTP 200 但未包含 score/description 字段\n\n"
                 f"请查看日志（帮助 → 系统日志）中的 [镜头分析] 详细记录。")
         else:

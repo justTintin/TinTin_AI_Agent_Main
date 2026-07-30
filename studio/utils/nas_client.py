@@ -3,7 +3,7 @@ NAS SMB 客户端 — 通过 SMB 协议直接访问 NAS 文件系统。
 
 用法:
     from utils.nas_client import NASClient
-    client = NASClient("//192.168.111.17", username="x", password="y")
+    client = NASClient("//your-nas-host", username="user", password="pass")
     for e in client.scandir("Photos"):
         print(e["name"], e["is_dir"])
 """

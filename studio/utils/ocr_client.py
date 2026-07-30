@@ -32,7 +32,7 @@ def _get_server_url():
                 return url
     except Exception:
         pass
-    return "http://192.168.111.28:8000"
+    return ""
 
 
 def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=None, timeout=60):

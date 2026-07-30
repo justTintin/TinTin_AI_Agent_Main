@@ -467,7 +467,7 @@ class PageSetupMixin:
         server_lbl.setObjectName("muted_text")
         server_row.addWidget(server_lbl)
         self.compute_server_input = QLineEdit()
-        self.compute_server_input.setPlaceholderText("http://192.168.111.18:8000（各服务默认基址）")
+        self.compute_server_input.setPlaceholderText("http://<服务器IP>:8000（统一计算节点地址）")
         self.compute_server_input.textChanged.connect(self._on_server_url_changed)
         server_row.addWidget(self.compute_server_input, 1)
         self.btn_save_server = mdi_button("保存全部", "save")
@@ -590,7 +590,7 @@ class PageSetupMixin:
         self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
         self.load_voxcpm_config()
         # 统一服务端地址初始化（会联动同步 Whisper/CLIP/PaddleOCR 的地址）
-        self.compute_server_input.setText(self.ai_config.get("compute_server_url", "http://192.168.111.18:8000"))
+        self.compute_server_input.setText(self.ai_config.get("compute_server_url", ""))
 
         # ── 统一管理：模型专属 API 地址置灰只读展示，禁止手动编辑 ──
         # LLM API 地址输入框在「自定义」模式下可编辑，其余模式只读
@@ -834,13 +834,15 @@ class PageSetupMixin:
             try:
                 from config.paths import AI_CONFIG_FILE
                 import json as _json
-                base_url = "http://192.168.111.18:8000"
+                base_url = ""
                 if os.path.isfile(AI_CONFIG_FILE):
                     with open(AI_CONFIG_FILE, "r") as f:
                         cfg = _json.load(f)
                     url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
                     if url:
                         base_url = url
+                if not base_url:
+                    return None
                 resp = _req.get(f"{base_url}/tasks", timeout=10)
                 if resp.status_code != 200:
                     return None

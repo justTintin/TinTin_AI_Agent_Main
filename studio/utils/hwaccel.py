@@ -96,9 +96,12 @@ def get_encoder() -> str:
     return _detect()["encoder"]
 
 
-def get_video_encode_args(crf: int = 23, preset: str = "fast") -> list[str]:
-    info = _detect()
-    enc = info["encoder"]
+def get_video_encode_args(crf: int = 23, preset: str = "fast", force_software: bool = False) -> list[str]:
+    if force_software:
+        enc = "libx264"
+    else:
+        info = _detect()
+        enc = info["encoder"]
     pmap = _PRESET_MAP[enc]
     mapped = pmap.get(preset, pmap.get("fast", list(pmap.values())[0]))
     args = ["-c:v", enc, "-preset", mapped]

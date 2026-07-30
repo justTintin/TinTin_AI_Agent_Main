@@ -24,7 +24,7 @@ class VideoConcatWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)  # Emits list of generated files absolute paths
 
-    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade", beat_times=None, music_path="", music_range=None):
+    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade", beat_times=None, music_path="", music_range=None, lut_path=""):
         super().__init__()
         self.selected_clips = selected_clips
         self.output_dir = output_dir
@@ -40,6 +40,7 @@ class VideoConcatWorker(BaseWorker):
         self.beat_times = list(beat_times or [])
         self.music_path = music_path or ""
         self.music_range = list(music_range or [])
+        self.lut_path = (lut_path or "").strip()
 
     def _probe_resolution(self, clip):
         """用 ffprobe 读取视频显示分辨率（已考虑旋转），失败返回 None。"""
@@ -119,12 +120,17 @@ class VideoConcatWorker(BaseWorker):
     }
 
     def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
-        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。"""
+        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。
+
+        注意：xfade 是复杂 CPU 滤镜，其输出像素格式/帧时序与硬件编码器（AMF/NVENC/QSV）
+        配合时容易出现卡顿/假死。因此本阶段统一强制使用 libx264 软编，确保稳定性。
+        当 LUT 启用时，也在 lut3d 后显式转 yuv420p，避免 10-bit/HDR 素材格式不兼容。
+        """
         if not clips:
             return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
 
         # 读取 LUT 配置
-        lut_path = self._get_selected_lut_path() if hasattr(self, "_get_selected_lut_path") else ""
+        lut_path = self.lut_path
         if lut_path and not os.path.isfile(lut_path):
             log.warning(f"[LUT] 文件不存在，跳过: {lut_path}")
             lut_path = ""
@@ -135,9 +141,10 @@ class VideoConcatWorker(BaseWorker):
         if len(clips) == 1:
             if lut_path:
                 lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
-                vf = f"lut3d='{lut_esc}'"
+                vf = f"lut3d='{lut_esc}',format=yuv420p"
+                self.stage.emit(f"单个镜头 LUT 还原（软件编码）...")
                 cmd = [ffmpeg_path, "-y", "-i", clips[0], "-vf", vf,
-                       *get_video_encode_args(crf=23, preset="superfast"),
+                       *get_video_encode_args(crf=23, preset="superfast", force_software=True),
                        "-c:a", "aac", "-ar", "44100", "-ac", "2",
                        "-movflags", "+faststart", out_file]
             else:
@@ -147,6 +154,8 @@ class VideoConcatWorker(BaseWorker):
 
         xfade_type = self._XFADE_MAP.get(self.transition, "fade")
         transition_dur = 0.5  # 转场时长 0.5 秒
+
+        self.stage.emit(f"正在合成转场视频 ({len(clips)} 个镜头){'，LUT 已启用' if lut_path else ''}...")
 
         # 获取每个片段的时长
         durations = []
@@ -174,11 +183,11 @@ class VideoConcatWorker(BaseWorker):
         for clip in clips:
             inputs += ["-i", clip]
 
-        # ── LUT 色彩还原：在 xfade 之前给每个片段加 lut3d ──
+        # ── LUT 色彩还原：在 xfade 之前给每个片段加 lut3d，并显式转 8-bit yuv420p ──
         if lut_path:
             lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
             for i in range(n):
-                filter_parts.append(f"[{i}:v]lut3d='{lut_esc}'[lut{i}];")
+                filter_parts.append(f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[lut{i}];")
 
         # 第一个转场
         if lut_path:
@@ -210,7 +219,7 @@ class VideoConcatWorker(BaseWorker):
             "-filter_complex", filter_complex,
             "-map", f"[{final_vlabel}]",
             "-map", "[aout]",
-            *get_video_encode_args(crf=23, preset="superfast"),
+            *get_video_encode_args(crf=23, preset="superfast", force_software=True),
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             "-movflags", "+faststart",
             out_file

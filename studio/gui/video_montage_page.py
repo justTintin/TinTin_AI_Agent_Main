@@ -3454,6 +3454,7 @@ class VideoMontagePage(BasePage):
             beat_times=beat_times,
             music_path=music_path,
             music_range=music_range,
+            lut_path=self._get_selected_lut_path(),
         )
         self.concat_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v))

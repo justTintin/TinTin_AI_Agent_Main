@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 from config.paths import PROJECT_ROOT, WORKSPACE_ROOT
-from utils.platform_utils import find_ffmpeg, find_ffprobe, create_no_window_flag
+from utils.platform_utils import find_ffmpeg, find_ffprobe, run_subprocess
 from utils.hwaccel import get_video_encode_args
 
 RATIO_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
@@ -19,8 +19,7 @@ def _find(name):
 
 
 def _run(args, cwd=None):
-    flags = create_no_window_flag()
-    r = subprocess.run(args, capture_output=True, cwd=cwd, creationflags=flags)
+    r = run_subprocess(args, capture_output=True, cwd=cwd)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[-400:] or "ffmpeg 失败")
 
@@ -28,10 +27,9 @@ def _run(args, cwd=None):
 def _probe_duration(path):
     try:
         ffprobe = find_ffprobe()
-        flags = create_no_window_flag()
-        r = subprocess.run([ffprobe, "-v", "error", "-show_entries",
+        r = run_subprocess([ffprobe, "-v", "error", "-show_entries",
                             "format=duration", "-of", "csv=p=0", path],
-                           capture_output=True, creationflags=flags)
+                           capture_output=True)
         return float((r.stdout or b"").decode().strip() or 0)
     except (ValueError, OSError):
         return 0.0

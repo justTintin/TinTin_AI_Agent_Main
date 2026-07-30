@@ -2,7 +2,7 @@ import subprocess
 import logging
 from functools import lru_cache
 
-from utils.platform_utils import find_ffmpeg
+from utils.platform_utils import find_ffmpeg, run_subprocess
 
 log = logging.getLogger(__name__)
 
@@ -47,15 +47,17 @@ _QUALITY_FLAG = {
 
 def _test_encoder(ffmpeg_path: str, encoder: str) -> bool:
     """用 2 帧测试编码器是否真正可用（驱动/GPU 就绪）。
-    注意：AMF 等硬件编码器有最小分辨率要求，不能用太小的尺寸。"""
+    注意：AMF 等硬件编码器有最小分辨率要求，不能用太小的尺寸。
+
+    统一走 run_subprocess，确保 stdin 关闭，避免 GUI 无控制台环境下 ffmpeg 阻塞。
+    """
     try:
-        r = subprocess.run(
+        r = run_subprocess(
             [ffmpeg_path, "-y", "-f", "lavfi", "-i",
              "testsrc=duration=0.2:size=640x480:rate=25",
              "-c:v", encoder, "-frames:v", "2",
              "-f", "null", "-"],
             capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         return r.returncode == 0
     except Exception:
@@ -67,10 +69,9 @@ def _detect():
     result = {"encoder": "libx264", "hwaccel_decode": []}
     try:
         ffmpeg_path = find_ffmpeg()
-        r = subprocess.run(
+        r = run_subprocess(
             [ffmpeg_path, "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         out = r.stdout + r.stderr
         for name in ("h264_nvenc", "h264_amf", "h264_qsv"):

@@ -66,9 +66,14 @@ def kill_process_by_pid(pid: int, *, tree: bool = False):
 # ═══════════════════════════════════════════════════════════════
 
 def run_subprocess(cmd, **kwargs):
-    """subprocess.run 统一封装 —— 自动隐藏 Windows 控制台窗口。"""
+    """subprocess.run 统一封装 —— 自动隐藏 Windows 控制台窗口，并默认关闭 stdin。
+
+    在 GUI 无控制台环境下，子进程继承的 stdin 往往不是真实终端；ffmpeg 等工具会
+    阻塞在 stdin 读取上，导致 CPU/GPU 0% 假死。统一默认传入 DEVNULL 避免该问题。
+    """
     kwargs.setdefault("creationflags", 0)
     kwargs["creationflags"] |= _CREATE_NO_WINDOW
+    kwargs.setdefault("stdin", subprocess.DEVNULL)
     return subprocess.run(cmd, **kwargs)
 
 

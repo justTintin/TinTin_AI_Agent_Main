@@ -31,8 +31,7 @@ def find_ffmpeg():
 
 def get_media_duration(filepath):
     try:
-        from utils.platform_utils import find_ffprobe, create_no_window_flag
-        creationflags = create_no_window_flag()
+        from utils.platform_utils import find_ffprobe, run_subprocess
         ffprobe_exe = find_ffprobe()
         if not os.path.isfile(ffprobe_exe):
             ffprobe_exe = find_ffmpeg().replace("ffmpeg", "ffprobe")
@@ -40,7 +39,7 @@ def get_media_duration(filepath):
             return 0.0
         cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
                "-of", "csv=p=0", filepath]
-        r = subprocess.run(cmd, capture_output=True, text=True, creationflags=creationflags, timeout=10)
+        r = run_subprocess(cmd, capture_output=True, text=True, timeout=10)
         if r.returncode == 0 and r.stdout.strip():
             return float(r.stdout.strip())
     except Exception:
@@ -185,11 +184,10 @@ def compute_clip_quality(clip_path):
                 if ff:
                     ffprobe = ff.replace("ffmpeg", "ffprobe")
             if ffprobe:
-                r = subprocess.run(
+                r = run_subprocess(
                     [ffprobe, "-v", "error", "-select_streams", "a",
                      "-show_entries", "stream=codec_type", "-of", "csv=p=0", clip_path],
-                    capture_output=True, text=True, timeout=10,
-                    creationflags=0x08000000)
+                    capture_output=True, text=True, timeout=10)
                 if "audio" in (r.stdout or ""):
                     audio_score = 20
         except Exception:

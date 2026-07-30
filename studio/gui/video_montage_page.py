@@ -4761,6 +4761,33 @@ class VideoMontagePage(BasePage):
         except Exception:
             pass
         return ""
+    # [3·分割]  _get_shot_cache_for_clip
+    def _get_shot_cache_for_clip(self, clip_path):
+        """根据镜头片段路径返回对应源视频的 ShotAnalysisCache（按需创建）。
+
+        合并分割/挑精华模式下当前可能没有选中单个视频，self._shot_cache 为 None，
+        导致分析结果无法落盘。此 helper 按 clip_path 反推 {workspace_dir}/{basename}
+        并创建/加载对应 sidecar JSON，保证任何场景下都能保存。
+        """
+        if not clip_path:
+            return None
+        try:
+            from utils.shot_analysis_cache import ShotAnalysisCache
+            clip_path = os.path.abspath(clip_path)
+            clip_splits_dir = os.path.dirname(clip_path)
+            clip_workspace_dir = os.path.dirname(clip_splits_dir)
+            clip_basename = os.path.basename(clip_workspace_dir)
+            if not clip_workspace_dir or not clip_basename:
+                return None
+            cache_key = (clip_workspace_dir, clip_basename)
+            caches = getattr(self, "_shot_cache_pool", {})
+            if cache_key not in caches:
+                caches[cache_key] = ShotAnalysisCache(clip_workspace_dir, clip_basename)
+                self._shot_cache_pool = caches
+            return caches[cache_key]
+        except Exception as e:
+            log.warning(f"获取镜头分析缓存失败({clip_path}): {e}")
+            return None
     # [3·分割]  _on_analysis_item_ready
     def _on_analysis_item_ready(self, idx, result):
         """服务端分析完成一个镜头，回填表格。result = {score, desc, extra}"""
@@ -4857,9 +4884,12 @@ class VideoMontagePage(BasePage):
 
         # 持久化到 sidecar JSON：保存 score/景别/产品/型号/描述/其他维度，
         # 避免重新打开应用或对同一视频重新分割后只剩"画面描述"。
-        if getattr(self, "_shot_cache", None):
+        # 合并模式下 self._shot_cache 可能为 None，或指向与当前片段不同的源视频，
+        # 因此按 clip_path 反推对应源视频缓存，确保分析结果落到正确的 sidecar JSON。
+        cache = self._get_shot_cache_for_clip(path)
+        if cache is not None:
             try:
-                self._shot_cache.upsert(path, {
+                cache.upsert(path, {
                     "score": score, "desc": desc,
                     "shot_type": shot_type, "product": product, "model": model,
                     "duration": duration_val,

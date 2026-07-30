@@ -283,6 +283,25 @@ class SubtitleRemovalWorkerV14(QThread):
                     pass
 
 
+class _ProgressFileReader:
+    """包装文件对象，读取时回调上传进度。"""
+    def __init__(self, f, total, cb):
+        self._f = f
+        self._total = total
+        self._cb = cb
+        self._read = 0
+
+    def read(self, size=-1):
+        data = self._f.read(size)
+        self._read += len(data)
+        if self._cb:
+            self._cb(self._read, self._total)
+        return data
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+
 class RemoteVSRWorkerV14(QThread):
     """服务端去字幕 worker：上传视频 + 全部选区 sub_areas → 轮询任务 → 下载结果。"""
 
@@ -319,7 +338,7 @@ class RemoteVSRWorkerV14(QThread):
             def _cancel():
                 try:
                     import requests
-                    requests.delete(f"{self._base_url}/tasks/{self._task_id}", timeout=5)
+                    requests.delete(f"{self._base_url}/tasks/{self._task_id}", proxies=self._proxies, timeout=5)
                 except Exception:
                     pass
             threading.Thread(target=_cancel, daemon=True).start()
@@ -332,29 +351,49 @@ class RemoteVSRWorkerV14(QThread):
         try:
             from config.paths import AI_CONFIG_FILE
             base_url = ""
+            proxy_cfg = ""
             if os.path.isfile(AI_CONFIG_FILE):
                 with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    base_url = (_json.load(f).get("compute_server_url") or "").strip().rstrip("/")
+                    cfg = _json.load(f)
+                    base_url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                    proxy_cfg = (cfg.get("proxy") or "").strip()
             if not base_url:
                 self.finished.emit(False, "未配置服务端地址，请先在「系统设置 → 模型配置」中设置 compute_server_url。")
                 return
             self._base_url = base_url
 
+            proxies = None
+            if proxy_cfg:
+                if "://" not in proxy_cfg:
+                    proxy_cfg = "http://" + proxy_cfg
+                proxies = {"http": proxy_cfg, "https": proxy_cfg}
+                self.log_received.emit(f"[INFO] 使用代理: {proxy_cfg}")
+            self._proxies = proxies
+
             is_smart = not self.sub_areas
             self.status_updated.emit("正在上传视频到服务端...")
             desc = "智能去除（服务端自动检测）" if is_smart else f"选区去除 {self.sub_areas[:60]}"
             self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  mode={self.inpaint_mode}  {desc}")
-            self.progress_updated.emit(5)
 
-            with open(self.video_path, "rb") as f:
-                files = {"file": (os.path.basename(self.video_path), f, "video/mp4")}
+            # 上传进度 0-10%（真实字节追踪）
+            file_size = os.path.getsize(self.video_path)
+            _upload_pct = [0]
+            def _on_upload(read, total):
+                pct = min(10, int(read * 10 / max(total, 1)))
+                if pct != _upload_pct[0]:
+                    _upload_pct[0] = pct
+                    self.progress_updated.emit(pct)
+
+            with open(self.video_path, "rb") as raw_f:
+                tracked_f = _ProgressFileReader(raw_f, file_size, _on_upload)
+                files = {"file": (os.path.basename(self.video_path), tracked_f, "video/mp4")}
                 data = {
                     "inpaint_mode": self.inpaint_mode,
                     "sub_areas": self.sub_areas,
                     "purpose": self.purpose,
                     "watermark_text": self.watermark_text,
                 }
-                r = requests.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
+                r = requests.post(f"{base_url}/vsr/remove", files=files, data=data, proxies=proxies, timeout=1800)
             if r.status_code != 200:
                 self.finished.emit(False, f"服务端返回 {r.status_code}: {r.text[:300]}")
                 return
@@ -376,29 +415,40 @@ class RemoteVSRWorkerV14(QThread):
                     return
                 _time.sleep(3)
                 try:
-                    pr = requests.get(poll_url, timeout=15)
+                    pr = requests.get(poll_url, proxies=proxies, timeout=15)
                 except Exception:
                     continue
                 if pr.status_code != 200:
                     continue
                 pdata = pr.json()
                 status = str(pdata.get("status") or "").lower()
-                # 若服务端回报进度则映射到 10~90
+                # 服务端回报进度 → 映射到 10~95（下载阶段用 95-100）
                 try:
                     prog = pdata.get("progress")
                     if prog is not None:
                         pct = float(prog)
                         if pct <= 1.0:
                             pct *= 100
-                        self.progress_updated.emit(max(10, min(90, int(10 + pct * 0.8))))
+                        mapped = max(10, min(95, int(10 + pct * 0.85)))
+                        self.progress_updated.emit(mapped)
+                        self.log_received.emit(f"[进度] 服务端 {pct:.0f}% → 客户端 {mapped}%")
                 except Exception:
                     pass
                 if status in ("completed", "done", "success"):
-                    filename = (pdata.get("filename") or pdata.get("output")
-                                or pdata.get("result", {}).get("filename") or "")
-                    if not filename:
-                        filename = f"{task_id}.mp4"
-                    self._download(base_url, filename)
+                    # 优先用服务端返回的 download_url，其次从 filename 拼装
+                    dl_url = pdata.get("download_url") or pdata.get("result", {}).get("download_url") or ""
+                    if dl_url:
+                        if dl_url.startswith("/"):
+                            dl_url = base_url + dl_url
+                        elif not dl_url.startswith("http"):
+                            dl_url = f"{base_url}/{dl_url}"
+                        self._download(dl_url)
+                    else:
+                        filename = (pdata.get("filename") or pdata.get("output")
+                                    or pdata.get("result", {}).get("filename") or "")
+                        if not filename:
+                            filename = f"{task_id}.mp4"
+                        self._download(f"{base_url}/vsr/download/{filename}")
                     return
                 if status in ("failed", "error"):
                     err = pdata.get("error") or pdata.get("message") or "未知错误"
@@ -408,14 +458,13 @@ class RemoteVSRWorkerV14(QThread):
         except Exception as e:
             self.finished.emit(False, f"服务端去字幕异常: {e}")
 
-    def _download(self, base_url, filename):
+    def _download(self, dl_url):
         import requests
         self.status_updated.emit("正在下载处理结果...")
         self.progress_updated.emit(95)
-        dl_url = f"{base_url}/vsr/download/{filename}"
         self.log_received.emit(f"[INFO] 下载结果: {dl_url}")
         os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
-        with requests.get(dl_url, stream=True, timeout=600) as r:
+        with requests.get(dl_url, stream=True, proxies=self._proxies, timeout=600) as r:
             r.raise_for_status()
             with open(self.output_path, "wb") as f:
                 for chunk in r.iter_content(1024 * 512):
@@ -700,18 +749,18 @@ class SubtitleRemovalPageV14(BasePage):
             QSlider::handle:horizontal {
                 background: #ffffff;
                 border: 2px solid #3b82f6;
-                width: 12px;
-                height: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
+                width: 20px;
+                height: 20px;
+                margin: -8px 0;
+                border-radius: 10px;
             }
             QSlider::handle:horizontal:hover {
                 background: #3b82f6;
                 border: 2px solid #ffffff;
-                width: 14px;
-                height: 14px;
-                margin: -5px 0;
-                border-radius: 7px;
+                width: 22px;
+                height: 22px;
+                margin: -9px 0;
+                border-radius: 11px;
             }
         """)
         seek_row.addWidget(self.seek_slider)
@@ -891,6 +940,7 @@ class SubtitleRemovalPageV14(BasePage):
         sliders_layout.addLayout(create_slider_row("字幕选区高 H:", self.h_slider, self.h_val_lbl))
 
         box_manage_layout.addWidget(self.sliders_container)
+        self.sliders_container.setVisible(False)  # 四边形直接在预览上拖角点编辑，不再需要坐标滑块
         controls_layout.addWidget(box_manage_group)
 
         # Options & action buttons (bottom of control card)
@@ -1141,9 +1191,8 @@ class SubtitleRemovalPageV14(BasePage):
     def _on_mode_switched(self, _idx):
         """切换智能/标注模式：显隐选区管理区 + 本地选项区，刷新预览。"""
         is_select = self._is_select_mode()
-        # 选区管理区（列表/滑块/添加删除）+ 本地选项区 仅在标注选区模式显示
+        # 选区管理区（列表/添加删除）在标注模式显示；坐标滑块不再需要（四边形直接拖角点编辑）
         for w in [getattr(self, "box_manage_group", None),
-                  getattr(self, "sliders_container", None),
                   getattr(self, "local_opts_container", None)]:
             if w is not None:
                 w.setVisible(is_select)
@@ -1229,26 +1278,12 @@ class SubtitleRemovalPageV14(BasePage):
             self.update_preview()
 
     def update_preview(self):
+        # 本地模式处理中禁止更新预览；服务端模式上传后允许拖动预览
         if self.worker and self.worker.isRunning():
-            return
+            if not isinstance(self.worker, RemoteVSRWorkerV14):
+                return
 
-        # 选区去除模式下，滑块控制激活框的 AABB（顶点拖动后同步滑块；滑块拖动则改 AABB）
-        if self._is_select_mode() and self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
-            x = self.x_slider.value()
-            w = self.w_slider.value()
-            y = self.y_slider.value()
-            h = self.h_slider.value()
-            self.x_val_lbl.setText(str(x))
-            self.w_val_lbl.setText(str(w))
-            self.y_val_lbl.setText(str(y))
-            self.h_val_lbl.setText(str(h))
-            # 滑块改动 → 重置激活框为该 AABB 的矩形四点
-            self.boxes[self.active_box_index] = _rect_to_quad(x, y, w, h)
-            self.box_list_widget.blockSignals(True)
-            item = self.box_list_widget.item(self.active_box_index)
-            if item:
-                item.setText(f"选区 {self.active_box_index+1}: X={x}, Y={y}, W={w}, H={h}")
-            self.box_list_widget.blockSignals(False)
+        # 四边形直接在预览上拖角点编辑，无需从滑块同步
 
         # Pass boxes to interactive label
         self.preview_label.set_boxes(self.boxes, self.active_box_index)
@@ -1466,6 +1501,10 @@ class SubtitleRemovalPageV14(BasePage):
             output_path = os.path.join(base_dir, f"{vd_name}_no_sub.mp4")
 
         self._lock_controls()
+        # 服务端模式：视频上传后预览拖动放开（不影响处理）
+        self.seek_slider.setEnabled(True)
+        self.btn_prev_frame.setEnabled(True)
+        self.btn_next_frame.setEnabled(True)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.log_view.clear()

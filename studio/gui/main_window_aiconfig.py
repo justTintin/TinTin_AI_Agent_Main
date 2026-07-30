@@ -206,6 +206,7 @@ class AIConfigMixin:
             "llm_vision_api_url": "",
             "llm_vision_model": "",
             "compute_server_url": "",
+            "proxy": "",
             "whisper_api_url": "",
             "clip_api_url": "",
             "ocr_api_url": "",

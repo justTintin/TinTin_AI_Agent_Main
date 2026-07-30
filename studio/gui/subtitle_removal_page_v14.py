@@ -291,18 +291,22 @@ class RemoteVSRWorkerV14(QThread):
     log_received = Signal(str)
     finished = Signal(bool, str)
 
-    def __init__(self, video_path, sub_areas, inpaint_mode, output_path):
+    def __init__(self, video_path, sub_areas, inpaint_mode, output_path, purpose="subtitle", watermark_text=""):
         """
-        :param sub_areas: 服务端 sub_areas JSON 字符串。空串=""智能去除；
-                          选区去除为四边形相对坐标 [[[x_rel,y_rel]×4], ...]
-        :param inpaint_mode: 服务端算法名 sttn_det/sttn_auto/lama/propainter
+        :param sub_areas: 服务端 sub_areas JSON 字符串。空串=""智能识别（服务端自动检测）；
+                          标注选区为四边形相对坐标 [[[x_rel,y_rel]×4], ...]
+        :param inpaint_mode: 服务端算法名 sttn_det/sttn_auto/lama/propainter（具体模型由服务端匹配）
         :param output_path: 结果下载后的本地保存路径
+        :param purpose: 用途 "subtitle"(去字幕) / "watermark"(去水印)
+        :param watermark_text: 要去除的水印文字内容（供服务端精准定位水印，空=按选区/自动识别）
         """
         super().__init__()
         self.video_path = video_path
         self.sub_areas = sub_areas
         self.inpaint_mode = inpaint_mode
         self.output_path = output_path
+        self.purpose = purpose
+        self.watermark_text = watermark_text
         self.is_aborted = False
         self._task_id = ""
         self._base_url = ""
@@ -344,7 +348,12 @@ class RemoteVSRWorkerV14(QThread):
 
             with open(self.video_path, "rb") as f:
                 files = {"file": (os.path.basename(self.video_path), f, "video/mp4")}
-                data = {"inpaint_mode": self.inpaint_mode, "sub_areas": self.sub_areas}
+                data = {
+                    "inpaint_mode": self.inpaint_mode,
+                    "sub_areas": self.sub_areas,
+                    "purpose": self.purpose,
+                    "watermark_text": self.watermark_text,
+                }
                 r = requests.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
             if r.status_code != 200:
                 self.finished.emit(False, f"服务端返回 {r.status_code}: {r.text[:300]}")
@@ -749,15 +758,39 @@ class SubtitleRemovalPageV14(BasePage):
         controls_layout.setContentsMargins(0, 20, 0, 20)
         controls_layout.setSpacing(14)
 
-        # ── 去除模式切换：智能去除（服务端自动检测）/ 选区去除（手画四边形）──
+        # ── 用途 + 模式 两个维度（2×2=4 组合，算法由服务端匹配）──
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("去除模式:"))
+        mode_row.setSpacing(10)
+        mode_row.addWidget(QLabel("用途:"))
+        self.purpose_combo = QComboBox()
+        self.purpose_combo.addItem("📝 去字幕", "subtitle")
+        self.purpose_combo.addItem("🏷️ 去水印", "watermark")
+        self.purpose_combo.setToolTip("去字幕：擦除视频中的字幕文字。\n去水印：擦除台标/LOGO 等水印。可填写水印文字帮助服务端精准定位要去除的水印。")
+        mode_row.addWidget(self.purpose_combo)
+        mode_row.addSpacing(12)
+        mode_row.addWidget(QLabel("模式:"))
         self.mode_switch = QComboBox()
-        self.mode_switch.addItem("🤖 智能去除（自动检测，无需画框）", "smart")
-        self.mode_switch.addItem("✏️ 选区去除（手画四边形选区）", "select")
+        self.mode_switch.addItem("🤖 智能识别（自动检测，无需画框）", "smart")
+        self.mode_switch.addItem("✏️ 标注选区（手画四边形选区）", "select")
         self.mode_switch.currentIndexChanged.connect(self._on_mode_switched)
         mode_row.addWidget(self.mode_switch, 1)
         controls_layout.addLayout(mode_row)
+
+        # 去水印时才显示的水印文字输入（帮助服务端精准定位要去除的水印）
+        watermark_row = QHBoxLayout()
+        watermark_row.setSpacing(8)
+        self.watermark_lbl = QLabel("水印文字:")
+        watermark_row.addWidget(self.watermark_lbl)
+        self.watermark_input = QLineEdit()
+        self.watermark_input.setPlaceholderText("要去除的水印文字内容（留空=按选区/自动识别去除）")
+        watermark_row.addWidget(self.watermark_input)
+        self.watermark_container = QWidget()
+        wl = QHBoxLayout(self.watermark_container)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.addLayout(watermark_row)
+        self.watermark_container.setVisible(False)  # 默认去字幕，隐藏
+        controls_layout.addWidget(self.watermark_container)
+        self.purpose_combo.currentIndexChanged.connect(self._on_purpose_changed)
 
         # Combined Subtitle Area Manager & Editor (Visual Design Optimized)
         box_manage_group = QFrame()
@@ -866,43 +899,33 @@ class SubtitleRemovalPageV14(BasePage):
         bottom_container_layout.setContentsMargins(24, 0, 24, 0)
         bottom_container_layout.setSpacing(14)
 
-        # Algorithm selection
-        algo_row = QHBoxLayout()
-        algo_row.addWidget(QLabel("重绘填充算法:"))
+        # 本地处理选项容器（算法/编码/帧数等，仅"标注选区+本地"时显示；算法由服务端匹配，故不再让用户选）
+        # 保留 mode_combo（隐藏，仅供本地 worker 取值，默认 sttn）
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("STTN 算法 (速度快，对真人视频好)", "sttn")
-        self.mode_combo.addItem("Lama 算法 (效果强，对动画视频好)", "lama")
-        self.mode_combo.addItem("ProPainter 算法 (显存要求极高，极剧烈运动)", "propainter")
-        algo_row.addWidget(self.mode_combo)
-        bottom_container_layout.addLayout(algo_row)
+        self.mode_combo.addItem("STTN", "sttn")
+        self.mode_combo.addItem("Lama", "lama")
+        self.mode_combo.addItem("ProPainter", "propainter")
+        self.mode_combo.setVisible(False)  # 算法由服务端匹配，本地默认 sttn，不暴露给用户
 
-        # Checkboxes
-        self.skip_detect_chk = QCheckBox("⏩ 切换为去水印模式 (跳过检测，对框选全区强制覆盖重绘)")
-        self.skip_detect_chk.setToolTip(
-            "【去字幕模式】(未勾选)：使用精准文字检测，只涂抹字幕笔画本身，保护背景，适合动态字幕。\n"
-            "【去水印模式】(已勾选)：跳过文字检测直接重绘整个框选矩形区域，适合静态台标、LOGO水印。"
-        )
-        self.skip_detect_chk.setChecked(True)
-        bottom_container_layout.addWidget(self.skip_detect_chk)
+        self.local_opts_container = QWidget()
+        local_layout = QVBoxLayout(self.local_opts_container)
+        local_layout.setContentsMargins(0, 0, 0, 0)
+        local_layout.setSpacing(10)
 
         self.lama_fast_chk = QCheckBox("⚡ LAMA极速模式 (直接擦除，忽略精细过渡)")
         self.lama_fast_chk.setChecked(False)
-        bottom_container_layout.addWidget(self.lama_fast_chk)
+        local_layout.addWidget(self.lama_fast_chk)
 
         self.h264_chk = QCheckBox("📱 使用 H.264 兼容编码 (方便移动端/手机播放)")
         self.h264_chk.setChecked(True)
-        bottom_container_layout.addWidget(self.h264_chk)
+        local_layout.addWidget(self.h264_chk)
 
-        self.server_mode_chk = QCheckBox("🌐 使用服务端处理 (所有选区一并提交，不占本机显卡)")
-        self.server_mode_chk.setChecked(False)
-        self.server_mode_chk.setToolTip(
-            "勾选后：视频和全部字幕选区(box)将上传到服务端 /vsr/remove 处理，\n"
-            "处理完成后自动下载结果到本地。算法映射：STTN→sttn_det/sttn_auto，\n"
-            "Lama→lama，ProPainter→propainter。LAMA极速/H.264/批量帧数仅本地模式生效。"
-        )
-        bottom_container_layout.addWidget(self.server_mode_chk)
+        self.server_mode_chk = QCheckBox("🌐 使用服务端处理 (不占本机显卡)")
+        self.server_mode_chk.setChecked(True)
+        self.server_mode_chk.setToolTip("勾选后视频上传服务端处理（算法由服务端自动匹配）。\n取消则用本机显卡处理（仅标注选区模式支持本地）。")
+        local_layout.addWidget(self.server_mode_chk)
 
-        # STTN batch size control (key for high-resolution videos)
+        # STTN batch size control（本地模式才需要）
         batch_row = QHBoxLayout()
         batch_lbl = QLabel("🎞️ STTN 每批处理帧数:")
         batch_lbl.setStyleSheet("font-size: 12px; color: #a1a1aa;")
@@ -935,7 +958,8 @@ class SubtitleRemovalPageV14(BasePage):
         batch_hint.setStyleSheet("font-size: 11px; color: #71717a;")
         batch_row.addWidget(batch_hint)
         batch_row.addStretch()
-        bottom_container_layout.addLayout(batch_row)
+        local_layout.addLayout(batch_row)
+        bottom_container_layout.addWidget(self.local_opts_container)
 
         bottom_container_layout.addStretch(1)
 
@@ -1098,22 +1122,32 @@ class SubtitleRemovalPageV14(BasePage):
             self.preview_label.setText(f"预览加载失败: {e}")
 
     def _is_smart_mode(self):
-        """智能去除模式：不画框，服务端自动检测字幕。"""
+        """智能识别模式：不画框，服务端自动检测。"""
         return getattr(self, "mode_switch", None) is not None and self.mode_switch.currentData() == "smart"
 
     def _is_select_mode(self):
-        """选区去除模式：用户画四边形选区。"""
+        """标注选区模式：用户画四边形选区。"""
         return not self._is_smart_mode()
 
+    def _get_purpose(self):
+        """用途：subtitle(去字幕) / watermark(去水印)。"""
+        return self.purpose_combo.currentData() if hasattr(self, "purpose_combo") else "subtitle"
+
+    def _on_purpose_changed(self, _idx):
+        """用途切换：去水印时显示水印文字输入。"""
+        is_watermark = self._get_purpose() == "watermark"
+        self.watermark_container.setVisible(is_watermark)
+
     def _on_mode_switched(self, _idx):
-        """切换智能/选区模式：显隐选区管理区，刷新预览。"""
+        """切换智能/标注模式：显隐选区管理区 + 本地选项区，刷新预览。"""
         is_select = self._is_select_mode()
-        # 选区管理区（列表/滑块/添加删除）仅在选区模式显示
+        # 选区管理区（列表/滑块/添加删除）+ 本地选项区 仅在标注选区模式显示
         for w in [getattr(self, "box_manage_group", None),
-                  getattr(self, "sliders_container", None)]:
+                  getattr(self, "sliders_container", None),
+                  getattr(self, "local_opts_container", None)]:
             if w is not None:
                 w.setVisible(is_select)
-        # 智能去除必须走服务端（本地 CLI 无自动检测能力），强制勾选并禁用切换
+        # 智能识别必须走服务端（本地 CLI 无自动检测能力）
         if not is_select:
             self.server_mode_chk.setChecked(True)
             self.server_mode_chk.setEnabled(False)
@@ -1354,13 +1388,14 @@ class SubtitleRemovalPageV14(BasePage):
         self.log_view.clear()
 
         # Instantiate background worker
+        # 本地模式：去水印=跳过检测(整框强制重绘)，去字幕=精准检测；算法默认 sttn
         self.worker = SubtitleRemovalWorkerV14(
             vsr_python=vsr_python,
             vsr_script=vsr_script,
             video_path=video_path,
             boxes=worker_boxes,
             mode=self.mode_combo.currentData(),
-            skip_detect=self.skip_detect_chk.isChecked(),
+            skip_detect=(self._get_purpose() == "watermark"),
             lama_fast=self.lama_fast_chk.isChecked(),
             h264=self.h264_chk.isChecked(),
             preview_path=self.preview_img_path,
@@ -1389,8 +1424,8 @@ class SubtitleRemovalPageV14(BasePage):
         self.btn_add_box.setEnabled(False)
         self.btn_delete_box.setEnabled(False)
         self.box_list_widget.setEnabled(False)
-        self.mode_combo.setEnabled(False)
-        self.skip_detect_chk.setEnabled(False)
+        self.purpose_combo.setEnabled(False)
+        self.mode_switch.setEnabled(False)
         self.lama_fast_chk.setEnabled(False)
         self.h264_chk.setEnabled(False)
         self.server_mode_chk.setEnabled(False)
@@ -1400,24 +1435,27 @@ class SubtitleRemovalPageV14(BasePage):
         self.btn_next_frame.setEnabled(False)
 
     def _start_remote_removal(self, video_path):
-        """服务端模式：上传视频到 /vsr/remove。智能去除传空 sub_areas，选区去除传四边形相对坐标。"""
-        # 算法映射（服务端 inpaint_mode: sttn_det/sttn_auto/lama/propainter）
-        mode = self.mode_combo.currentData()
-        if mode == "lama":
-            inpaint_mode = "lama"
-        elif mode == "propainter":
-            inpaint_mode = "propainter"
-        else:
-            # STTN：勾选跳过检测(去水印模式)→sttn_auto；未勾选(精准检测)→sttn_det
-            inpaint_mode = "sttn_auto" if self.skip_detect_chk.isChecked() else "sttn_det"
+        """服务端模式：上传视频到 /vsr/remove。
 
-        # 智能去除模式：空 sub_areas，服务端自动检测字幕；选区去除模式：四边形相对坐标
+        算法由服务端匹配，客户端只传 purpose(subtitle/watermark) + sub_areas。
+        去字幕=精准检测(sttn_det)，去水印=整框重绘(sttn_auto)。
+        """
+        purpose = self._get_purpose()
+        # 去水印→sttn_auto(整框重绘)，去字幕→sttn_det(精准检测)；具体模型服务端匹配
+        inpaint_mode = "sttn_auto" if purpose == "watermark" else "sttn_det"
+
+        # 智能识别模式：空 sub_areas，服务端自动检测；标注选区模式：四边形相对坐标
         if self._is_smart_mode():
             sub_areas = ""
         else:
             # 每个四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
             polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]
             sub_areas = _json.dumps(polys)
+
+        # 去水印时附带水印文字（帮助服务端精准定位要去除的水印）
+        watermark_text = ""
+        if purpose == "watermark" and hasattr(self, "watermark_input"):
+            watermark_text = self.watermark_input.text().strip()
 
         base_dir = os.path.dirname(video_path)
         vd_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -1437,6 +1475,8 @@ class SubtitleRemovalPageV14(BasePage):
             sub_areas=sub_areas,
             inpaint_mode=inpaint_mode,
             output_path=output_path,
+            purpose=purpose,
+            watermark_text=watermark_text,
         )
         self.worker.progress_updated.connect(self.on_worker_progress)
         self.worker.status_updated.connect(self.on_worker_status)
@@ -1530,8 +1570,8 @@ class SubtitleRemovalPageV14(BasePage):
         self.btn_add_box.setEnabled(True)
         self.btn_delete_box.setEnabled(len(self.boxes) > 1)
         self.box_list_widget.setEnabled(True)
-        self.mode_combo.setEnabled(True)
-        self.skip_detect_chk.setEnabled(True)
+        self.purpose_combo.setEnabled(True)
+        self.mode_switch.setEnabled(True)
         self.lama_fast_chk.setEnabled(True)
         self.h264_chk.setEnabled(True)
         self.server_mode_chk.setEnabled(True)

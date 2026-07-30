@@ -130,25 +130,6 @@ class VideoConcatWorker(BaseWorker):
         "zoomout": "zoomout",
     }
 
-    @staticmethod
-    def _deduplicate_by_description(clips, desc_getter):
-        """按画面描述去重：保留同一描述第一次出现的镜头，相似/重复描述不重复入镜。
-
-        空描述的镜头无法判断相似性，原样保留。
-        """
-        seen = set()
-        result = []
-        for c in clips:
-            desc = (desc_getter(c) or "").strip()
-            if not desc:
-                result.append(c)
-                continue
-            if desc in seen:
-                continue
-            seen.add(desc)
-            result.append(c)
-        return result
-
     def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
         """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。
 
@@ -480,33 +461,12 @@ class VideoConcatWorker(BaseWorker):
                         # Low randomness = no shuffling, keep sequential order
                         pass
                 
-                # 同描述去重：一个合成视频里相似画面不重复出现。
-                # 先按当前顺序保留每个描述第一次出现的镜头，再尝试用其它不同描述补满目标数。
-                before_dedup = len(batch_clips)
-                batch_clips = self._deduplicate_by_description(batch_clips, lambda c: norm_to_desc.get(c, ""))
-                dropped = before_dedup - len(batch_clips)
-                if dropped > 0:
-                    self.stage.emit(f"无损拼接第 {batch_idx+1}/{self.batch_count} 个视频：已去掉 {dropped} 个重复/相似镜头")
-                
-                # 若去重后不足目标数，优先用不同描述的剩余镜头补满，避免引入重复描述
-                if len(batch_clips) < self.target_clip_count:
-                    seen_descs = {norm_to_desc.get(c, "").strip() for c in batch_clips if norm_to_desc.get(c, "").strip()}
-                    for c in normalized_list:
-                        if len(batch_clips) >= self.target_clip_count:
-                            break
-                        d = (norm_to_desc.get(c, "") or "").strip()
-                        if d and d in seen_descs:
-                            continue
-                        if c in batch_clips:
-                            continue
-                        batch_clips.append(c)
-                        if d:
-                            seen_descs.add(d)
-                    if len(batch_clips) < self.target_clip_count:
-                        log.info(f"[拼接] 描述去重后可用镜头不足目标数 {self.target_clip_count}，实际使用 {len(batch_clips)} 个")
-                
                 if len(batch_clips) > self.target_clip_count:
                     batch_clips = batch_clips[:self.target_clip_count]
+                elif len(batch_clips) < self.target_clip_count:
+                    extra_needed = self.target_clip_count - len(batch_clips)
+                    for _ in range(extra_needed):
+                        batch_clips.append(random.choice(normalized_list))
                 
                 out_file = os.path.join(self.output_dir, f"montage_concat_{random.randint(1000, 9999)}_{batch_idx+1}.mp4")
 

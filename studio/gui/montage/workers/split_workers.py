@@ -250,7 +250,7 @@ class BestClipWorker(BaseWorker):
                "-pix_fmt", "yuv420p", "-c:a", "aac",
                "-movflags", "+faststart", out_path]
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           errors="ignore", creationflags=creationflags)
+                           errors="ignore", creationflags=creationflags, stdin=subprocess.DEVNULL)
         if r.returncode != 0 or not os.path.exists(out_path):
             tail = (r.stderr or "")[-400:]
             raise RuntimeError(f"ffmpeg 裁剪失败:\n{tail}")
@@ -862,7 +862,7 @@ class BeatVideoGenWorker(BaseWorker):
                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                "-c:a", "aac", "-shortest", "-movflags", "+faststart", out_path]
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                           errors="ignore", creationflags=0x08000000)
+                           errors="ignore", creationflags=0x08000000, stdin=subprocess.DEVNULL)
         if r.returncode != 0 or not os.path.exists(out_path):
             tail = (r.stderr or "")[-300:]
             raise RuntimeError(f"图片转视频失败({os.path.basename(image_path)}):\n{tail}")

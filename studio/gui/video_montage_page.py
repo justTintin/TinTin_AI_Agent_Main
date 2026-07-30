@@ -1710,17 +1710,23 @@ class VideoMontagePage(BasePage):
                 files = sorted([f for f in os.listdir(splits_dir) if f.lower().endswith((".mp4", ".m4v"))])
             log.info(f"[DIAG _check_split_clips_exist] splits_dir='{splits_dir}' files_count={len(files)}")
             
+            # 镜头分析 sidecar 缓存：按镜头内容指纹命中，恢复 score/景别/产品/型号
+            try:
+                from utils.shot_analysis_cache import ShotAnalysisCache
+                shot_caches = {}
+            except Exception as e:
+                log.warning(f"导入镜头分析缓存失败: {e}")
+                shot_caches = None
+
             # Try to restore split descriptions from the srt file if they are not in self.split_descriptions yet
             if files and video_path:
                 video_basename = os.path.splitext(os.path.basename(video_path))[0]
                 video_dir = os.path.dirname(video_path)
                 video_workspace_dir = os.path.join(video_dir, video_basename)
-                # 镜头分析 sidecar 缓存：按镜头内容指纹命中，恢复 score/景别/产品/型号
-                try:
-                    from utils.shot_analysis_cache import ShotAnalysisCache
+                if shot_caches is not None:
                     self._shot_cache = ShotAnalysisCache(video_workspace_dir, video_basename)
-                except Exception as e:
-                    log.warning(f"初始化镜头分析缓存失败: {e}")
+                    shot_caches[(video_workspace_dir, video_basename)] = self._shot_cache
+                else:
                     self._shot_cache = None
                 srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
                 if not os.path.exists(srt_path):
@@ -1777,6 +1783,18 @@ class VideoMontagePage(BasePage):
                     if getattr(self, "_shot_cache", None):
                         try:
                             cached = self._shot_cache.get(norm_path)
+                        except Exception:
+                            cached = None
+                    # 合并扫描时每个片段可能来自不同源视频，按片段路径找对应缓存
+                    if not cached and shot_caches is not None:
+                        try:
+                            clip_splits_dir = os.path.dirname(norm_path)
+                            clip_workspace_dir = os.path.dirname(clip_splits_dir)
+                            clip_basename = os.path.basename(clip_workspace_dir)
+                            cache_key = (clip_workspace_dir, clip_basename)
+                            if cache_key not in shot_caches:
+                                shot_caches[cache_key] = ShotAnalysisCache(clip_workspace_dir, clip_basename)
+                            cached = shot_caches[cache_key].get(norm_path)
                         except Exception:
                             cached = None
 

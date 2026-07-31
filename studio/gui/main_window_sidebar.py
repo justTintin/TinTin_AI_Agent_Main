@@ -136,9 +136,9 @@ class SidebarMixin:
         media_header.setObjectName("section_header")
         media_layout.addWidget(media_header)
 
-         media_menus = [
-             ("🎨 素材生成", 32, None),
-             # ("🧺 即梦素材", 43),          # 暂时隐藏
+        media_menus = [
+            ("🎨 素材生成", 32, None),
+            # ("🧺 即梦素材", 43),          # 暂时隐藏
             # ("🪄 MG 动画", 36),          # 暂时隐藏
             ("素材检索", 39, "search"),
             ("📋 任务队列", 9, None),
@@ -404,3 +404,4 @@ class SidebarMixin:
                 btn.setProperty("active", new_val)
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
+

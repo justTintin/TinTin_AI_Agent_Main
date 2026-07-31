@@ -17,7 +17,8 @@
 - 用户界面渲染与交互
 - 本地素材浏览、管理与轻量预处理
 - 向配置的远程服务端发起任务请求并轮询结果
-- 调用已集成的本地工具（ffmpeg、VSR 去字幕、rembg、PaddleOCR 等）
+- 调用已集成的本地工具（ffmpeg、rembg 等）及浏览器扩展桥接服务
+- 浏览器扩展「螺丝钉素材采集」的本地桥接（`utils/extension_bridge.py`），随客户端自动启动
 
 > 远程服务地址统一在 `studio/config/ai_config.json` 中配置，具体服务端实现由独立部署的 `compute_server` / `comfyui_server` 等提供。本仓库不维护服务端代码。
 
@@ -39,14 +40,16 @@
 
 | 目录 | 用途 |
 |------|------|
-| `vsr-v1.4.0/` | 视频去字幕 / 视频修复（VSR + PaddleOCR） |
+| `vsr-v1.4.0/` | 视频去字幕 / 视频修复旧版本地包（当前可见功能已切换服务端） |
 | `asset-browser/` | Electron 素材浏览器 |
 | `pw-browsers/` | Playwright 内嵌 Chromium |
 | `rembg/` | AI 图像抠图 |
 | `modelscope/` | 即梦/模型scope 相关工具 |
-| `browser-extension/` | 浏览器采集扩展 |
+| `browser-extension/` | 「螺丝钉素材采集」浏览器扩展源码 |
 | `whisper-models/` | 本地 Whisper 模型占位 |
 | `clip-models-hf/` | 本地 CLIP 模型占位 |
+
+> 视频去字幕、OCR 等功能的本地 PaddleOCR 模型已移除，当前可见版本统一走服务端。
 
 ---
 
@@ -60,7 +63,7 @@
 螺丝钉-电商智能体矩阵.exe
 ```
 
-该启动器会调用内嵌 Python 环境 `python_embeded\pythonw.exe` 启动 GUI。
+该启动器会调用内嵌 Python 环境 `python_embeded\pythonw.exe` 启动 GUI，并随客户端自动启动浏览器扩展桥接服务。
 
 ### 开发环境
 
@@ -125,6 +128,8 @@ studio\run_gui_integrated.bat
   └── ❓ 帮助
 ```
 
+> 素材浏览器为独立 Electron 应用，从侧边栏顶部直接唤起；「扩展插件」管理浏览器扩展安装与本地桥接服务。
+
 ### 已隐藏（代码仍在，菜单未开放）
 
 | 功能 | 说明 | 对应文件/索引 |
@@ -138,6 +143,7 @@ studio\run_gui_integrated.bat
 | 批量 LUT 调色 | LUT 色彩预设 | `video_lut_page.py` / index 27 |
 | 封面制作 | 批量电商封面生成 | `cover_maker_page.py` / index 33 |
 | 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
+| 本地视频去字幕（旧版） | 基于本地 VSR 的旧版页面 | `subtitle_removal_page.py` / index 14 |
 
 ### 已移除（代码/文件已删除）
 
@@ -176,18 +182,19 @@ studio\run_gui_integrated.bat
 |------|:----:|------|
 | 视频转文字 | 可用 | 上传/选择视频 → 请求远程 Whisper 服务 → 展示时间戳文本 |
 | 声音克隆 | 可用 | 样本管理、TTS 请求远程 VoxCPM 服务 |
-| 视频去字幕 | 可用 | 本地 VSR 超分 + PaddleOCR 检测 → 擦除硬字幕 |
-| 视频框选 OCR | 可用 | 框选区域 → 本地 PaddleOCR 提取文字 |
+| 视频去字幕 | 可用 | 上传视频+选区 → 服务端 `/vsr/remove` 处理 → 下载结果 |
+| 视频框选 OCR | 可用 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
 | 视频修复 | 隐藏 | 本地 VSR 处理（v14） |
 | 视频智能重命名 | 隐藏 | 抽帧 → 请求远程视觉模型 → 智能命名 |
 | 批量 LUT 调色 | 隐藏 | 本地 ffmpeg 应用 LUT |
+| 本地视频去字幕（旧版） | 隐藏 | 旧版本地 VSR 页面 |
 
 ### 图形处理
 
 | 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
 | 图像抠图 | 可用 | 本地 rembg 批量去背景 |
-| 图片框选 OCR | 可用 | 本地 PaddleOCR 提取文字 |
+| 图片框选 OCR | 可用 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
 | 智能分层 | 隐藏 | AI 图像分层分解 |
 | 封面制作 | 隐藏 | 批量电商封面生成 |
 
@@ -198,7 +205,7 @@ studio\run_gui_integrated.bat
 | 我的知识库 | 可用 | 个人知识库 (RAG) 界面 |
 | 产品资料 | 可用 | 产品资料库管理 + Excel 导入导出 |
 | 产品文案创作 | 可用 | 产品资料 → 调用云端 LLM API 生成文案 |
-| 分镜脚本创作 | 可用 | 分析画面 → 调用 LLM 生成分镜脚本 |
+| 分镜脚本创作 | 可用 | 分析画面 → 调用 LLM 生成分镜脚本；含「飞书选题同步」卡片 |
 
 ### 视频运营
 
@@ -207,16 +214,12 @@ studio\run_gui_integrated.bat
 | 视频评价预测 | 可用 | 钩子评分界面 |
 | 视频营销检测 | 可用 | 识别营销/违禁内容界面 |
 
-### 已移除/隐藏功能
+### 扩展与采集
 
-| 功能 | 状态 | 说明 |
+| 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
-| 热点追踪 | 已移除 | 并入素材浏览器 |
-| 数字人 | 隐藏 | 下版本计划 |
-| 飞书选题 | 隐藏 | 已并入「分镜脚本创作」页面内作为「飞书选题同步」卡片，不再作为独立侧边栏菜单 |
-| 即梦素材 | 隐藏 | 功能已开发 |
-| MG 动画 | 隐藏 | 功能已开发 |
-| 账户平台 | 隐藏 | 抖音账户管理 |
+| 浏览器扩展管理 | 可用 | 检测/安装 Chrome/Edge/360 等浏览器扩展；控制本地桥接服务启停与端口 |
+| 素材浏览器 | 可用 | Electron 应用，嗅探网页视频/音频资源 |
 
 ---
 
@@ -244,11 +247,18 @@ studio\run_gui_integrated.bat
 - 语音转写：远程 Whisper 连通性测试
 - 声音克隆：远程 VoxCPM 连通性测试
 - 向量模型：远程 CLIP 连通性测试
-- PaddleOCR / rembg：本地可用性检测
+- OCR 文本识别：服务端 `/material/ocr` 连通性测试（本地 PaddleOCR 模型已移除）
+- rembg：本地抠图模型可用性检测
 
 ### 资源配置
 - 声音样本管理
 - 素材目录：支持多目录，NAS 入库
+
+### 扩展插件
+- 检测本机 Chromium 系浏览器（Chrome / Edge / 360 / QQ 等）
+- 一键安装/加载「螺丝钉素材采集」扩展
+- 控制本地桥接服务（`utils/extension_bridge.py`）：端口、保存目录、服务端扫描、启停
+- 查看最近采集记录
 
 ---
 
@@ -262,12 +272,12 @@ studio\run_gui_integrated.bat
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `compute_server_url` | 统一计算节点地址（ASR / VoxCPM / Ollama / CLIP / 智能混剪合成） | `http://<server>:8000` |
+| `compute_server_url` | 统一计算节点地址（ASR / VoxCPM / Ollama / CLIP / OCR / 去字幕 / 智能混剪合成） | `http://<server>:8000` |
 | `whisper_api_url` | 语音转写服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
 | `llm_vision_api_url` | 视觉分析地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
 | `vox_api_url` | 声音克隆 TTS 地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000/voxcpm/tts` |
 | `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
-| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
+| `material_api_url` | 素材管理 / OCR 服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
 | `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://<server>:8188` |
 | `llm_api_url` | 文案生成 LLM API（云端） | `https://api.deepseek.com` |
 
@@ -305,6 +315,7 @@ port = 7861
 | `.runtime/tmp/` | 临时文件 |
 | `outputs/` | 导出产物 |
 | `data/` | 持久化 JSON |
+| `data/extension_bridge.json` | 扩展桥接配置 |
 
 ---
 
@@ -335,13 +346,15 @@ make clean             # 清理构建产物
 | 内嵌 Python | `python_embeded/` 独立 Python 环境 |
 | 图像生成 | 即梦 / ComfyUI（远程） |
 | 文案生成 | DeepSeek API（云端） |
-| 本地媒体处理 | ffmpeg · VSR · rembg · PaddleOCR |
+| 本地媒体处理 | ffmpeg · rembg |
+| OCR / 去字幕 | 服务端 `/material/ocr` / `/vsr/remove` |
 | Web 引擎 | QtWebEngine / Playwright |
+| 浏览器扩展桥接 | `utils/extension_bridge.py`（本地 HTTP 服务） |
 | 构建 | PyInstaller · Makefile / TinTin_Release_Builder |
 | 素材浏览器 | Electron |
 
 ---
 
-> 设计原则：客户端聚焦 UI 与本地轻量处理，重度 AI 推理与媒体合成统一委托到可配置的远程服务端，避免依赖客户端机器性能。
+> 设计原则：客户端聚焦 UI、本地轻量处理与浏览器扩展桥接；重度 AI 推理、媒体合成、OCR、去字幕统一委托到可配置的远程服务端，避免依赖客户端机器性能。
 
 > 仅供学习交流，请勿用于违反平台规则或法律的用途。

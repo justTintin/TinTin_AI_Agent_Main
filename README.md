@@ -135,12 +135,11 @@ studio\run_gui_integrated.bat
 | 功能 | 说明 | 对应文件/索引 |
 |------|------|--------------|
 | 数字人 | 数字人形象生成 | `setup_digital_human_page` / index 3 |
-| 即梦素材 | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
+| 素材生成（即梦素材） | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
 | MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
 | 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
 | 视频修复 | VSR 超分/去噪/补帧 v14 | `subtitle_removal_page_v14.py` / index 11 |
 | 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
-| 批量 LUT 调色 | LUT 色彩预设 | `video_lut_page.py` / index 27 |
 | 封面制作 | 批量电商封面生成 | `cover_maker_page.py` / index 33 |
 | 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
 | 本地视频去字幕（旧版） | 基于本地 VSR 的旧版页面 | `subtitle_removal_page.py` / index 14 |
@@ -149,6 +148,7 @@ studio\run_gui_integrated.bat
 
 | 功能 | 说明 |
 |------|------|
+| 批量 LUT 调色 | 本地 LUT 调色功能已删除 |
 | 热点追踪 | 页面已彻底移除，功能并入素材浏览器；`studio/gui/hotspot_page.py` 已删除 |
 | AI 技能模块 | `ai_skills/` 目录已删除（无代码依赖） |
 | 旧版爬虫 | `legacy_crawler/` 目录已删除，被 `studio/core/` 取代 |
@@ -186,7 +186,7 @@ studio\run_gui_integrated.bat
 | 视频框选 OCR | 可用 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
 | 视频修复 | 隐藏 | 本地 VSR 处理（v14） |
 | 视频智能重命名 | 隐藏 | 抽帧 → 请求远程视觉模型 → 智能命名 |
-| 批量 LUT 调色 | 隐藏 | 本地 ffmpeg 应用 LUT |
+| 批量 LUT 调色 | 已移除 | 本地 LUT 调色功能已删除 |
 | 本地视频去字幕（旧版） | 隐藏 | 旧版本地 VSR 页面 |
 
 ### 图形处理

@@ -95,7 +95,7 @@ studio\run_gui_integrated.bat
   └── 📝 分镜脚本创作
 
 🗄️ 媒体库
-  ├── 🎨 即梦生成
+  ├── 🎨 素材生成
   ├── 🔍 素材检索
   └── 📋 任务队列
 
@@ -135,7 +135,7 @@ studio\run_gui_integrated.bat
 | 功能 | 说明 | 对应文件/索引 |
 |------|------|--------------|
 | 数字人 | 数字人形象生成 | `setup_digital_human_page` / index 3 |
-| 素材生成（即梦素材） | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
+| 即梦素材 | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
 | MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
 | 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
 | 视频修复 | VSR 超分/去噪/补帧 v14 | `subtitle_removal_page_v14.py` / index 11 |
@@ -172,7 +172,7 @@ studio\run_gui_integrated.bat
 
 | 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
-| 即梦生成 | 可用 | 调用即梦可执行文件/ComfyUI 生成图像 |
+| 素材生成 | 可用 | 调用即梦/ComfyUI 等生成图像并管理入库 |
 | 素材检索 | 可用 | 向量/关键词检索界面，请求远程 CLIP 服务 |
 | 任务队列 | 可用 | 展示服务端定时任务/生成队列状态 |
 

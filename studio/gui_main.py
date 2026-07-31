@@ -481,7 +481,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 监控为被动探活：不为看状态而启动本地（auto_start=False），外部优先、本地已跑则用本地
         self.monitor = SystemMonitorThread(
             lambda: comfy.resolve_addr(self.ai_config, auto_start=False))
-        self.monitor.stats_updated.connect(self.update_system_stats)
         # ComfyUI 默认不启动检测，用户可在「AI 设置」手动开启
         # self.monitor.start()
         
@@ -520,11 +519,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         if app is not None:
             apply_theme(app)
         self.theme_hint.setText(f"✅ 已切换到「{self.theme_combo.currentText()}」，立即生效")
-
-    def update_system_stats(self, stats):
-        if hasattr(self, 'cpu_label'):
-            self.cpu_label.setText(f"CPU: {stats['cpu']}%")
-            self.gpu_label.setText(f"显存: {stats['gpu']}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

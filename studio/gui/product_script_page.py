@@ -86,27 +86,19 @@ class ProductScriptPage(BasePage):
         src.setSpacing(10)
 
         search_row = QHBoxLayout()
-        lbl_search = QLabel("📦 产品检索")
-        lbl_search.setFixedWidth(70)
+        lbl_search = QLabel("📦 产品选择")
+        lbl_search.setObjectName("card_title")
         search_row.addWidget(lbl_search)
-        self.search_product = QLineEdit()
-        self.search_product.setPlaceholderText("输入品牌/型号/编码/条码过滤产品...")
-        self.search_product.textChanged.connect(self._filter_products)
-        self.search_product.setMinimumWidth(100)
-        search_row.addWidget(self.search_product, 1)
-
-        btn_reload = QPushButton("🔄")
+        self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
+        self.combo_product.currentIndexChanged.connect(self._on_product_selected)
+        self.combo_product.setMinimumWidth(100)
+        search_row.addWidget(self.combo_product, 1)
+        btn_reload = QPushButton("🔄 重置")
         btn_reload.setObjectName("secondary_button")
-        btn_reload.setFixedWidth(40)
         btn_reload.setToolTip("重新载入产品资料与我的知识库")
         btn_reload.clicked.connect(self.reload_sources)
         search_row.addWidget(btn_reload)
         src.addLayout(search_row)
-
-        self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
-        self.combo_product.currentIndexChanged.connect(self._on_product_selected)
-        self.combo_product.setMinimumWidth(100)
-        src.addWidget(self.combo_product)
         col.addWidget(card_src)
 
         # ── 卡片 2：产品已保存资料 ──
@@ -147,17 +139,18 @@ class ProductScriptPage(BasePage):
         style_title = QLabel("🎨 风格化（可选）")
         style_title.setObjectName("card_title")
         style_hdr.addWidget(style_title)
-        btn_refresh_style = QPushButton("🔄")
-        btn_refresh_style.setObjectName("secondary_button")
-        btn_refresh_style.setFixedWidth(36)
-        btn_refresh_style.setToolTip("重新加载知识库风格化列表")
-        btn_refresh_style.clicked.connect(self._reload_stylizations)
-        style_hdr.addWidget(btn_refresh_style)
         sl.addLayout(style_hdr)
 
+        style_row = QHBoxLayout()
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
-        sl.addWidget(self.combo_stylization)
+        style_row.addWidget(self.combo_stylization, 1)
+        btn_refresh_style = QPushButton("🔄 重置")
+        btn_refresh_style.setObjectName("secondary_button")
+        btn_refresh_style.setToolTip("重新加载知识库风格化列表")
+        btn_refresh_style.clicked.connect(self._reload_stylizations)
+        style_row.addWidget(btn_refresh_style)
+        sl.addLayout(style_row)
 
         self.text_style_portrait = QTextEdit()
         self.text_style_portrait.setReadOnly(True)
@@ -240,8 +233,7 @@ class ProductScriptPage(BasePage):
     def reload_sources(self):
         self.kb.load()
         self.my_kb.load()
-        kw = self.search_product.text().strip() if hasattr(self, "search_product") else ""
-        self._populate_products(kw)
+        self._populate_products("")
         self._reload_stylizations()
 
     def _reload_stylizations(self):
@@ -312,9 +304,6 @@ class ProductScriptPage(BasePage):
         else:
             self.edit_features.clear()
             self.edit_selling_points.clear()
-
-    def _filter_products(self, keyword):
-        self._populate_products(keyword.strip())
 
     # ──────────────────────── LLM 通用 ────────────────────────
     def _ai_cfg(self):

@@ -803,29 +803,18 @@ class PageSetupMixin:
     def setup_task_list_page(self):
             layout = QVBoxLayout(self.page_task_list)
             layout.setContentsMargins(30, 30, 30, 30)
-        
-            # --- Top: Monitoring Section ---
-            mon_card = QFrame()
-            mon_card.setObjectName("card")
-            mon_card.setFixedHeight(80)
-            mon_layout = QHBoxLayout(mon_card)
-            mon_layout.addWidget(QLabel("📊 系统资源:"))
-            self.cpu_label = QLabel("CPU: --%")
-            self.ram_label = QLabel("内存: --%")
-            self.gpu_label = QLabel("显存: --")
-            for lbl in [self.cpu_label, self.ram_label, self.gpu_label]:
-                lbl.setStyleSheet("font-weight: bold; color: #3498db; margin-right: 20px;")
-                mon_layout.addWidget(lbl)
-            mon_layout.addStretch()
-            layout.addWidget(mon_card)
-        
+
+            # 统一标题
+            heading = QLabel("📋 任务队列")
+            heading.setObjectName("heading")
+            layout.addWidget(heading)
+
             # --- Task List ---
             task_card = QFrame()
             task_card.setObjectName("card")
             task_layout = QVBoxLayout(task_card)
-        
+
             header = QHBoxLayout()
-            header.addWidget(QLabel("📋 任务队列"))
             self.lbl_task_status = QLabel("")
             self.lbl_task_status.setObjectName("muted_text")
             header.addWidget(self.lbl_task_status, 1)

@@ -582,11 +582,15 @@ class StoryboardPage(BasePage):
         sp.addWidget(self._card_title("🎨 风格化（可选）"))
 
         ratio_row = QHBoxLayout()
-        ratio_row.addWidget(QLabel("风格化"))
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.addItem("── 不使用风格化 ──", None)
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         ratio_row.addWidget(self.combo_stylization, 1)
+        btn_reset_style = QPushButton("🔄 重置")
+        btn_reset_style.setObjectName("secondary_button")
+        btn_reset_style.setToolTip("重新加载知识库风格化列表")
+        btn_reset_style.clicked.connect(self._reload_stylizations)
+        ratio_row.addWidget(btn_reset_style)
         sp.addLayout(ratio_row)
 
         sp.addWidget(self._muted_lbl("风格画像："))

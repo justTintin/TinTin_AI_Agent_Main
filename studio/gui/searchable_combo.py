@@ -32,7 +32,6 @@ class SearchableComboBox(QComboBox):
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)   # Qt ≥ 6.3：包含匹配
         completer.setModel(self.model())
-        completer.setPopup(self.view())             # 弹出与下拉共用同一列表视图
         self.setCompleter(completer)
         completer.activated.connect(self._on_completer_activated)
 
@@ -51,11 +50,21 @@ class SearchableComboBox(QComboBox):
         return self.setItems(items)
 
     def setView(self, view):
-        """页面更换弹出视图时，同步 completer 的弹窗视图（避免引用已销毁视图）。"""
+        """页面更换弹出视图：仅透传给 QComboBox；completer 使用自己的独立弹窗。"""
         super().setView(view)
-        completer = self.completer()
-        if completer is not None:
-            completer.setPopup(view)
+
+    def showPopup(self):
+        """点击下拉箭头：显示完整列表供选择（重置过滤为空），不要求先输入。
+
+        说明：若把 completer 的弹窗设成 QComboBox 自己的视图，箭头点击会被
+        completer 接管而不再弹出。这里改为 completer 独立弹窗 + 显式弹出。
+        """
+        comp = self.completer()
+        if comp is not None:
+            comp.setCompletionPrefix("")   # 空前缀 = 显示全部候选项
+            comp.complete()
+        else:
+            super().showPopup()
 
     def addItem(self, text, userData=None):
         """保留 QComboBox 语义：可编辑模式下首个 addItem 自动选中第 0 项。"""

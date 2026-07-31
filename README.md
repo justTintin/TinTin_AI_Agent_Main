@@ -1,4 +1,4 @@
-# 螺丝钉-电商智能体矩阵
+﻿# 螺丝钉-电商智能体矩阵
 
 > 面向电商内容创作的全栈 AI 桌面工作站
 >
@@ -8,258 +8,270 @@
 
 ---
 
-## 架构（客户端-服务端分离）
+## 项目定位
 
-系统采用**客户端-服务端**（Client-Server）架构：客户端负责交互界面与轻量预处理，AI 推理任务统一交由远程服务端处理。
+本仓库为 **Windows 桌面客户端**。用户通过 PySide6 图形界面完成内容创作 workflow；重度 AI 推理与媒体合成任务按功能配置委托到远程服务端或本地工具执行。
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    客户端 (本机 Windows)                           │
-│                                                                  │
-│  studio/                    主应用 (Python + PySide6)              │
-│   ├── gui_main.py           入口，侧边栏 + 页面切换                  │
-│   ├── gui/                  40+ 功能页面                            │
-│   ├── utils/                管理器 & 远程服务客户端                   │
-│   │   ├── asr_client.py     → 远程 Whisper 语音转写                  │
-│   │   ├── voxcpm_client.py  → 远程 VoxCPM 声音克隆                   │
-│   │   ├── comfyui_client.py → 远程 ComfyUI 图像生成                  │
-│   │   ├── ollama_manager.py → 远程 Ollama 视觉模型                   │
-│   │   └── material_clip_indexer.py → 远程 CLIP 向量检索              │
-│   ├── core/                 本地抖音解析 / 下载引擎                   │
-│   ├── config/paths.py       全局路径 & 二进制定位                    │
-│   └── ui/gui_styles.py      暗色/亮色主题 QSS                       │
-│                                                                  │
-│  apps/                      本地第三方工具 (~59 GB，不入库)           │
-│   ├── vsr-v1.4.0/           视频去字幕 (本地处理)                    │
-│   ├── PaddleOCR/            OCR 引擎 (本地处理)                     │
-│   ├── rembg/                AI 抠图 (本地处理)                      │
-│   ├── clip-models/          CLIP 向量模型 (fallback)                │
-│   └── asset-browser/        Electron 素材浏览器                     │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-             HTTP / WebSocket  │  (局域网 / 公网)
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    服务端 (远程 Linux/Windows)                     │
-│                                                                  │
-│  compute_server (统一计算节点)       http://<server>:8000          │
-│   ├── /whisper/transcribe     → 语音转写 (Whisper)                │
-│   ├── /voxcpm/tts             → 声音克隆 TTS (VoxCPM)             │
-│   ├── /vllm/chat              → 视觉分析 (Qwen2.5VL)              │
-│   ├── /clip/embed             → 向量嵌入 (Chinese-CLIP)           │
-│   └── /material/*             → 素材管理 API                       │
-│                                                                  │
-│  comfyui_server               http://<server>:8188                │
-│   └── AI 图像生成 (ComfyUI)                                       │
-│                                                                  │
-│  DeepSeek API (云端)          https://api.deepseek.com            │
-│   └── 文案生成 (LLM)                                             │
-└─────────────────────────────────────────────────────────────────┘
-```
+客户端只负责：
 
-> ⚠️ **`apps/` 与敏感文件不入库**：约 59 GB 的模型/工具二进制、Cookie、License 白名单、用户主题偏好等均通过 `.gitignore` 排除。开发者克隆后需自行下载模型或从分发包获取（见 [docs/SETUP.md](docs/SETUP.md)）。
+- 用户界面渲染与交互
+- 本地素材浏览、管理与轻量预处理
+- 向配置的远程服务端发起任务请求并轮询结果
+- 调用已集成的本地工具（ffmpeg、VSR 去字幕、rembg、PaddleOCR 等）
+
+> 远程服务地址统一在 `studio/config/ai_config.json` 中配置，具体服务端实现由独立部署的 `compute_server` / `comfyui_server` 等提供。本仓库不维护服务端代码。
+
+---
+
+## 分发包体积与本地依赖
+
+当前工作区（含内嵌 Python 与本地工具）参考体积：
+
+| 目录 | 说明 | 参考体积 |
+|------|------|---------|
+| `apps/` | 本地第三方工具 | 约 13.6 GB |
+| `python_embeded/` | 内嵌 Python 运行时 | 约 9.3 GB |
+| `studio/` | 客户端源码与资源 | 约 2.7 GB |
+
+> `apps/` 与敏感文件不入库，实际体积随模型/工具下载情况变化。部署时从分发包获取或按 `docs/SETUP.md` 自行准备。
+
+`apps/` 当前目录：
+
+| 目录 | 用途 |
+|------|------|
+| `vsr-v1.4.0/` | 视频去字幕 / 视频修复（VSR + PaddleOCR） |
+| `asset-browser/` | Electron 素材浏览器 |
+| `pw-browsers/` | Playwright 内嵌 Chromium |
+| `rembg/` | AI 图像抠图 |
+| `modelscope/` | 即梦/模型scope 相关工具 |
+| `browser-extension/` | 浏览器采集扩展 |
+| `whisper-models/` | 本地 Whisper 模型占位 |
+| `clip-models-hf/` | 本地 CLIP 模型占位 |
 
 ---
 
 ## 快速开始
 
-### Windows
+### 生产环境（分发包）
+
+双击运行根目录：
+
+```
+螺丝钉-电商智能体矩阵.exe
+```
+
+该启动器会调用内嵌 Python 环境 `python_embeded\pythonw.exe` 启动 GUI。
+
+### 开发环境
 
 ```powershell
-.\run_gui_integrated.bat
+# 方式一：开发启动脚本
+python build.py run
+
+# 方式二：使用内嵌环境启动
+studio\run_gui_integrated.bat
 ```
+
+> `build.py` 仅保留开发模式；打包/加固/发布逻辑已迁移到独立发布工程 `TinTin_Release_Builder`。
 
 ---
 
 ## 侧边栏导航
 
-### ✅ 当前可用
+> 侧边栏顺序已按当前 `studio/gui/main_window_sidebar.py` 重新扫描。
+
+### 当前可用（按显示顺序）
 
 ```
+🌐 素材浏览器（顶部独立按钮，直接打开 Electron 应用）
+
 📚 方案脚本
-  ├── 📚 我的知识库       📦 产品资料
-  └── 🛒 产品文案创作     📝 分镜脚本创作
+  ├── 📚 我的知识库
+  ├── 📦 产品资料
+  ├── 🛒 产品文案创作
+  └── 📝 分镜脚本创作
 
 🗄️ 媒体库
-  ├── 🎨 即梦生成         🔍 向量检索
-  ├── 🗄️ 素材管理
-  └── 🌐 素材浏览器       (外部 Electron 应用)
+  ├── 🎨 即梦生成
+  ├── 🔍 素材检索
+  └── 📋 任务队列
 
 ✂️ 成片制作
-  ├── ✂️ 智能混剪         📡 直播切片
+  ├── 🕒 成片任务
+  ├── 🚀 一键成片
+  ├── ✂️ 智能混剪
+  └── 📡 直播切片
 
 🖼️ 图形处理
-  ├── 👤 图像抠图         👁️ 图片框选 OCR
+  ├── 👤 图像抠图
+  └── 👁️ 图片框选 OCR
 
 🎬 视频处理
-  ├── 💬 视频转文字       🎙️ 声音克隆
-  ├── 🎞️ 视频去字幕      🔎 视频框选 OCR
-  └── 📈 视频预测评价     📢 营销视频检测
+  ├── 💬 视频转文字
+  ├── 🎙️ 声音克隆
+  ├── 🎞️ 视频去字幕
+  └── 🔎 视频框选 OCR
+
+📈 视频运营
+  ├── 📈 视频评价预测
+  └── 📢 视频营销检测
 
 ⚙️ 系统设置
-  ├── ⚙️ 模型配置         🔌 平台接入
-  ├── 📦 资源配置         🖥️ 运行环境
+  ├── ⚙️ 模型配置
+  ├── 🔌 平台接入
+  ├── 📦 资源配置
+  ├── 🖥️ 运行环境
+  ├── 🧩 扩展插件
   └── ❓ 帮助
 ```
 
-### 🚧 已隐藏（未在侧边栏显示）
+### 已隐藏（代码仍在，菜单未开放）
 
-下列功能代码已存在但菜单未开放，按计划状态分组：
+| 功能 | 说明 | 对应文件/索引 |
+|------|------|--------------|
+| 数字人 | 数字人形象生成 | `setup_digital_human_page` / index 3 |
+| 即梦素材 | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
+| MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
+| 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
+| 视频修复 | VSR 超分/去噪/补帧 v14 | `subtitle_removal_page_v14.py` / index 11 |
+| 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
+| 批量 LUT 调色 | LUT 色彩预设 | `video_lut_page.py` / index 27 |
+| 封面制作 | 批量电商封面生成 | `cover_maker_page.py` / index 33 |
+| 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
 
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| 🗣️ 数字人 | 📅 下版本计划 | 数字人形象生成 |
-| 🚀 一键成片 | 📅 下版本计划 | ComfyUI 工作流端到端成片 |
-| 🖼️ 封面制作 | 📅 下版本计划 | 批量电商封面生成 |
-| ✍️ 飞书选题 | 📅 下版本计划 | 从飞书表格同步选题 |
-| 🧺 即梦素材 | 🔒 暂时隐藏 | 即梦生成素材管理（功能已开发） |
-| 🪄 MG 动画 | 🔒 暂时隐藏 | Remotion 动态图形（功能已开发） |
-| 🗂️ 智能分层 | 🔒 暂时隐藏 | AI 图像分层（功能已开发） |
-| ✨ 视频修复 | 🔒 暂时隐藏 | VSR 超分修复 v14（功能已开发） |
-| 🏷️ 视频智能重命名 | 🔒 暂时隐藏 | 视觉模型智能命名（功能已开发） |
-| 🌈 批量 LUT 调色 | 🔒 暂时隐藏 | LUT 色彩预设（功能已开发） |
-| 📋 任务列表 | 🔒 暂时隐藏 | 后台任务查看（占位） |
-| 👥 账户平台 | 🔒 暂时隐藏 | 抖音账户管理（整段 Section 隐藏） |
+### 已移除（代码/文件已删除）
 
-> 状态图例：📅 下版本计划 = 已排期；🔒 暂时隐藏 = 功能已就绪但暂不开放。具体见 `studio/gui/main_window_sidebar.py` 注释。
+| 功能 | 说明 |
+|------|------|
+| 热点追踪 | 页面已彻底移除，功能并入素材浏览器；`studio/gui/hotspot_page.py` 已删除 |
+| AI 技能模块 | `ai_skills/` 目录已删除（无代码依赖） |
+| 旧版爬虫 | `legacy_crawler/` 目录已删除，被 `studio/core/` 取代 |
+
+> 菜单显隐以 `studio/gui/main_window_sidebar.py` 注释为准；页面索引以 `studio/gui_main.py` 的 `setup_pages` 顺序为准。
 
 ---
 
 ## 功能模块
 
-> 状态：✅ 可用 · 🔒 暂时隐藏（功能已就绪）· 📅 下版本计划
+### 成片制作
 
-### 🎬 视频处理
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 智能混剪 | 可用 | 镜头分割、精华提取、镜头重组在客户端编排；最终视频合成默认委托远程服务端（可切换本地），合成参数与分割片段上传至服务端 |
+| 直播切片 | 可用 | 直播录制管理、自动分段、精华提取界面 |
+| 一键成片 | 可用 | 模板选择、素材匹配、合成请求界面 |
+| 成片任务 | 可用 | 合成/生成任务队列展示界面 |
+
+### 媒体库
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 即梦生成 | 可用 | 调用即梦可执行文件/ComfyUI 生成图像 |
+| 素材检索 | 可用 | 向量/关键词检索界面，请求远程 CLIP 服务 |
+| 任务队列 | 可用 | 展示服务端定时任务/生成队列状态 |
+
+### 视频处理
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 视频转文字 | 可用 | 上传/选择视频 → 请求远程 Whisper 服务 → 展示时间戳文本 |
+| 声音克隆 | 可用 | 样本管理、TTS 请求远程 VoxCPM 服务 |
+| 视频去字幕 | 可用 | 本地 VSR 超分 + PaddleOCR 检测 → 擦除硬字幕 |
+| 视频框选 OCR | 可用 | 框选区域 → 本地 PaddleOCR 提取文字 |
+| 视频修复 | 隐藏 | 本地 VSR 处理（v14） |
+| 视频智能重命名 | 隐藏 | 抽帧 → 请求远程视觉模型 → 智能命名 |
+| 批量 LUT 调色 | 隐藏 | 本地 ffmpeg 应用 LUT |
+
+### 图形处理
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 图像抠图 | 可用 | 本地 rembg 批量去背景 |
+| 图片框选 OCR | 可用 | 本地 PaddleOCR 提取文字 |
+| 智能分层 | 隐藏 | AI 图像分层分解 |
+| 封面制作 | 隐藏 | 批量电商封面生成 |
+
+### 方案脚本
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 我的知识库 | 可用 | 个人知识库 (RAG) 界面 |
+| 产品资料 | 可用 | 产品资料库管理 + Excel 导入导出 |
+| 产品文案创作 | 可用 | 产品资料 → 调用云端 LLM API 生成文案 |
+| 分镜脚本创作 | 可用 | 分析画面 → 调用 LLM 生成分镜脚本 |
+
+### 视频运营
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 视频评价预测 | 可用 | 钩子评分界面 |
+| 视频营销检测 | 可用 | 识别营销/违禁内容界面 |
+
+### 已移除/隐藏功能
 
 | 功能 | 状态 | 说明 |
 |------|:----:|------|
-| 智能混剪 | ✅ | 镜头分割 → 精华提取 → 排列 → 配音 → 字幕 → 合成 |
-| 直播切片 | ✅ | 直播录制 → 自动分段 → 精华提取 |
-| 视频转文字 | ✅ | Whisper 语音识别，输出带时间戳文本 |
-| 声音克隆 | ✅ | 上传样音 → VoxCPM 克隆 → 口播 TTS |
-| 视频去字幕 | ✅ | VSR 超分 + PaddleOCR 检测 → 擦除硬字幕 |
-| 视频框选 OCR | ✅ | 视频内框选区域 → 自动提取文字 |
-| 视频预测评价 | ✅ | 钩子评分，预测视频表现 |
-| 营销视频检测 | ✅ | 识别视频中的营销/违禁内容 |
-| 视频智能重命名 | 🔒 | 抽帧 → 视觉模型分析 → 智能文件名 |
-| 视频修复 | 🔒 | VSR 超分/去噪/补帧（v14） |
-| 批量 LUT 调色 | 🔒 | LUT 色彩预设批量应用 |
-| 数字人 | 📅 | 数字人形象生成 |
-
-### 🖼️ 图形处理
-
-| 功能 | 状态 | 说明 |
-|------|:----:|------|
-| 图像抠图 | ✅ | rembg 批量去背景，输出透明 PNG |
-| 图片框选 OCR | ✅ | 图片内框选区域 → 自动提取文字 |
-| 智能分层 | 🔒 | AI 图像分层分解 |
-| MG 动画 | 🔒 | Remotion 驱动的动态图形 |
-| 封面制作 | 📅 | 批量电商封面生成 |
-
-### 🤖 AI 工具
-
-| 功能 | 状态 | 说明 |
-|------|:----:|------|
-| 即梦生成 | ✅ | 即梦多比例/多模型 AI 图像生成 |
-| 一键成片 | 📅 | ComfyUI 工作流端到端成片 |
-
-### 📚 方案脚本
-
-| 功能 | 状态 | 说明 |
-|------|:----:|------|
-| 我的知识库 | ✅ | 个人知识库 (RAG) |
-| 产品资料 | ✅ | 产品资料库管理 + Excel 导入导出 |
-| 产品文案创作 | ✅ | 产品资料 → AI 自动生成电商文案 |
-| 分镜脚本创作 | ✅ | AI 分析画面 → 生成分镜脚本 |
-| 飞书选题 | 📅 | 从飞书表格同步选题 |
-
-### 📊 素材管理
-
-| 功能 | 状态 | 说明 |
-|------|:----:|------|
-| 素材管理 | ✅ | 素材入库 / 标签 / NAS 目录索引 / AI 分析 |
-| 素材浏览器 | ✅ | 内嵌 Electron 浏览器，自动嗅探视频/音频 |
-| 向量检索 | ✅ | CLIP 语义搜索 + 关键词加权匹配 |
-| 即梦素材 | 🔒 | 即梦生成素材管理 |
-| 任务列表 | 🔒 | 后台任务查看 |
+| 热点追踪 | 已移除 | 并入素材浏览器 |
+| 数字人 | 隐藏 | 下版本计划 |
+| 飞书选题 | 隐藏 | 已并入「分镜脚本创作」页面内作为「飞书选题同步」卡片，不再作为独立侧边栏菜单 |
+| 即梦素材 | 隐藏 | 功能已开发 |
+| MG 动画 | 隐藏 | 功能已开发 |
+| 账户平台 | 隐藏 | 抖音账户管理 |
 
 ---
 
-## 系统配置详解
+## 系统配置
 
-### 🖥️ 运行环境
+> v2.1.0 将原「环境配置」拆分为 5 个独立菜单，合并/迁移了冗余菜单：AI 设置→平台接入、大模型配置→模型配置、系统日志/帮助/备份还原/Python 终端→运行环境/资源配置等。
+
+### 运行环境
 - Python 版本/路径、GPU 型号/显存、CUDA/PyTorch 状态实时检测
-- 根据显存自动优化并发参数 (Ollama 并发 / 视觉分析 / CLIP 批大小)
+- 根据显存自动优化并发参数
 - 一键修复：重装 CUDA 版 PyTorch + WhisperX 依赖
 - 数据备份/还原：配置 + 业务数据一键打包 zip
-- 内嵌 Python 终端：在应用内执行命令
+- 内嵌 Python 终端
+- 系统日志 / 帮助文档 / 硬件信息
 
-### 🔌 平台接入
-- **统一计算节点**：远程服务端地址配置、连通性测试（集中管理 ASR/VoxCPM/Ollama/CLIP）
-- **ComfyUI**：远程地址配置、连接测试
-- **RunningHub**：API Key 配置、用户信息验证
-- **即梦**：二进制路径显示
-- **飞书**：App ID/Secret/Token/Table 配置，保存到 `config.ini`
+### 平台接入
+- 统一计算节点：远程服务端地址配置、连通性测试
+- ComfyUI：远程地址配置、连接测试
+- RunningHub：API Key 配置、用户信息验证
+- 即梦 / 飞书：二进制路径与 App ID/Secret 配置
 
-### 🧠 模型配置
-- **大语言模型**（云端）：API 地址 / Key / 模型名配置
-- **视觉模型**（服务端）：远程 Ollama 视觉模型列表、下载/删除
-- **语音转写**（服务端）：远程 Whisper 服务连通性测试
-- **声音克隆**（服务端）：远程 VoxCPM 服务连通性测试
-- **向量模型**（服务端）：远程 CLIP 服务连通性测试
-- **PaddleOCR**（本地）：Python 环境检测、导入测试
-- **rembg**（本地）：抠图模型可用性检测
+### 模型配置
+- 大语言模型：API 地址 / Key / 模型名
+- 视觉模型：远程 Ollama 列表、下载/删除
+- 语音转写：远程 Whisper 连通性测试
+- 声音克隆：远程 VoxCPM 连通性测试
+- 向量模型：远程 CLIP 连通性测试
+- PaddleOCR / rembg：本地可用性检测
 
-### 📊 系统信息
-- 硬件信息：OS / CPU / RAM / GPU / VRAM
-- 系统日志：最近 100 行实时查看
-- 帮助文档：快速开始 / 环境要求 / 功能概览 / FAQ
-
-### 📦 资源配置
+### 资源配置
 - 声音样本管理
-- 素材目录：支持多目录，NAS 入库，平台自动适配
+- 素材目录：支持多目录，NAS 入库
 
 ---
 
 ## 配置
 
-> 完整字段说明见 **[docs/SETUP.md](docs/SETUP.md)** 第 5 节。含凭据的配置文件不入库，仓库内提供 `.example` 模板，部署时复制为正式文件并填入真实值。
+> 凭据与敏感文件不入库。仓库提供 `.example` 模板，部署时复制为正式文件并填入真实值。
 
 ### AI 配置 (`studio/config/ai_config.json`)
 
-```json
-{
-  "llm_provider": "deepseek",
-  "llm_api_key": "sk-xxx",
-  "llm_api_url": "https://api.deepseek.com",
-  "llm_model": "deepseek-v4-flash",
-  "compute_server_url": "http://192.168.111.18:8000",
-  "whisper_api_url": "http://192.168.111.18:8000",
-  "llm_vision_api_url": "http://192.168.111.18:8000",
-  "vox_api_url": "http://192.168.111.18:8000/voxcpm/tts",
-  "clip_api_url": "http://192.168.111.18:8000",
-  "material_api_url": "http://192.168.111.18:8000",
-  "comfyui_addr": "http://192.168.111.36:8188",
-  "runninghub_api_key": "",
-  "runninghub_base_url": "https://www.runninghub.cn",
-  "rustfs_endpoint": "http://192.168.111.17:9000",
-  "rustfs_access_key": "xxx",
-  "rustfs_secret_key": "xxx",
-  "rustfs_bucket": "photos"
-}
-```
+关键字段：
 
 | 字段 | 说明 | 示例 |
 |------|------|------|
-| `compute_server_url` | **统一计算节点地址**（ASR / VoxCPM / Ollama / CLIP 共用） | `http://192.168.111.18:8000` |
-| `whisper_api_url` | 语音转写服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
-| `llm_vision_api_url` | 视觉分析（Ollama）地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
-| `vox_api_url` | 声音克隆 TTS 地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000/voxcpm/tts` |
-| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
-| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://192.168.111.18:8000` |
-| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://192.168.111.36:8188` |
+| `compute_server_url` | 统一计算节点地址（ASR / VoxCPM / Ollama / CLIP / 智能混剪合成） | `http://<server>:8000` |
+| `whisper_api_url` | 语音转写服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
+| `llm_vision_api_url` | 视觉分析地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
+| `vox_api_url` | 声音克隆 TTS 地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000/voxcpm/tts` |
+| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
+| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
+| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://<server>:8188` |
 | `llm_api_url` | 文案生成 LLM API（云端） | `https://api.deepseek.com` |
-| `rustfs_endpoint` | RustFS/S3 对象存储地址 | `http://192.168.111.17:9000` |
+
+> 服务端接口路径以运行时服务端 `/guide` 或 OpenAPI 文档为准，客户端按文档对接。
 
 ### 服务配置 (`config.ini`)
 
@@ -278,15 +290,11 @@ modelpath = apps/voxcpm2/models/openbmb__VoxCPM2
 port = 7861
 ```
 
-> **注意**：VoxCPM 目前使用远程服务端模式，本地 `VoxCPM` 配置段为保留项。远程地址统一在 `ai_config.json` 中配置。
-
 ### 激活与授权
 
-未激活设备启动时弹出激活对话框，需输入开发人员签发的激活码（JSON）。
-
-- **机器码**：对话框显示 16 位机器码，**支持鼠标选中复制或点「📋 复制」按钮**，发给开发人员签发激活码
-- **白名单**：`studio/config/trial_whitelist.json` 中的机器码可免激活直接试用（该文件已从 git 移除，仅本地保留）
-- **开发跳过**：设环境变量 `TINTIN_NO_LICENSE=1` 可跳过激活检查（仅开发用）
+- 未激活设备启动时弹出激活对话框，输入开发人员签发的激活码
+- 机器码支持复制
+- 开发跳过：设环境变量 `TINTIN_NO_LICENSE=1`
 - 签发工具：`tools/license_tool.py`
 
 ### 运行时目录
@@ -303,22 +311,19 @@ port = 7861
 ## 开发
 
 ```bash
-make install-dev     # 完整开发环境 (含 PyInstaller)
-make run             # 开发模式运行
-make build           # 打包当前平台
-make check           # 全部 .py 语法校验
-make clean           # 清理构建产物
+python build.py run    # 开发模式运行（打包逻辑已迁移到 TinTin_Release_Builder）
+make install-dev       # 完整开发环境（若使用 Makefile）
+make check             # 全部 .py 语法校验
+make clean             # 清理构建产物
 ```
 
 ### 依赖文件
 
-| 文件 | 用途 |
-|------|------|
-| `studio/requirements_gui.txt` | GUI 主程序依赖（PySide6 / 图像视频 / 授权等，含可选功能注释） |
-| `studio/requirements.txt` | 爬虫 / 数据库 / Flask 等后端依赖 |
-| `studio/requirements_dev.txt` | 开发工具（PyInstaller / Playwright） |
+- `studio/requirements_gui.txt` — GUI 主程序依赖
+- `studio/requirements.txt` — 爬虫/数据库/Flask 依赖
+- `studio/requirements_dev.txt` — 开发工具
 
-详细指南见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
+详细指南见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
 ---
 
@@ -327,17 +332,16 @@ make clean           # 清理构建产物
 | 层 | 技术 |
 |----|------|
 | 客户端 GUI | PySide6 (Qt 6) |
-| 服务端 (AI 推理) | FastAPI · Whisper · VoxCPM2 · Ollama (vLLM) · Chinese-CLIP |
-| 图像生成 | ComfyUI（独立服务节点）|
+| 内嵌 Python | `python_embeded/` 独立 Python 环境 |
+| 图像生成 | 即梦 / ComfyUI（远程） |
 | 文案生成 | DeepSeek API（云端） |
+| 本地媒体处理 | ffmpeg · VSR · rembg · PaddleOCR |
 | Web 引擎 | QtWebEngine / Playwright |
-| 本地处理 | ffmpeg · VSR · rembg · PaddleOCR |
-| 数据 | PostgreSQL+pgvector · MySQL · MongoDB · RustFS/S3 |
-| 构建 | PyInstaller · Makefile |
+| 构建 | PyInstaller · Makefile / TinTin_Release_Builder |
 | 素材浏览器 | Electron |
 
 ---
 
-> 💡 **设计原则**：客户端只做 UI 渲染和轻量预处理（ffmpeg 提取音频、本地 VSR 去字幕等），所有 AI 推理任务（语音转写、声音克隆、视觉分析、向量嵌入）统一由远程服务端执行。这种分离让客户端保持轻量，同时支持服务端 GPU 资源共享与横向扩展。
+> 设计原则：客户端聚焦 UI 与本地轻量处理，重度 AI 推理与媒体合成统一委托到可配置的远程服务端，避免依赖客户端机器性能。
 
-> ⚠️ 仅供学习交流，请勿用于违反平台规则或法律的用途。
+> 仅供学习交流，请勿用于违反平台规则或法律的用途。

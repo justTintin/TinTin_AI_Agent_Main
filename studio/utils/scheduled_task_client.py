@@ -50,7 +50,18 @@ def list_tasks(timeout=10):
 
 
 def get_task(task_id, timeout=10):
-    """GET /scheduled/tasks/{id} → 返回单任务 dict。失败返回 None。"""
+    """GET /tasks/unified/{id} → 返回单任务 dict。失败返回 None。
+
+    按 /guide 4.4 说明，客户端统一走 unified 轮询；unified 失败时回退到
+    /scheduled/tasks/{id} 保持兼容。
+    """
+    try:
+        r = requests.get(f"{_server_url()}/tasks/unified/{task_id}", timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        log.warning(f"[定时任务] unified get_task({task_id}) 失败: {e}")
+
     try:
         r = requests.get(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
         if r.status_code == 200:

@@ -100,19 +100,34 @@ class VideoConcatWorker(BaseWorker):
         except Exception:
             raise _TranscodeSkip(f"⚠ 跳过探测失败的文件: {name}")
 
-        # 2) 转码：缩放/填充黑边/统一 30fps，软编 libx264 superfast crf23
+        # 2) 转码：缩放/填充黑边/统一 30fps，强制软编 libx264 superfast crf23
+        # 标准化转码阶段必须强制软编，避免 GPU 编码器驱动/并发会话在后台线程中
+        # 出现 0% 占用假死；xfade/LUT 阶段已强制软编，此处保持一致。
         norm_out = os.path.join(temp_dir, f"norm_{i:04d}.mp4")
         # format=yuv420p：源素材可能是 10-bit（yuv420p10le/HDR），AMF 等硬件编码器
         # 不支持 10-bit 输入，必须在滤镜链显式转 8-bit，否则转码全部失败。
         vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p"
+
+        clip_dur = 0.0
+        try:
+            if probe_r.returncode == 0 and probe_r.stdout.strip():
+                clip_dur = float(probe_r.stdout.strip())
+        except Exception:
+            pass
+        encode_timeout = max(60, int(clip_dur * 10)) if clip_dur > 0 else 300
+
         cmd = [
             ffmpeg_path, "-y", "-i", clip_abspath,
             "-vf", vf_filter,
-            *get_video_encode_args(crf=23, preset="superfast"),
+            *get_video_encode_args(crf=23, preset="superfast", force_software=True),
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             norm_out
         ]
-        r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=encode_timeout)
+        except subprocess.TimeoutExpired:
+            log.warning(f"标准化转码单镜头超时({encode_timeout}s): {name}")
+            raise _TranscodeSkip(f"⚠ 转码超时，跳过: {name}")
         if r.returncode != 0:
             log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
             raise _TranscodeSkip(f"⚠ 转码失败，跳过: {name}")
@@ -129,26 +144,22 @@ class VideoConcatWorker(BaseWorker):
         "zoomin": "zoomin",
         "zoomout": "zoomout",
     }
+    # 单个 xfade filter_complex 中最多同时解码的镜头数。超过此值时拆分为多个
+    # chunk 分别做 xfade，再用无损 concat 合并，避免镜头过多导致 filter graph
+    # 过大、初始化缓慢甚至 ffmpeg 假死。
+    _XFADE_CHUNK_SIZE = 12
 
-    def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
-        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。
-
-        注意：xfade 是复杂 CPU 滤镜，其输出像素格式/帧时序与硬件编码器（AMF/NVENC/QSV）
-        配合时容易出现卡顿/假死。因此本阶段统一强制使用 libx264 软编，确保稳定性。
-        当 LUT 启用时，也在 lut3d 后显式转 yuv420p，避免 10-bit/HDR 素材格式不兼容。
+    def _simple_concat(self, ffmpeg_path, clips, out_file, temp_dir, batch_idx):
+        """无损 concat（无转场）。单镜头直接复制；多镜头走 concat demuxer。
+        若启用 LUT，使用 filter_complex 给每个镜头做 lut3d 后 concat（需重编码）。
         """
         if not clips:
             return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
 
-        # 读取 LUT 配置
         lut_path = self.lut_path
         if lut_path and not os.path.isfile(lut_path):
-            log.warning(f"[LUT] 文件不存在，跳过: {lut_path}")
             lut_path = ""
-        if lut_path:
-            log.info(f"[LUT] 应用色彩还原: {os.path.basename(lut_path)}")
 
-        # 单个镜头直接复制（带 LUT 时需要重新编码）
         if len(clips) == 1:
             if lut_path:
                 lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
@@ -163,12 +174,47 @@ class VideoConcatWorker(BaseWorker):
             return _run_proc(cmd, capture_output=True, text=True,
                                   creationflags=subprocess.CREATE_NO_WINDOW)
 
+        # 多镜头 + LUT：需要在 filter_complex 里逐个应用 lut3d 后 concat
+        if lut_path:
+            lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
+            n = len(clips)
+            video_parts = [f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[v{i}];" for i in range(n)]
+            concat_labels = "".join(f"[v{i}]" for i in range(n))
+            audio_labels = "".join(f"[{i}:a]" for i in range(n))
+            filter_complex = (
+                "".join(video_parts) +
+                f"{concat_labels}concat=n={n}:v=1:a=0[vout];" +
+                f"{audio_labels}concat=n={n}:v=0:a=1[aout]"
+            )
+            cmd = [ffmpeg_path, "-y"] + [arg for i, clip in enumerate(clips) for arg in ("-i", clip)] + [
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "[aout]",
+                *get_video_encode_args(crf=23, preset="superfast", force_software=True),
+                "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                "-movflags", "+faststart",
+                out_file
+            ]
+            return _run_proc(cmd, capture_output=True, text=True,
+                                  creationflags=subprocess.CREATE_NO_WINDOW)
+
+        concat_txt = os.path.join(temp_dir, f"concat_simple_{batch_idx}_{os.getpid()}.txt")
+        with open(concat_txt, "w", encoding="utf-8") as f:
+            for c in clips:
+                safe_path = c.replace("\\", "/")
+                f.write(f"file '{safe_path}'\n")
+        cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
+        return _run_proc(cmd, capture_output=True, text=True,
+                              creationflags=subprocess.CREATE_NO_WINDOW)
+
+    def _run_xfade(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):
+        """对少量镜头直接构建 xfade 滤镜链拼接。超过 _XFADE_CHUNK_SIZE 的镜头应走
+        _run_xfade_chunked 分块处理。
+        """
         xfade_type = self._XFADE_MAP.get(self.transition, "fade")
-        transition_dur = 0.5  # 转场时长 0.5 秒
+        transition_dur = 0.5
 
         self.stage.emit(f"正在合成转场视频 ({len(clips)} 个镜头){'，LUT 已启用' if lut_path else ''}...")
 
-        # 获取每个片段的时长
         durations = []
         for clip in clips:
             dur = 0.0
@@ -185,22 +231,17 @@ class VideoConcatWorker(BaseWorker):
                 dur = 5.0
             durations.append(dur)
 
-        # 构建 xfade 滤镜链
-        # xfade 语法: [v0][v1]xfade=transition=fade:duration=0.5:offset=4.5[v01]
-        # offset = 前一个片段结束时间 - 转场时长
         n = len(clips)
         filter_parts = []
         inputs = []
         for clip in clips:
             inputs += ["-i", clip]
 
-        # ── LUT 色彩还原：在 xfade 之前给每个片段加 lut3d，并显式转 8-bit yuv420p ──
         if lut_path:
             lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
             for i in range(n):
                 filter_parts.append(f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[lut{i}];")
 
-        # 第一个转场
         if lut_path:
             prev_label = "lut0"
         else:
@@ -216,7 +257,6 @@ class VideoConcatWorker(BaseWorker):
             prev_label = out_label
             accumulated = offset + transition_dur + (durations[i] - transition_dur)
 
-        # 音频用 concat 拼接（简单交叉不需要复杂音频转场）
         audio_filter_parts = []
         for i in range(n):
             audio_filter_parts.append(f"[{i}:a]")
@@ -225,6 +265,9 @@ class VideoConcatWorker(BaseWorker):
 
         final_vlabel = prev_label
         filter_complex = ";".join(filter_parts) + ";" + audio_filter
+
+        total_dur = sum(durations)
+        timeout = max(120, int(total_dur * 3) + n * 20)
 
         cmd = [ffmpeg_path, "-y"] + inputs + [
             "-filter_complex", filter_complex,
@@ -235,8 +278,64 @@ class VideoConcatWorker(BaseWorker):
             "-movflags", "+faststart",
             out_file
         ]
-        return _run_proc(cmd, capture_output=True, text=True,
-                              creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            return _run_proc(cmd, capture_output=True, text=True,
+                                  creationflags=subprocess.CREATE_NO_WINDOW, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            log.warning(f"xfade 拼接 {len(clips)} 个镜头超时({timeout}s)，输出文件未生成，准备降级")
+            return subprocess.CompletedProcess(args=cmd, returncode=1,
+                                               stderr=f"xfade timeout after {timeout}s")
+
+    def _run_xfade_chunked(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):
+        """镜头数过多时拆块处理，每块内部做 xfade，最后无损 concat 合并各块。"""
+        chunk_size = self._XFADE_CHUNK_SIZE
+        chunks = [clips[i:i + chunk_size] for i in range(0, len(clips), chunk_size)]
+        chunk_files = []
+        for idx, chunk in enumerate(chunks):
+            self.stage.emit(f"转场拼接分块 {idx + 1}/{len(chunks)} ({len(chunk)} 个镜头)...")
+            chunk_out = os.path.join(temp_dir, f"chunk_{batch_idx}_{idx}_{os.getpid()}.mp4")
+            r = self._run_xfade(ffmpeg_path, ffprobe_path, chunk, chunk_out, temp_dir,
+                                f"{batch_idx}_{idx}", lut_path)
+            if r.returncode != 0 or not os.path.isfile(chunk_out):
+                log.warning(f"分块 {idx + 1} xfade 失败，该块改用无损 concat: {r.stderr[-200:]}")
+                r2 = self._simple_concat(ffmpeg_path, chunk, chunk_out, temp_dir,
+                                         f"{batch_idx}_{idx}_fallback")
+                if r2.returncode != 0 or not os.path.isfile(chunk_out):
+                    return subprocess.CompletedProcess(args=[], returncode=1,
+                        stderr=f"chunk {idx} fallback concat failed: {r2.stderr}")
+            chunk_files.append(chunk_out)
+
+        return self._simple_concat(ffmpeg_path, chunk_files, out_file, temp_dir,
+                                    f"chunked_{batch_idx}")
+
+    def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
+        """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。
+
+        注意：xfade 是复杂 CPU 滤镜，其输出像素格式/帧时序与硬件编码器（AMF/NVENC/QSV）
+        配合时容易出现卡顿/假死。因此本阶段统一强制使用 libx264 软编，确保稳定性。
+        当 LUT 启用时，也在 lut3d 后显式转 yuv420p，避免 10-bit/HDR 素材格式不兼容。
+        为避免镜头数过多时 filter graph 过大导致初始化/编码假死，超过阈值会自动分块；
+        若用户选择"无转场"或 xfade 超时/失败，自动降级为无损 concat。
+        """
+        if not clips:
+            return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
+
+        # 读取 LUT 配置
+        lut_path = self.lut_path
+        if lut_path and not os.path.isfile(lut_path):
+            log.warning(f"[LUT] 文件不存在，跳过: {lut_path}")
+            lut_path = ""
+        if lut_path:
+            log.info(f"[LUT] 应用色彩还原: {os.path.basename(lut_path)}")
+
+        # 无转场 / 单镜头：直接走无损 concat
+        if self.transition == "none" or len(clips) <= 1:
+            return self._simple_concat(ffmpeg_path, clips, out_file, temp_dir, batch_idx)
+
+        # 镜头数在阈值内：直接 xfade；超过阈值：分块 xfade
+        if len(clips) <= self._XFADE_CHUNK_SIZE:
+            return self._run_xfade(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)
+        return self._run_xfade_chunked(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)
 
     def _compose_beat_video(self, ffmpeg_path, norm_clips, out_file, temp_dir):
         """音乐卡点合成：每个镜头裁剪到对应节拍区间时长，硬切拼接（保证卡点精准），

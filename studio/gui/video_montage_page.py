@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QListWidget, QTableWidget,
                                QTableWidgetItem, QHeaderView, QAbstractItemView, QSlider, QDoubleSpinBox, QWidget, QStackedWidget,
                                QSpinBox, QListWidgetItem, QDialog, QPlainTextEdit, QScrollArea, QListView, QMenu)
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QBrush, QPixmap
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.base_worker import BaseWorker
@@ -50,7 +50,9 @@ from gui.error_dialog import show_error_dialog
 from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker,
                                                ServerClipAnalysisWorker)
 from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorker, VideoDubbingWorker)
+from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
 from gui.montage.workers.voice_workers import VoiceCloneWorker
+from utils import scheduled_task_client as stc
 from gui.montage.workers.desc_workers import (BatchGenerateDescriptionsWorker, LocalVisionDescWorker)
 from gui.montage.workers.script_workers import (PunctuationSRTLLMWorker, AITextRewriteWorker,
                                                 ProductCopyWorker, SceneCopyWorker, GenScriptWorker,
@@ -59,6 +61,9 @@ from gui.montage.workers.script_workers import (PunctuationSRTLLMWorker, AITextR
 
 
 class VideoMontagePage(BasePage):
+    # 是否把镜头合成提交到服务端 montage_concat 执行器。
+    # 服务端部署完成后设为 True；未部署前保持 False，走本地 VideoConcatWorker。
+    USE_SERVER_CONCAT = True  # 默认启用服务端合成
     """智能混剪主页面（控制器层）。
 
     本类方法按流程阶段用行内标签分节，便于在 5000+ 行中快速定位。
@@ -714,6 +719,7 @@ class VideoMontagePage(BasePage):
         self.transition_combo.addItem("下移", "slidedown")
         self.transition_combo.addItem("推进", "zoomin")
         self.transition_combo.addItem("拉远", "zoomout")
+        self.transition_combo.addItem("无转场", "none")
         self.transition_combo.setCurrentIndex(0)
         self.transition_combo.setFixedWidth(100)
         self.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
@@ -3435,11 +3441,44 @@ class VideoMontagePage(BasePage):
                               target_clip_count, batch_count, randomness,
                               selected_descriptions_list=None,
                               beat_times=None, music_path="", music_range=None):
+        """入口：根据开关决定走服务端合成还是本地合成。"""
         self.btn_assemble_video.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
 
+        if self.USE_SERVER_CONCAT:
+            self._submit_concat_to_server(
+                selected_clips=selected_clips,
+                out_montage_dir=out_montage_dir,
+                recombine_mode=recombine_mode,
+                target_clip_count=target_clip_count,
+                batch_count=batch_count,
+                randomness=randomness,
+                selected_descriptions_list=selected_descriptions_list,
+                beat_times=beat_times,
+                music_path=music_path,
+                music_range=music_range,
+            )
+        else:
+            self._launch_local_concat_worker(
+                selected_clips=selected_clips,
+                out_montage_dir=out_montage_dir,
+                recombine_mode=recombine_mode,
+                target_clip_count=target_clip_count,
+                batch_count=batch_count,
+                randomness=randomness,
+                selected_descriptions_list=selected_descriptions_list,
+                beat_times=beat_times,
+                music_path=music_path,
+                music_range=music_range,
+            )
+
+    def _launch_local_concat_worker(self, selected_clips, out_montage_dir, recombine_mode,
+                                      target_clip_count, batch_count, randomness,
+                                      selected_descriptions_list=None,
+                                      beat_times=None, music_path="", music_range=None):
+        """本地 ffmpeg 合成（fallback）。"""
         self.concat_worker = VideoConcatWorker(
             selected_clips=selected_clips,
             output_dir=out_montage_dir,
@@ -3461,6 +3500,144 @@ class VideoMontagePage(BasePage):
         self.concat_worker.finished.connect(self._on_concat_finished)
         self.concat_worker.error.connect(self._on_concat_error)
         self.concat_worker.start()
+
+    def _probe_first_clip_resolution(self, clips):
+        """探测第一个有效镜头的分辨率，用于 layout_mode=source 时回传给服务端。
+
+        服务端 montage_concat 只认 width/height，不认 layout_mode，所以 source 模式
+        需要客户端主动把第一个镜头的宽高传过去，才能保持"与原视频一致"的行为。
+        """
+        for clip in clips:
+            if not os.path.isfile(clip):
+                continue
+            try:
+                ffprobe = find_ffmpeg().replace("ffmpeg", "ffprobe")
+                cmd = [
+                    ffprobe, "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height",
+                    "-of", "csv=p=0:s=x",
+                    clip,
+                ]
+                r = subprocess.run(
+                    cmd, capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW, timeout=15,
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    parts = r.stdout.strip().split("x")
+                    if len(parts) == 2:
+                        return int(parts[0]), int(parts[1])
+            except Exception:
+                pass
+        return 0, 0
+
+    def _submit_concat_to_server(self, selected_clips, out_montage_dir, recombine_mode,
+                                 target_clip_count, batch_count, randomness,
+                                 selected_descriptions_list=None,
+                                 beat_times=None, music_path="", music_range=None):
+        """提交镜头合成任务到服务端 montage_concat 执行器。
+
+        严格对齐 /guide 2.10 镜头拼接（montage_concat）接口：
+          - POST /montage/concat（multipart/form-data），同时上传 files / lut(可选) / 参数
+          - options 只包含文档列出的字段，避免传 layout_mode / output_dir / audio_fade 等
+            服务端可能不认识或误用的字段。
+          - 转场名称按服务端支持列表做安全映射。
+          - source 模式由本地上传第一个镜头的分辨率，不再传 0x0。
+        """
+        # 构建输出文件名
+        filename = f"montage_concat_server_{random.randint(1000, 9999)}_{batch_count}.mp4"
+        local_output_path = os.path.join(out_montage_dir, filename)
+
+        layout_mode = self.layout_combo.currentData() if hasattr(self, "layout_combo") else "vertical"
+        transition = self.transition_combo.currentData() if hasattr(self, "transition_combo") else "fade"
+        lut_path = self._get_selected_lut_path() if hasattr(self, "_get_selected_lut_path") else ""
+
+        # 服务端支持的转场名称与 UI 的 xfade 命名略有差异，做安全映射；
+        # 若遇到未列出的转场，回退到 fade 以避免服务端 422 / 本地回退导致假死。
+        SERVER_TRANSITION_MAP = {
+            "fade": "fade",
+            "dissolve": "dissolve",
+            "slideleft": "wipeleft",
+            "slideright": "wiperight",
+            "slideup": "slideup",
+            "slidedown": "slidedown",
+            "zoomin": "circleopen",
+            "zoomout": "radial",
+            "none": "none",
+        }
+        server_transition = SERVER_TRANSITION_MAP.get(transition, "fade")
+        if server_transition != transition:
+            log.info(f"[montage_concat] 转场名称映射：{transition} -> {server_transition}")
+
+        # 输出分辨率：按接口文档只传 width/height，不再传 layout_mode
+        width, height = 1080, 1920
+        if layout_mode == "horizontal":
+            width, height = 1920, 1080
+        elif layout_mode == "source":
+            width, height = self._probe_first_clip_resolution(selected_clips)
+            if width <= 0 or height <= 0:
+                width, height = 1080, 1920
+
+        # 服务端 /montage/concat 只支持这些参数，且通过 multipart 同镜头一起上传
+        options = {
+            "transition": server_transition,
+            "transition_duration": 0.5,
+            "width": width,
+            "height": height,
+            "fps": 30,
+            "crf": 23,
+            "preset": "superfast",
+        }
+
+        # 卡点 / LUT 当前服务端接口不支持，回退本地处理
+        if recombine_mode == "beat" and beat_times:
+            self.stage_label.setText("⚠ 卡点模式暂不支持服务端合成，回退到本地合成")
+            self._launch_local_concat_worker(
+                selected_clips=selected_clips,
+                out_montage_dir=out_montage_dir,
+                recombine_mode=recombine_mode,
+                target_clip_count=target_clip_count,
+                batch_count=batch_count,
+                randomness=randomness,
+                selected_descriptions_list=selected_descriptions_list,
+                beat_times=beat_times,
+                music_path=music_path,
+                music_range=music_range,
+            )
+            return
+
+        if not stc._server_url():
+            self.stage_label.setText("⚠ 未配置服务端地址，回退到本地合成")
+            self._launch_local_concat_worker(
+                selected_clips=selected_clips,
+                out_montage_dir=out_montage_dir,
+                recombine_mode=recombine_mode,
+                target_clip_count=target_clip_count,
+                batch_count=batch_count,
+                randomness=randomness,
+                selected_descriptions_list=selected_descriptions_list,
+                beat_times=beat_times,
+                music_path=music_path,
+                music_range=music_range,
+            )
+            return
+
+        self.stage_label.setText("🌐 正在上传镜头并提交服务端合成...")
+        self.concat_worker = MontageConcatServerWorker(
+            local_output_path=local_output_path,
+            clips=list(selected_clips),
+            options=options,
+            lut_path=lut_path,
+            source_clips=list(selected_clips),
+        )
+        self.concat_worker.stage.connect(lambda t: self.stage_label.setText(t), type=Qt.QueuedConnection)
+        self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v), type=Qt.QueuedConnection)
+        self.concat_worker.concat_finished.connect(lambda p: self._on_concat_finished([p]), type=Qt.QueuedConnection)
+        self.concat_worker.error.connect(self._on_concat_error, type=Qt.QueuedConnection)
+        self.concat_worker.start()
+
+
+
     # [8·事件回调]  _on_logic_combo_changed
     def _on_logic_combo_changed(self):
         logic = self.logic_combo.currentData() if hasattr(self, "logic_combo") else "random"
@@ -3591,12 +3768,25 @@ class VideoMontagePage(BasePage):
                 plan["output_path"] = out_path
                 plan["confirmed"] = True
                 self.stage_label.setText(f"✅ 预合成 {idx + 1} 已确认合成")
-                self._refresh_precompose_list(select_index=idx)
+                # 只更新该条列表项文字，避免整表刷新触发预览重载/卡死
+                item = self.assembled_clips_list_widget.item(idx)
+                if item is not None:
+                    clip_count = len(plan.get("clips") or [])
+                    confirmed = plan.get("confirmed") and bool(out_path)
+                    status_txt = "✅已合成" if confirmed else "⏳待确认"
+                    file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
+                    copy_preview = self._assembled_copy_preview(out_path) if out_path else ""
+                    copy_mark = f"  📝{copy_preview}" if copy_preview else ""
+                    item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
+                    item.setData(Qt.UserRole + 1, int(confirmed))
+                self.current_precompose_index = idx
+                self.assembled_video_path = out_path
+                self.btn_next_to_step_3.setEnabled(bool(self._collect_assembled_paths()))
                 if hasattr(self, "btn_batch_scene_copy"):
                     self.btn_batch_scene_copy.setEnabled(bool(self._collect_assembled_paths()))
                 self._update_confirm_all_button()
                 if getattr(self, "_confirm_queue", None):
-                    self._confirm_next_in_queue()
+                    QTimer.singleShot(0, self._confirm_next_in_queue)
                 else:
                     QMessageBox.information(
                         self.parent_widget,
@@ -5791,6 +5981,13 @@ class VideoMontagePage(BasePage):
             out_montage_dir = self._get_out_montage_dir(dir_path)
         os.makedirs(out_montage_dir, exist_ok=True)
         self._confirming_plan_index = index
+
+        # 停止并清空预览，释放当前镜头文件句柄，避免上传/合成期间被占用
+        try:
+            self.preview_player.stop()
+            self.preview_player.setSource(QUrl())
+        except Exception:
+            pass
 
         selected_descs = []
         for clip in clips:

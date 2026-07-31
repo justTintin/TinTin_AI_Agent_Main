@@ -5,13 +5,14 @@ import shutil
 import subprocess
 import traceback
 import time
+import math
 import av
 from PIL import Image, ImageDraw
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy, QListWidget)
 from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
-from PySide6.QtGui import QImage, QPixmap, QIcon
+from PySide6.QtGui import QImage, QPixmap, QIcon, QCursor, QPainter, QPen, QBrush, QColor, QPolygonF
 from utils.logger_utils import log
 from config.paths import TMP_DIR
 
@@ -258,10 +259,13 @@ class InteractivePreviewLabelV14(QLabel):
         self.px_offset_x = 0
         self.px_offset_y = 0
 
-        self.drag_mode = None      # None | 'move' | 'vertex-N' (N=0..3) | 'draw'
+        self.drag_mode = None      # None | 'move' | 'vertex-N' (N=0..3) | 'rotate' | 'draw'
         self.drag_start_pos = None
         self.drag_start_quad = None  # 拖动起始时的四点副本（帧坐标）
         self.draw_start = None       # 新画矩形起始点（widget 坐标）
+        self.rotate_center = None    # 旋转中心（帧坐标）
+        self.rotate_start_angle = 0.0  # 按下旋转把手时的起始角度
+        self._rotate_cursor_cache = None
 
     def sizeHint(self):
         return QSize(400, 300)
@@ -290,6 +294,57 @@ class InteractivePreviewLabelV14(QLabel):
                 inside = not inside
             j = i
         return inside
+
+    def _rotation_vertex_index(self):
+        """返回视觉'右下角'的顶点下标（x+y 最大的角），用作旋转把手。"""
+        if self.active_box_index < 0 or not self.boxes:
+            return -1
+        quad = self.boxes[self.active_box_index]
+        if not quad:
+            return -1
+        best = 0
+        best_sum = quad[0][0] + quad[0][1]
+        for i in range(1, len(quad)):
+            s = quad[i][0] + quad[i][1]
+            if s > best_sum:
+                best, best_sum = i, s
+        return best
+
+    def _rotate_cursor(self):
+        """旋转把手光标（懒加载缓存）。"""
+        if self._rotate_cursor_cache is None:
+            self._rotate_cursor_cache = self._make_rotate_cursor()
+        return self._rotate_cursor_cache
+
+    @staticmethod
+    def _make_rotate_cursor():
+        """绘制顺时针旋转箭头光标（透明底、白色箭头）。"""
+        from PySide6.QtCore import QRectF, QPointF
+        pm = QPixmap(28, 28)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#ffffff"), 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        # 从 12 点方向顺时针画 300° 圆弧，留 60° 缺口放箭头
+        p.drawArc(QRectF(5, 5, 18, 18), 90 * 16, -300 * 16)
+        cx = cy = 14.0
+        r = 9.0
+        end_deg = math.radians(150)
+        ex = cx + r * math.cos(end_deg)
+        ey = cy + r * math.sin(end_deg)
+        tx = math.sin(end_deg)
+        ty = -math.cos(end_deg)
+        tip = QPointF(ex + tx * 5.0, ey + ty * 5.0)
+        base = QPointF(ex - tx * 3.0, ey - ty * 3.0)
+        side1 = QPointF(ex - ty * 4.0, ey + tx * 4.0)
+        side2 = QPointF(ex + ty * 4.0, ey - tx * 4.0)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor("#ffffff")))
+        p.drawPolygon(QPolygonF([tip, side1, base, side2]))
+        p.end()
+        return QCursor(pm)
 
     def get_handle_under_mouse(self, pos):
         """返回 (handle, idx)。handle: 'vertex-N'（N=0..3，仅激活框）/ 'move'（任意框内）/ None。"""
@@ -334,37 +389,92 @@ class InteractivePreviewLabelV14(QLabel):
             self.drag_mode = handle
             self.drag_start_pos = event.pos()
             self.drag_start_quad = [list(p) for p in self.boxes[idx]]
+            # 右下角顶点 = 旋转把手：按下进入整体旋转模式
+            if (handle.startswith('vertex-')
+                    and int(handle.split('-')[1]) == self._rotation_vertex_index()):
+                self.drag_mode = 'rotate'
+                self.rotate_center = (
+                    sum(p[0] for p in self.drag_start_quad) / 4.0,
+                    sum(p[1] for p in self.drag_start_quad) / 4.0,
+                )
+                cx, cy = self.rotate_center
+                fx = (event.pos().x() - self.px_offset_x) * self.frame_w / self.target_w
+                fy = (event.pos().y() - self.px_offset_y) * self.frame_h / self.target_h
+                self.rotate_start_angle = math.atan2(fy - cy, fx - cx)
 
     def mouseMoveEvent(self, event):
-        # 顶点/整体移动拖动
+        # 旋转/顶点/整体移动拖动
         if self.drag_mode is not None and self.drag_start_pos is not None and self.active_box_index >= 0:
-            cur = self._widget_to_frame(event.pos())
-            start = self._widget_to_frame(self.drag_start_pos)
-            if not cur or not start:
-                return
-            dx = cur[0] - start[0]
-            dy = cur[1] - start[1]
             sq = self.drag_start_quad  # 起始四点
 
-            if self.drag_mode == 'move':
+            if self.drag_mode == 'rotate':
+                fx = (event.pos().x() - self.px_offset_x) * self.frame_w / self.target_w
+                fy = (event.pos().y() - self.px_offset_y) * self.frame_h / self.target_h
+                cx, cy = self.rotate_center
+                delta = math.atan2(fy - cy, fx - cx) - self.rotate_start_angle
+                cos_d, sin_d = math.cos(delta), math.sin(delta)
+                new_quad = []
+                for px, py in sq:
+                    ox, oy = px - cx, py - cy
+                    new_quad.append([cx + ox * cos_d - oy * sin_d,
+                                     cy + ox * sin_d + oy * cos_d])
+                # 旋转后整体平移，尽量把外接框留在画面内：
+                # 放得下 → 整体贴边；放不下（旋转后比画面还大）→ 上/左缘贴边，不把框推出屏幕
+                aabb = _quad_aabb(new_quad)
+                tx = 0
+                if aabb[2] <= self.frame_w:
+                    if aabb[0] < 0:
+                        tx = -aabb[0]
+                    elif aabb[0] + aabb[2] > self.frame_w:
+                        tx = self.frame_w - aabb[0] - aabb[2]
+                else:
+                    tx = -aabb[0] if aabb[0] < 0 else 0
+                ty = 0
+                if aabb[3] <= self.frame_h:
+                    if aabb[1] < 0:
+                        ty = -aabb[1]
+                    elif aabb[1] + aabb[3] > self.frame_h:
+                        ty = self.frame_h - aabb[1] - aabb[3]
+                else:
+                    ty = -aabb[1] if aabb[1] < 0 else 0
+                self.boxes[self.active_box_index] = [[p[0] + tx, p[1] + ty] for p in new_quad]
+            else:
+                cur = self._widget_to_frame(event.pos())
+                start = self._widget_to_frame(self.drag_start_pos)
+                if not cur or not start:
+                    return
+                dx = cur[0] - start[0]
+                dy = cur[1] - start[1]
+
+                if self.drag_mode == 'move':
                 # 整体平移：clamp 使 AABB 不出帧
-                aabb = _quad_aabb(sq)
-                nx = max(-aabb[0], min(dx, self.frame_w - aabb[0] - aabb[2]))
-                ny = max(-aabb[1], min(dy, self.frame_h - aabb[1] - aabb[3]))
-                self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]
-            elif self.drag_mode.startswith('vertex-'):
-                vi = int(self.drag_mode.split('-')[1])
-                new_quad = [list(p) for p in sq]
-                new_quad[vi] = [max(0, min(self.frame_w, cur[0])),
-                                max(0, min(self.frame_h, cur[1]))]
-                self.boxes[self.active_box_index] = new_quad
+                    aabb = _quad_aabb(sq)
+                    nx = max(-aabb[0], min(dx, self.frame_w - aabb[0] - aabb[2]))
+                    ny = max(-aabb[1], min(dy, self.frame_h - aabb[1] - aabb[3]))
+                    self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]
+                elif self.drag_mode.startswith('vertex-'):
+                    vi = int(self.drag_mode.split('-')[1])
+                    new_quad = [list(p) for p in sq]
+                    new_quad[vi] = [max(0, min(self.frame_w, cur[0])),
+                                    max(0, min(self.frame_h, cur[1]))]
+                    self.boxes[self.active_box_index] = new_quad
 
             self.boundsChanged.emit(self.active_box_index)
         else:
             # 光标提示
             handle, _ = self.get_handle_under_mouse(event.pos())
             if handle and handle.startswith('vertex-'):
-                self.setCursor(Qt.SizeAllCursor)
+                vi = int(handle.split('-')[1])
+                if vi == self._rotation_vertex_index():
+                    self.setCursor(self._rotate_cursor())
+                else:
+                    quad = self.boxes[self.active_box_index]
+                    cx = sum(p[0] for p in quad) / 4.0
+                    cy = sum(p[1] for p in quad) / 4.0
+                    vx, vy = quad[vi]
+                    self.setCursor(
+                        Qt.SizeFDiagCursor if (vx - cx) * (vy - cy) >= 0
+                        else Qt.SizeBDiagCursor)
             elif handle == 'move':
                 self.setCursor(Qt.SizeAllCursor)
             else:
@@ -375,6 +485,7 @@ class InteractivePreviewLabelV14(QLabel):
             self.drag_mode = None
             self.drag_start_pos = None
             self.drag_start_quad = None
+            self.rotate_center = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1015,12 +1126,24 @@ class SubtitleRemovalPageV14(BasePage):
                     outline = "#00ff00" if is_active else "#00ffff"
                     width = 3 if is_active else 2
                     draw.polygon(pts, outline=outline, width=width)
-                    # 激活框：在 4 个顶点画小方块手柄
+                    # 激活框：3 个角为拉伸方块手柄，右下角为旋转圆环把手
                     if is_active:
                         hs = 5  # 手柄半边长
-                        for (hx, hy) in pts:
-                            draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
-                                           fill="#00ff00", outline="#ffffff")
+                        rot_i = self.preview_label._rotation_vertex_index()
+                        for vi, (hx, hy) in enumerate(pts):
+                            if vi == rot_i:
+                                # 旋转把手：黄色圆环 + 斜向箭头
+                                draw.ellipse([hx - 7, hy - 7, hx + 7, hy + 7],
+                                             outline="#ffd400", width=2)
+                                ax0, ay0 = hx + 3, hy - 8
+                                ax1, ay1 = hx + 10, hy - 14
+                                draw.line([ax0, ay0, ax1, ay1], fill="#ffd400", width=2)
+                                draw.polygon(
+                                    [(ax1, ay1 - 4), (ax1 + 4, ay1), (ax1 - 2, ay1 + 2)],
+                                    fill="#ffd400")
+                            else:
+                                draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
+                                               fill="#00ff00", outline="#ffffff")
 
             # Convert to QImage
             rgb_img = resized_img.convert("RGB")

@@ -78,6 +78,7 @@ from config.paths import (
     PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
     ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_DIR
 )
+from version import __app_name__, get_version
 
 os.environ.setdefault("TMP", TMP_DIR)
 os.environ.setdefault("TEMP", TMP_DIR)
@@ -221,7 +222,9 @@ class _StatsCollector(QThread):
 
     def run(self):
         import requests as _req
+        consecutive_failures = 0
         while self._running:
+            ok = False
             try:
                 base = self._get_server_url()
                 cpu = ram = 0.0
@@ -232,6 +235,7 @@ class _StatsCollector(QThread):
                     try:
                         resp = _req.get(f"{base}/health", timeout=4)
                         if resp.status_code == 200:
+                            ok = True
                             d = resp.json()
                             cpu = float(d.get("cpu", {}).get("percent", 0))
                             mem = d.get("memory", {})
@@ -248,7 +252,19 @@ class _StatsCollector(QThread):
                 self.stats_ready.emit(cpu, ram, up, down, gpu_vram)
             except Exception:
                 pass
-            time.sleep(3)
+            # 指数退避：服务不可达时 3s→6s→12s→…封顶 60s，恢复后回到 3s；
+            # 未配置地址不算失败，保持基础频率以便配置改动尽快生效
+            if not base:
+                consecutive_failures = 0
+            elif ok:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+            delay = 3 if consecutive_failures == 0 else min(
+                3 * (2 ** (consecutive_failures - 1)), 60)
+            end = time.time() + delay
+            while self._running and time.time() < end:
+                time.sleep(0.25)
 
     def stop(self):
         self._running = False
@@ -260,22 +276,39 @@ class SystemStatusOverlay(QWidget):
         super().__init__(parent)
         self.setObjectName("status_overlay")
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 4, 12, 4)
-        layout.setSpacing(10)
-        
-        self.ollama_lbl = QLabel("Ollama: 🔴")
-        self.vision_lbl = QLabel("视觉: 🔴")
-        self.whisper_lbl = QLabel("语音: 🟢")
-        self.clip_lbl = QLabel("向量: 🟢")
-        self.clone_lbl = QLabel("克隆: 🔴")
-        
-        self.cpu_lbl = QLabel()
-        self.ram_lbl = QLabel()
-        self.gpu_lbl = QLabel()
-        self.net_lbl = QLabel()
-        
+        layout.setContentsMargins(14, 4, 14, 4)
+        layout.setSpacing(8)
+
+        # 服务器入口
+        self.server_lbl = QLabel("🖥️ 服务器")
+        self.server_lbl.setObjectName("ov_server")
+        layout.addWidget(self.server_lbl)
+
+        # 资源指标：图标 + 名称 + 数值（数值按负载分级着色）
+        def metric(icon, name):
+            chip = QWidget()
+            chip.setObjectName("ov_chip")
+            chip_layout = QHBoxLayout(chip)
+            chip_layout.setContentsMargins(0, 0, 0, 0)
+            chip_layout.setSpacing(4)
+            icon_lbl = QLabel(icon)
+            icon_lbl.setObjectName("ov_icon")
+            name_lbl = QLabel(name)
+            name_lbl.setObjectName("ov_name")
+            value_lbl = QLabel("--")
+            value_lbl.setObjectName("ov_value")
+            chip_layout.addWidget(icon_lbl)
+            chip_layout.addWidget(name_lbl)
+            chip_layout.addWidget(value_lbl)
+            layout.addWidget(chip)
+            return value_lbl
+
+        self.cpu_lbl = metric("⚡", "CPU")
+        self.ram_lbl = metric("🧠", "内存")
+        self.vram_lbl = metric("🎮", "显存")
+
         def create_sep():
             sep = QFrame()
             sep.setFrameShape(QFrame.VLine)
@@ -283,49 +316,79 @@ class SystemStatusOverlay(QWidget):
             sep.setFixedWidth(1)
             sep.setObjectName("status_separator")
             return sep
-            
-        # 服务器资源监控放最前面（更醒目），AI 服务状态在后
-        layout.addWidget(self.gpu_lbl)
-        layout.addWidget(self.cpu_lbl)
-        layout.addWidget(create_sep())
-        layout.addWidget(self.ram_lbl)
-        layout.addWidget(create_sep())
-        layout.addWidget(self.net_lbl)
+
         layout.addWidget(create_sep())
 
-        layout.addWidget(self.ollama_lbl)
+        # AI 服务状态：图标 + 名称，文字按状态着色
+        def service(icon, name):
+            lbl = QLabel(f"{icon} {name}")
+            lbl.setObjectName("ov_service")
+            layout.addWidget(lbl)
+            return lbl
+
+        self.ollama_lbl = service("🤖", "Ollama")
         layout.addWidget(create_sep())
-        layout.addWidget(self.vision_lbl)
+        self.vision_lbl = service("👁️", "视觉")
         layout.addWidget(create_sep())
-        layout.addWidget(self.whisper_lbl)
+        self.whisper_lbl = service("🎤", "语音")
         layout.addWidget(create_sep())
-        layout.addWidget(self.clip_lbl)
+        self.clip_lbl = service("🧲", "向量")
         layout.addWidget(create_sep())
-        layout.addWidget(self.clone_lbl)
-        
-        self.setFixedSize(895, 26)
-        
-        self._cached_vram = "VRAM: --"
+        self.clone_lbl = service("🎭", "克隆")
+
+        # 兼容别名（旧代码可能引用）
+        self.gpu_lbl = self.server_lbl
+        self.net_lbl = self.vram_lbl
+
+        self.setFixedHeight(30)
+        self.adjustSize()
 
         # 后台线程采集 CPU/RAM/网速和 GPU 显存
         self._collector = _StatsCollector(self)
         self._collector.stats_ready.connect(self._on_stats_ready)
         self._collector.start()
 
+    @staticmethod
+    def _set_level(label, level):
+        """通过动态属性驱动 QSS 状态色，主题自适应。"""
+        label.setProperty("level", level)
+        label.style().unpolish(label)
+        label.style().polish(label)
+
+    @staticmethod
+    def _set_service_state(label, state):
+        label.setProperty("state", state)
+        label.style().unpolish(label)
+        label.style().polish(label)
+
+    @staticmethod
+    def _load_level(value):
+        if value >= 85:
+            return "bad"
+        if value >= 60:
+            return "warn"
+        return "ok"
+
     def update_ai_status(self, status):
-        def _color(ok):
-            return "<font color='#22c55e'>🟢</font>" if ok else "<font color='#ef4444'>🔴</font>"
-        self.ollama_lbl.setText(f"Ollama: {_color(status.get('ollama_ok'))}")
-        self.vision_lbl.setText(f"视觉: {_color(status.get('vision_ok'))}")
-        self.whisper_lbl.setText(f"语音: {_color(status.get('whisper_ok'))}")
-        self.clip_lbl.setText(f"向量: {_color(status.get('clip_ok'))}")
-        self.clone_lbl.setText(f"克隆: {_color(status.get('clone_ok'))}")
+        self._set_service_state(self.ollama_lbl,
+                                "ok" if status.get("ollama_ok") else "bad")
+        self._set_service_state(self.vision_lbl,
+                                "ok" if status.get("vision_ok") else "bad")
+        self._set_service_state(self.whisper_lbl,
+                                "ok" if status.get("whisper_ok") else "bad")
+        self._set_service_state(self.clip_lbl,
+                                "ok" if status.get("clip_ok") else "bad")
+        self._set_service_state(self.clone_lbl,
+                                "ok" if status.get("clone_ok") else "bad")
 
     def _on_stats_ready(self, cpu, ram, up, down, gpu_vram):
-        self.cpu_lbl.setText(f"CPU: <font color='#facc15'>{cpu:.0f}%</font>")
-        self.ram_lbl.setText(f"RAM: <font color='#facc15'>{ram:.0f}%</font>")
-        self.net_lbl.setText(f"<font color='#facc15'>{gpu_vram}</font>")
-        self.gpu_lbl.setText(f"<font color='#8b949e'>🖥️ 服务器</font>")
+        self.cpu_lbl.setText(f"{cpu:.0f}%")
+        self._set_level(self.cpu_lbl, self._load_level(cpu))
+        self.ram_lbl.setText(f"{ram:.0f}%")
+        self._set_level(self.ram_lbl, self._load_level(ram))
+        self.vram_lbl.setText(gpu_vram if gpu_vram != "--" else "--")
+        self._set_level(self.vram_lbl, "idle")
+        self.adjustSize()
 
     def update_stats(self):
         pass  # kept for compatibility
@@ -363,7 +426,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         super().__init__()
         self.splash = splash
         self._update_splash("正在初始化窗口参数...", 15)
-        self.setWindowTitle("螺丝钉-电商智能体矩阵 v2.0.0 RC")
+        self.setWindowTitle(f"{__app_name__} v{get_version()}")
         self.resize(1300, 900)
         # Set Window Icon
         icon_path = os.path.join(PROJECT_ROOT, "assets", "app_icon.png")
@@ -449,13 +512,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 pass
 
     def _on_theme_changed(self):
-        """主题切换回调（立即保存，重启生效）。"""
+        """主题切换回调：保存设置并立即应用到全部窗口（无需重启）。"""
         theme = self.theme_combo.currentData()
-        from utils.theme_manager import save_theme
+        from utils.theme_manager import save_theme, apply_theme
         save_theme(theme)
-        self.theme_hint.setText(f"✅ 已保存为「{self.theme_combo.currentText()}」(重启后生效)")
-        
-
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app)
+        self.theme_hint.setText(f"✅ 已切换到「{self.theme_combo.currentText()}」，立即生效")
 
     def update_system_stats(self, stats):
         if hasattr(self, 'cpu_label'):
@@ -500,6 +564,30 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def keyPressEvent(self, event):
+        """F11 全屏/退出全屏（修复全屏右缘出屏问题的可控入口）。"""
+        if event.key() == Qt.Key.Key_F11:
+            self._toggle_fullscreen()
+            return
+        super().keyPressEvent(event)
+
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            # 先确保窗口在当前屏幕可视区内，再进入全屏，避免右缘出屏
+            try:
+                from PySide6.QtGui import QGuiApplication as _QGA
+                frame = self.frameGeometry()
+                scr = _QGA.screenAt(frame.center()) or _QGA.primaryScreen()
+                if scr is not None:
+                    avail = scr.availableGeometry()
+                    if not avail.intersects(frame):
+                        self.move(avail.center() - self.rect().center())
+            except Exception:
+                pass
+            self.showFullScreen()
 
     def _quit_from_tray(self):
         # 标记为真正退出，closeEvent 走原有的确认对话框
@@ -639,7 +727,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         
         # 3: Digital Human
         self.page_digital_human = QWidget()
-        self.setup_digital_human_page()
         self.content_stack.addWidget(self.page_digital_human)
         
         # 4: Library/Downloads (Disabled)
@@ -651,10 +738,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_login_page()
         self.content_stack.addWidget(self.page_login)
 
-        # 6: System Logs
-        self.page_logs = QWidget()
-        self.setup_logs_page()
-        self.content_stack.addWidget(self.page_logs)
+        # 6: 关于（系统信息 / 关于与版本 / 外观）
+        self.page_about = QWidget()
+        self.content_stack.addWidget(self.page_about)
+        self._register_lazy_page(6, self.setup_about_page)
 
         # 7: AI Settings
         self.page_ai_settings = QWidget()
@@ -688,7 +775,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 13: Environment Configuration
         self.page_env_config = QWidget()
-        self.setup_env_config_page()
         self.content_stack.addWidget(self.page_env_config)
 
         # 14: Subtitle Removal Page
@@ -698,8 +784,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 15: Video Montage Tool (Smart Cut & Assemble)
         self.page_video_montage = QWidget()
-        self.setup_video_montage_page()
         self.content_stack.addWidget(self.page_video_montage)
+        self._register_lazy_page(15, self.setup_video_montage_page)
 
         # 16: Image Matting Page (Alpha Matting Cutout)
         self.page_image_matting = QWidget()
@@ -753,8 +839,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 26: Video AI Rename Page
         self.page_video_ai_rename = QWidget()
-        self.setup_video_ai_rename_page()
         self.content_stack.addWidget(self.page_video_ai_rename)
+        self._register_lazy_page(26, self.setup_video_ai_rename_page)
 
         # 27: Video LUT Batch Conversion Page
         self.page_video_lut = QWidget()
@@ -782,8 +868,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 32: Material Generation (素材生成) Page
         self.page_dreamina = QWidget()
-        self.setup_dreamina_page()
         self.content_stack.addWidget(self.page_dreamina)
+        self._register_lazy_page(32, self.setup_dreamina_page)
 
         # 33: Cover Maker (封面制作) Page
         self.page_cover_maker = QWidget()
@@ -792,8 +878,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 34: One-click Compile Video (一键成片) Page
         self.page_compile_video = QWidget()
-        self.setup_compile_video_page()
         self.content_stack.addWidget(self.page_compile_video)
+        self._register_lazy_page(34, self.setup_compile_video_page)
 
         # 35: Hook Score (开头黄金3秒评分) Page
         self.page_hook_score = QWidget()
@@ -802,7 +888,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 36: MG Animation (Remotion) Page
         self.page_mg_animation = QWidget()
-        self.setup_mg_animation_page()
         self.content_stack.addWidget(self.page_mg_animation)
 
         # 37: Data Backup / Restore Page
@@ -845,6 +930,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_extension_page()
         self.content_stack.addWidget(self.page_extension)
 
+        # 45: 音频素材（媒体库独立菜单，懒加载）
+        self.page_audio_material = QWidget()
+        self.content_stack.addWidget(self.page_audio_material)
+        self._register_lazy_page(45, self.setup_audio_material_page)
+
         # 浏览器扩展桥接服务：按配置随客户端自动启动
         try:
             from utils.extension_bridge import get_bridge
@@ -878,15 +968,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "creator_pw_poll_timer") and self.creator_pw_poll_timer.isActive():
                 self.creator_pw_poll_timer.stop()
 
-        if index == 6: # Logs
-            self.refresh_logs()
-        elif index == 8: # Accounts
+        if index == 8: # Accounts
             self.refresh_accounts_list()
         elif index == 12: # Transcription
             pass
-        elif index == 37: # 运行环境
+        elif index == 37:  # 环境与维护（含系统日志 Tab）
             if hasattr(self, "env_config_tool"):
                 self.env_config_tool.refresh_status()
+            self.refresh_logs()
         elif index == 7: # System Config
             if hasattr(self, "refresh_llm_page_status"):
                 self.refresh_llm_page_status()
@@ -908,10 +997,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 44: # 扩展插件
             if hasattr(self, "extension_tool"):
                 self.extension_tool.refresh()
+        elif index == 45:  # 音频素材
+            if hasattr(self, "audio_material_tool"):
+                self.audio_material_tool.refresh()
         elif index == 38: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()
-        elif index == 22: # 资源配置
+        elif index == 22: # 本地配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
             if hasattr(self, "_load_lut_config"):
@@ -1472,6 +1564,36 @@ if __name__ == "__main__":
 
         splash.close()
         window.show()
+
+        # 修复：窗口可能被 Windows 恢复到屏幕外（上次位置失效 / 多显示器断开 / DPI 变化），
+        # 导致最大化/全屏时右缘跑出屏幕、需二次全屏才复原。显示后延迟校正一次，
+        # 把窗口完整拉回当前屏幕可视区（等待窗口管理器完成布局，避免与 WM 恢复位置竞争）。
+        try:
+            from PySide6.QtGui import QGuiApplication as _QGA
+            from PySide6.QtCore import QTimer as _QTimer
+
+            def _ensure_window_visible():
+                try:
+                    if window.isFullScreen() or window.isMaximized():
+                        return
+                    frame = window.frameGeometry()
+                    scr = _QGA.screenAt(frame.center()) or _QGA.primaryScreen()
+                    if scr is None:
+                        return
+                    avail = scr.availableGeometry()
+                    win_w = min(frame.width(), avail.width())
+                    win_h = min(frame.height(), avail.height())
+                    x = max(avail.left(), min(frame.left(), avail.right() - win_w + 1))
+                    y = max(avail.top(), min(frame.top(), avail.bottom() - win_h + 1))
+                    if (x, y, win_w, win_h) != (frame.left(), frame.top(), frame.width(), frame.height()):
+                        window.setGeometry(x, y, win_w, win_h)
+                        log.info(f"Corrected window bounds -> ({x}, {y}) {win_w}x{win_h}")
+                except Exception as e:
+                    log.error(f"校正窗口位置失败: {e}")
+
+            _QTimer.singleShot(80, _ensure_window_visible)
+        except Exception as e:
+            log.error(f"窗口校正初始化失败: {e}")
 
         log.info("MainWindow shown successfully.")
 

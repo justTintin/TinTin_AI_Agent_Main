@@ -170,28 +170,18 @@ class StartupSplash(QWidget):
         
         layout = QVBoxLayout(self)
         self.card = QFrame()
-        self.card.setStyleSheet("""
-            QFrame {
-                background-color: #ffffff;
-                border: 1px solid #e5e5ea;
-                border-radius: 12px;
-            }
-            QLabel {
-                color: #3a3a3f;
-                font-family: "Microsoft YaHei", "微软雅黑";
-            }
-        """)
+        self.card.setObjectName("splash_card")
         self.card_layout = QVBoxLayout(self.card)
         self.card_layout.setContentsMargins(30, 35, 30, 35)
         self.card_layout.setSpacing(16)
         
         title_lbl = QLabel("🤖 <b>螺丝钉-电商智能体矩阵</b>")
-        title_lbl.setStyleSheet("font-size: 18px; color: #1a1a1c;")
+        title_lbl.setObjectName("splash_title")
         title_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(title_lbl)
         
         self.status_lbl = QLabel("正在启动程序，准备系统核心中...")
-        self.status_lbl.setStyleSheet("font-size: 13px; color: #6366f1;")
+        self.status_lbl.setObjectName("splash_status")
         self.status_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(self.status_lbl)
         
@@ -199,18 +189,6 @@ class StartupSplash(QWidget):
         self.progress.setRange(0, 100)
         self.progress.setValue(10)
         self.progress.setTextVisible(False)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #e5e5ea;
-                border-radius: 4px;
-                background-color: #f0f0f5;
-                height: 6px;
-            }
-            QProgressBar::chunk {
-                background-color: #6366f1;
-                border-radius: 4px;
-            }
-        """)
         self.card_layout.addWidget(self.progress)
         
         layout.addWidget(self.card)
@@ -220,17 +198,7 @@ class CloseSplash(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Dialog)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #ffffff;
-                border: 1px solid #e5e5ea;
-                border-radius: 12px;
-            }
-            QLabel {
-                color: #3a3a3f;
-                font-family: "Microsoft YaHei", "微软雅黑";
-            }
-        """)
+        self.setObjectName("close_splash")
         self.setFixedSize(450, 180)
         
         if parent:
@@ -249,30 +217,18 @@ class CloseSplash(QDialog):
         layout.setSpacing(16)
 
         title = QLabel("🔒 <b>正在安全关闭系统，请稍候...</b>")
-        title.setStyleSheet("font-size: 15px; color: #1a1a1c;")
+        title.setObjectName("close_splash_title")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
         self.status_lbl = QLabel("正在释放浏览器内核、清理后台服务与未完成任务...")
-        self.status_lbl.setStyleSheet("font-size: 12px; color: #86868b;")
+        self.status_lbl.setObjectName("close_splash_status")
         self.status_lbl.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_lbl)
         
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #e5e5ea;
-                border-radius: 4px;
-                background-color: #f0f0f5;
-                height: 6px;
-            }
-            QProgressBar::chunk {
-                background-color: #ef4444;
-                border-radius: 4px;
-            }
-        """)
         layout.addWidget(self.progress)
 
 
@@ -281,27 +237,6 @@ class EditAccountDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("编辑账户资料")
         self.resize(400, 280)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #ffffff;
-                color: #1d1d1f;
-            }
-            QLabel {
-                color: #1d1d1f;
-                font-size: 13px;
-            }
-            QLineEdit {
-                background-color: #f5f5f7;
-                border: 1px solid #d1d1d6;
-                border-radius: 8px;
-                padding: 6px 10px;
-                font-size: 13px;
-                color: #1d1d1f;
-            }
-            QLineEdit:focus {
-                border: 1px solid #6366f1;
-            }
-        """)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(25, 25, 25, 25)
@@ -372,33 +307,13 @@ class ActivationDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("激活 - 电商智能体矩阵")
         self.setFixedSize(520, 380)
-        self.setStyleSheet("""
-            QDialog { background-color: #ffffff; color: #1d1d1f; }
-            QLabel { color: #1d1d1f; }
-            QLineEdit {
-                background-color: #f5f5f7; color: #1d1d1f;
-                border: 1px solid #d1d1d6; border-radius: 6px;
-                padding: 10px 14px; font-size: 13px;
-            }
-            QPushButton#primary_button {
-                background-color: #6366f1; color: white;
-                border: none; border-radius: 6px;
-                padding: 10px 28px; font-size: 14px; font-weight: bold;
-            }
-            QPushButton#primary_button:hover { background-color: #818cf8; }
-            QPushButton#secondary_button {
-                background-color: #f0f0f5; color: #1d1d1f;
-                border: 1px solid #d1d1d6; border-radius: 6px;
-                padding: 8px 20px; font-size: 13px;
-            }
-        """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(16)
 
         # 标题区域
         title = QLabel("🔑 软件激活")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #e4e4e7;")
+        title.setObjectName("activation_title")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
@@ -414,11 +329,7 @@ class ActivationDialog(QDialog):
         self.mid_lbl = QLabel(machine_id)
         self.mid_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.mid_lbl.setCursor(Qt.IBeamCursor)
-        self.mid_lbl.setStyleSheet(
-            "color: #818cf8; font-family: monospace; font-size: 12px; "
-            "background-color: #f5f5f7; border: 1px solid #d1d1d6; "
-            "border-radius: 6px; padding: 6px 10px;"
-        )
+        self.mid_lbl.setObjectName("activation_machine_id")
         self.mid_lbl.setToolTip("可拖动选中后 Ctrl+C 复制，或点右侧按钮")
         mid_row.addWidget(self.mid_lbl, 1)
         btn_copy_mid = QPushButton("📋 复制")
@@ -436,13 +347,7 @@ class ActivationDialog(QDialog):
             "请将开发人员提供的激活码（JSON）粘贴到这里..."
         )
         self.code_edit.setMinimumHeight(80)
-        self.code_edit.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #141418; color: #e4e4e7;
-                border: 1px solid #2e2e32; border-radius: 6px;
-                padding: 10px; font-size: 12px; font-family: monospace;
-            }
-        """)
+        self.code_edit.setObjectName("activation_code_edit")
         layout.addWidget(self.code_edit)
 
         # 状态提示

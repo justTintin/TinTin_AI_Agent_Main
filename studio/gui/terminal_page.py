@@ -102,11 +102,16 @@ class TerminalPage(BasePage):
         title.setObjectName("heading")
         hdr.addWidget(title)
         hdr.addStretch()
+        lay.addLayout(hdr)
+
+        # Python 路径独立一行（标题行不放其它控件）
+        py_row = QHBoxLayout()
         lbl_py = QLabel(_PYTHON_EXE)
         lbl_py.setObjectName("muted_text")
         lbl_py.setWordWrap(False)
-        hdr.addWidget(lbl_py)
-        lay.addLayout(hdr)
+        py_row.addWidget(lbl_py)
+        py_row.addStretch()
+        lay.addLayout(py_row)
 
         # ── 快捷按钮行 ──────────────────────────────────────────────────────
         quick_scroll = QScrollArea()

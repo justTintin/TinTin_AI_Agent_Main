@@ -556,6 +556,21 @@ class VideoAnalyzeWorker(BaseWorker):
 # ─────────────────────────────────────────────
 #  单帧分析线程
 # ─────────────────────────────────────────────
+class OllamaModelsWorker(BaseWorker):
+    """后台获取 Ollama 已下载模型列表，避免首次进入页面时阻塞界面。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        try:
+            from utils.ollama_manager import OllamaManager
+            mgr = OllamaManager.get()
+            if not mgr.is_running():
+                return
+            self.finished.emit(list(mgr.list_local_models()))
+        except Exception:
+            pass
+
+
 class FrameAnalysisThread(BaseWorker):
     """抽取视频指定位置的单帧并调用视觉模型分析。"""
     result_ready = Signal(dict)   # {'brand':..., 'category':..., 'model':...} or {'error':...}
@@ -1208,30 +1223,33 @@ class VideoAiRenamePage(BasePage):
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
             self.lbl_model_info.style().polish(self.lbl_model_info)
 
-        # 刷新视觉模型下拉框：尝试从 Ollama 获取已下载列表
+        # 刷新视觉模型下拉框：后台从 Ollama 获取已下载列表，避免阻塞界面
         cur = self._vision_model
         self.combo_vision_model.blockSignals(True)
         self.combo_vision_model.clear()
         self.combo_vision_model.addItem("无（仅文本分析）", userData="")
-        try:
-            from utils.ollama_manager import OllamaManager
-            mgr = OllamaManager.get()
-            if mgr.is_running():
-                for m in mgr.list_local_models():
-                    self.combo_vision_model.addItem(m, userData=m)
-        except Exception:
-            pass
-        # 如果配置里有视觉模型但 Ollama 没列出，手动加一条
-        if cur:
-            idx = self.combo_vision_model.findData(cur)
-            if idx < 0:
-                self.combo_vision_model.addItem(cur, userData=cur)
-                idx = self.combo_vision_model.count() - 1
-            self.combo_vision_model.setCurrentIndex(idx)
-        else:
-            self.combo_vision_model.setCurrentIndex(0)
         self.combo_vision_model.blockSignals(False)
         self._vision_model = cur
+
+        def _apply_ollama_models(models):
+            if self.combo_vision_model is None:
+                return
+            self.combo_vision_model.blockSignals(True)
+            self.combo_vision_model.clear()
+            self.combo_vision_model.addItem("无（仅文本分析）", userData="")
+            for m in models:
+                self.combo_vision_model.addItem(m, userData=m)
+            # 如果配置里有视觉模型但 Ollama 没列出，手动加一条
+            if cur and self.combo_vision_model.findData(cur) < 0:
+                self.combo_vision_model.addItem(cur, userData=cur)
+            self.combo_vision_model.setCurrentIndex(
+                self.combo_vision_model.findData(cur) if cur else 0)
+            self.combo_vision_model.blockSignals(False)
+            self._vision_model = cur
+
+        w = self.track_worker(OllamaModelsWorker())
+        w.finished.connect(_apply_ollama_models)
+        w.start()
 
     def _on_vision_model_changed(self, index: int):
         """用户切换视觉模型时，用 userData 更新 self._vision_model（避免显示文字污染）。"""

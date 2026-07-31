@@ -42,6 +42,7 @@ from PySide6.QtGui import QIcon, QFont, QPixmap
 from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
+from utils import config_manager as cm
 
 
 class AIConfigMixin:
@@ -49,9 +50,7 @@ class AIConfigMixin:
         # 关键：先从所有 UI 收集最新值，避免保存时用过期内存值覆盖其它字段
         self._collect_all_config_from_ui()
         try:
-            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "大模型配置已保存。")
             log.info("LLM configuration saved successfully.")
         except Exception as e:
@@ -119,9 +118,7 @@ class AIConfigMixin:
         # 关键：先从所有 UI 收集最新值，避免用过期内存值覆盖
         self._collect_all_config_from_ui()
         try:
-            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "所有模型配置已保存。")
             log.info("All AI configuration saved successfully.")
         except Exception as e:
@@ -215,24 +212,24 @@ class AIConfigMixin:
             "vox_timesteps": 20,
             "vox_cfg": 2.0
         }
-        config_path = self.ai_config_file if os.path.exists(self.ai_config_file) else None
-        if not config_path and hasattr(self, "ai_config_legacy_file") and os.path.exists(self.ai_config_legacy_file):
-            config_path = self.ai_config_legacy_file
+        loaded = cm.load_config("ai_config")
+        if loaded:
+            self.ai_config = loaded
+            for k, v in default_config.items():
+                if k not in self.ai_config:
+                    self.ai_config[k] = v
+            return
 
-        if config_path:
+        # 旧版工程根目录 ai_config.json（迁移一次后写入统一位置）
+        legacy = getattr(self, "ai_config_legacy_file", "") or ""
+        if legacy and os.path.exists(legacy):
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
+                with open(legacy, 'r', encoding='utf-8') as f:
                     self.ai_config = json.load(f)
                 for k, v in default_config.items():
                     if k not in self.ai_config:
                         self.ai_config[k] = v
-                if config_path != self.ai_config_file:
-                    try:
-                        os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-                        with open(self.ai_config_file, 'w', encoding='utf-8') as wf:
-                            json.dump(self.ai_config, wf, indent=4, ensure_ascii=False)
-                    except Exception as e:
-                        log.error(f"迁移 AI 配置失败: {e}")
+                cm.save_ai_config(self.ai_config)
                 return
             except Exception as e:
                 log.error(f"加载 AI 配置失败: {e}")
@@ -243,9 +240,7 @@ class AIConfigMixin:
         self._collect_all_config_from_ui()
 
         try:
-            os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-            with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+            cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "AI 配置已保存。")
             log.info("AI configuration saved successfully.")
         except Exception as e:
@@ -597,20 +592,18 @@ class AIConfigMixin:
     # ── 飞书配置 ──
 
     def load_feishu_config(self):
-        config = configparser.ConfigParser()
+        config = cm.load_ini()
         appid = ""; appsecret = ""; apptoken = ""; tableid = ""
         topicfield = "选题"; scriptfield = "脚本"; foldertoken = ""
         try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding='utf-8')
-                if config.has_section('Feishu'):
-                    appid = config.get('Feishu', 'AppId', fallback="")
-                    appsecret = config.get('Feishu', 'AppSecret', fallback="")
-                    apptoken = config.get('Feishu', 'AppToken', fallback="")
-                    tableid = config.get('Feishu', 'TableId', fallback="")
-                    topicfield = config.get('Feishu', 'TopicField', fallback="选题")
-                    scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
-                    foldertoken = config.get('Feishu', 'FolderToken', fallback="")
+            if config.has_section('Feishu'):
+                appid = config.get('Feishu', 'AppId', fallback="")
+                appsecret = config.get('Feishu', 'AppSecret', fallback="")
+                apptoken = config.get('Feishu', 'AppToken', fallback="")
+                tableid = config.get('Feishu', 'TableId', fallback="")
+                topicfield = config.get('Feishu', 'TopicField', fallback="选题")
+                scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
+                foldertoken = config.get('Feishu', 'FolderToken', fallback="")
         except Exception as e:
             log.error(f"加载飞书配置失败: {e}")
         if hasattr(self, 'edit_feishu_appid'):
@@ -623,10 +616,8 @@ class AIConfigMixin:
             self.edit_feishu_foldertoken.setText(foldertoken)
 
     def save_feishu_config(self):
-        config = configparser.ConfigParser()
+        config = cm.load_ini()
         try:
-            if os.path.exists(CONFIG_INI_FILE):
-                config.read(CONFIG_INI_FILE, encoding='utf-8')
             if not config.has_section('Feishu'):
                 config.add_section('Feishu')
             config.set('Feishu', 'AppId', self.edit_feishu_appid.text().strip())
@@ -636,8 +627,7 @@ class AIConfigMixin:
             config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())
             config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())
             config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())
-            with open(CONFIG_INI_FILE, 'w', encoding='utf-8') as f:
-                config.write(f)
+            cm.save_ini(config)
             QMessageBox.information(self, "提示", "飞书配置参数保存成功！")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")

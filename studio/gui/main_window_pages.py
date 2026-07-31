@@ -18,6 +18,7 @@ from config.paths import (
 import threading
 import uuid
 import configparser
+from version import __app_name__, get_version
 from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
@@ -50,6 +51,27 @@ from utils.gui_icons import mdi_button, mdi_icon
 
 
 class PageSetupMixin:
+    def _register_lazy_page(self, index, setup_method):
+        """登记懒加载页面：首次切换到该页时才调用 setup_method 构建。
+
+        页面容器（self.page_xxx = QWidget()）仍在 setup_ui 阶段创建并加入
+        content_stack，保证栈索引与侧边栏一致；只是把耗时的页面构建推迟到
+        用户真正进入该页时执行，缩短启动时间。
+        """
+        if not hasattr(self, "_lazy_pages"):
+            self._lazy_pages = {}
+        self._lazy_pages[index] = setup_method
+
+    def _ensure_page_built(self, index):
+        """确保 index 对应的懒加载页面已构建（只构建一次）。"""
+        setup_method = getattr(self, "_lazy_pages", {}).pop(index, None)
+        if setup_method is None:
+            return
+        try:
+            setup_method()
+        except Exception as e:
+            log.error(f"[页面懒加载] index={index} 构建失败: {e}")
+
     def setup_transcription_page(self):
         self.transcription_tool = TranscriptionToolPage(self.page_transcription, self)
         self.transcription_tool.setup()
@@ -96,21 +118,20 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         # Tab 1: 声音样本
-        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
+        p1 = QWidget(); p1.setObjectName("tab_page")
         from gui.voice_samples_page import VoiceSamplesPage
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
         tabs.addTab(p1, "🎭 声音样本")
 
         # Tab 2: 视频配置（LUT 还原）
-        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        p2 = QWidget(); p2.setObjectName("tab_page")
         self._setup_video_config_tab(p2)
         tabs.addTab(p2, "🎬 视频配置")
 
         # Tab 3: 本地配置（缓存目录）
-        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
+        p3 = QWidget(); p3.setObjectName("tab_page")
         self._setup_local_config_tab(p3)
         tabs.addTab(p3, "📁 本地配置")
 
@@ -172,19 +193,30 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(0)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         # Tab 1: 即梦生成
         from gui.dreamina_page import DreaminaPage
-        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
+        p1 = QWidget(); p1.setObjectName("tab_page")
         self.dreamina_tool = DreaminaPage(p1, self); self.dreamina_tool.setup()
         tabs.addTab(p1, "🎨 即梦生成")
 
         # Tab 2: 产品生图
         from gui.product_image_page import ProductImagePage
-        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        p2 = QWidget(); p2.setObjectName("tab_page")
         self.product_image_tool = ProductImagePage(p2, self); self.product_image_tool.setup()
         tabs.addTab(p2, "🆕 产品生图")
+
+        # Tab 3: 数字人
+        p3 = QWidget(); p3.setObjectName("tab_page")
+        self._build_digital_human_tab(p3)
+        tabs.addTab(p3, "🤖 数字人")
+
+        # Tab 4: MG 动画
+        p4 = QWidget(); p4.setObjectName("tab_page")
+        from gui.mg_animation_page import MGAnimationPage
+        self.mg_animation_tool = MGAnimationPage(p4, self)
+        self.mg_animation_tool.setup()
+        tabs.addTab(p4, "🪄 MG 动画")
 
         layout.addWidget(tabs)
 
@@ -227,6 +259,11 @@ class PageSetupMixin:
         from gui.extension_page import ExtensionPage
         self.extension_tool = ExtensionPage(self.page_extension, self)
         self.extension_tool.setup()
+
+    def setup_audio_material_page(self):
+        from gui.audio_material_page import AudioMaterialPage
+        self.audio_material_tool = AudioMaterialPage(self.page_audio_material, self)
+        self.audio_material_tool.setup()
 
 
     def setup_video_tools_page(self):
@@ -481,7 +518,7 @@ class PageSetupMixin:
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("background: transparent;")
+        scroll_content.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setSpacing(16)
 
@@ -621,7 +658,6 @@ class PageSetupMixin:
         layout = QVBoxLayout(self.page_llm_settings)
         layout.setContentsMargins(20, 20, 20, 20)
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
         def _inp(lbl, attr, ph, parent_layout, echo=None):
             r = QHBoxLayout(); r.addWidget(QLabel(lbl))
@@ -682,8 +718,8 @@ class PageSetupMixin:
         # Load feishu config
         self.load_feishu_config()
 
-    def setup_digital_human_page(self):
-            layout = QVBoxLayout(self.page_digital_human)
+    def _build_digital_human_tab(self, parent):
+            layout = QVBoxLayout(parent)
             layout.setContentsMargins(40, 40, 40, 40)
         
             heading = QLabel("数字人克隆生成")
@@ -832,15 +868,11 @@ class PageSetupMixin:
             import requests as _req
             import socket as _socket
             try:
-                from config.paths import AI_CONFIG_FILE
-                import json as _json
+                from utils import config_manager as _cm
                 base_url = ""
-                if os.path.isfile(AI_CONFIG_FILE):
-                    with open(AI_CONFIG_FILE, "r") as f:
-                        cfg = _json.load(f)
-                    url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-                    if url:
-                        base_url = url
+                url = (_cm.get_setting("ai_config", "compute_server_url") or "").strip().rstrip("/")
+                if url:
+                    base_url = url
                 if not base_url:
                     return None
                 resp = _req.get(f"{base_url}/tasks", timeout=10)
@@ -931,14 +963,18 @@ class PageSetupMixin:
             heading = QLabel("抖音账户管理")
             heading.setObjectName("heading")
             header.addWidget(heading)
-        
+            header.addStretch()
+            layout.addLayout(header)
+
+            # 标题行不放其它控件（避免被资源监控悬浮层遮挡），按钮独立一行
+            add_row = QHBoxLayout()
+            add_row.addStretch()
             btn_add = mdi_button("添加新账户", "plus")
             btn_add.setObjectName("primary_button")
             btn_add.setFixedWidth(150)
             btn_add.clicked.connect(self.trigger_add_account)
-            header.addWidget(btn_add)
-            header.addStretch()
-            layout.addLayout(header)
+            add_row.addWidget(btn_add)
+            layout.addLayout(add_row)
         
             # Grid layout for accounts
             self.accounts_grid_container = QWidget()
@@ -1003,15 +1039,9 @@ class PageSetupMixin:
             self.account_videos_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
             layout.addWidget(self.account_videos_table, 1)
 
-    def setup_logs_page(self):
-        layout = QVBoxLayout(self.page_logs)
-        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
-        tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
-
-        # Tab 1: 日志
-        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
-        l1 = QVBoxLayout(p1); l1.setContentsMargins(16,16,16,16)
+    def _build_log_tab(self, parent):
+        """系统日志 Tab：日志查看器 + 级别/关键词过滤 + 服务端日志开关。"""
+        l1 = QVBoxLayout(parent); l1.setContentsMargins(16,16,16,16)
         frow = QHBoxLayout(); l1.addLayout(frow)
         b = mdi_button("刷新", "refresh"); b.setObjectName("primary_button"); b.setFixedWidth(90); b.clicked.connect(self.refresh_logs); frow.addWidget(b)
         frow.addWidget(QLabel("  级别:"))
@@ -1037,11 +1067,11 @@ class PageSetupMixin:
         self.log_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.log_viewer.customContextMenuRequested.connect(self._log_viewer_context_menu)
         l1.addWidget(QLabel("完整日志: .runtime/logs/app.log"))
-        tabs.addTab(p1, "📊 日志")
 
-        # Tab 2: 系统信息
-        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
-        l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30); l2.setSpacing(12)
+    def _build_sysinfo_tab(self, parent):
+        """系统信息 Tab：本机硬件 / Python / CUDA 环境检测。"""
+        self.page_sysinfo = parent
+        l2 = QVBoxLayout(parent); l2.setContentsMargins(30,30,30,30); l2.setSpacing(12)
         l2.addWidget(QLabel("系统硬件信息")); l2.addWidget(self._info_row("操作系统:", "os_ver"))
         l2.addWidget(self._info_row("处理器:", "cpu_info"))
         l2.addWidget(self._info_row("内存:", "ram_info"))
@@ -1051,36 +1081,28 @@ class PageSetupMixin:
         l2.addWidget(self._info_row("CUDA:", "cuda_info"))
         l2.addStretch()
         QTimer.singleShot(200, self._refresh_help_sysinfo)
-        tabs.addTab(p2, "🖥️ 系统信息")
 
-        # Tab 3: 关于与版本
-        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
-        l3 = QVBoxLayout(p3); l3.setContentsMargins(30, 20, 30, 20); l3.setSpacing(14)
+    def _build_about_tab(self, parent):
+        """关于与版本 Tab：品牌 / 授权 / 版本信息。"""
+        l3 = QVBoxLayout(parent); l3.setContentsMargins(30, 20, 30, 20); l3.setSpacing(14)
 
         # Brand / Developer Info Card
         brand_card = QFrame()
         brand_card.setObjectName("brand_card")
-        brand_card.setStyleSheet("""
-            #brand_card {
-                background-color: #1a1a24;
-                border: 1px solid #2e2e38;
-                border-radius: 12px;
-            }
-        """)
         brand_layout = QVBoxLayout(brand_card)
         brand_layout.setContentsMargins(20, 20, 20, 20)
         brand_layout.setSpacing(10)
 
         app_title = QLabel("🔩 螺丝钉-电商智能体矩阵")
-        app_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        app_title.setObjectName("about_app_title")
         brand_layout.addWidget(app_title)
 
         dev_info = QLabel("此智能体由 <b>大怪工作室</b> 开发")
-        dev_info.setStyleSheet("font-size: 13px; color: #a1a1aa;")
+        dev_info.setObjectName("about_dev_info")
         brand_layout.addWidget(dev_info)
 
         contact_info = QLabel("📞 联系电话：<span style='color: #3b82f6; font-weight: bold;'>17361907260</span>（微信同号）")
-        contact_info.setStyleSheet("font-size: 13px; color: #e4e4e7;")
+        contact_info.setObjectName("about_contact")
         brand_layout.addWidget(contact_info)
         
         l3.addWidget(brand_card)
@@ -1096,19 +1118,12 @@ class PageSetupMixin:
         # License Info Card
         license_card = QFrame()
         license_card.setObjectName("license_card")
-        license_card.setStyleSheet("""
-            #license_card {
-                background-color: #1a1a24;
-                border: 1px solid #2e2e38;
-                border-radius: 12px;
-            }
-        """)
         license_layout = QVBoxLayout(license_card)
         license_layout.setContentsMargins(20, 16, 20, 16)
         license_layout.setSpacing(10)
 
         license_title = QLabel("🔑 软件授权与激活")
-        license_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #10b981; margin-bottom: 4px;")
+        license_title.setObjectName("about_license_title")
         license_layout.addWidget(license_title)
 
         # Machine ID Row with Copy button
@@ -1118,24 +1133,11 @@ class PageSetupMixin:
         mac_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
         mac_val = QLineEdit(machine_id)
         mac_val.setReadOnly(True)
-        mac_val.setStyleSheet("color: #3b82f6; font-size: 12px; font-family: monospace; background: #15151e; border: 1px solid #2e2e38; border-radius: 4px; padding: 2px 6px;")
+        mac_val.setObjectName("about_machine_id")
         
         btn_copy = QPushButton("📋 复制机器码")
         btn_copy.setFixedWidth(100)
-        btn_copy.setStyleSheet("""
-            QPushButton {
-                background-color: #27272a;
-                color: #ffffff;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                font-size: 11px;
-                padding: 3px 6px;
-            }
-            QPushButton:hover {
-                background-color: #3f3f46;
-                border-color: #3b82f6;
-            }
-        """)
+        btn_copy.setObjectName("about_copy_btn")
         
         def copy_mac():
             QApplication.clipboard().setText(machine_id)
@@ -1170,7 +1172,7 @@ class PageSetupMixin:
         licensee_lbl = QLabel("激活签名:")
         licensee_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
         licensee_val = QLabel(licensee_name)
-        licensee_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        licensee_val.setObjectName("about_section_value")
         licensee_row.addWidget(licensee_lbl)
         licensee_row.addWidget(licensee_val, 1)
         license_layout.addLayout(licensee_row)
@@ -1181,7 +1183,7 @@ class PageSetupMixin:
         expire_lbl = QLabel("有效期至:")
         expire_lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
         expire_val = QLabel(expiry_date)
-        expire_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+        expire_val.setObjectName("about_section_value")
         expire_row.addWidget(expire_lbl)
         expire_row.addWidget(expire_val, 1)
         license_layout.addLayout(expire_row)
@@ -1191,19 +1193,12 @@ class PageSetupMixin:
         # System & Version Info Card
         version_card = QFrame()
         version_card.setObjectName("version_card")
-        version_card.setStyleSheet("""
-            #version_card {
-                background-color: #15151e;
-                border: 1px solid #26262e;
-                border-radius: 10px;
-            }
-        """)
         version_layout = QVBoxLayout(version_card)
         version_layout.setContentsMargins(20, 16, 20, 16)
         version_layout.setSpacing(8)
 
         version_title = QLabel("📋 系统与版本信息")
-        version_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #3b82f6; margin-bottom: 4px;")
+        version_title.setObjectName("about_version_title")
         version_layout.addWidget(version_title)
 
         import sys as _s, platform as _p
@@ -1213,13 +1208,13 @@ class PageSetupMixin:
             lbl = QLabel(label)
             lbl.setStyleSheet("color: #8e8e93; font-size: 12px; font-weight: bold; min-width: 80px;")
             v_val = QLabel(val)
-            v_val.setStyleSheet("color: #d1d1d6; font-size: 12px;")
+            v_val.setObjectName("about_section_value")
             v_val.setWordWrap(True)
             row.addWidget(lbl)
             row.addWidget(v_val, 1)
             version_layout.addLayout(row)
 
-        add_version_row("应用版本:", "v2.0.0 RC")
+        add_version_row("应用版本:", f"v{get_version()}")
         add_version_row("Python 版本:", _s.version)
         add_version_row("运行系统:", f"{_p.system()} {_p.release()} ({_p.version()})")
         
@@ -1233,10 +1228,10 @@ class PageSetupMixin:
         
         l3.addWidget(version_card)
         l3.addStretch()
-        tabs.addTab(p3, "ℹ️ 关于")
 
-        # Tab 4: 外观主题
-        p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30, 30, 30, 30)
+    def _build_theme_tab(self, parent):
+        """外观主题 Tab。"""
+        l4 = QVBoxLayout(parent); l4.setContentsMargins(30, 30, 30, 30)
         l4.addWidget(QLabel("🎨 界面主题"))
         l4.addWidget(QLabel("选择应用程序的外观配色方案："))
         self.theme_combo = QComboBox()
@@ -1252,12 +1247,29 @@ class PageSetupMixin:
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         l4.addWidget(self.theme_combo)
         l4.addSpacing(10)
-        self.theme_hint = QLabel("主题将在下次启动应用时完全生效（部分窗口可能需要重启）。")
+        self.theme_hint = QLabel("切换主题后立即生效，无需重启；个别旧弹窗会在下次打开时应用最新样式。")
         self.theme_hint.setObjectName("muted_text")
         self.theme_hint.setWordWrap(True)
         l4.addWidget(self.theme_hint)
         l4.addStretch()
-        tabs.addTab(p4, "🎨 外观")
+
+    def setup_about_page(self):
+        """关于页（侧边栏『关于』入口）：系统信息 / 关于与版本 / 外观 三个子 Tab。"""
+        layout = QVBoxLayout(self.page_about)
+        layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(0)
+        tabs = QTabWidget()
+
+        p1 = QWidget(); p1.setObjectName("tab_page")
+        self._build_sysinfo_tab(p1)
+        tabs.addTab(p1, "🖥️ 系统信息")
+
+        p2 = QWidget(); p2.setObjectName("tab_page")
+        self._build_about_tab(p2)
+        tabs.addTab(p2, "ℹ️ 关于与版本")
+
+        p3 = QWidget(); p3.setObjectName("tab_page")
+        self._build_theme_tab(p3)
+        tabs.addTab(p3, "🎨 外观")
 
         layout.addWidget(tabs, 1)
 
@@ -1266,7 +1278,10 @@ class PageSetupMixin:
 
     def _refresh_help_sysinfo(self):
         import platform as _p
-        for w in self.page_logs.findChildren(QLabel):
+        target = getattr(self, "page_sysinfo", None)
+        if target is None:
+            return
+        for w in target.findChildren(QLabel):
             if w.objectName() == "os_ver":
                 w.setText(f"操作系统: {_p.system()} {_p.release()} ({_p.version()})")
             if w.objectName() == "cpu_info":
@@ -1299,31 +1314,33 @@ class PageSetupMixin:
         layout = QVBoxLayout(self.page_backup)
         layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(16)
 
-        # ── 系统工具 ──
-        sys_label = QLabel("🖥️ 系统工具")
-        sys_label.setObjectName("section_label")
-        sys_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #9ca3af; padding: 0;")
-        layout.addWidget(sys_label)
-
         tabs = QTabWidget()
-        tabs.setStyleSheet("QTabWidget::pane { border: none; QWidget { background: transparent; } } QTabBar::tab { padding: 8px 18px; font-size: 13px; } QTabBar::tab:selected { color: #3b82f6; font-weight: bold; }")
 
-        p1 = QWidget(); p1.setStyleSheet("QWidget { background: transparent; }")
+        # Tab 1: 系统日志
+        p0 = QWidget(); p0.setObjectName("tab_page")
+        self._build_log_tab(p0)
+        tabs.addTab(p0, "📋 系统日志")
+
+        # Tab 2: 运行环境
+        p1 = QWidget(); p1.setObjectName("tab_page")
         from gui.env_config_page import EnvConfigPage
         self.env_config_tool = EnvConfigPage(p1, self); self.env_config_tool.setup()
         tabs.addTab(p1, "🖥️ 运行环境")
 
-        p2 = QWidget(); p2.setStyleSheet("QWidget { background: transparent; }")
+        # Tab 3: 终端
+        p2 = QWidget(); p2.setObjectName("tab_page")
         from gui.terminal_page import TerminalPage
         self.terminal_tool = TerminalPage(p2, self); self.terminal_tool.setup()
         tabs.addTab(p2, "💻 终端")
 
-        p3 = QWidget(); p3.setStyleSheet("QWidget { background: transparent; }")
+        # Tab 4: 备份管理
+        p3 = QWidget(); p3.setObjectName("tab_page")
         from gui.backup_page import BackupPage
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
         tabs.addTab(p3, "💾 备份管理")
 
-        p4 = QWidget(); p4.setStyleSheet("QWidget { background: transparent; }")
+        # Tab 5: 系统配置
+        p4 = QWidget(); p4.setObjectName("tab_page")
         self._setup_system_tab(p4)
         tabs.addTab(p4, "⚙️ 系统配置")
 
@@ -1331,10 +1348,8 @@ class PageSetupMixin:
 
     def _setup_system_tab(self, parent_widget):
         """系统配置 Tab：开机自动运行等系统级开关。"""
-        from config.paths import CONFIG_DIR
         from utils import autostart as _autostart
-        import json as _json
-        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        from utils import config_manager as _cm
 
         layout = QVBoxLayout(parent_widget)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -1358,23 +1373,11 @@ class PageSetupMixin:
         layout.addWidget(self.autostart_status)
 
         def _load_cfg() -> dict:
-            if os.path.isfile(_LOCAL_CFG):
-                try:
-                    with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
-                        return _json.load(f)
-                except Exception:
-                    pass
-            return {}
+            return _cm.load_config("local_config")
 
         def _on_autostart_toggled(checked):
-            data = _load_cfg()
-            data["auto_start"] = bool(checked)
-            try:
-                os.makedirs(CONFIG_DIR, exist_ok=True)
-                with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
-                    _json.dump(data, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                self.autostart_status.setText(f"❌ 配置保存失败: {e}")
+            if not _cm.set_setting("local_config", "auto_start", bool(checked)):
+                self.autostart_status.setText("❌ 配置保存失败")
                 return
             ok = _autostart.set_enabled(checked)
             self.autostart_status.setText(
@@ -1391,9 +1394,7 @@ class PageSetupMixin:
 
     def _setup_local_config_tab(self, parent_widget):
         """本地配置 Tab：设置本地缓存/生成目录。"""
-        from config.paths import CONFIG_DIR
-        import json as _json
-        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        from utils import config_manager as _cm
 
         layout = QVBoxLayout(parent_widget)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -1422,14 +1423,10 @@ class PageSetupMixin:
         layout.addWidget(self.local_cache_status)
 
         # 加载已有配置
-        if os.path.isfile(_LOCAL_CFG):
-            try:
-                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
-                    data = _json.load(f)
-                self.local_cache_dir_input.setText(data.get("cache_dir", ""))
-                self.local_cache_status.setText("已加载配置")
-            except Exception:
-                pass
+        cache_dir = _cm.get_setting("local_config", "cache_dir", "")
+        if cache_dir:
+            self.local_cache_dir_input.setText(cache_dir)
+            self.local_cache_status.setText("已加载配置")
 
         btn_save = QPushButton("💾 保存")
         btn_save.setObjectName("primary_button")
@@ -1448,37 +1445,21 @@ class PageSetupMixin:
             self.local_cache_dir_input.setText(d)
 
     def _save_local_config(self):
-        from config.paths import CONFIG_DIR
-        import json as _json
-        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        from utils import config_manager as _cm
         cache_dir = self.local_cache_dir_input.text().strip()
         try:
-            data = {}
-            if os.path.isfile(_LOCAL_CFG):
-                try:
-                    with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
-                        data = _json.load(f)
-                except Exception:
-                    data = {}
-            data["cache_dir"] = cache_dir
-            with open(_LOCAL_CFG, "w", encoding="utf-8") as f:
-                _json.dump(data, f, indent=2, ensure_ascii=False)
+            _cm.set_setting("local_config", "cache_dir", cache_dir)
             self.local_cache_status.setText("✅ 已保存")
         except Exception as e:
             self.local_cache_status.setText(f"❌ 保存失败: {e}")
 
     def get_local_cache_dir(self):
         """获取配置的本地缓存目录，未配置返回空。"""
-        from config.paths import CONFIG_DIR
-        import json as _json
-        _LOCAL_CFG = os.path.join(CONFIG_DIR, "local_config.json")
+        from utils import config_manager as _cm
         try:
-            if os.path.isfile(_LOCAL_CFG):
-                with open(_LOCAL_CFG, "r", encoding="utf-8") as f:
-                    data = _json.load(f)
-                d = data.get("cache_dir", "").strip()
-                if d and os.path.isdir(d):
-                    return d
+            d = _cm.get_setting("local_config", "cache_dir", "").strip()
+            if d and os.path.isdir(d):
+                return d
         except Exception:
             pass
         return ""
@@ -1530,20 +1511,17 @@ class PageSetupMixin:
         self._load_lut_config()
 
     def _load_lut_config(self):
-        from config.paths import VIDEO_CONFIG_FILE
-        import json as _json
+        from utils import config_manager as _cm
         self.lut_list.clear()
-        if os.path.isfile(VIDEO_CONFIG_FILE):
-            try:
-                with open(VIDEO_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    data = _json.load(f)
-                for name, path in data.items():
-                    item = QListWidgetItem(f"{name}  →  {path}")
-                    item.setData(Qt.UserRole, {"name": name, "path": path})
-                    self.lut_list.addItem(item)
-                self.lut_status.setText(f"已加载 {self.lut_list.count()} 个 LUT 配置")
-            except Exception as e:
-                self.lut_status.setText(f"加载失败: {e}")
+        data = _cm.load_config("video_config")
+        try:
+            for name, path in data.items():
+                item = QListWidgetItem(f"{name}  →  {path}")
+                item.setData(Qt.UserRole, {"name": name, "path": path})
+                self.lut_list.addItem(item)
+            self.lut_status.setText(f"已加载 {self.lut_list.count()} 个 LUT 配置")
+        except Exception as e:
+            self.lut_status.setText(f"加载失败: {e}")
 
     def _add_lut_entry(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1570,8 +1548,7 @@ class PageSetupMixin:
         self._save_lut_config()
 
     def _save_lut_config(self):
-        from config.paths import VIDEO_CONFIG_FILE
-        import json as _json
+        from utils import config_manager as _cm
         data = {}
         for i in range(self.lut_list.count()):
             item = self.lut_list.item(i)
@@ -1579,8 +1556,8 @@ class PageSetupMixin:
             if d:
                 data[d["name"]] = d["path"]
         try:
-            with open(VIDEO_CONFIG_FILE, "w", encoding="utf-8") as f:
-                _json.dump(data, f, indent=2, ensure_ascii=False)
+            if not _cm.save_config("video_config", data):
+                raise RuntimeError("写入失败")
             self.lut_status.setText(f"已保存 {len(data)} 个 LUT 配置")
         except Exception as e:
             self.lut_status.setText(f"保存失败: {e}")

@@ -523,19 +523,29 @@ class StoryboardPage(BasePage):
     # ──────────────────────────── UI ────────────────────────────────
     def setup(self):
         layout = QVBoxLayout(self.parent_widget)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(16)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(20)
 
-        heading = QLabel("🎬 分镜脚本创作（视频分镜设计 + 即梦/MG素材生成）")
+        # 标题行：仅标题（长描述独立一行，避免被右上角资源监控遮挡）
+        heading = QLabel("🎬 分镜脚本创作")
         heading.setObjectName("heading")
         layout.addWidget(heading)
+        desc = QLabel("视频分镜设计 + 即梦 / MG 动画素材生成")
+        desc.setObjectName("muted_text")
+        layout.addWidget(desc)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._build_left())
-        splitter.addWidget(self._build_right())
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 8)
-        splitter.setSizes([260, 1040])
+        splitter.setObjectName("themeSplitter")
+        left = self._build_left()
+        right = self._build_right()
+        # 左栏固定最小宽度，避免被压缩/遮盖（参考图像抠图页的左卡面板）
+        left.setMinimumWidth(320)
+        right.setMinimumWidth(420)
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 0)   # 左栏不随窗口拉伸
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([360, 920])
         layout.addWidget(splitter, 1)
 
         status_row = QHBoxLayout()

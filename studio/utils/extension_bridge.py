@@ -147,22 +147,27 @@ def _normalize_proxy(addr: str) -> str:
     return addr
 
 
+_PROXY_ENV_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+                   "http_proxy", "https_proxy", "all_proxy")
+
+
 def _build_dl_env(proxy: str) -> dict:
     """构造下载子进程的环境变量：注入代理（全链路继承）。
 
     以环境变量方式注入 —— yt-dlp / ffmpeg / requests 统一继承，无需分别传命令行参数。
     同时设置 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 三个变量，覆盖不同库的读取约定
     （requests 读 HTTP_PROXY/HTTPS_PROXY；yt-dlp 两者都读；socks 代理用 ALL_PROXY）。
+
+    未配置代理时主动剔除环境里已存在的代理变量，保证"直连"不受宿主环境
+    （企业网/全局代理等）影响，子进程行为完全由本函数决定。
     """
     env = os.environ.copy()
+    for k in _PROXY_ENV_KEYS:
+        env.pop(k, None)
     p = _normalize_proxy(proxy)
     if p:
-        env["HTTP_PROXY"] = p
-        env["HTTPS_PROXY"] = p
-        env["http_proxy"] = p
-        env["https_proxy"] = p
-        env["ALL_PROXY"] = p
-        env["all_proxy"] = p
+        for k in _PROXY_ENV_KEYS:
+            env[k] = p
     return env
 
 
@@ -612,7 +617,9 @@ class ExtensionBridge(QObject):
             url, item.get("page_url") or "", item.get("referer") or "") else ""
         # requests 用 socks 代理需 PySocks 依赖；未装时对 requests 跳过 socks 代理
         # （不影响 yt-dlp/ffmpeg 子进程——它们已通过运行环境 env 统一走代理）。
-        proxies = None
+        # 显式传 {"http": None, "https": None} 可屏蔽 requests 对环境变量代理的回退，
+        # 保证非 YouTube 下载是真实直连（与 _build_dl_env 剔除代理变量保持一致）。
+        proxies = {"http": None, "https": None}
         if proxy and not (proxy.startswith("socks") and not _HAS_PYSOCKS):
             proxies = {"http": proxy, "https": proxy}
         with requests.get(url, headers=headers, stream=True,

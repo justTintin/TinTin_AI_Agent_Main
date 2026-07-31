@@ -314,8 +314,6 @@ class BeatSegmentCard(QFrame):
         self._current_src = None
 
         self.setObjectName("segment_card")
-        self.setStyleSheet(
-            "#segment_card { border: 1px solid #33334d; border-radius: 6px; background: #1b1b28; }")
 
         vbox = QVBoxLayout(self)
         vbox.setContentsMargins(8, 6, 8, 6)
@@ -370,9 +368,7 @@ class BeatSegmentCard(QFrame):
         self.time_lbl = QLabel(self._fmt_range(self.seg_start))
         self.time_lbl.setFixedHeight(18)
         self.time_lbl.setAlignment(Qt.AlignCenter)
-        self.time_lbl.setStyleSheet(
-            "background: #2d2d44; color: #f9c74f; font-family: Consolas; "
-            "font-size: 9pt; font-weight: bold; border-radius: 3px;")
+        self.time_lbl.setObjectName("beat_time_label")
         right_col.addWidget(self.time_lbl)
         body.addLayout(right_col, 1)
 
@@ -606,7 +602,7 @@ class StepBeatView(BaseStepView):
         # ── 参数设置行（已选镜头 + 时长 → 转场 → 视频个数 → 检测卡点，设置整体右移）──
         settings_row = QHBoxLayout()
         self.main_page.beat_clips_info_lbl = QLabel("镜头素材: 0 个")
-        self.main_page.beat_clips_info_lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        self.main_page.beat_clips_info_lbl.setObjectName("beat_clips_info")
         settings_row.addWidget(self.main_page.beat_clips_info_lbl)
         settings_row.addStretch()
         settings_row.addWidget(QLabel("时长:"))
@@ -677,8 +673,7 @@ class StepBeatView(BaseStepView):
         # 片段卡片滚动区
         self.cards_scroll = QScrollArea()
         self.cards_scroll.setWidgetResizable(True)
-        self.cards_scroll.setStyleSheet(
-            "QScrollArea { border: 1px solid #333; border-radius: 4px; background: #16161f; }")
+        self.cards_scroll.setObjectName("beat_cards_scroll")
         self.cards_container = QWidget()
         self.cards_layout = QVBoxLayout(self.cards_container)
         self.cards_layout.setContentsMargins(8, 8, 8, 8)
@@ -691,14 +686,12 @@ class StepBeatView(BaseStepView):
         preview_panel = QFrame()
         preview_panel.setObjectName("preview_panel")
         preview_panel.setMaximumWidth(560)
-        preview_panel.setStyleSheet(
-            "#preview_panel { border: 1px solid #333; border-radius: 4px; background: #16161f; }")
         self.preview_panel = preview_panel
         pvbox = QVBoxLayout(preview_panel)
         pvbox.setContentsMargins(8, 8, 8, 8)
         pvbox.setSpacing(6)
         self.main_page.beat_preview_title = QLabel("预览播放器")
-        self.main_page.beat_preview_title.setStyleSheet("color: #f9c74f; font-weight: bold;")
+        self.main_page.beat_preview_title.setObjectName("beat_preview_title")
         pvbox.addWidget(self.main_page.beat_preview_title)
         # 视频预览（播放服务端下载的卡点视频）
         self.main_page.beat_preview_video = QVideoWidget()

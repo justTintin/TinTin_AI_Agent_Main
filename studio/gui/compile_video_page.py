@@ -220,10 +220,6 @@ class CompileVideoPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
-        heading = QLabel("🎬 一键成片")
-        heading.setObjectName("heading")
-        root.addWidget(heading)
-
         # 顶层 tab：产品成片（选产品）+ 脚本成片（选分镜脚本）
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet(

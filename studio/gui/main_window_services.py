@@ -63,10 +63,8 @@ class ServicesMixin:
                     self.ai_config["vox_timesteps"] = self.vox_timesteps_spin.value()
                     self.ai_config["vox_cfg"] = self.vox_cfg_spin.value()
                 try:
-                    import json
-                    os.makedirs(os.path.dirname(self.ai_config_file), exist_ok=True)
-                    with open(self.ai_config_file, 'w', encoding='utf-8') as f:
-                        json.dump(self.ai_config, f, indent=4, ensure_ascii=False)
+                    from utils import config_manager as _cm
+                    _cm.save_ai_config(self.ai_config)
                 except Exception as e:
                     log.error(f"保存声音克隆参数到 ai_config 失败: {e}")
             return True

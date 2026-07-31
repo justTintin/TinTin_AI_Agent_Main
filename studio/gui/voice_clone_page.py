@@ -140,7 +140,7 @@ class VoiceClonePage(BasePage):
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("background: transparent;")
+        scroll_content.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(16)

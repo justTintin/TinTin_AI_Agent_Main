@@ -13,6 +13,7 @@ from config.paths import (
 import threading
 import uuid
 import configparser
+from version import get_version
 from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
@@ -61,7 +62,7 @@ class SidebarMixin:
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("QWidget { background: transparent; }")
+        scroll_content.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(8, 12, 8, 12)
         scroll_layout.setSpacing(12)
@@ -69,7 +70,7 @@ class SidebarMixin:
         self.nav_buttons = []
 
         # 素材浏览器（菜单最顶部，直接打开外部 Electron 应用，非页面切换）
-        btn_browser = QPushButton("🌐 素材浏览器")
+        btn_browser = mdi_button("素材浏览器", "web")
         btn_browser.setObjectName("nav_button")
         btn_browser.setCursor(Qt.PointingHandCursor)
         btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
@@ -107,10 +108,10 @@ class SidebarMixin:
         script_layout.addWidget(script_header)
         
         script_menus = [
-            ("📚 我的知识库", 29, None),
-            ("产品资料", 28, "download"),
-            ("🛒 产品文案创作", 30, None),
-            ("分镜脚本创作", 38, "pencil"),
+            ("我的知识库", 29, "book"),
+            ("产品资料", 28, "database"),
+            ("产品文案创作", 30, "text"),
+            ("分镜脚本创作", 38, "movie-open"),
         ]
         for text, index, icon_name in script_menus:
             if icon_name:
@@ -137,11 +138,11 @@ class SidebarMixin:
         media_layout.addWidget(media_header)
 
         media_menus = [
-            ("🎨 素材生成", 32, None),
-            # ("🧺 即梦素材", 43),          # 暂时隐藏
-            # ("🪄 MG 动画", 36),          # 暂时隐藏
-            ("素材检索", 39, "search"),
-            ("📋 任务队列", 9, None),
+            ("素材生成", 32, "palette"),
+            ("素材检索", 39, "text-box-search"),
+            ("音频素材", 45, "music"),
+            ("即梦素材", 42, "image-multiple"),
+            ("任务队列", 9, "format-list-checks"),
         ]
         for text, index, icon_name in media_menus:
             if icon_name:
@@ -171,7 +172,7 @@ class SidebarMixin:
             ("成片任务", 43, "clock-outline"),
             ("一键成片", 34, "rocket"),
             ("智能混剪", 15, "content-cut"),
-            ("📡 直播切片", 19, None),
+            ("直播切片", 19, "broadcast"),
         ]
         for text, index, icon_name in compose_menus:
             if icon_name:
@@ -198,13 +199,13 @@ class SidebarMixin:
         graphics_layout.addWidget(graphics_header)
         
         graphics_menus = [
-            # ("🖼️ 封面制作", 33),          # 下版本
-            ("👤 图像抠图", 16),
+            ("封面制作", 33, "image-edit"),
+            ("图像抠图", 16, "image"),
             # ("🗂️ 智能分层", 17),          # 暂时隐藏
-            ("👁️ 图片框选 OCR", 25),
+            ("图片框选 OCR", 25, "text-box-search"),
         ]
-        for text, index in graphics_menus:
-            btn = QPushButton(text)
+        for text, index, icon_name in graphics_menus:
+            btn = mdi_button(text, icon_name)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -225,20 +226,16 @@ class SidebarMixin:
         video_layout.addWidget(video_header)
         
         video_menus = [
-            # ("🗣️ 数字人", 3),             # 下版本
-            ("💬 视频转文字", 12, None),
+            ("视频修复", 11, "wrench"),
+            ("视频转文字", 12, "subtitles"),
             ("声音克隆", 21, "audio"),
-            ("🎞️ 视频去字幕", 18, None),
-            # ("✨ 视频修复", 11, None),
-            ("视频框选 OCR", 24, "search"),
+            ("视频去字幕", 18, "closed-caption"),
+            ("视频框选 OCR", 24, "text-box-search"),
+            ("批量 LUT 调色", 27, "gradient"),
             # ("🏷️ 视频智能重命名", 26),   # 暂时隐藏
-            # ("🌈 批量 LUT 调色", 27),     # 暂时隐藏
         ]
         for text, index, icon_name in video_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -259,14 +256,11 @@ class SidebarMixin:
         ops_layout.addWidget(ops_header)
 
         ops_menus = [
-            ("📈 视频评价预测", 35, None),
-            ("📢 视频营销检测", 41, None),
+            ("视频评价预测", 35, "chart-line"),
+            ("视频营销检测", 41, "bullhorn"),
         ]
         for text, index, icon_name in ops_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -289,16 +283,13 @@ class SidebarMixin:
         other_menus = [
             ("模型配置", 7, "cog"),
             ("平台接入", 23, "link"),
-            ("资源配置", 22, "download"),
-            ("运行环境", 37, "server"),
-            ("🧩 扩展插件", 44, None),
-            ("❓ 帮助", 6, None),
+            ("本地配置", 22, "download"),
+            ("环境与维护", 37, "server"),
+            ("扩展插件", 44, "puzzle"),
+            ("关于", 6, "information"),
         ]
         for text, index, icon_name in other_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -312,7 +303,7 @@ class SidebarMixin:
         scroll.setWidget(scroll_content)
         self.sidebar_layout.addWidget(scroll)
         
-        footer = QLabel("v2.1.1")
+        footer = QLabel(f"v{get_version()}")
         footer.setObjectName("sidebar_footer")
         self.sidebar_layout.addWidget(footer)
         self.main_layout.addWidget(self.sidebar)
@@ -383,6 +374,8 @@ class SidebarMixin:
 
     def switch_page(self, index):
         # Update Content Stack
+        if hasattr(self, "_ensure_page_built"):
+            self._ensure_page_built(index)
         self.content_stack.setCurrentIndex(index)
         
         # 1. Update Navigation Focus (Visual Only)

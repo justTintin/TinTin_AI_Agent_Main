@@ -12,10 +12,12 @@ import requests
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QListWidget, QListWidgetItem, QAbstractItemView,
-    QSpinBox, QDialog, QFrame, QSplitter, QWidget,
+    QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider,
 )
-from PySide6.QtCore import Qt, QSize, QTimer, Signal
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl
 from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
@@ -63,6 +65,99 @@ def _make_placeholder_pixmap(text="?", color="#3a3a3c"):
     p.drawText(pm.rect(), Qt.AlignCenter, text)
     p.end()
     return pm
+
+
+def _fmt_ms(ms):
+    """毫秒 → m:ss。"""
+    total = max(0, int(ms or 0)) // 1000
+    return f"{total // 60}:{total % 60:02d}"
+
+
+class VideoPreviewDialog(QDialog):
+    """内置视频播放器：通过 /material/serve 流式播放服务端素材（支持 Range）。"""
+
+    def __init__(self, url, title="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"▶ 视频预览 - {title}")
+        self.resize(960, 600)
+        self.setObjectName("videoPreviewDialog")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
+
+        self.video_widget = QVideoWidget()
+        self.video_widget.setStyleSheet("background:#000; border-radius:6px;")
+        lay.addWidget(self.video_widget, 1)
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 1000)
+        self.slider.setEnabled(False)
+        self.slider.sliderPressed.connect(self._on_slider_pressed)
+        self.slider.sliderReleased.connect(self._on_slider_released)
+        lay.addWidget(self.slider)
+
+        ctrl = QHBoxLayout()
+        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play.setObjectName("primary_button")
+        self.btn_play.setFixedWidth(90)
+        self.btn_play.clicked.connect(self._toggle_play)
+        ctrl.addWidget(self.btn_play)
+        ctrl.addStretch(1)
+        self.lbl_time = QLabel("加载中…")
+        self.lbl_time.setObjectName("muted_text")
+        ctrl.addWidget(self.lbl_time)
+        lay.addLayout(ctrl)
+
+        self._dragging = False
+        self.player = QMediaPlayer(self)
+        self._audio = QAudioOutput(self)
+        self.player.setAudioOutput(self._audio)
+        self.player.setVideoOutput(self.video_widget)
+        self.player.positionChanged.connect(self._on_position)
+        self.player.durationChanged.connect(self._on_duration)
+        self.player.playbackStateChanged.connect(self._on_state)
+        self.player.errorOccurred.connect(self._on_error)
+        self.player.setSource(QUrl(url))
+        self.player.play()
+
+    def _toggle_play(self):
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def _on_state(self, state):
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self.btn_play.setText("⏸ 暂停" if playing else "▶ 播放")
+
+    def _on_position(self, pos):
+        if self._dragging:
+            return
+        dur = self.player.duration()
+        if dur > 0:
+            self.slider.setValue(int(pos * 1000 / dur))
+        self.lbl_time.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")
+
+    def _on_duration(self, dur):
+        self.slider.setEnabled(dur > 0)
+
+    def _on_slider_pressed(self):
+        self._dragging = True
+
+    def _on_slider_released(self):
+        self._dragging = False
+        dur = self.player.duration()
+        if dur > 0:
+            self.player.setPosition(int(self.slider.value() * dur / 1000))
+
+    def _on_error(self, _error, error_string):
+        self.btn_play.setText("▶ 重试")
+        self.lbl_time.setText(f"❌ 播放失败: {error_string}")
+
+    def closeEvent(self, event):
+        self.player.stop()
+        super().closeEvent(event)
 
 
 class _SearchWorker(BaseWorker):
@@ -180,9 +275,6 @@ class VectorSearchPage(BasePage):
         title.setObjectName("heading")
         hdr.addWidget(title)
         hdr.addStretch()
-        sub = QLabel(f"服务端: {_get_server_url()}")
-        sub.setObjectName("muted_text")
-        hdr.addWidget(sub)
         root.addLayout(hdr)
 
         search_row = QHBoxLayout()
@@ -315,9 +407,10 @@ class VectorSearchPage(BasePage):
         self._brand_values = []           # 品牌全量（供文本过滤）
         self._loading_filters = 0
 
-        # 占位图标（图片加载前 / 视频占位）
+        # 占位图标（图片加载前 / 视频 / 音频占位）
         self._pm_placeholder = _make_placeholder_pixmap("…")
         self._pm_video = _make_placeholder_pixmap("🎬", "#243b55")
+        self._pm_audio = _make_placeholder_pixmap("🎵", "#3b2f5b")
 
         # 初始：加载统计 + 筛选选项 + 默认浏览全库
         QTimer.singleShot(100, self._init_load)
@@ -513,8 +606,9 @@ class VectorSearchPage(BasePage):
             score = item.get("score")
 
             # tooltip：完整信息
+            type_name = {"video": "视频", "audio": "音频", "image": "图片"}.get(mtype, mtype)
             tip = (f"📁 {fname}\n品牌: {brand}\n型号: {model}\n"
-                   f"分类: {category}\n类型: {mtype}\n大小: {size_str}")
+                   f"分类: {category}\n类型: {type_name}\n大小: {size_str}")
             if score is not None:
                 tip += f"\n相关度: {float(score):.3f}"
 
@@ -524,16 +618,15 @@ class VectorSearchPage(BasePage):
             lw_item.setForeground(QColor("#d1d5db"))
             lw_item.setData(Qt.UserRole, {"mid": mid, "media_type": mtype, "item": item})
 
-            if mtype == "video":
-                lw_item.setIcon(self._pm_video)
+            if mtype == "audio":
+                lw_item.setIcon(self._pm_audio)
+            elif mid and mid in self._thumb_cache:
+                lw_item.setIcon(self._thumb_cache[mid])
             else:
-                # 图片：先占位，缓存命中则直接显示
-                if mid and mid in self._thumb_cache:
-                    lw_item.setIcon(self._thumb_cache[mid])
-                else:
-                    lw_item.setIcon(self._pm_placeholder)
-                    if mid:
-                        to_load.append(mid)
+                # 图片/视频：先占位，异步加载缩略图（服务端为视频生成首帧图）
+                lw_item.setIcon(self._pm_video if mtype == "video" else self._pm_placeholder)
+                if mid:
+                    to_load.append(mid)
 
             self.grid.addItem(lw_item)
             if mid:
@@ -608,7 +701,8 @@ class VectorSearchPage(BasePage):
         if not mid:
             return
         if mtype == "video":
-            self.lbl_stat.setText("视频素材，请用「复制地址」后在播放器中打开")
+            dlg = VideoPreviewDialog(_serve_url(mid), item.text(), self.parent_widget)
+            dlg.exec()
             return
         # 图片：异步加载原图并弹大图预览
         dlg = QDialog(self.parent_widget)

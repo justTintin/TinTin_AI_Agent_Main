@@ -67,6 +67,29 @@ class LoadWorkflowsWorker(BaseWorker):
         self.finished.emit(workflows)
 
 
+class ServerCheckWorker(BaseWorker):
+    """后台检测服务端 ComfyUI 状态，避免阻塞界面。"""
+    finished = Signal(str)  # 状态文本
+
+    def __init__(self, server_url):
+        super().__init__()
+        self.server_url = server_url
+
+    def do_work(self):
+        import requests
+        try:
+            r = requests.get(f"{self.server_url}/comfyui/status", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("online"):
+                    ver = data.get("version", "?")
+                    self.finished.emit(f"✅ ComfyUI 在线 (v{ver})")
+                    return
+            self.finished.emit("❌ ComfyUI 离线")
+        except Exception:
+            self.finished.emit("❌ 服务端不可达")
+
+
 class UploadAndRunWorker(BaseWorker):
     """上传产品图 → 提交工作流 → 轮询结果 → 下载生成图。"""
     phase = Signal(str)
@@ -232,14 +255,19 @@ class ProductImagePage(BasePage):
         heading.setObjectName("heading")
         title_row.addWidget(heading)
         title_row.addStretch()
+        root.addLayout(title_row)
+
+        # 服务端状态/刷新独立一行（标题行不放其它控件，避免被资源监控遮挡）
+        status_row = QHBoxLayout()
         self.lbl_server_status = QLabel("检测服务端…")
         self.lbl_server_status.setObjectName("muted_text")
-        title_row.addWidget(self.lbl_server_status)
+        status_row.addWidget(self.lbl_server_status)
+        status_row.addStretch()
         btn_refresh = QPushButton("🔄 刷新")
         btn_refresh.setObjectName("secondary_button")
         btn_refresh.clicked.connect(self._refresh_all)
-        title_row.addWidget(btn_refresh)
-        root.addLayout(title_row)
+        status_row.addWidget(btn_refresh)
+        root.addLayout(status_row)
 
         # 主体：左右分栏
         splitter = QSplitter(Qt.Horizontal)
@@ -385,19 +413,11 @@ class ProductImagePage(BasePage):
         self._load_workflows()
 
     def _check_server(self):
-        """检测服务端 ComfyUI 状态。"""
-        import requests
-        try:
-            r = requests.get(f"{self._server_url}/comfyui/status", timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("online"):
-                    ver = data.get("version", "?")
-                    self.lbl_server_status.setText(f"✅ ComfyUI 在线 (v{ver})")
-                    return
-            self.lbl_server_status.setText("❌ ComfyUI 离线")
-        except Exception:
-            self.lbl_server_status.setText("❌ 服务端不可达")
+        """检测服务端 ComfyUI 状态（后台线程，不阻塞界面）。"""
+        self.lbl_server_status.setText("检测服务端…")
+        w = self.track_worker(ServerCheckWorker(self._server_url))
+        w.finished.connect(self.lbl_server_status.setText)
+        w.start()
 
     def _load_products(self):
         self.combo_product.clear()

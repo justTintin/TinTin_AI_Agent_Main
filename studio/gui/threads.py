@@ -22,7 +22,9 @@ class SystemMonitorThread(QThread):
         self.running = True
     
     def run(self):
+        consecutive_failures = 0
         while self.running:
+            ok = False
             try:
                 addr = self.get_addr_func().rstrip("/")
                 if not addr:
@@ -31,6 +33,7 @@ class SystemMonitorThread(QThread):
                 # ComfyUI system_stats endpoint
                 res = requests.get(f"{addr}/system_stats", timeout=3)
                 if res.status_code == 200:
+                    ok = True
                     data = res.json()
                     cpu = data.get('system', {}).get('cpu_utilization', 0)
                     
@@ -52,7 +55,13 @@ class SystemMonitorThread(QThread):
                     self.stats_updated.emit({"cpu": "Error", "ram": "--", "gpu": "Error"})
             except Exception:
                 self.stats_updated.emit({"cpu": "Offline", "ram": "--", "gpu": "Offline"})
-            time.sleep(3)
+            # 指数退避：连续失败时 3s→6s→12s→…封顶 60s；成功后复位
+            consecutive_failures = 0 if ok else consecutive_failures + 1
+            delay = 3 if consecutive_failures == 0 else min(
+                3 * (2 ** (consecutive_failures - 1)), 60)
+            end = time.time() + delay
+            while self.running and time.time() < end:
+                time.sleep(0.25)
 
 
 class ComfyWSThread(QThread):
@@ -106,8 +115,8 @@ class AIStatusCheckThread(QThread):
         import os
         import json
         import requests as req
-        from utils.http_client import resilient_get, resilient_post
 
+        consecutive_failures = 0
         while self.running:
             status = {
                 "ollama_ok": False,
@@ -125,11 +134,9 @@ class AIStatusCheckThread(QThread):
                     model   = cfg.get("llm_vision_model", "").strip()
 
                     if server_url:
+                        # 健康探活：单次请求、不重试不打日志（避免服务不可达时刷屏）
                         try:
-                            res = resilient_get(
-                                f"{server_url.rstrip('/')}/ollama/status",
-                                timeout=2, service="ollama", circuit_breaker=False,
-                            )
+                            res = req.get(f"{server_url.rstrip('/')}/ollama/status", timeout=2)
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
                                 status["vision_ok"] = True  # 服务端代理管理视觉模型
@@ -147,7 +154,7 @@ class AIStatusCheckThread(QThread):
                     vox_url = cfg.get("vox_api_url", "").strip()
                     if vox_url:
                         base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
-                        r = resilient_get(f"{base}/voxcpm/health", timeout=3, service="voxcpm", circuit_breaker=False)
+                        r = req.get(f"{base}/voxcpm/health", timeout=2)
                         if r.status_code == 200:
                             status["clone_ok"] = True
             except Exception:
@@ -162,7 +169,7 @@ class AIStatusCheckThread(QThread):
                     whisper_url = cfg.get("whisper_api_url", "").strip()
                     if whisper_url:
                         base = whisper_url.rstrip("/")
-                        r = resilient_get(f"{base}/whisper/health", timeout=3, service="whisper", circuit_breaker=False)
+                        r = req.get(f"{base}/whisper/health", timeout=2)
                         if r.status_code == 200:
                             status["whisper_ok"] = True
             except Exception:
@@ -177,16 +184,23 @@ class AIStatusCheckThread(QThread):
                     clip_url = cfg.get("clip_api_url", "").strip()
                     if clip_url:
                         base = clip_url.rstrip("/")
-                        r = resilient_get(f"{base}/clip/health", timeout=3, service="clip", circuit_breaker=False)
+                        r = req.get(f"{base}/clip/health", timeout=2)
                         if r.status_code == 200:
                             status["clip_ok"] = True
             except Exception:
                 pass
 
             self.status_updated.emit(status)
-            
-            # Sleep 10 seconds, but check self.running frequently
-            for _ in range(20):
+
+            # 指数退避：全部服务探测失败（如服务端不可达）时拉长间隔，避免刷日志；
+            # 任一服务恢复后回到基础 10s 间隔。封顶 60s。
+            if any(status.values()):
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+            delay = 10 if consecutive_failures == 0 else min(
+                10 * (2 ** (consecutive_failures - 1)), 60)
+            for _ in range(int(delay * 2)):
                 if not self.running:
-                    break
+                    return
                 time.sleep(0.5)

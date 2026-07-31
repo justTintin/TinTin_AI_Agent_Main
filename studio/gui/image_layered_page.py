@@ -561,7 +561,7 @@ class ImageLayeredPage(BasePage):
         self.scroll_layers.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background: transparent;")
+        self.scroll_content.setObjectName("scroll_page")
         self.grid_layout = QGridLayout(self.scroll_content)
         self.grid_layout.setContentsMargins(10, 10, 10, 10)
         self.grid_layout.setSpacing(15)

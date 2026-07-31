@@ -74,12 +74,29 @@ EMOJI = {
     "palette":     "🎨",
     "voice":       "🗣️",
     "clipboard":   "📋",
+    "subtitles":   "💬",
+    "closed-caption": "🎞️",
+    "movie-open":  "🎞️",
+    "broadcast":   "📡",
+    "content-cut": "✂️",
+    "clock-outline": "🕐",
     # AI / 智能
     "robot":       "🤖",
     "brain":       "🧠",
     "robot2":      "🤖",
     "magic":       "🪄",
     "sparkles":    "✨",
+    "chart-line":  "📈",
+    "megaphone":   "📢",
+    "puzzle":      "🧩",
+    "help-circle": "❓",
+    "web":         "🌐",
+    "book":        "📚",
+    "database":    "🗄️",
+    "package":     "📦",
+    "type":        "✍️",
+    "format-list-checks": "📋",
+    "text-box-search": "🔍",
     # 状态
     "star":        "⭐",
     "heart":       "❤️",
@@ -125,7 +142,7 @@ except ImportError:
     _HAS_QTA = False
 
 
-def mdi_icon(name: str, color: str = "#c9cdd4") -> QIcon:
+def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
     """获取图标。优先 qtawesome，回退 emoji。"""
     if _HAS_QTA:
         # 部分别名：历史代码用了非标准 mdi 图标名，这里统一映射到有效名，
@@ -146,7 +163,7 @@ def mdi_icon(name: str, color: str = "#c9cdd4") -> QIcon:
 
 
 def mdi_button(text: str, icon_name: str = "", parent=None,
-               color: str = "#c9cdd4", size: int = 18) -> QPushButton:
+               color: str = "#8b90a3", size: int = 18) -> QPushButton:
     """创建带图标的按钮。qtawesome 可用时用 MDI 图标，否则回退 Emoji。"""
     if icon_name:
         if _HAS_QTA:
@@ -173,17 +190,6 @@ def emoji_button(text: str, emoji: str = "", parent=None) -> QPushButton:
     return QPushButton(text, parent)
 
 
-_TABLE_BTN_STYLE = """
-    QPushButton {
-        border: none; background: transparent; padding: 1px 5px;
-        font-size: 13px; color: #9ca3af;
-    }
-    QPushButton:hover {
-        color: #ffffff; background: rgba(255,255,255,0.1); border-radius: 3px;
-    }
-"""
-
-
 def table_action_button(text: str, tooltip: str = "", parent=None) -> QPushButton:
     """表格操作列专用扁平按钮（无边框，icon+文字，不挤压行高）。
     用法: btn = table_action_button('🗑', '删除')
@@ -192,5 +198,5 @@ def table_action_button(text: str, tooltip: str = "", parent=None) -> QPushButto
     if tooltip:
         btn.setToolTip(tooltip)
     btn.setFlat(True)
-    btn.setStyleSheet(_TABLE_BTN_STYLE)
+    btn.setObjectName("table_action_button")
     return btn

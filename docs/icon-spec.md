@@ -1,5 +1,17 @@
 # 螺丝钉-电商智能体矩阵 · 图标系统设计规范
 
+## 应用图标（App Icon）· Aurora Icon
+
+- **风格**：圆角方形（Windows 风格），深空渐变底，与暗色主题 `#0b0c10` 系一致
+- **中心图形**：螺丝钉头（Indigo→Violet 渐变 + 白色十字槽）＝ 品牌「螺丝钉」
+- **环绕图形**：8 节点矩阵环 + 连接线 + 虚线轨道 ＝ 「智能体矩阵」；星光点缀 ＝ AI
+- **源文件**：`studio/tools/make_app_icon.py`（QPainter 绘制，可改参数重新生成）
+- **输出**：
+  - `studio/assets/app_icon.png`（512，窗口/托盘图标）
+  - `studio/assets/app_icon.ico`（16/32/48/64/128/256 多尺寸，PyInstaller exe 图标）
+  - `studio/assets/icons/icon_16~256.png`（多尺寸 PNG 集）
+- **重新生成**：`python studio/tools/make_app_icon.py`
+
 ## 风格定义
 - **风格**：线性图标（Stroke），圆角端点
 - **网格**：24×24px 基准

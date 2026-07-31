@@ -121,7 +121,7 @@ class EnvConfigPage(BasePage):
         scroll_area.setMinimumHeight(300)
 
         scroll_widget = QWidget()
-        scroll_widget.setStyleSheet("QWidget { background: transparent; }")
+        scroll_widget.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(16)
@@ -320,11 +320,9 @@ class EnvConfigPage(BasePage):
         )
         if not new_dir:
             return
-        import json as _json
-        cfg_path = os.path.join(DATA_DIR, "knowledge_dir.json")
+        from utils import config_manager as _cm
         try:
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                _json.dump({"media_dir": new_dir}, f, ensure_ascii=False, indent=2)
+            _cm.set_setting("knowledge_dir", "media_dir", new_dir)
             self.edit_mat_dir.setText(new_dir)
             QMessageBox.information(
                 self.parent_widget, "媒体存储目录已设置",
@@ -335,11 +333,9 @@ class EnvConfigPage(BasePage):
             QMessageBox.critical(self.parent_widget, "保存失败", f"写入配置失败: {e}")
 
     def _reset_materials_dir(self):
-        import json as _json
-        cfg_path = os.path.join(DATA_DIR, "knowledge_dir.json")
+        from utils import config_manager as _cm
         try:
-            if os.path.exists(cfg_path):
-                os.remove(cfg_path)
+            _cm.clear_config("knowledge_dir")
         except Exception:
             pass
         default = os.path.join(MATERIALS_DIR, "knowledge")

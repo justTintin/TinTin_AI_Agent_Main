@@ -73,7 +73,7 @@ class ScriptCompareDialog(QDialog):
         # Theme-consistent dialog style
         self.setStyleSheet("""
             QPlainTextEdit {
-                border: 1px solid #374151;
+                border: 1px solid rgba(128, 128, 128, 0.25);
                 border-radius: 6px;
                 font-size: 13px;
                 line-height: 1.4;
@@ -123,14 +123,7 @@ class ScriptCompareDialog(QDialog):
         btn_box.addStretch()
         
         btn_use_original = mdi_button("还原为原始文案", "backward")
-        btn_use_original.setStyleSheet("""
-            QPushButton {
-                background-color: #4b5563;
-            }
-            QPushButton:hover {
-                background-color: #374151;
-            }
-        """)
+        btn_use_original.setObjectName("secondary_button")
         btn_use_original.clicked.connect(self._use_original)
         btn_box.addWidget(btn_use_original)
         
@@ -139,16 +132,7 @@ class ScriptCompareDialog(QDialog):
         btn_box.addWidget(btn_save)
         
         btn_cancel = QPushButton("取消")
-        btn_cancel.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #d1d5db;
-                border: 1px solid #4b5563;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-            }
-        """)
+        btn_cancel.setObjectName("secondary_button")
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
         
@@ -169,18 +153,6 @@ class DubbedVideosDialog(QDialog):
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
-        # Theme-consistent dialog (no custom QDialog/QPushButton base style)
-        self.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QPushButton#primary_button {
-                font-weight: 700;
-            }
-        """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
@@ -269,18 +241,6 @@ class FinalMixedVideosDialog(QDialog):
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
-        # Theme-consistent dialog (no custom QDialog/QPushButton base style)
-        self.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QPushButton#primary_button {
-                font-weight: 700;
-            }
-        """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)

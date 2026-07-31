@@ -192,7 +192,9 @@ class _SearchWorker(BaseWorker):
                 results = data.get("results") or data.get("data") or []
                 total = data.get("total") or len(results)
             else:
-                params = {"limit": self.limit, "offset": self.offset}
+                # 浏览模式：服务端 /material/list 用 page/size 分页（limit/offset 无效）
+                params = {"size": self.limit,
+                          "page": (self.offset // self.limit) + 1 if self.limit else 1}
                 if self.brand:
                     params["brand"] = self.brand
                 if self.category:
@@ -359,7 +361,25 @@ class VectorSearchPage(BasePage):
                                 " QListWidget::item { background: #1c1c24; border-radius: 6px; }"
                                 " QListWidget::item:selected { background: #2a3340; border: 1px solid #2ecc71; }")
         self.grid.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.grid.itemChanged.connect(self._on_item_changed)
         right_lay.addWidget(self.grid, 1)
+
+        # 选择工具栏：全选/取消全选（仅对当前页生效）
+        sel_row = QHBoxLayout()
+        btn_sel_all = QPushButton("☑ 全选本页")
+        btn_sel_all.setObjectName("secondary_button")
+        btn_sel_all.setFixedWidth(110)
+        btn_sel_all.clicked.connect(self._select_all_page)
+        sel_row.addWidget(btn_sel_all)
+        btn_sel_none = QPushButton("☐ 取消全选")
+        btn_sel_none.setObjectName("secondary_button")
+        btn_sel_none.setFixedWidth(110)
+        btn_sel_none.clicked.connect(self._clear_all_page)
+        sel_row.addWidget(btn_sel_none)
+        self.lbl_sel_count = QLabel("已选 0 项")
+        self.lbl_sel_count.setObjectName("muted_text")
+        sel_row.addWidget(self.lbl_sel_count, 1)
+        right_lay.addLayout(sel_row)
 
         # 分页控件行
         page_row = QHBoxLayout()
@@ -617,6 +637,8 @@ class VectorSearchPage(BasePage):
             lw_item.setText(fname if len(fname) <= 18 else fname[:17] + "…")
             lw_item.setToolTip(tip)
             lw_item.setForeground(QColor("#d1d5db"))
+            lw_item.setFlags(lw_item.flags() | Qt.ItemIsUserCheckable)
+            lw_item.setCheckState(Qt.Unchecked)
             lw_item.setData(Qt.UserRole, {"mid": mid, "media_type": mtype, "item": item})
 
             if mtype == "audio":
@@ -730,3 +752,20 @@ class VectorSearchPage(BasePage):
         w.finished.connect(on_loaded)
         w.start()
         dlg.exec()
+
+    # ── 本页多选（全选/取消全选，仅对当前页生效）─────────────────────
+    def _select_all_page(self):
+        for i in range(self.grid.count()):
+            self.grid.item(i).setCheckState(Qt.Checked)
+
+    def _clear_all_page(self):
+        for i in range(self.grid.count()):
+            self.grid.item(i).setCheckState(Qt.Unchecked)
+
+    def _selected_items(self):
+        """返回当前页勾选的 item 列表。"""
+        return [self.grid.item(i) for i in range(self.grid.count())
+                if self.grid.item(i).checkState() == Qt.Checked]
+
+    def _on_item_changed(self, _item):
+        self.lbl_sel_count.setText(f"已选 {len(self._selected_items())} 项")

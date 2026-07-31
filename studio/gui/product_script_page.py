@@ -224,9 +224,15 @@ class ProductScriptPage(BasePage):
         if not copy_text:
             QMessageBox.warning(self.parent_widget, "文案为空", "请先生成或填写文案，然后再进行分镜脚本设计。")
             return
+        # 携带当前产品上下文（品牌/型号/产品类型），供分镜页素材检索使用
+        prod = {}
+        item_id = self.combo_product.currentData()
+        if item_id:
+            prod = self.kb.get(item_id) or {}
         if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:
             style_id = self._selected_stylization.get("id") if self._selected_stylization else None
-            self.main_window.storyboard_tool.set_copywriting(copy_text, stylization_id=style_id)
+            self.main_window.storyboard_tool.set_copywriting(
+                copy_text, stylization_id=style_id, product=prod)
         self.main_window.switch_page(38)
 
     # ──────────────────────── 数据载入 ────────────────────────

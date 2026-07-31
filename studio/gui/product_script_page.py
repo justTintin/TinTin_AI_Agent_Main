@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from utils.product_library_manager import ProductLibraryManager
+from gui.searchable_combo import SearchableComboBox
 from utils.my_knowledge_manager import MyKnowledgeManager, STYLIZATION_TYPE
 from gui.ai_script_page import LLMWorker
 from gui.base_page import BasePage
@@ -102,8 +103,7 @@ class ProductScriptPage(BasePage):
         search_row.addWidget(btn_reload)
         src.addLayout(search_row)
 
-        self.combo_product = QComboBox()
-        self.combo_product.setPlaceholderText("选择产品（品牌 - 型号）")
+        self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
         self.combo_product.currentIndexChanged.connect(self._on_product_selected)
         self.combo_product.setMinimumWidth(100)
         src.addWidget(self.combo_product)
@@ -155,7 +155,7 @@ class ProductScriptPage(BasePage):
         style_hdr.addWidget(btn_refresh_style)
         sl.addLayout(style_hdr)
 
-        self.combo_stylization = QComboBox()
+        self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         sl.addWidget(self.combo_stylization)
 

@@ -32,6 +32,7 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from config.paths import OUTPUTS_DIR
+from gui.searchable_combo import SearchableComboBox
 
 PRODUCT_IMAGE_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "product_images")
 
@@ -58,9 +59,9 @@ class LoadWorkflowsWorker(BaseWorker):
         self.server_url = server_url
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_get
         url = f"{self.server_url}/comfyui/workflows"
-        r = requests.get(url, timeout=10)
+        r = http_get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
         workflows = data.get("workflows", [])
@@ -76,9 +77,9 @@ class ServerCheckWorker(BaseWorker):
         self.server_url = server_url
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_get
         try:
-            r = requests.get(f"{self.server_url}/comfyui/status", timeout=5)
+            r = http_get(f"{self.server_url}/comfyui/status", timeout=5, quiet=True)
             if r.status_code == 200:
                 data = r.json()
                 if data.get("online"):
@@ -105,15 +106,15 @@ class UploadAndRunWorker(BaseWorker):
         self.output_dir = output_dir
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_get, http_post
 
         # 1. 上传产品图
         self.phase.emit("正在上传产品图…")
         self.progress.emit(10)
         upload_url = f"{self.server_url}/comfyui/upload/image"
         with open(self.image_path, "rb") as f:
-            resp = requests.post(upload_url, files={"image": f},
-                                 params={"overwrite": "true"}, timeout=60)
+            resp = http_post(upload_url, files={"image": f},
+                             params={"overwrite": "true"}, timeout=60)
         resp.raise_for_status()
         uploaded_name = resp.json().get("name", os.path.basename(self.image_path))
         log.info(f"[产品生图] 上传成功: {uploaded_name}")
@@ -126,7 +127,7 @@ class UploadAndRunWorker(BaseWorker):
         # 3. 提交执行
         run_url = f"{self.server_url}/comfyui/run"
         payload = {"prompt": workflow, "client_id": "tintin-studio"}
-        resp = requests.post(run_url, json=payload, timeout=30)
+        resp = http_post(run_url, json=payload, timeout=30)
         resp.raise_for_status()
         result = resp.json()
         prompt_id = result.get("prompt_id") or result.get("id") or ""
@@ -143,7 +144,7 @@ class UploadAndRunWorker(BaseWorker):
         for i in range(60):  # 最多等 5 分钟
             time.sleep(5)
             try:
-                hr = requests.get(history_url, timeout=10)
+                hr = http_get(history_url, timeout=10)
                 if hr.status_code != 200:
                     continue
                 hist = hr.json()
@@ -184,7 +185,7 @@ class UploadAndRunWorker(BaseWorker):
             view_url = (f"{self.server_url}/comfyui/view"
                         f"?filename={fname}&type={img_type}&subfolder={subfolder}")
             try:
-                ir = requests.get(view_url, timeout=30)
+                ir = http_get(view_url, timeout=30)
                 if ir.status_code == 200:
                     local_path = os.path.join(self.output_dir, fname)
                     with open(local_path, "wb") as f:
@@ -295,8 +296,7 @@ class ProductImagePage(BasePage):
         lay.addWidget(QLabel("📦 产品选择"))
 
         # 产品下拉
-        self.combo_product = QComboBox()
-        self.combo_product.setPlaceholderText("加载中…")
+        self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
         self.combo_product.currentIndexChanged.connect(self._on_product_selected)
         lay.addWidget(self.combo_product)
 
@@ -345,8 +345,7 @@ class ProductImagePage(BasePage):
         # 工作流选择
         wf_row = QHBoxLayout()
         wf_row.addWidget(QLabel("工作流:"))
-        self.combo_workflow = QComboBox()
-        self.combo_workflow.setPlaceholderText("加载工作流列表…")
+        self.combo_workflow = SearchableComboBox(placeholder="输入工作流名称搜索…")
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_selected)
         wf_row.addWidget(self.combo_workflow, 1)
         btn_reload_wf = QPushButton("🔄")
@@ -550,10 +549,10 @@ class ProductImagePage(BasePage):
 
     def _fetch_workflow_and_run(self, wf_path, prompt_text):
         """获取工作流 JSON 后启动生成。"""
-        import requests
+        from utils.http_client import http_get
         try:
             url = f"{self._server_url}/comfyui/workflow"
-            r = requests.get(url, params={"path": wf_path}, timeout=10)
+            r = http_get(url, params={"path": wf_path}, timeout=10)
             r.raise_for_status()
             workflow_json = r.json()
         except Exception as e:

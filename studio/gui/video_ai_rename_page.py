@@ -981,6 +981,7 @@ class VideoPlayerDialog(QDialog):
 #  主页面类
 # ─────────────────────────────────────────────
 from gui.base_page import BasePage
+from gui.searchable_combo import SearchableComboBox
 
 
 class VideoAiRenamePage(BasePage):
@@ -1043,7 +1044,7 @@ class VideoAiRenamePage(BasePage):
 
         # 视觉模型选择下拉框（纯选择，不可手动输入）
         row_config.addWidget(QLabel("视觉:"))
-        self.combo_vision_model = QComboBox()
+        self.combo_vision_model = SearchableComboBox(placeholder="输入模型名称搜索…")
         self.combo_vision_model.setMinimumWidth(180)
         self.combo_vision_model.setToolTip("选择已下载的 Ollama 视觉模型，留空则仅用文本分析")
         self.combo_vision_model.currentIndexChanged.connect(self._on_vision_model_changed)

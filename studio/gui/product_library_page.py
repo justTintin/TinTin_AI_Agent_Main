@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QFrame, QWidget, QTreeWidget, QTreeWidgetItem, QMessageBox, QComboBox,
     QSplitter, QScrollArea, QFormLayout, QSizePolicy, QFileDialog,
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
@@ -56,6 +56,7 @@ class StockSyncWorker(BaseWorker):
     def run(self):
         import time
         import requests
+        from utils.http_client import http_get, http_post
         from utils.product_library_manager import _get_machine_id
         try:
             base = _get_server_url()
@@ -68,7 +69,7 @@ class StockSyncWorker(BaseWorker):
             # 1. 触发服务端 ERP 同步（服务端内部完成 ERP 拉取 + 存储 + 品类归类）
             self.phase.emit("正在触发服务端 ERP 同步...")
             try:
-                r = requests.post(f"{api}/sync", timeout=10)
+                r = http_post(f"{api}/sync", timeout=10)
                 if r.status_code == 409:
                     self.phase.emit("服务端同步进行中，等待完成...")
                 elif r.status_code != 200:
@@ -82,7 +83,7 @@ class StockSyncWorker(BaseWorker):
             self.phase.emit("正在等待服务端同步完成...")
             while True:
                 try:
-                    sr = requests.get(f"{api}/sync/status", timeout=10)
+                    sr = http_get(f"{api}/sync/status", timeout=10)
                     st = sr.json() if sr.status_code == 200 else {}
                 except Exception:
                     st = {}
@@ -110,7 +111,10 @@ from gui.base_page import BasePage
 
 
 class SingleMineWorker(BaseWorker):
-    """后台线程：调用服务端 mine-single 接口，挖掘+持久化一步到位。
+    """后台线程：按文档化接口挖掘单个产品并取回结果。
+
+    流程：POST /mine（item_ids=[当前产品]）→ 轮询 /mine/status → GET /items/{item_id}。
+    （旧实现调用的 /mine-single 在服务端不存在，返回 404。）
 
     与「一键成片」共享同一套数据源（服务端 product_items 表），
     挖掘完成后自动持久化，无需客户端再手动保存。
@@ -131,28 +135,72 @@ class SingleMineWorker(BaseWorker):
         self.llm_model = llm_model
 
     def run(self):
+        import time
         import requests
-        url = (f"{self.server_url.rstrip('/')}/api/product-library"
-               f"/clients/{self.machine_id}/mine-single")
-        payload = {
-            "item_id": self.item_id,
-            "category": self.category,
-            "brand": self.brand,
-            "model_name": self.model_name,
-            "spec_name": self.spec_name,
-            "notes": self.notes,
-            "llm_model": self.llm_model,
-        }
+        from utils.http_client import http_get, http_post
+        api = (f"{self.server_url.rstrip('/')}/api/product-library"
+               f"/clients/{self.machine_id}")
+        headers = {"X-Machine-ID": self.machine_id, "Content-Type": "application/json"}
         try:
-            r = requests.post(url, json=payload, timeout=120)
-            if r.status_code == 200:
-                self.result_ready.emit(r.json())
-            else:
+            # 1. 触发挖掘：item_ids 非空 = 只挖当前选中的产品
+            r = http_post(
+                f"{api}/mine",
+                json={"item_ids": [self.item_id], "model": self.llm_model},
+                headers=headers, timeout=10)
+            if r.status_code == 409:
+                pass  # 服务端已有挖掘任务在跑，直接进入轮询
+            elif r.status_code != 200:
                 try:
                     err = r.json().get("detail", r.text[:200])
                 except Exception:
                     err = r.text[:200]
-                self.error.emit(f"服务端返回错误 (HTTP {r.status_code}): {err}")
+                self.error.emit(f"触发挖掘失败 (HTTP {r.status_code}): {err}")
+                return
+
+            # 2. 轮询挖掘进度（最长 10 分钟）
+            deadline = time.time() + 600
+            while time.time() < deadline:
+                try:
+                    sr = http_get(f"{api}/mine/status", headers=headers, timeout=10)
+                    st = sr.json() if sr.status_code == 200 else {}
+                except Exception:
+                    st = {}
+                if not st.get("running", False):
+                    if st.get("error"):
+                        self.error.emit(f"服务端挖掘出错: {st['error']}")
+                        return
+                    break
+                time.sleep(2)
+            else:
+                self.error.emit("服务端挖掘超时（10 分钟），请稍后在批量挖掘中查看。")
+                return
+
+            # 3. 拉取挖掘后的产品数据（features / selling_points 由服务端写入）。
+            #    注意：GET /items/{id} 返回包裹结构 {"ok": true, "item": {...}}，
+            #    需要取 item 层；并小幅重试以兼容服务端状态与落库的微小时序差。
+            item = None
+            for _attempt in range(8):
+                g = http_get(f"{api}/items/{self.item_id}", headers=headers, timeout=10)
+                if g.status_code == 200:
+                    payload = g.json()
+                    candidate = payload.get("item") if isinstance(payload, dict) else None
+                    if not isinstance(candidate, dict):
+                        candidate = payload if isinstance(payload, dict) else {}
+                    item = candidate
+                    if (str(candidate.get("features") or "").strip()
+                            or str(candidate.get("selling_points") or "").strip()):
+                        break
+                time.sleep(1.5)
+            if item is not None:
+                self.result_ready.emit({
+                    "ok": True,
+                    "features": str(item.get("features") or ""),
+                    "selling_points": str(item.get("selling_points") or ""),
+                    "persisted": True,
+                    "item_id": self.item_id,
+                })
+            else:
+                self.error.emit("获取挖掘结果失败：服务端未返回产品数据。")
         except Exception as e:
             self.error.emit(f"请求服务端失败: {e}")
 
@@ -176,6 +224,7 @@ class BulkMineWorker(BaseWorker):
     def run(self):
         import time
         import requests
+        from utils.http_client import http_get, http_post
         from utils.product_library_manager import _get_machine_id
         base = _get_server_url()
         if not base:
@@ -186,9 +235,9 @@ class BulkMineWorker(BaseWorker):
 
         # 1. 触发服务端批量挖掘
         try:
-            r = requests.post(f"{api}/mine",
-                              json={"item_ids": [], "model": self.model},
-                              timeout=10)
+            r = http_post(f"{api}/mine",
+                          json={"item_ids": [], "model": self.model},
+                          timeout=10)
             if r.status_code == 409:
                 pass  # 已在运行中，直接轮询
             elif r.status_code != 200:
@@ -201,7 +250,7 @@ class BulkMineWorker(BaseWorker):
         # 2. 轮询挖掘进度
         while not self._should_stop:
             try:
-                sr = requests.get(f"{api}/mine/status", timeout=10)
+                sr = http_get(f"{api}/mine/status", timeout=10)
                 st = sr.json() if sr.status_code == 200 else {}
             except Exception:
                 st = {}
@@ -258,7 +307,7 @@ class ProductLibraryPage(BasePage):
         self.btn_export_template.setObjectName("secondary_button")
         self.btn_export_template.clicked.connect(self._on_export_template)
         sync_bar.addWidget(self.btn_export_template)
-        self.btn_mine_all = QPushButton("⚡ 挖掘")
+        self.btn_mine_all = QPushButton("⚡ 全量挖掘")
         self.btn_mine_all.setObjectName("secondary_button")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点")
         self.btn_mine_all.clicked.connect(self._on_mine_all)
@@ -290,7 +339,12 @@ class ProductLibraryPage(BasePage):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索 品牌 / 型号 / 编码 / 条码 ...")
-        self.search_input.textChanged.connect(self.refresh_tree)
+        # 搜索防抖：避免每次按键都重建 600+ 节点树并发一次服务端请求
+        self._search_timer = QTimer(self.parent_widget)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self.refresh_tree)
+        self.search_input.textChanged.connect(self._search_timer.start)
         layout.addWidget(self.search_input)
 
         self.tree = QTreeWidget()
@@ -637,6 +691,11 @@ class ProductLibraryPage(BasePage):
             return
         record = self.manager.get(item_id)
         if not record:
+            # 缓存未命中（服务端 /items 只返回前 50 条；/grouped 全量但可能滞后）：
+            # 直接向服务端取该产品，保证任何树节点都能立即显示详情
+            record = self._fetch_item_direct(item_id)
+        if not record:
+            self._set_status(f"未找到产品（id={item_id}），请稍后重试或先同步。")
             return
         self.current_id = item_id
         self._fill_form(record)
@@ -645,6 +704,27 @@ class ProductLibraryPage(BasePage):
         self.btn_save.setText("💾 保存修改")
         self._set_status(f"正在编辑：{record.get('brand','')} {record.get('model','')}"
                          + ("（仓库产品：仅可改 商品名称/品类/备注）" if is_warehouse else ""))
+
+    def _fetch_item_direct(self, item_id):
+        """缓存未命中时直接 GET /items/{item_id} 取单个产品（含 features/selling_points）。"""
+        from utils.http_client import http_get
+        from utils.product_library_manager import _get_machine_id
+        base = _get_server_url()
+        if not base:
+            return None
+        try:
+            machine_id = _get_machine_id()
+            url = (f"{base.rstrip('/')}/api/product-library/clients/"
+                   f"{machine_id}/items/{item_id}")
+            r = http_get(url, headers={"X-Machine-ID": machine_id}, timeout=10)
+            if r.status_code == 200:
+                payload = r.json()
+                cand = payload.get("item") if isinstance(payload, dict) else None
+                if isinstance(cand, dict):
+                    return cand
+        except Exception as e:
+            log.warning(f"[产品库] 直接获取产品失败 {item_id}: {e}")
+        return None
 
     # ---------------- 手动增删改 ----------------
     def clear_form(self):
@@ -741,7 +821,7 @@ class ProductLibraryPage(BasePage):
     def _on_mine_all(self):
         if self.bulk_mine_worker and self.bulk_mine_worker.isRunning():
             self.bulk_mine_worker.stop()
-            self.btn_mine_all.setText("\u26a1 一键挖掘")
+            self.btn_mine_all.setText("\u26a1 全量挖掘")
             self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
             self._set_sync_status("已请求停止\u2026")
             return
@@ -785,7 +865,7 @@ class ProductLibraryPage(BasePage):
         self._set_sync_status(f"一键挖掘中\u2026（{done}/{total}）{msg}")
 
     def _on_mine_all_done(self, done_count, total):
-        self.btn_mine_all.setText("\u26a1 一键挖掘")
+        self.btn_mine_all.setText("\u26a1 全量挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
         self._set_sync_status(f"一键挖掘完成：处理 {done_count}/{total} 条。")
         self.manager.load()  # 刷新本地缓存
@@ -796,7 +876,7 @@ class ProductLibraryPage(BasePage):
                 self._fill_form(record)
 
     def _on_mine_all_err(self, err):
-        self.btn_mine_all.setText("\u26a1 一键挖掘")
+        self.btn_mine_all.setText("\u26a1 全量挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
         self._set_sync_status(f"一键挖掘出错：{err}")
 

@@ -1,4 +1,5 @@
 import requests
+from utils.http_client import http_get, http_post
 import json
 from utils.logger_utils import log
 
@@ -22,7 +23,7 @@ class RunningHubManager:
         url = f"{self.base_url}/openapi/v1/user/info"
         try:
             log.info(f"Verifying RunningHub API Key via: {url}")
-            res = requests.get(url, headers=self.headers, timeout=10)
+            res = http_get(url, headers=self.headers, timeout=10)
             log.info(f"User Info Response [{res.status_code}]: {res.text[:100]}...")
             if res.status_code == 200:
                 return res.json()
@@ -53,9 +54,9 @@ class RunningHubManager:
                 try:
                     log.info(f"Trying RunningHub API: {method} {url}")
                     if method == "POST":
-                        res = requests.post(url, headers=self.headers, json=payload, timeout=10)
+                        res = http_post(url, headers=self.headers, json=payload, timeout=10)
                     else:
-                        res = requests.get(url, headers=self.headers, params=payload, timeout=10)
+                        res = http_get(url, headers=self.headers, params=payload, timeout=10)
                     
                     log.info(f"Response from {url} [{res.status_code}]: {res.text[:150]}...")
                     
@@ -102,9 +103,9 @@ class RunningHubManager:
             try:
                 log.info(f"Trying RunningHub Detail API: {method} {url} with {params}")
                 if method == "POST":
-                    res = requests.post(url, headers=self.headers, json=params, timeout=10)
+                    res = http_post(url, headers=self.headers, json=params, timeout=10)
                 else:
-                    res = requests.get(url, headers=self.headers, params=params, timeout=10)
+                    res = http_get(url, headers=self.headers, params=params, timeout=10)
                 
                 log.info(f"Detail Response from {url} [{res.status_code}]: {res.text[:150]}...")
                 
@@ -134,7 +135,7 @@ class RunningHubManager:
             url = f"{self.base_url}{path}"
             try:
                 log.info(f"Executing RunningHub via: {url}")
-                res = requests.post(url, headers=self.headers, json=payload, timeout=20)
+                res = http_post(url, headers=self.headers, json=payload, timeout=20)
                 log.info(f"Execution Response [{res.status_code}]: {res.text[:150]}...")
                 if res.status_code == 200:
                     data = res.json()
@@ -149,7 +150,7 @@ class RunningHubManager:
         url = f"{self.base_url}/openapi/v1/task/status"
         params = {"taskId": task_id}
         try:
-            res = requests.get(url, headers=self.headers, params=params, timeout=10)
+            res = http_get(url, headers=self.headers, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 if data.get("code") == 0:
@@ -166,7 +167,7 @@ class RunningHubManager:
             with open(file_path, 'rb') as f:
                 files = {'file': f}
                 # Note: Some APIs might require different field names
-                res = requests.post(url, headers={"Authorization": self.headers["Authorization"]}, files=files, timeout=60)
+                res = http_post(url, headers={"Authorization": self.headers["Authorization"]}, files=files, timeout=60)
                 if res.status_code == 200:
                     data = res.json()
                     if data.get("code") == 0:

@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QL
                                QFrame, QTableWidget, QHeaderView, QComboBox, QListView,
                                QSpinBox, QDoubleSpinBox, QCheckBox, QWidget)
 from PySide6.QtCore import Qt
+from gui.searchable_combo import SearchableComboBox
 from gui.montage.base_step_view import BaseStepView
 from utils.gui_icons import mdi_button
 
@@ -56,7 +57,7 @@ class Step3VoiceView(BaseStepView):
         row_voice.setAlignment(Qt.AlignVCenter)
         row_voice.addWidget(QLabel("🗣️ 参考声音:"))
         
-        self.main_page.ref_audio_combo = QComboBox()
+        self.main_page.ref_audio_combo = SearchableComboBox(placeholder="输入声音名称搜索…")
         self.main_page.ref_audio_combo.setView(QListView())
         self.main_page.ref_audio_combo.setMinimumWidth(160)
         self.main_page.ref_audio_combo.currentIndexChanged.connect(self.main_page._on_ref_audio_combo_changed)

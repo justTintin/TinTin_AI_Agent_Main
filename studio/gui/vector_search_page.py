@@ -9,6 +9,7 @@
 """
 import os
 import requests
+from utils.http_client import http_get, http_post
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QListWidget, QListWidgetItem, QAbstractItemView,
@@ -184,7 +185,7 @@ class _SearchWorker(BaseWorker):
                     params["category"] = self.category
                 if self.media_type:
                     params["media_type"] = self.media_type
-                resp = requests.post(f"{base}/material/search", json=params, timeout=20)
+                resp = http_post(f"{base}/material/search", json=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
                 data = resp.json()
@@ -198,7 +199,7 @@ class _SearchWorker(BaseWorker):
                     params["category"] = self.category
                 if self.media_type:
                     params["media_type"] = self.media_type
-                resp = requests.get(f"{base}/material/list", params=params, timeout=20)
+                resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
                 data = resp.json()
@@ -220,7 +221,7 @@ class _DistinctLoader(BaseWorker):
     def do_work(self):
         try:
             url = f"{_get_server_url()}/material/distinct?field={self.field}"
-            resp = requests.get(url, timeout=15)
+            resp = http_get(url, timeout=15)
             if resp.status_code == 200:
                 self.finished.emit(self.field, resp.json().get("values", []))
                 return
@@ -235,7 +236,7 @@ class _StatsLoader(BaseWorker):
 
     def do_work(self):
         try:
-            resp = requests.get(f"{_get_server_url()}/material/stats", timeout=10)
+            resp = http_get(f"{_get_server_url()}/material/stats", timeout=10)
             if resp.status_code == 200:
                 self.finished.emit(resp.json())
                 return
@@ -254,9 +255,9 @@ class _ThumbWorker(BaseWorker):
 
     def do_work(self):
         try:
-            resp = requests.get(_thumb_url(self.material_id), timeout=10)
+            resp = http_get(_thumb_url(self.material_id), timeout=10)
             if resp.status_code != 200 or not resp.content:
-                resp = requests.get(_serve_url(self.material_id), timeout=10)
+                resp = http_get(_serve_url(self.material_id), timeout=10)
             if resp.status_code == 200 and resp.content:
                 self.finished.emit(self.material_id, resp.content)
         except Exception:

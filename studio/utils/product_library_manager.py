@@ -95,10 +95,10 @@ class ProductLibraryManager:
         return {"X-Machine-ID": self.machine_id, "Content-Type": "application/json"}
 
     def _http_get(self, path: str, params=None, timeout=10):
-        import requests
+        from utils.http_client import http_get
         url = f"{self._base()}{path}"
         try:
-            r = requests.get(url, headers=self._headers(), params=params, timeout=timeout)
+            r = http_get(url, headers=self._headers(), params=params, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
             log.warning(f"[ProductLib] GET {url} → HTTP {r.status_code}: {r.text[:150]}")
@@ -107,10 +107,10 @@ class ProductLibraryManager:
         return None
 
     def _http_post(self, path: str, json_data=None, timeout=15):
-        import requests
+        from utils.http_client import http_post
         url = f"{self._base()}{path}"
         try:
-            r = requests.post(url, headers=self._headers(), json=json_data, timeout=timeout)
+            r = http_post(url, headers=self._headers(), json=json_data, timeout=timeout)
             if r.status_code in (200, 201):
                 return r.json()
             log.error(f"[ProductLib] POST {url} → HTTP {r.status_code}: {r.text[:200]}")
@@ -125,10 +125,10 @@ class ProductLibraryManager:
             return {"ok": False, "message": f"网络异常: {e}"}
 
     def _http_put(self, path: str, json_data: dict, timeout=10):
-        import requests
+        from utils.http_client import http_put
         url = f"{self._base()}{path}"
         try:
-            r = requests.put(url, headers=self._headers(), json=json_data, timeout=timeout)
+            r = http_put(url, headers=self._headers(), json=json_data, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
             log.error(f"[ProductLib] PUT {url} → HTTP {r.status_code}: {r.text[:200]}")
@@ -142,10 +142,10 @@ class ProductLibraryManager:
             return {"ok": False, "message": f"网络异常: {e}"}
 
     def _http_delete(self, path: str, timeout=10) -> bool:
-        import requests
+        from utils.http_client import http_delete
         url = f"{self._base()}{path}"
         try:
-            r = requests.delete(url, headers=self._headers(), timeout=timeout)
+            r = http_delete(url, headers=self._headers(), timeout=timeout)
             if r.status_code == 200:
                 return True
             log.warning(f"[ProductLib] DELETE {url} → HTTP {r.status_code}")
@@ -156,7 +156,27 @@ class ProductLibraryManager:
     # ── 持久化 ─────────────────────────────────────────────────────────────
 
     def load(self):
-        """从服务端拉取全量数据到本地缓存。"""
+        """从服务端拉取全量数据到本地缓存。
+
+        服务端 /items 固定只返回前 50 条（limit/offset 参数被忽略），
+        而 /grouped 返回全部产品（含 features/selling_points），
+        因此用 /grouped 作为全量缓存源，保证树里每个产品都能命中本地缓存。
+        """
+        data = self._http_get("/grouped", timeout=15)
+        if data is not None:
+            tree = data.get("tree") if isinstance(data, dict) else None
+            if isinstance(tree, dict):
+                items = []
+                for _cat, brands in tree.items():
+                    for _brand, lst in brands.items():
+                        items.extend(lst)
+                self.items = items
+                self._cache_time = time.time()
+                return self.items
+            self.items = []
+            self._cache_time = time.time()
+            return self.items
+        # 兜底：仍尝试 /items（可能只有前 50 条）
         data = self._http_get("/items", timeout=15)
         if data is not None:
             if isinstance(data, list):
@@ -171,10 +191,6 @@ class ProductLibraryManager:
             if self._cache_time == 0:
                 self.items = []
         return self.items
-
-    def save(self):
-        """服务端在每次写操作后自动持久化，此方法为兼容保留（不执行任何操作）。"""
-        pass
 
     # ── 工具 ───────────────────────────────────────────────────────────────
 
@@ -260,16 +276,8 @@ class ProductLibraryManager:
     # ── 检索 / 归类 ──────────────────────────────────────────────────────
 
     def all_items(self):
-        """返回所有条目（优先服务端，降级缓存）。"""
-        # 尝试从服务端刷新
-        data = self._http_get("/items", timeout=8)
-        if data is not None:
-            if isinstance(data, list):
-                self.items = data
-            elif isinstance(data, dict) and isinstance(data.get("items"), list):
-                self.items = data["items"]
-            self._cache_time = time.time()
-        return list(self.items)
+        """返回所有条目（优先服务端全量 /grouped，降级缓存）。"""
+        return list(self.load())
 
     def categories(self):
         """品类列表。"""

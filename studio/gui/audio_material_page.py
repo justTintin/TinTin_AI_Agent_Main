@@ -15,6 +15,7 @@
 """
 import os
 import requests
+from utils.http_client import http_get, http_post
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
@@ -115,7 +116,7 @@ class _AudioListWorker(BaseWorker):
                           "limit": self.limit, "offset": self.offset}
                 if self.tag:
                     params["tag"] = self.tag
-                resp = requests.post(f"{base}/material/search", json=params, timeout=20)
+                resp = http_post(f"{base}/material/search", json=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
                 data = resp.json()
@@ -125,7 +126,7 @@ class _AudioListWorker(BaseWorker):
                 params = {"media_type": "audio", "limit": self.limit, "offset": self.offset}
                 if self.tag:
                     params["tag"] = self.tag
-                resp = requests.get(f"{base}/material/list", params=params, timeout=20)
+                resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
                 data = resp.json()

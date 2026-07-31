@@ -5,7 +5,8 @@ import threading
 import subprocess
 
 import requests
-from utils.http_client import resilient_get, resilient_post
+from utils.http_client import (resilient_get, resilient_post,
+                               http_get, http_post, http_put, http_delete)
 
 from config.paths import APPS_DIR, PYTHON_EMBEDED_DIR, LOG_DIR
 from utils.logger_utils import log
@@ -53,7 +54,7 @@ def _is_proxy_alive(timeout: float = 3) -> bool:
     if not proxy:
         return False
     try:
-        r = requests.get(f"{proxy}/comfyui/status", timeout=timeout)
+        r = http_get(f"{proxy}/comfyui/status", timeout=timeout)
         return r.status_code == 200 and r.json().get("online", False)
     except requests.exceptions.ConnectionError:
         log.warning(f"[ComfyUI] 服务端 {proxy} 连接失败")
@@ -70,7 +71,7 @@ def is_alive(addr: str, timeout: float = 2) -> bool:
     if not addr:
         return False
     try:
-        r = requests.get(f"{addr}/system_stats", timeout=timeout)
+        r = http_get(f"{addr}/system_stats", timeout=timeout)
         return r.status_code == 200
     except requests.exceptions.RequestException:
         return False
@@ -319,7 +320,7 @@ def _comfyui_direct_addr(ai_config: dict) -> str | None:
     proxy = _read_proxy_addr()
     if proxy:
         try:
-            r = requests.get(f"{proxy}/comfyui/status", timeout=5)
+            r = http_get(f"{proxy}/comfyui/status", timeout=5)
             if r.status_code == 200:
                 host = (r.json().get("host") or "").strip().rstrip("/")
                 if host and not host.startswith("http"):
@@ -365,7 +366,7 @@ class ComfyUIClient:
         if not self.server_addr:
             return False
         try:
-            r = requests.get(f"{self.server_addr}/apps", timeout=5)
+            r = http_get(f"{self.server_addr}/apps", timeout=5)
             return r.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -417,7 +418,7 @@ class ComfyUIClient:
         if not addr:
             raise RuntimeError("无可用 ComfyUI 直连地址，无法下载文件。")
         url = view_url(addr, filename, file_type, subfolder)
-        resp = requests.get(url, timeout=120)
+        resp = http_get(url, timeout=120)
         resp.raise_for_status()
         return resp.content
 

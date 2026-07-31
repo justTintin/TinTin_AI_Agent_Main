@@ -6,6 +6,7 @@ import base64
 import subprocess
 import traceback
 import requests
+from utils.http_client import http_get, http_post
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -62,7 +63,7 @@ class VoiceCloneWorker(BaseWorker):
         deadline = time.time() + max_wait
         while time.time() < deadline:
             try:
-                r = requests.get(health, timeout=3)
+                r = http_get(health, timeout=3, quiet=True)
                 if r.status_code == 200 and r.json().get("loaded"):
                     return True
             except Exception:
@@ -151,7 +152,7 @@ class VoiceCloneWorker(BaseWorker):
         last_err = None
         for attempt in range(1, max_attempts + 1):
             try:
-                res = requests.post(self.voice_api_url, json=payload, timeout=180)
+                res = http_post(self.voice_api_url, json=payload, timeout=180)
                 if res.status_code == 503:
                     # 503：服务端繁忙/资源不足，不猜测具体原因，只显示服务端响应
                     raise ApiError(self.voice_api_url, method="POST", params=payload,

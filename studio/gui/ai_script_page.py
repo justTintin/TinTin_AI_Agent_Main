@@ -29,9 +29,10 @@ class FeishuSyncWorker(BaseWorker):
     def run(self):
         try:
             import requests
+            from utils.http_client import http_get, http_post
             token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"
             payload = {"app_id": self.app_id, "app_secret": self.app_secret}
-            res = requests.post(token_url, json=payload, timeout=10)
+            res = http_post(token_url, json=payload, timeout=10)
             if res.status_code != 200:
                 raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")
             token_data = res.json()
@@ -42,7 +43,7 @@ class FeishuSyncWorker(BaseWorker):
             records_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
             headers = {"Authorization": f"Bearer {access_token}"}
             params = {"page_size": 100}
-            res = requests.get(records_url, headers=headers, params=params, timeout=15)
+            res = http_get(records_url, headers=headers, params=params, timeout=15)
             if res.status_code != 200:
                 raise RuntimeError(f"获取多维表格记录失败: HTTP {res.status_code} - {res.text}")
             
@@ -95,6 +96,7 @@ class WebSearchWorker(BaseWorker):
     def run(self):
         try:
             import requests
+            from utils.http_client import http_get
             from lxml import html
             import urllib.parse
             
@@ -103,7 +105,7 @@ class WebSearchWorker(BaseWorker):
             }
             q = self.query.strip()
             url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-            res = requests.get(url, headers=headers, timeout=15)
+            res = http_get(url, headers=headers, timeout=15)
             if res.status_code != 200:
                 raise RuntimeError(f"搜索请求失败，HTTP 状态码: {res.status_code}")
                 
@@ -164,9 +166,10 @@ class FeishuUploadWorker(BaseWorker):
     def run(self):
         try:
             import requests
+            from utils.http_client import http_get, http_post, http_put
             token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"
             payload = {"app_id": self.app_id, "app_secret": self.app_secret}
-            res = requests.post(token_url, json=payload, timeout=10)
+            res = http_post(token_url, json=payload, timeout=10)
             if res.status_code != 200:
                 raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")
             token_data = res.json()
@@ -185,7 +188,7 @@ class FeishuUploadWorker(BaseWorker):
                         self.script_field: self.script_text
                     }
                 }
-                res = requests.put(url, headers=headers, json=payload, timeout=15)
+                res = http_put(url, headers=headers, json=payload, timeout=15)
                 if res.status_code != 200:
                     raise RuntimeError(f"同步多维表格失败: HTTP {res.status_code} - {res.text}")
                 data = res.json()
@@ -199,7 +202,7 @@ class FeishuUploadWorker(BaseWorker):
                 }
                 if self.folder_token:
                     doc_payload["folder_token"] = self.folder_token
-                res = requests.post(create_url, headers=headers, json=doc_payload, timeout=15)
+                res = http_post(create_url, headers=headers, json=doc_payload, timeout=15)
                 if res.status_code != 200:
                     raise RuntimeError(f"创建文档失败: HTTP {res.status_code} - {res.text}")
                 create_data = res.json()
@@ -243,7 +246,7 @@ class FeishuUploadWorker(BaseWorker):
                 
                 for i in range(0, len(children_blocks), 100):
                     batch = children_blocks[i:i+100]
-                    res = requests.post(blocks_url, headers=headers, json={"children": batch}, timeout=15)
+                    res = http_post(blocks_url, headers=headers, json={"children": batch}, timeout=15)
                 
                 doc_url = f"https://open.feishu.cn/docx/{document_id}"
                 self.finished.emit(f"生成飞书云文档成功！\n文档链接: {doc_url}")
@@ -253,6 +256,7 @@ class FeishuUploadWorker(BaseWorker):
 from utils.my_knowledge_manager import STYLIZATION_TYPE
 
 from gui.base_page import BasePage
+from gui.searchable_combo import SearchableComboBox
 
 class AIScriptPage(BasePage):
     def __init__(self, parent_widget, main_window):
@@ -364,7 +368,7 @@ class AIScriptPage(BasePage):
         style_hdr.addWidget(btn_refresh_style)
         sl.addLayout(style_hdr)
 
-        self.combo_stylization = QComboBox()
+        self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         sl.addWidget(self.combo_stylization)
 

@@ -2,6 +2,7 @@
 import json
 import time
 import requests
+from utils.http_client import http_get
 import uuid
 from PySide6.QtCore import QThread, Signal
 from utils.logger_utils import log
@@ -31,7 +32,7 @@ class SystemMonitorThread(QThread):
                     raise Exception("No address")
                 
                 # ComfyUI system_stats endpoint
-                res = requests.get(f"{addr}/system_stats", timeout=3)
+                res = http_get(f"{addr}/system_stats", timeout=3, quiet=True)
                 if res.status_code == 200:
                     ok = True
                     data = res.json()
@@ -114,7 +115,7 @@ class AIStatusCheckThread(QThread):
     def run(self):
         import os
         import json
-        import requests as req
+        from utils.http_client import http_get
 
         consecutive_failures = 0
         while self.running:
@@ -136,7 +137,7 @@ class AIStatusCheckThread(QThread):
                     if server_url:
                         # 健康探活：单次请求、不重试不打日志（避免服务不可达时刷屏）
                         try:
-                            res = req.get(f"{server_url.rstrip('/')}/ollama/status", timeout=2)
+                            res = http_get(f"{server_url.rstrip('/')}/ollama/status", timeout=2, quiet=True)
                             if res.status_code == 200:
                                 status["ollama_ok"] = True
                                 status["vision_ok"] = True  # 服务端代理管理视觉模型
@@ -154,7 +155,7 @@ class AIStatusCheckThread(QThread):
                     vox_url = cfg.get("vox_api_url", "").strip()
                     if vox_url:
                         base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
-                        r = req.get(f"{base}/voxcpm/health", timeout=2)
+                        r = http_get(f"{base}/voxcpm/health", timeout=2, quiet=True)
                         if r.status_code == 200:
                             status["clone_ok"] = True
             except Exception:
@@ -169,7 +170,7 @@ class AIStatusCheckThread(QThread):
                     whisper_url = cfg.get("whisper_api_url", "").strip()
                     if whisper_url:
                         base = whisper_url.rstrip("/")
-                        r = req.get(f"{base}/whisper/health", timeout=2)
+                        r = http_get(f"{base}/whisper/health", timeout=2, quiet=True)
                         if r.status_code == 200:
                             status["whisper_ok"] = True
             except Exception:
@@ -184,7 +185,7 @@ class AIStatusCheckThread(QThread):
                     clip_url = cfg.get("clip_api_url", "").strip()
                     if clip_url:
                         base = clip_url.rstrip("/")
-                        r = req.get(f"{base}/clip/health", timeout=2)
+                        r = http_get(f"{base}/clip/health", timeout=2, quiet=True)
                         if r.status_code == 200:
                             status["clip_ok"] = True
             except Exception:

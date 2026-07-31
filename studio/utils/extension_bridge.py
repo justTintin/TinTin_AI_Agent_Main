@@ -609,6 +609,7 @@ class ExtensionBridge(QObject):
 
         目录结构：保存目录/<平台>/_未分组/<文件名>_<日期>.<ext>
         """
+        from utils.http_client import http_get
         headers = {"User-Agent": _UA}
         if item["referer"]:
             headers["Referer"] = item["referer"]
@@ -622,8 +623,8 @@ class ExtensionBridge(QObject):
         proxies = {"http": None, "https": None}
         if proxy and not (proxy.startswith("socks") and not _HAS_PYSOCKS):
             proxies = {"http": proxy, "https": proxy}
-        with requests.get(url, headers=headers, stream=True,
-                          timeout=(10, 60), allow_redirects=True, proxies=proxies) as resp:
+        with http_get(url, headers=headers, stream=True,
+                      timeout=(10, 60), allow_redirects=True, proxies=proxies) as resp:
             resp.raise_for_status()
             ctype = resp.headers.get("Content-Type", "")
             # 媒体流校验：返回 HTML/JSON/文本说明是错误页或无效探测流，不是真实媒体
@@ -1032,8 +1033,8 @@ class ExtensionBridge(QObject):
         if not base:
             return
         try:
-            import requests
-            resp = requests.post(f"{base}/material/scan", json={"path": scan_dir}, timeout=15)
+            from utils.http_client import http_post
+            resp = http_post(f"{base}/material/scan", json={"path": scan_dir}, timeout=15)
             log.info(f"[扩展桥接] 已触发服务端扫描 {scan_dir}: HTTP {resp.status_code}")
         except Exception as e:
             log.error(f"[扩展桥接] 触发服务端扫描失败: {e}")

@@ -14,6 +14,10 @@
 重试：
   最多 3 次，间隔 1s→2s→4s（指数退避）
   只对超时/连接错误重试，HTTP 4xx/5xx 不重试
+
+全工程统一请求日志入口（http_get / http_post / http_put / http_delete）：
+    from utils.http_client import http_get, http_post
+    resp = http_get(url, params=..., timeout=10)   # 每次请求自动打点：发起 → 状态/耗时
 """
 import time
 import requests
@@ -75,6 +79,49 @@ _MAX_RETRIES = 3
 _BASE_DELAY = 1  # 秒
 
 
+# ── 统一请求日志入口（全工程请求打点规范）────────────────────────────
+
+def logged_request(method, url, *, timeout=30, quiet=False, **kwargs):
+    """统一请求入口：每次发起请求都记录日志（发起 + 结果/耗时）。
+
+    参数与 requests.request 完全一致（params/json/data/files/proxies/stream…），
+    返回 requests.Response；异常原样抛出（已记错误日志）。
+    quiet=True 仅用于后台健康探活等静默轮询：成功不打印，失败仍记录。
+    """
+    start = time.perf_counter()
+    if not quiet:
+        log.info(f"[HTTP] → {method} {url} timeout={timeout}")
+    try:
+        resp = requests.request(method, url, timeout=timeout, **kwargs)
+    except Exception as e:
+        log.error(f"[HTTP] ✗ {method} {url} 请求失败: {e}")
+        raise
+    ms = int((time.perf_counter() - start) * 1000)
+    if not quiet:
+        log.info(f"[HTTP] ← {method} {url} status={resp.status_code} {ms}ms")
+    return resp
+
+
+def http_get(url, **kwargs):
+    """GET 请求（统一打点）。"""
+    return logged_request("GET", url, **kwargs)
+
+
+def http_post(url, **kwargs):
+    """POST 请求（统一打点）。"""
+    return logged_request("POST", url, **kwargs)
+
+
+def http_put(url, **kwargs):
+    """PUT 请求（统一打点）。"""
+    return logged_request("PUT", url, **kwargs)
+
+
+def http_delete(url, **kwargs):
+    """DELETE 请求（统一打点）。"""
+    return logged_request("DELETE", url, **kwargs)
+
+
 def resilient_get(url, *, service="default", timeout=10, **kwargs):
     """带重试+熔断的 GET。探活场景传 circuit_breaker=False 跳过熔断。"""
     return _do_request("GET", url, service=service, timeout=timeout, **kwargs)
@@ -124,6 +171,7 @@ def _do_request(method, url, *, service="default", timeout=10,
                 circuit_breaker=True, **kwargs):
     params_for_error = _extract_params(kwargs)
     last_err = None
+    start = time.perf_counter()
     for attempt in range(_MAX_RETRIES):
         # 熔断检查
         if circuit_breaker and not _allow_request(service):
@@ -146,6 +194,8 @@ def _do_request(method, url, *, service="default", timeout=10,
                 elif resp.status_code >= 500:
                     _on_failure(service)
 
+            log.info(f"[HTTP:{service}] {method} {url} → HTTP {resp.status_code} "
+                     f"{int((time.perf_counter() - start) * 1000)}ms")
             return resp
 
         except _RETRYABLE as e:

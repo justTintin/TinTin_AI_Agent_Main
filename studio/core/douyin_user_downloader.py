@@ -5,6 +5,7 @@ import json
 import time
 import random
 import requests
+from utils.http_client import http_get
 import datetime
 import argparse
 from loguru import logger
@@ -59,7 +60,7 @@ class DouyinUserDownloader:
             logger.info(f"正在通过链接获取 sec_uid: {url}...")
             try:
                 # Follow redirects to get the final Home Page URL which contains sec_uid
-                res = requests.get(url, headers=self.headers, allow_redirects=True, timeout=10)
+                res = http_get(url, headers=self.headers, allow_redirects=True, timeout=10)
                 url = res.url
                 logger.info(f"最终重定向到: {url}")
             except Exception as e:
@@ -132,7 +133,7 @@ class DouyinUserDownloader:
             
             logger.info(f"正在获取视频列表, cursor: {max_cursor}...")
             try:
-                res = requests.get(url, headers=self.headers, timeout=10)
+                res = http_get(url, headers=self.headers, timeout=10)
                 if res.status_code != 200:
                     logger.error(f"请求失败，状态码: {res.status_code}, 响应内容: {res.text[:200]}")
                     if res.status_code == 403:
@@ -275,7 +276,7 @@ class DouyinUserDownloader:
         # 转换 https 为 http (保持原有项目的某种兼容性尝试，虽然现代环境一般不需要)
         # url = url.replace('https://', 'http://')
         try:
-            res = requests.get(url, headers=self.headers, stream=True, timeout=30)
+            res = http_get(url, headers=self.headers, stream=True, timeout=30)
             if res.status_code == 200:
                 with open(filepath, 'wb') as f:
                     for chunk in res.iter_content(chunk_size=8192):

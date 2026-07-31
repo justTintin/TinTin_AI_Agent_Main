@@ -12,6 +12,7 @@ import os
 import time
 from contextlib import ExitStack
 import requests
+from utils.http_client import http_get, http_post
 from PySide6.QtCore import Signal
 
 from utils.base_worker import BaseWorker
@@ -90,7 +91,7 @@ class MontageConcatServerWorker(BaseWorker):
             self.stage.emit("正在提交 montage_concat 合成任务...")
             timeout = max(60, int(total_size / self._UPLOAD_SPEED_BPS) + 30)
             try:
-                r = requests.post(url, data=data, files=files, timeout=timeout)
+                r = http_post(url, data=data, files=files, timeout=timeout)
                 r.raise_for_status()
             except requests.exceptions.RequestException as e:
                 raise RuntimeError(f"提交 montage_concat 失败: {e}")
@@ -150,7 +151,7 @@ class MontageConcatServerWorker(BaseWorker):
             full_url = stc._server_url() + video_url
 
         self.stage.emit("正在下载成片...")
-        r = requests.get(full_url, stream=True, timeout=self._DOWNLOAD_TIMEOUT)
+        r = http_get(full_url, stream=True, timeout=self._DOWNLOAD_TIMEOUT)
         r.raise_for_status()
 
         with open(self.local_output_path, "wb") as f:

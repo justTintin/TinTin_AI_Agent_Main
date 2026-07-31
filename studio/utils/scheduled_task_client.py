@@ -15,6 +15,7 @@
     created_at, updated_at, completed_at
 """
 import requests
+from utils.http_client import http_get, http_post, http_delete
 
 from utils.logger_utils import log
 
@@ -39,7 +40,7 @@ def _server_url():
 def list_tasks(timeout=10):
     """GET /scheduled/tasks → 返回任务列表 [{...}, ...]。失败返回 []。"""
     try:
-        r = requests.get(f"{_server_url()}/scheduled/tasks", timeout=timeout)
+        r = http_get(f"{_server_url()}/scheduled/tasks", timeout=timeout)
         if r.status_code == 200:
             data = r.json()
             return data.get("items") or data.get("data") or []
@@ -56,14 +57,14 @@ def get_task(task_id, timeout=10):
     /scheduled/tasks/{id} 保持兼容。
     """
     try:
-        r = requests.get(f"{_server_url()}/tasks/unified/{task_id}", timeout=timeout)
+        r = http_get(f"{_server_url()}/tasks/unified/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return r.json()
     except Exception as e:
         log.warning(f"[定时任务] unified get_task({task_id}) 失败: {e}")
 
     try:
-        r = requests.get(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
+        r = http_get(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return r.json()
     except Exception as e:
@@ -87,7 +88,7 @@ def create_task(task_type, title, params, schedule=None, timeout=15):
     if schedule:
         body["schedule"] = schedule
     try:
-        r = requests.post(f"{_server_url()}/scheduled/tasks", json=body, timeout=timeout)
+        r = http_post(f"{_server_url()}/scheduled/tasks", json=body, timeout=timeout)
         if r.status_code == 200:
             new_id = r.json().get("id")
             log.info(f"[定时任务] create_task 成功, task_id={new_id}, type={task_type}")
@@ -101,7 +102,7 @@ def create_task(task_type, title, params, schedule=None, timeout=15):
 def delete_task(task_id, timeout=10):
     """DELETE /scheduled/tasks/{id} → 成功返回 True。"""
     try:
-        r = requests.delete(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
+        r = http_delete(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
         return r.status_code == 200
     except Exception as e:
         log.warning(f"[定时任务] delete_task({task_id}) 失败: {e}")
@@ -117,9 +118,9 @@ def evolution_feedback(task_id, feedback, timeout=10):
     返回 True 表示服务端已记录（status:updated）；False 表示 id 无效或失败。
     """
     try:
-        r = requests.post(f"{_server_url()}/scheduled/tasks/evolution/feedback",
-                          json={"evolution_id": str(task_id), "feedback": feedback},
-                          timeout=timeout)
+        r = http_post(f"{_server_url()}/scheduled/tasks/evolution/feedback",
+                      json={"evolution_id": str(task_id), "feedback": feedback},
+                      timeout=timeout)
         if r.status_code == 200:
             return r.json().get("status") == "updated"
         log.warning(f"[定时任务] evolution_feedback task_id={task_id} HTTP {r.status_code}: {r.text[:120]}")
@@ -133,7 +134,7 @@ def evolution_stats(timeout=10):
     返回 {total_generations, strategies:[{script_style,pacing,count,avg_score,max_score}],
           good_feedback, bad_feedback}。失败返回 {}。"""
     try:
-        r = requests.get(f"{_server_url()}/scheduled/tasks/evolution/stats", timeout=timeout)
+        r = http_get(f"{_server_url()}/scheduled/tasks/evolution/stats", timeout=timeout)
         if r.status_code == 200:
             return r.json()
     except Exception as e:

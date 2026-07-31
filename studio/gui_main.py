@@ -221,7 +221,7 @@ class _StatsCollector(QThread):
         return ""
 
     def run(self):
-        import requests as _req
+        from utils.http_client import http_get
         consecutive_failures = 0
         while self._running:
             ok = False
@@ -233,7 +233,7 @@ class _StatsCollector(QThread):
 
                 if base:
                     try:
-                        resp = _req.get(f"{base}/health", timeout=4)
+                        resp = http_get(f"{base}/health", timeout=4, quiet=True)
                         if resp.status_code == 200:
                             ok = True
                             d = resp.json()
@@ -779,7 +779,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 14: Subtitle Removal Page
         self.page_subtitle_removal = QWidget()
-        self.setup_subtitle_removal_page()
         self.content_stack.addWidget(self.page_subtitle_removal)
 
         # 15: Video Montage Tool (Smart Cut & Assemble)
@@ -1316,8 +1315,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             
             def do_download(u=url, p=local_path):
                 try:
-                    import requests
-                    r = requests.get(u, stream=True)
+                    from utils.http_client import http_get
+                    r = http_get(u, stream=True)
                     with open(p, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=8192):
                             f.write(chunk)
@@ -1350,7 +1349,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         """Helper to fetch and set a remote image on a QLabel asynchronously"""
         def fetch_image():
             try:
-                response = requests.get(url, timeout=5)
+                from utils.http_client import http_get
+                response = http_get(url, timeout=5)
                 if response.status_code == 200:
                     return response.content
             except Exception as e:

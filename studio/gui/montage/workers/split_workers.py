@@ -289,7 +289,7 @@ class ServerClipAnalysisWorker(BaseWorker):
 
     def _analyze_one(self, clip_path):
         """提交 → 轮询 → 返回完整 result dict。"""
-        import requests
+        from utils.http_client import http_get, http_post
         import time as _time
 
         fname = os.path.basename(clip_path)
@@ -299,7 +299,7 @@ class ServerClipAnalysisWorker(BaseWorker):
         # ── 第 1 步：提交文件，获取 task_id ──
         log.info(f"[镜头分析] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url}")
         with open(clip_path, "rb") as f:
-            resp = requests.post(
+            resp = http_post(
                 submit_url,
                 files={"file": (fname, f, "video/mp4")},
                 data={"analyze_shot": "true", "product_mode": "true"},
@@ -337,7 +337,7 @@ class ServerClipAnalysisWorker(BaseWorker):
                 raise RuntimeError("用户取消")
             _time.sleep(self._POLL_INTERVAL)
             try:
-                pr = requests.get(poll_url, timeout=15)
+                pr = http_get(poll_url, timeout=15)
             except Exception as e:
                 log.warning(f"[镜头分析] {fname} task_id={task_id} 轮询请求异常: {e}")
                 continue
@@ -520,7 +520,7 @@ class BeatDetectWorker(BaseWorker):
         self._should_stop = True
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_get, http_post
         import time as _time
 
         fname = os.path.basename(self.music_path)
@@ -539,10 +539,10 @@ class BeatDetectWorker(BaseWorker):
             log.info(f"[音乐卡点] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url} "
                      f"count={self.count} segment_duration={self.segment_duration}")
             with open(self.music_path, "rb") as f:
-                resp = requests.post(submit_url,
-                                     files={"file": (fname, f, "audio/mpeg")},
-                                     data=form_data,
-                                     timeout=60)
+                resp = http_post(submit_url,
+                                 files={"file": (fname, f, "audio/mpeg")},
+                                 data=form_data,
+                                 timeout=60)
             log.info(f"[音乐卡点] 响应: HTTP {resp.status_code}, body={resp.text[:300]}")
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError(f"提交失败 HTTP {resp.status_code}: {resp.text[:200]}")
@@ -573,7 +573,7 @@ class BeatDetectWorker(BaseWorker):
                     raise RuntimeError("用户取消")
                 _time.sleep(self._POLL_INTERVAL)
                 try:
-                    pr = requests.get(poll_url, timeout=15)
+                    pr = http_get(poll_url, timeout=15)
                 except Exception as e:
                     log.warning(f"[音乐卡点] task_id={task_id} 轮询异常: {e}")
                     continue
@@ -719,7 +719,7 @@ class BeatVideoGenWorker(BaseWorker):
         return cls._MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_get
         import time as _time
 
         spec = self.spec
@@ -751,7 +751,7 @@ class BeatVideoGenWorker(BaseWorker):
                 raise RuntimeError("用户取消")
             _time.sleep(self._POLL_INTERVAL)
             try:
-                pr = requests.get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
+                pr = http_get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
             except Exception as e:
                 log.warning(f"[卡点成片] task_id={tid} 轮询异常: {e}")
                 continue
@@ -870,7 +870,7 @@ class BeatVideoGenWorker(BaseWorker):
 
     def _submit_one(self, spec):
         """提交单个 /montage/beat 任务，返回 task_id。"""
-        import requests
+        from utils.http_client import http_post
         music = spec.get("music") or ""
         videos = spec.get("videos") or []
         if not music or not os.path.isfile(music):
@@ -897,8 +897,8 @@ class BeatVideoGenWorker(BaseWorker):
                 vf = open(vp, "rb"); opened.append(vf)
                 files.append(("videos", (os.path.basename(vp), vf, self._mime(vp))))
             log.info(f"[卡点成片] 上传: 1 音乐 + {len(videos)} 视频, 参数={data}")
-            resp = requests.post(f"{self.server_url}/montage/beat",
-                                 files=files, data=data, timeout=600)
+            resp = http_post(f"{self.server_url}/montage/beat",
+                             files=files, data=data, timeout=600)
         finally:
             for fh in opened:
                 try:
@@ -933,14 +933,14 @@ class BeatVideoGenWorker(BaseWorker):
 
     def _download(self, task_id, file_ref, index):
         """下载成片到 download_dir，返回本地路径。"""
-        import requests
+        from utils.http_client import http_get
         url = file_ref if str(file_ref).startswith("http") else f"{self.server_url}{file_ref}"
         if not str(file_ref).startswith(("http", "/")):
             url = f"{self.server_url}/montage/result/{task_id}"
         os.makedirs(self.download_dir, exist_ok=True)
         ext = os.path.splitext(str(file_ref).split("?")[0])[1] or ".mp4"
         local = os.path.join(self.download_dir, f"beat_gen_{index + 1}{ext}")
-        with requests.get(url, stream=True, timeout=300) as r:
+        with http_get(url, stream=True, timeout=300) as r:
             r.raise_for_status()
             with open(local, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):

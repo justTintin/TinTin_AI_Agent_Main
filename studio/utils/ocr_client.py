@@ -40,7 +40,7 @@ def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=Non
 
     失败抛 RuntimeError。lines 元素为 {text, confidence, poly?}。
     """
-    import requests
+    from utils.http_client import http_post
     url = f"{_get_server_url()}/material/ocr"
     params = {}
     if material_id:
@@ -48,7 +48,7 @@ def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=Non
     if file_hash:
         params["file_hash"] = file_hash
     files = {"file": (filename, image_bytes, "image/jpeg")}
-    resp = requests.post(url, files=files, params=params, timeout=timeout)
+    resp = http_post(url, files=files, params=params, timeout=timeout)
     if resp.status_code != 200:
         raise RuntimeError(f"服务端 OCR 返回 {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
@@ -241,8 +241,8 @@ def extract_numbers(text):
 def check_server_ocr(timeout=5):
     """轻量探测服务端 OCR 是否可用（调 /material/status）。返回 bool。"""
     try:
-        import requests
-        resp = requests.get(f"{_get_server_url()}/material/status", timeout=timeout)
+        from utils.http_client import http_get
+        resp = http_get(f"{_get_server_url()}/material/status", timeout=timeout, quiet=True)
         return resp.status_code == 200
     except Exception as e:
         log.debug(f"[OCR] 服务端连通检测失败: {e}")

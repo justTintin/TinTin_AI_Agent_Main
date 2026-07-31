@@ -697,7 +697,7 @@ class PageSetupMixin:
         l3.addLayout(r3)
         self.fs_test_status = QLabel(""); self.fs_test_status.setObjectName("muted_text"); l3.addWidget(self.fs_test_status)
         l3.addStretch()
-        # 注意：不调用 tabs.addTab(p3, ...) 以隐藏飞书Tab
+        tabs.addTab(p3, "✈️ 飞书")
 
         # ── Tab 4: 即梦 ──
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30,30,30,30)
@@ -865,7 +865,7 @@ class PageSetupMixin:
 
         def _fetch():
             """仅做 HTTP 请求，返回数据，不碰 UI。"""
-            import requests as _req
+            from utils.http_client import http_get
             import socket as _socket
             try:
                 from utils import config_manager as _cm
@@ -875,7 +875,7 @@ class PageSetupMixin:
                     base_url = url
                 if not base_url:
                     return None
-                resp = _req.get(f"{base_url}/tasks", timeout=10)
+                resp = http_get(f"{base_url}/tasks", timeout=10)
                 if resp.status_code != 200:
                     return None
                 tasks = resp.json()

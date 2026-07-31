@@ -46,24 +46,6 @@ from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
 
 
-class PaddleOcrInstallWorker(QThread):
-    """OCR 已迁移至服务端 POST /material/ocr，本地安装逻辑已废弃。
-
-    此类仅作兼容保留（部分旧引用可能仍在），不再执行任何本地 PaddleOCR 安装。
-    """
-    log_line = Signal(str)
-    stage = Signal(str)
-    busy = Signal(bool)
-    finished = Signal(bool, str)
-
-    def run(self):
-        self.busy.emit(True)
-        self.stage.emit("OCR 已切换为服务端模式，无需本地部署")
-        self.log_line.emit("[INFO] OCR 现由算力服务端 /material/ocr 提供，无需本地 PaddleOCR 环境。")
-        self.busy.emit(False)
-        self.finished.emit(True, "OCR 已为服务端模式，无需本地部署")
-
-
 class InstallersMixin:
     def is_playwright_chromium_present(self):
         if not os.path.isdir(PW_BROWSERS_DIR):

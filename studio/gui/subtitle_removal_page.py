@@ -841,7 +841,7 @@ class SubtitleRemovalPage(BasePage):
 
     def _start_remote_removal(self, video_path):
         """使用服务端 API 去除字幕。"""
-        import requests as _req
+        from utils.http_client import http_get, http_post
 
         # 根据 inpaint_mode 计算 inpaint_mode 参数
         mode_map = {"STTN（默认）": "sttn_det", "STTN（精准）": "sttn", "ENODE": "enode", "SPADE": "spade"}
@@ -896,7 +896,7 @@ class SubtitleRemovalPage(BasePage):
                             "inpaint_mode": self.mode,
                             "sub_areas": sub_areas,
                         }
-                        r = _req.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=600)
+                        r = http_post(f"{base_url}/vsr/remove", files=files, data=data, timeout=600)
                         if r.status_code != 200:
                             raise RuntimeError(f"服务端返回 {r.status_code}: {r.text[:200]}")
                     result = r.json()
@@ -911,7 +911,7 @@ class SubtitleRemovalPage(BasePage):
                     while _time.time() < deadline:
                         _time.sleep(3)
                         try:
-                            pr = _req.get(poll_url, timeout=15)
+                            pr = http_get(poll_url, timeout=15)
                         except Exception:
                             continue
                         if pr.status_code != 200:

@@ -94,8 +94,8 @@ class RemoteVSRWorkerV14(QThread):
             import threading
             def _cancel():
                 try:
-                    import requests
-                    requests.delete(f"{self._base_url}/tasks/{self._task_id}", timeout=5)
+                    from utils.http_client import http_delete
+                    http_delete(f"{self._base_url}/tasks/{self._task_id}", timeout=5)
                 except Exception:
                     pass
             threading.Thread(target=_cancel, daemon=True).start()
@@ -104,6 +104,7 @@ class RemoteVSRWorkerV14(QThread):
         import json as _json
         import time as _time
         import requests
+        from utils.http_client import http_get, http_post
 
         try:
             from config.paths import AI_CONFIG_FILE
@@ -141,7 +142,7 @@ class RemoteVSRWorkerV14(QThread):
                     "purpose": self.purpose,
                     "watermark_text": self.watermark_text,
                 }
-                r = requests.post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
+                r = http_post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
             if r.status_code != 200:
                 self.finished.emit(False, f"服务端返回 {r.status_code}: {r.text[:300]}")
                 return
@@ -165,7 +166,7 @@ class RemoteVSRWorkerV14(QThread):
                     return
                 _time.sleep(3)
                 try:
-                    pr = requests.get(poll_url, timeout=15)
+                    pr = http_get(poll_url, timeout=15)
                 except Exception:
                     continue
                 if pr.status_code != 200:
@@ -215,12 +216,12 @@ class RemoteVSRWorkerV14(QThread):
             self.finished.emit(False, f"服务端去字幕异常: {e}")
 
     def _download(self, dl_url):
-        import requests
+        from utils.http_client import http_get
         self.status_updated.emit("正在下载处理结果...")
         self.progress_updated.emit(95)
         self.log_received.emit(f"[INFO] 下载结果: {dl_url}")
         os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
-        with requests.get(dl_url, stream=True, timeout=600) as r:
+        with http_get(dl_url, stream=True, timeout=600) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             downloaded = 0

@@ -37,6 +37,7 @@ from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from utils.product_library_manager import ProductLibraryManager
+from gui.searchable_combo import SearchableComboBox
 from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 
 
@@ -80,7 +81,7 @@ class MaterialMatchWorker(BaseWorker):
         self.brand = brand; self.model = model; self.category = category
 
     def do_work(self):
-        import requests
+        from utils.http_client import http_post
         try:
             url = f"{_get_server_url()}/material/search"
             params = {"limit": 200, "offset": 0}
@@ -91,7 +92,7 @@ class MaterialMatchWorker(BaseWorker):
             if self.model:
                 params["model"] = self.model
             self.log_line.emit(f"🔎 远程匹配素材: brand={self.brand!r} category={self.category!r}")
-            resp = requests.post(url, json=params, timeout=15)
+            resp = http_post(url, json=params, timeout=15)
             if resp.status_code != 200:
                 self.log_line.emit(f"⚠ 服务端返回 {resp.status_code}")
                 self.result_ready.emit("")
@@ -281,10 +282,7 @@ class CompileVideoPage(BasePage):
         left_lay.addWidget(left_title)
 
         prod_row = QHBoxLayout()
-        self.combo_product = QComboBox()
-        self.combo_product.setEditable(True)
-        self.combo_product.setInsertPolicy(QComboBox.NoInsert)
-        self.combo_product.setCurrentIndex(-1)
+        self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
         prod_row.addWidget(self.combo_product, 1)
         self.btn_reload_product = QPushButton("刷新")
         self.btn_reload_product.setObjectName("secondary_button")
@@ -326,7 +324,7 @@ class CompileVideoPage(BasePage):
         # TTS 一键配音
         tts_row = QHBoxLayout()
         tts_row.addWidget(QLabel("TTS 音色"))
-        self.combo_voice = QComboBox()
+        self.combo_voice = SearchableComboBox(placeholder="输入音色名称搜索…")
         tts_row.addWidget(self.combo_voice, 1)
         self.btn_tts = mdi_button("用文案生成配音", "audio")
         self.btn_tts.setObjectName("secondary_button")
@@ -482,7 +480,7 @@ class CompileVideoPage(BasePage):
         # ── 脚本选择行 ─────────────────────────────────────────────────────
         sel_row = QHBoxLayout()
         sel_row.addWidget(QLabel("选择脚本"))
-        self.combo_script = QComboBox()
+        self.combo_script = SearchableComboBox(placeholder="输入脚本名称搜索…")
         self.combo_script.setMinimumWidth(360)
         self.combo_script.currentIndexChanged.connect(self._on_script_changed)
         sel_row.addWidget(self.combo_script, 1)

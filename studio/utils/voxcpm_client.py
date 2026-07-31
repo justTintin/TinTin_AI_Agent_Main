@@ -9,7 +9,7 @@ import os
 import json
 import base64
 import requests
-from utils.http_client import resilient_post
+from utils.http_client import resilient_post, http_post
 
 from utils.logger_utils import log
 from utils.api_error import ApiError
@@ -42,7 +42,7 @@ def tts_url() -> str:
 def is_running(timeout=2):
     """检测远程 VoxCPM 是否可用（发空文本探测）。"""
     try:
-        requests.post(tts_url(), json={"text": ""}, timeout=timeout)
+        http_post(tts_url(), json={"text": ""}, timeout=timeout)
         return True
     except requests.exceptions.RequestException:
         return False

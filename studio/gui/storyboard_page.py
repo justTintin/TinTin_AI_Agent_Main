@@ -28,6 +28,7 @@ from utils.dreamina_client import DreaminaClient
 from config.paths import DREAMINA_OUTPUT_DIR, CONFIG_INI_FILE, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from gui.ai_script_page import LLMWorker, FeishuUploadWorker, WebSearchWorker
 from gui.base_page import BasePage
+from gui.searchable_combo import SearchableComboBox
 
 SHOT_TYPES = ["特写", "近景", "中景", "远景", "全景", "俯拍", "仰拍", "主观", "空镜"]
 
@@ -582,7 +583,7 @@ class StoryboardPage(BasePage):
 
         ratio_row = QHBoxLayout()
         ratio_row.addWidget(QLabel("风格化"))
-        self.combo_stylization = QComboBox()
+        self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.addItem("── 不使用风格化 ──", None)
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         ratio_row.addWidget(self.combo_stylization, 1)
@@ -686,29 +687,27 @@ class StoryboardPage(BasePage):
         self.sb_scroll.setWidget(self.sb_container)
         sb.addWidget(self.sb_scroll, 1)
 
-        # 飞书同步行（已隐藏按钮，代码保留）
+        # 飞书同步行
         feishu_row = QHBoxLayout()
         self.lbl_feishu_info = QLabel("飞书关联：无")
         self.lbl_feishu_info.setObjectName("muted_text")
-        self.lbl_feishu_info.hide()
         feishu_row.addWidget(self.lbl_feishu_info)
         feishu_row.addStretch()
         self.btn_sync_bitable = QPushButton("📊 同步到多维表格")
         self.btn_sync_bitable.setObjectName("secondary_button")
         self.btn_sync_bitable.setEnabled(False)
         self.btn_sync_bitable.clicked.connect(lambda: self._upload_to_feishu("bitable"))
-        self.btn_sync_bitable.hide()
         feishu_row.addWidget(self.btn_sync_bitable)
         self.btn_sync_docx = QPushButton("📝 创建飞书文档")
         self.btn_sync_docx.setObjectName("secondary_button")
         self.btn_sync_docx.setEnabled(False)
         self.btn_sync_docx.clicked.connect(lambda: self._upload_to_feishu("docx"))
-        self.btn_sync_docx.hide()
         feishu_row.addWidget(self.btn_sync_docx)
         sb.addLayout(feishu_row)
 
         appid, appsecret, *_ = self._get_feishu_config()
         if appid and appsecret:
+            self.btn_sync_bitable.setEnabled(True)
             self.btn_sync_docx.setEnabled(True)
 
         # 底部操作行

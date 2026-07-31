@@ -103,6 +103,7 @@ class RemoteAsrWorker(BaseWorker):
             self.error.emit(str(e))
 
 from gui.base_page import BasePage
+from gui.searchable_combo import SearchableComboBox
 
 
 class VoiceClonePage(BasePage):
@@ -166,7 +167,7 @@ class VoiceClonePage(BasePage):
         lbl_ref_sample.setFixedWidth(140)
         row_ref_audio.addWidget(lbl_ref_sample)
         
-        self.ref_audio_combo = QComboBox()
+        self.ref_audio_combo = SearchableComboBox(placeholder="输入声音名称搜索…")
         self.ref_audio_combo.setView(QListView())
         self.ref_audio_combo.setMinimumWidth(300)
         self.ref_audio_combo.currentIndexChanged.connect(self._on_ref_audio_combo_changed)

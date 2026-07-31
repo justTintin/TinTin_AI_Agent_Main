@@ -254,6 +254,7 @@ class AIConfigMixin:
         results = []
         try:
             import requests
+            from utils.http_client import http_get
             from utils import comfyui_client as comfy
             # Test ComfyUI：外部地址 + 本地引擎双后端
             if comfyui_addr and comfy.is_alive(comfyui_addr):
@@ -272,7 +273,7 @@ class AIConfigMixin:
 
             # Test Voice Clone
             try:
-                res = requests.get(voice_addr, timeout=5)
+                res = http_get(voice_addr, timeout=5)
                 results.append(f"克隆声音: {'✅ 在线' if res.status_code == 200 else '❌ 异常 ('+str(res.status_code)+')'}")
             except:
                 results.append("克隆声音: ❌ 无法连接")
@@ -419,9 +420,10 @@ class AIConfigMixin:
 
         def _run():
             import requests
+            from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/v1/tts").rstrip("/voxcpm/tts").rstrip("/")
-                r = requests.get(f"{base}/voxcpm/health", timeout=5)
+                r = http_get(f"{base}/voxcpm/health", timeout=5, quiet=True)
                 if r.status_code == 200:
                     self.llm_vox_status_val.setText("✅ 连接成功")
                     self.llm_vox_status_val.setStyleSheet("color: #2ecc71;")
@@ -452,9 +454,10 @@ class AIConfigMixin:
 
         def _run():
             import requests
+            from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/")
-                r = requests.get(f"{base}/whisper/health", timeout=5)
+                r = http_get(f"{base}/whisper/health", timeout=5, quiet=True)
                 if r.status_code == 200:
                     self.whisper_status_lbl.setText("✅ 连接成功")
                     self.whisper_status_lbl.setStyleSheet("color: #2ecc71;")
@@ -485,9 +488,10 @@ class AIConfigMixin:
 
         def _run():
             import requests
+            from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/")
-                r = requests.get(f"{base}/clip/health", timeout=5)
+                r = http_get(f"{base}/clip/health", timeout=5, quiet=True)
                 if r.status_code == 200:
                     self.clip_status_lbl.setText("✅ 连接成功")
                     self.clip_status_lbl.setStyleSheet("color: #2ecc71;")
@@ -518,10 +522,11 @@ class AIConfigMixin:
 
         def _run():
             import requests
+            from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/")
                 # 探测 /material/status（与 check_server_ocr 一致）
-                r = requests.get(f"{base}/material/status", timeout=5)
+                r = http_get(f"{base}/material/status", timeout=5, quiet=True)
                 if r.status_code == 200:
                     self.ocr_status_lbl.setText("✅ 连接成功（/material/ocr 可用）")
                     self.ocr_status_lbl.setStyleSheet("color: #2ecc71;")
@@ -636,14 +641,15 @@ class AIConfigMixin:
     def _test_feishu(self):
         self.fs_test_status.setText("⏳ 测试中…")
         import requests as req
+        from utils.http_client import http_post
         app_id = self.edit_feishu_appid.text().strip()
         app_secret = self.edit_feishu_appsecret.text().strip()
         if not app_id or not app_secret:
             self.fs_test_status.setText("<font color='#dc2626'>❌ 请填入 App ID 和 Secret</font>")
             return
         try:
-            r = req.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
+            r = http_post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                          json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
             if r.status_code == 200 and r.json().get("tenant_access_token"):
                 self.fs_test_status.setText("<font color='#16a34a'>✅ 连接成功</font>")
             else:

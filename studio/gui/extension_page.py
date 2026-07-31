@@ -281,7 +281,7 @@ class ExtensionPage(BasePage):
         self.edit_proxy = QLineEdit(self.bridge.config.get("proxy") or "")
         self.edit_proxy.setPlaceholderText("127.0.0.1:7890（留空=不走代理；socks5端口请写 socks5://host:port）")
         self.edit_proxy.setToolTip(
-            "YouTube 等需翻墙站点，yt-dlp 直连会超时卡死。填写你代理软件的本地端口，\n"
+            "仅 YouTube 下载使用代理，其他站点直连。填写你代理软件的本地端口，\n"
             "以运行环境方式注入：yt-dlp/ffmpeg 全链路统一走代理。\n\n"
             "填写规则：\n"
             "• 直接写 127.0.0.1:端口 → 默认按 http 代理（推荐，兼容 Clash 混合端口/v2rayN http端口）\n"

@@ -87,6 +87,11 @@ def _platform_of(url: str) -> str:
     return "其他"
 
 
+def _is_youtube(url: str, page_url: str = "", referer: str = "") -> bool:
+    """判断下载是否属于 YouTube 场景（页面/来源/直链任一命中 YouTube）。"""
+    return _platform_of(page_url or referer or url) == "YouTube"
+
+
 def _find_ytdlp() -> str:
     """定位 yt-dlp（优先素材浏览器自带的，其次 PATH）。"""
     c = os.path.join(APPS_DIR, "asset-browser", "bin", "yt-dlp.exe")
@@ -175,9 +180,9 @@ def default_config() -> dict:
         # 视频下载完成后自动生成字幕（调用服务端 Whisper）
         "auto_subtitle": False,
         # 代理地址（用户自己的代理软件暴露的本地端口），如 socks5://127.0.0.1:1080
-        # 留空不走代理。YouTube 等需翻墙站点必填，否则 yt-dlp 直连超时、反复卡在
+        # 留空不走代理。仅 YouTube 下载时使用代理，其他站点（B站/抖音等）直连。
+        # YouTube 需翻墙，未配置代理时 yt-dlp 直连超时、反复卡在
         # "Downloading webpage"，最终被判卡死而失败。
-        # 以运行环境（环境变量）方式注入：yt-dlp/ffmpeg/requests 全链路统一继承。
         "proxy": "",
     }
 
@@ -602,7 +607,9 @@ class ExtensionBridge(QObject):
         headers = {"User-Agent": _UA}
         if item["referer"]:
             headers["Referer"] = item["referer"]
-        proxy = _normalize_proxy(self.config.get("proxy", ""))
+        # 仅 YouTube 下载使用代理，其他平台直连，避免国内站点被代理拖慢/拦截。
+        proxy = _normalize_proxy(self.config.get("proxy", "")) if _is_youtube(
+            url, item.get("page_url") or "", item.get("referer") or "") else ""
         # requests 用 socks 代理需 PySocks 依赖；未装时对 requests 跳过 socks 代理
         # （不影响 yt-dlp/ffmpeg 子进程——它们已通过运行环境 env 统一走代理）。
         proxies = None
@@ -676,6 +683,7 @@ class ExtensionBridge(QObject):
         if not ytdlp:
             return ""
         platform = _platform_of(item.get("page_url") or item.get("referer") or url)
+        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")
         # 目录结构：<保存目录>/<平台>/<UP主>/<标题>_[<上传日期>].<ext>
         out_tmpl = os.path.join(
             self.save_dir, platform, "%(uploader|unknown)s",
@@ -741,7 +749,7 @@ class ExtensionBridge(QObject):
             elif val:
                 cmd += ["--cookies-from-browser", val]
             cmd.append(url)
-            found = self._run_ytdlp(cmd, task_id)
+            found = self._run_ytdlp(cmd, task_id, use_proxy=use_proxy)
             if found:
                 # yt-dlp generic 提取器也可能"成功"下载几十字节的错误页，按无效处理
                 try:
@@ -773,7 +781,7 @@ class ExtensionBridge(QObject):
         if not found:
             # 兜底不再带 po_token（token 若有效第一次就成功了；带它反而可能因格式问题失败）
             cmd = list(base_cmd) + [url]
-            found = self._run_ytdlp(cmd, task_id)
+            found = self._run_ytdlp(cmd, task_id, use_proxy=use_proxy)
             if found:
                 try:
                     fsize = os.path.getsize(found)
@@ -803,7 +811,7 @@ class ExtensionBridge(QObject):
 
     _ytdlp_last_error = ""
 
-    def _run_ytdlp(self, cmd: list, task_id: str = "") -> str:
+    def _run_ytdlp(self, cmd: list, task_id: str = "", use_proxy: bool = False) -> str:
         """执行一次 yt-dlp 下载（带进度解析+速度解析），成功返回文件路径，失败返回 ""。
 
         内置无进度超时（两种卡死场景）：
@@ -818,7 +826,7 @@ class ExtensionBridge(QObject):
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="ignore",
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                env=_build_dl_env(self.config.get("proxy", "")))
+                env=_build_dl_env(self.config.get("proxy", "") if use_proxy else ""))
             if task_id:
                 with self._dl_lock:
                     t = self._dl_tasks.get(task_id)
@@ -907,6 +915,7 @@ class ExtensionBridge(QObject):
         if not ffmpeg:
             return ""
         platform = _platform_of(item.get("page_url") or item.get("referer") or url)
+        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")
         sub_dir = os.path.join(self.save_dir, platform, "_未分组")
         os.makedirs(sub_dir, exist_ok=True)
         out_path = self._unique_path(
@@ -919,7 +928,7 @@ class ExtensionBridge(QObject):
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
                                creationflags=subprocess.CREATE_NO_WINDOW,
-                               env=_build_dl_env(self.config.get("proxy", "")))
+                               env=_build_dl_env(self.config.get("proxy", "") if use_proxy else ""))
             if r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
                 return out_path
             tail = (r.stderr or "").strip().splitlines()

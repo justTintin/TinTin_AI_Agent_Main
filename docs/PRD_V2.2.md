@@ -403,6 +403,8 @@ ffmpeg 滤镜链：
 
 > 实际接口命名、参数、返回格式以服务端 `/guide` 或 OpenAPI 文档为准。
 
+**现状核对（2026-08-01）**：服务端 `/guide` 已有「分镜脚本成片」任务接口——`POST /scheduled/tasks`，`task_type=storyboard_montage`，`params.shots[]`（服务端自动搜素材→TTS→FFmpeg→质量评分），客户端提交后轮询 `/tasks/unified/{id}`；但「分镜脚本存储/列表」接口（`/api/storyboard/scripts`）尚未在 `/guide` 出现，本节存储部分仍为规划，待服务端实现后补充文档，客户端再对齐（当前客户端保存先走本地 JSON，服务端接口就绪后切换）。
+
 ### 7.5 客户端改动
 
 - `storyboard_page`：`_save_storyboard` 增加服务端上传（`config_manager` 服务端地址 + `http_post`）；

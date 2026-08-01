@@ -401,7 +401,7 @@ class VectorSearchPage(BasePage):
         self.spin_limit.setFixedWidth(60)
         page_row.addWidget(self.spin_limit)
         page_row.addStretch()
-        self.lbl_stat = QLabel("就绪")
+        self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
         page_row.addWidget(self.lbl_stat)
         self.btn_copy_url = QPushButton("📋 复制地址")

@@ -38,6 +38,8 @@ def parse_video_detail_json(aweme_id, json_res):
     # Extract high-quality video URL
     v_info = res_data.get('video', {})
     
+    video_url = None
+
     # Prioritize bit_rate list for highest quality
     bit_rates = v_info.get('bit_rate', [])
     if bit_rates:

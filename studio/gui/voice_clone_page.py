@@ -395,7 +395,7 @@ class VoiceClonePage(BasePage):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(6)
 
-        self.stage_label = QLabel("就绪")
+        self.stage_label = QLabel("")
         self.stage_label.setObjectName("muted_text")
         bottom_layout.addWidget(self.stage_label)
 

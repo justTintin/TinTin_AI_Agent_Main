@@ -183,7 +183,7 @@ class VoiceSamplesPage(BasePage):
         main_layout.addWidget(table_card, 1)
 
         # Bottom status
-        self.status_label = QLabel("就绪")
+        self.status_label = QLabel("")
         self.status_label.setObjectName("muted_text")
         main_layout.addWidget(self.status_label, 0)
 

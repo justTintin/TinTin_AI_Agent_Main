@@ -1,5 +1,5 @@
 {
-  "_说明": "按服务端 /guide「POST /interfaces/request 提交新接口需求」契约生成的负载。当前服务端尚未实现该提交接口（openapi 无此路径，POST 返回 404），服务端实现后可直接逐条 POST 提交；或服务端直接按下列规格实现接口。",
+  "_说明": "已通过 POST /interfaces/request 提交至服务端（2026-08-01，全部 pending）。request_id：保存=REQ_8408D432，列表=REQ_D346FFFE，读取=REQ_1BA7246F，更新=REQ_36570C3A，删除=REQ_D0532DC5。服务端实现后状态置 done，并补充 /guide。",
   "_提交地址": "POST http://192.168.111.28:8000/interfaces/request",
   "_关联PRD": "docs/PRD_V2.2.md 第七章「分镜脚本服务端存储」",
   "requests": [

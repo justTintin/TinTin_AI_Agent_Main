@@ -403,7 +403,7 @@ ffmpeg 滤镜链：
 
 > 实际接口命名、参数、返回格式以服务端 `/guide` 或 OpenAPI 文档为准。
 
-**提交与实现（2026-08-01）**：已按服务端 `/guide`「POST /interfaces/request 提交新接口需求」契约，将本章 CRUD 整理为可直接提交的负载 [分镜脚本服务端接口需求.json](分镜脚本服务端接口需求.json)（保存/列表/读取/更新/删除 5 个接口）。注意：该提交接口当前在服务端**尚未实现**（openapi.json 无此路径，POST 返回 404，仅 /guide 有文档），服务端实现提交接口后可逐条提交；或服务端直接按负载规格实现接口并补充 /guide。
+**提交与实现（2026-08-01）**：已按服务端 `/guide`「POST /interfaces/request 提交新接口需求」契约，将本章 CRUD 整理为可直接提交的负载 [分镜脚本服务端接口需求.json](分镜脚本服务端接口需求.json)（保存/列表/读取/更新/删除 5 个接口）。**提交结果（2026-08-01）**：服务端 `/interfaces/request` 已实现，5 条需求已全部提交成功（status=pending）：保存=REQ_8408D432，列表=REQ_D346FFFE，读取=REQ_1BA7246F，更新=REQ_36570C3A，删除=REQ_D0532DC5。服务端实现后状态置 done 并补充 /guide，客户端再按 /guide 对齐。
 
 **现状核对（2026-08-01）**：服务端 `/guide` 已有「分镜脚本成片」任务接口——`POST /scheduled/tasks`，`task_type=storyboard_montage`，`params.shots[]`（服务端自动搜素材→TTS→FFmpeg→质量评分），客户端提交后轮询 `/tasks/unified/{id}`；但「分镜脚本存储/列表」接口（`/api/storyboard/scripts`）尚未在 `/guide` 出现，本节存储部分仍为规划，待服务端实现后补充文档，客户端再对齐（当前客户端保存先走本地 JSON，服务端接口就绪后切换）。
 

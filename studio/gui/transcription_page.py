@@ -185,7 +185,7 @@ class TranscriptionToolPage(BasePage):
 
         # ── 底部状态行：处理阶段 + 进度条 ──
         bottom_row = QHBoxLayout()
-        self.stage_label = QLabel("就绪")
+        self.stage_label = QLabel("")
         self.stage_label.setObjectName("muted_text")
         bottom_row.addWidget(self.stage_label, 1)
         self.progress_bar = QProgressBar()
@@ -652,7 +652,7 @@ class TranscriptionToolPage(BasePage):
                 elif f["srt_text"]:
                     self.subtitle_editor.setPlainText(f["srt_text"])
                 vsb.setValue(scroll)
-        self.stage_label.setText("就绪")
+        self.stage_label.setText("")
         if resume:
             self._player.play()
             self.btn_play_toggle.setText("⏸")

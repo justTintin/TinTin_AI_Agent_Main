@@ -827,7 +827,7 @@ class SubtitleRemovalPageV14(BasePage):
         bottom_container_layout.addStretch(1)
 
         # Status & progress
-        self.status_lbl = QLabel("状态: 就绪")
+        self.status_lbl = QLabel("")
         self.status_lbl.setObjectName("muted_text")
         bottom_container_layout.addWidget(self.status_lbl)
 

@@ -299,7 +299,7 @@ class MarketingDetectPage(BasePage):
         root.addWidget(self.result_card)
 
         # 底部状态栏
-        self.lbl_status = QLabel("就绪")
+        self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("muted_text")
         root.addWidget(self.lbl_status)
         root.addStretch()

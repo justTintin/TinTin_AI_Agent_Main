@@ -470,7 +470,7 @@ class ImageLayeredPage(BasePage):
         
         # Execution & Actions
         left_layout.addWidget(QLabel("3. 分层操作:"))
-        self.lbl_status = QLabel("状态: 准备就绪")
+        self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("muted_text")
         left_layout.addWidget(self.lbl_status)
         

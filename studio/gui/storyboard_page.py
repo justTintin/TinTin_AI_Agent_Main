@@ -705,7 +705,7 @@ class StoryboardPage(BasePage):
         layout.addWidget(splitter, 1)
 
         status_row = QHBoxLayout()
-        self.lbl_status = QLabel("就绪")
+        self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("muted_text")
         status_row.addWidget(self.lbl_status)
         self.pbar = QProgressBar()
@@ -1059,11 +1059,21 @@ class StoryboardPage(BasePage):
             self._export_storyboard_excel(xlsx_path, topic, ratio, orient, style_name, total_dur, shots)
             saved_files.append(xlsx_path)
 
+        # 供「一键成片 → 脚本成片」使用：无论选择哪种格式都额外生成 JSON
+        # （一键成片只扫描 KNOWLEDGE_MEDIA_DIR/<选题>/storyboard/*.json）
+        json_path = os.path.join(out_dir, base_name + ".json")
+        if not os.path.exists(json_path):
+            self._export_storyboard_json(json_path, topic, ratio, total_dur, shots)
+        if json_path not in saved_files:
+            saved_files.append(json_path)
+
         if do_feishu:
             self._upload_to_feishu("docx")
 
         self.show_info(
-            f"分镜脚本已保存至：\n{out_dir}\n\n" + "\n".join(os.path.basename(f) for f in saved_files),
+            f"分镜脚本已保存至：\n{out_dir}\n\n"
+            + "\n".join(os.path.basename(f) for f in saved_files)
+            + "\n\n（已自动生成 .json，可在「一键成片 → 脚本成片」中刷新后选择）",
             "保存成功",
         )
 

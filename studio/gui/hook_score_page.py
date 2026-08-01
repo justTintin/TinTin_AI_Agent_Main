@@ -345,7 +345,7 @@ class HookScorePage(BasePage):
         self.feedback_card.setVisible(False)
         root.addWidget(self.feedback_card)
 
-        self.status = QLabel("就绪"); self.status.setObjectName("muted_text"); root.addWidget(self.status)
+        self.status = QLabel(""); self.status.setObjectName("muted_text"); root.addWidget(self.status)
         root.addStretch()
         self.update_vision_model_display()
 

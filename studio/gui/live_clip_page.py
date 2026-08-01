@@ -1599,7 +1599,7 @@ class LiveClipPage(BasePage):
 
         self.stacked.setCurrentIndex(index)
         self._update_step_indicator(index)
-        self.stage_lbl.setText("就绪")
+        self.stage_lbl.setText("")
         self.progress_bar.setVisible(False)
 
     def setup(self):
@@ -1909,7 +1909,7 @@ class LiveClipPage(BasePage):
         layout.addWidget(export_card)
 
         # Progress & Status for Page 1
-        self.stage_lbl_p1 = QLabel("就绪")
+        self.stage_lbl_p1 = QLabel("")
         self.stage_lbl_p1.setObjectName("muted_text")
         layout.addWidget(self.stage_lbl_p1)
 

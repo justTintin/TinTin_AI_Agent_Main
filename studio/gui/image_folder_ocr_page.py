@@ -206,7 +206,7 @@ class ImageFolderOcrPage(BasePage):
         options_layout.addLayout(out_row)
 
         # Status & Progress
-        self.status_lbl = QLabel("状态: 就绪")
+        self.status_lbl = QLabel("")
         self.status_lbl.setObjectName("muted_text")
         options_layout.addWidget(self.status_lbl)
 

@@ -366,7 +366,7 @@ class PageSetupMixin:
             top_bar.addWidget(btn_refresh)
             layout.addLayout(top_bar)
 
-            self.cg_status_label = QLabel("就绪")
+            self.cg_status_label = QLabel("")
             self.cg_status_label.setObjectName("muted_text")
             layout.addWidget(self.cg_status_label)
 

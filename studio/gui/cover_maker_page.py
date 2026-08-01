@@ -198,7 +198,7 @@ class CoverMakerPage(BasePage):
         root.addWidget(body, 1)
 
         srow = QHBoxLayout()
-        self.status = QLabel("就绪"); self.status.setObjectName("muted_text")
+        self.status = QLabel(""); self.status.setObjectName("muted_text")
         srow.addWidget(self.status, 1)
         self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(160)
         srow.addWidget(self.pbar)

@@ -394,7 +394,7 @@ class ProductImagePage(BasePage):
 
     def _build_status_bar(self, root):
         row = QHBoxLayout()
-        self.lbl_status = QLabel("就绪")
+        self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("muted_text")
         row.addWidget(self.lbl_status, 1)
         self.progress_bar = QProgressBar()

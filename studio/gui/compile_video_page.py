@@ -6,7 +6,7 @@
     ┌─ heading ────────────────────────────────────────────┐
     ├─ 上段（QSplitter 横向）                              │
     │   左：产品选择（必选，任务起点）+ 性能参数/核心卖点      │
-    │   右：可选设置（素材目录/配音/TTS/开场/封面/字幕文案）  │
+    │   右：可选设置（字幕文案/素材目录/配音/TTS/开场/封面） │
     ├─ 设置段（QGroupBox）：视频条数/总时长/比例/平台 + 执行  │
     └─ 输出段：结果列表 + 执行日志 + 进度条                  │
 
@@ -316,6 +316,12 @@ class CompileVideoPage(BasePage):
         right_title = QLabel("⚙️ 可选设置"); right_title.setStyleSheet("font-weight:bold;")
         right_lay.addWidget(right_title)
 
+        # 字幕文案放在镜头素材目录上方
+        right_lay.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
+        self.in_subtitle = QTextEdit(); self.in_subtitle.setFixedHeight(70)
+        self.in_subtitle.setPlaceholderText("粘贴文案；按句均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
+        right_lay.addWidget(self.in_subtitle)
+
         self.in_folder = self._file_row(right_lay, "镜头素材目录（留空=按产品自动匹配）",
                                         self._browse_folder, folder=True,
                                         placeholder="留空则按产品自动从素材库匹配")
@@ -344,10 +350,6 @@ class CompileVideoPage(BasePage):
         self.in_cover = self._file_row(right_lay, "封面(可选)", self._browse_cover,
                                        placeholder="片头封面图，显示 2 秒")
 
-        right_lay.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
-        self.in_subtitle = QTextEdit(); self.in_subtitle.setFixedHeight(70)
-        self.in_subtitle.setPlaceholderText("粘贴文案；按句均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
-        right_lay.addWidget(self.in_subtitle)
         right_lay.addStretch()
 
         top_splitter.addWidget(right_card)
@@ -427,7 +429,7 @@ class CompileVideoPage(BasePage):
         self.progress_bar = QProgressBar(); self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
         self.progress_bar.setFixedHeight(16)
         ol_lay.addWidget(self.progress_bar)
-        self.stage_label = QLabel("就绪"); self.stage_label.setObjectName("muted_text")
+        self.stage_label = QLabel(""); self.stage_label.setObjectName("muted_text")
         ol_lay.addWidget(self.stage_label)
         out_splitter.addWidget(out_left)
 
@@ -535,7 +537,7 @@ class CompileVideoPage(BasePage):
         root.addLayout(btn_row)
 
         # ── 状态/日志 ──────────────────────────────────────────────────────
-        self.script_status = QLabel("就绪"); self.script_status.setObjectName("muted_text")
+        self.script_status = QLabel(""); self.script_status.setObjectName("muted_text")
         root.addWidget(self.script_status)
 
         # 首次加载脚本列表

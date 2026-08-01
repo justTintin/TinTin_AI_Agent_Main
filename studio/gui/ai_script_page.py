@@ -436,7 +436,7 @@ class AIScriptPage(BasePage):
         layout.addWidget(splitter, 1)
 
         status_row = QHBoxLayout()
-        self.lbl_status = QLabel("就绪")
+        self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("muted_text")
         status_row.addWidget(self.lbl_status)
         self.pbar = QProgressBar()

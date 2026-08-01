@@ -99,7 +99,7 @@ class MGAnimationPage(BasePage):
         root.addWidget(card)
 
         rrow = QHBoxLayout()
-        self.status = QLabel("就绪"); self.status.setObjectName("muted_text")
+        self.status = QLabel(""); self.status.setObjectName("muted_text")
         rrow.addWidget(self.status, 1)
         self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(160)
         rrow.addWidget(self.pbar)

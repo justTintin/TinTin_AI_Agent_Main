@@ -21,6 +21,17 @@
    "status": "fail",
    "error": "下载卡住无响应（90秒无进度，可能被站点反爬拦截，建议配置 cookies）",
    "synced": ""
+  },
+  {
+   "time": "2026-07-31 19:22:59",
+   "url": "https://www.youtube.com/watch?v=hVkAbtK8gxg",
+   "media_type": "video",
+   "page_url": "https://www.youtube.com/watch?v=hVkAbtK8gxg",
+   "page_title": "China's 6th-Gen Fighter Development Is a Decade Ahead of the U.S.! Trump's Plan for a Trump-Class... - YouTube",
+   "filename": "中國六代機研發進度 甩開美國整整十年！ 川普要造川普級戰艦 紙上霸主、實戰活靶？｜岑永康、張延廷、邱世卿【永康情報局】完整版 20260728_[20260728].mp4",
+   "status": "ok",
+   "error": "",
+   "synced": "X:/插件素材\\YouTube\\永康情報局\\中國六代機研發進度 甩開美國整整十年！ 川普要造川普級戰艦 紙上霸主、實戰活靶？｜岑永康、張延廷、邱世卿【永康情報局】完整版 20260728_[20260728].mp4"
   }
  ]
 }

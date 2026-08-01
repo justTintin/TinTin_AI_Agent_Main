@@ -192,7 +192,7 @@ class DreaminaPage(BasePage):
         lay.addLayout(opt)
 
         srow = QHBoxLayout()
-        self.gen_status = QLabel("就绪"); self.gen_status.setObjectName("muted_text")
+        self.gen_status = QLabel(""); self.gen_status.setObjectName("muted_text")
         srow.addWidget(self.gen_status, 1)
         self.gen_pbar = QProgressBar(); self.gen_pbar.setVisible(False)
         self.gen_pbar.setRange(0, 0); self.gen_pbar.setMaximumWidth(160)

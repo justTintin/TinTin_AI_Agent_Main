@@ -606,7 +606,7 @@ class SubtitleRemovalPage(BasePage):
         server_row.addStretch()
         action_layout.addLayout(server_row)
 
-        self.status_lbl = QLabel("状态: 就绪")
+        self.status_lbl = QLabel("")
         self.status_lbl.setObjectName("muted_text")
         action_layout.addWidget(self.status_lbl)
 

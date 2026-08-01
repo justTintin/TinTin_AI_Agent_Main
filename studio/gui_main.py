@@ -759,7 +759,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 11: Video Tools (New)
         self.page_video_tools = QWidget()
-        self.setup_video_tools_page()
+        # 视频修复已并入「媒体工具」标签页（media_tools_page），不再启动时构建
         self.content_stack.addWidget(self.page_video_tools)
 
         # 12: Transcription Tool (Video → Text)
@@ -927,6 +927,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.page_audio_material = QWidget()
         self.content_stack.addWidget(self.page_audio_material)
         self._register_lazy_page(45, self.setup_audio_material_page)
+
+        # 46: 媒体工具（图片处理 + 视频处理 聚合标签页，懒加载）
+        self.page_media_tools = QWidget()
+        self.content_stack.addWidget(self.page_media_tools)
+        self._register_lazy_page(46, self.setup_media_tools_page)
 
         # 浏览器扩展桥接服务：按配置随客户端自动启动
         try:

@@ -266,70 +266,79 @@ class PageSetupMixin:
         self.audio_material_tool.setup()
 
 
-    def setup_video_tools_page(self):
-            layout = QVBoxLayout(self.page_video_tools)
-            layout.setContentsMargins(40, 40, 40, 40)
-        
-            # Heading
-            self.vt_main_heading = QLabel("视频修复")
-            self.vt_main_heading.setObjectName("heading")
-            layout.addWidget(self.vt_main_heading, 0)
-        
-            card_config = QFrame()
-            card_config.setObjectName("card")
-            config_layout = QVBoxLayout(card_config)
-            config_layout.setContentsMargins(30, 30, 30, 30)
-        
-            # Backend Selection (Lock to ComfyUI for now)
-            config_layout.addWidget(QLabel("选择生成后端:"))
-            self.vt_backend_selector = QComboBox()
-            self.vt_backend_selector.addItems(["ComfyUI (本地/局域网)"])
-            config_layout.addWidget(self.vt_backend_selector)
-        
-            config_layout.addSpacing(15)
+    def setup_media_tools_page(self):
+        from gui.media_tools_page import MediaToolsPage
+        self.media_tools_tool = MediaToolsPage(self.page_media_tools, self)
+        self.media_tools_tool.setup()
 
-            # Workflow Selection
-            config_layout.addWidget(QLabel("选择工作流 (assets/workflow):"))
-            self.vt_workflow_selector = QComboBox()
-            self.refresh_vt_workflows()
+    def setup_video_tools_page(self, container=None):
+        """构建「视频修复」UI。container 缺省为目标页面容器；媒体工具标签页可传入标签容器。"""
+        container = container or getattr(self, "page_video_tools", None)
+        if container is None:
+            return
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(40, 40, 40, 40)
         
-            self.vt_workflow_status = QLabel("请选择工作流并加载")
-            config_layout.addWidget(self.vt_workflow_status)
+        # Heading
+        self.vt_main_heading = QLabel("视频修复")
+        self.vt_main_heading.setObjectName("heading")
+        layout.addWidget(self.vt_main_heading, 0)
         
-            self.vt_workflow_selector.currentIndexChanged.connect(self.on_vt_workflow_changed)
-            config_layout.addWidget(self.vt_workflow_selector)
+        card_config = QFrame()
+        card_config.setObjectName("card")
+        config_layout = QVBoxLayout(card_config)
+        config_layout.setContentsMargins(30, 30, 30, 30)
         
-            config_layout.addSpacing(20)
+        # Backend Selection (Lock to ComfyUI for now)
+        config_layout.addWidget(QLabel("选择生成后端:"))
+        self.vt_backend_selector = QComboBox()
+        self.vt_backend_selector.addItems(["ComfyUI (本地/局域网)"])
+        config_layout.addWidget(self.vt_backend_selector)
+        
+        config_layout.addSpacing(15)
 
-            # Video Input Section
-            self.vt_video_input_label = QLabel("输入视频:")
-            config_layout.addWidget(self.vt_video_input_label)
-            video_row = QHBoxLayout()
-            self.vt_video_path_input = QLineEdit()
-            self.vt_video_path_input.setPlaceholderText("请选择视频文件...")
-            video_row.addWidget(self.vt_video_path_input)
-            btn_sel_video = QPushButton("浏览")
-            btn_sel_video.clicked.connect(self.select_vt_video)
-            video_row.addWidget(btn_sel_video)
-            config_layout.addLayout(video_row)
+        # Workflow Selection
+        config_layout.addWidget(QLabel("选择工作流 (assets/workflow):"))
+        self.vt_workflow_selector = QComboBox()
+        self.refresh_vt_workflows()
         
-            config_layout.addSpacing(20)
+        self.vt_workflow_status = QLabel("请选择工作流并加载")
+        config_layout.addWidget(self.vt_workflow_status)
         
-            self.btn_run_vt = mdi_button("提交视频处理任务", "rocket")
-            self.btn_run_vt.setObjectName("action_button")
-            self.btn_run_vt.setFixedHeight(50)
-            self.btn_run_vt.clicked.connect(self.run_video_tool_task)
-            config_layout.addWidget(self.btn_run_vt)
+        self.vt_workflow_selector.currentIndexChanged.connect(self.on_vt_workflow_changed)
+        config_layout.addWidget(self.vt_workflow_selector)
         
-            layout.addWidget(card_config, 0)
-            layout.addStretch()
+        config_layout.addSpacing(20)
 
-            # Default select face detail fix workflow
-            idx = self.vt_workflow_selector.findText("输入视频-修复脸部细节-20260113.json")
-            if idx >= 0:
-                self.vt_workflow_selector.setCurrentIndex(idx)
-            else:
-                self.on_vt_workflow_changed(self.vt_workflow_selector.currentIndex())
+        # Video Input Section
+        self.vt_video_input_label = QLabel("输入视频:")
+        config_layout.addWidget(self.vt_video_input_label)
+        video_row = QHBoxLayout()
+        self.vt_video_path_input = QLineEdit()
+        self.vt_video_path_input.setPlaceholderText("请选择视频文件...")
+        video_row.addWidget(self.vt_video_path_input)
+        btn_sel_video = QPushButton("浏览")
+        btn_sel_video.clicked.connect(self.select_vt_video)
+        video_row.addWidget(btn_sel_video)
+        config_layout.addLayout(video_row)
+        
+        config_layout.addSpacing(20)
+        
+        self.btn_run_vt = mdi_button("提交视频处理任务", "rocket")
+        self.btn_run_vt.setObjectName("action_button")
+        self.btn_run_vt.setFixedHeight(50)
+        self.btn_run_vt.clicked.connect(self.run_video_tool_task)
+        config_layout.addWidget(self.btn_run_vt)
+        
+        layout.addWidget(card_config, 0)
+        layout.addStretch()
+
+        # Default select face detail fix workflow
+        idx = self.vt_workflow_selector.findText("输入视频-修复脸部细节-20260113.json")
+        if idx >= 0:
+            self.vt_workflow_selector.setCurrentIndex(idx)
+        else:
+            self.on_vt_workflow_changed(self.vt_workflow_selector.currentIndex())
 
     def setup_hotspots_page(self):
             layout = QVBoxLayout(self.page_hotspots)

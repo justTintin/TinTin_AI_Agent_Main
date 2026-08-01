@@ -48,5 +48,30 @@ class TestUIRegression(unittest.TestCase):
         self.assertIn("（已自动生成 .json，可在「一键成片 → 脚本成片」中刷新后选择）", src)
 
 
+
+class TestMenuStructure(unittest.TestCase):
+    """侧边栏菜单结构：媒体工具聚合图片/视频处理子页面。"""
+
+    def _sidebar_src(self):
+        return open(os.path.join(testutil.STUDIO_DIR, "gui", "main_window_sidebar.py"),
+                    encoding="utf-8").read()
+
+    def test_media_tools_entry_exists(self):
+        src = self._sidebar_src()
+        self.assertIn('("媒体工具", 46, "image-filter")', src)
+
+    def test_old_image_video_sections_removed(self):
+        src = self._sidebar_src()
+        self.assertNotIn('QLabel("图形处理")', src)
+        self.assertNotIn('QLabel("视频处理")', src)
+
+    def test_media_tools_has_nine_tabs(self):
+        src = open(os.path.join(testutil.STUDIO_DIR, "gui", "media_tools_page.py"),
+                   encoding="utf-8").read()
+        for title in ("封面制作", "图像抠图", "图片框选OCR", "视频修复", "视频转文字",
+                      "声音克隆", "视频去字幕", "视频框选OCR", "批量LUT调色"):
+            self.assertIn(title, src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -143,6 +143,7 @@ class SidebarMixin:
             ("音频素材", 45, "music"),
             ("即梦素材", 42, "image-multiple"),
             ("任务队列", 9, "format-list-checks"),
+            ("媒体工具", 46, "image-filter"),
         ]
         for text, index, icon_name in media_menus:
             if icon_name:
@@ -186,63 +187,6 @@ class SidebarMixin:
             compose_layout.addWidget(btn)
             self.nav_buttons.append(btn)
         scroll_layout.addWidget(compose_card)
-
-        # 5. 图形处理 Section
-        graphics_card = QFrame()
-        graphics_card.setProperty("section_type", "ai")
-        graphics_layout = QVBoxLayout(graphics_card)
-        graphics_layout.setContentsMargins(6, 8, 6, 8)
-        graphics_layout.setSpacing(2)
-        
-        graphics_header = QLabel("图形处理")
-        graphics_header.setObjectName("section_header")
-        graphics_layout.addWidget(graphics_header)
-        
-        graphics_menus = [
-            ("封面制作", 33, "image-edit"),
-            ("图像抠图", 16, "image"),
-            # ("🗂️ 智能分层", 17),          # 暂时隐藏
-            ("图片框选 OCR", 25, "text-box-search"),
-        ]
-        for text, index, icon_name in graphics_menus:
-            btn = mdi_button(text, icon_name)
-            btn.setObjectName("nav_button")
-            btn.setProperty("target_index", index)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
-            graphics_layout.addWidget(btn)
-            self.nav_buttons.append(btn)
-        scroll_layout.addWidget(graphics_card)
-
-        # 6. 视频处理 Section
-        video_card = QFrame()
-        video_card.setProperty("section_type", "ai")
-        video_layout = QVBoxLayout(video_card)
-        video_layout.setContentsMargins(6, 8, 6, 8)
-        video_layout.setSpacing(2)
-        
-        video_header = QLabel("视频处理")
-        video_header.setObjectName("section_header")
-        video_layout.addWidget(video_header)
-        
-        video_menus = [
-            ("视频修复", 11, "wrench"),
-            ("视频转文字", 12, "subtitles"),
-            ("声音克隆", 21, "audio"),
-            ("视频去字幕", 18, "closed-caption"),
-            ("视频框选 OCR", 24, "text-box-search"),
-            ("批量 LUT 调色", 27, "gradient"),
-            # ("🏷️ 视频智能重命名", 26),   # 暂时隐藏
-        ]
-        for text, index, icon_name in video_menus:
-            btn = mdi_button(text, icon_name)
-            btn.setObjectName("nav_button")
-            btn.setProperty("target_index", index)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
-            video_layout.addWidget(btn)
-            self.nav_buttons.append(btn)
-        scroll_layout.addWidget(video_card)
 
         # 7. 视频运营 Section
         ops_card = QFrame()

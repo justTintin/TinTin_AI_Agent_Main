@@ -153,17 +153,9 @@ class VoiceClonePage(BasePage):
         card_layout.setSpacing(12)
         card_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Info: settings reminder
-        row_info = QHBoxLayout()
-        lbl_info = QLabel("⚙️ 声音克隆参数（调用方式/模型/推理步数/CFG）请在「🤖 大模型配置」页面中设置。")
-        lbl_info.setStyleSheet("color: #9ca3af; font-size: 12px;")
-        row_info.addWidget(lbl_info)
-        row_info.addStretch()
-        card_layout.addLayout(row_info)
-
         # 1. Reference voice sample selection
         row_ref_audio = QHBoxLayout()
-        lbl_ref_sample = QLabel("参考声音 sample (.wav):")
+        lbl_ref_sample = QLabel("参考声音样本:")
         lbl_ref_sample.setFixedWidth(140)
         row_ref_audio.addWidget(lbl_ref_sample)
         
@@ -284,15 +276,15 @@ class VoiceClonePage(BasePage):
         v_btn_clone_layout.setSpacing(6)
         v_btn_clone_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_clone_whole = mdi_button("一键生成整体克隆人声", "voice")
+        self.btn_clone_whole = mdi_button("整体克隆人声", "voice")
         self.btn_clone_whole.setObjectName("primary_button")
-        self.btn_clone_whole.setFixedHeight(85)
+        self.btn_clone_whole.setFixedHeight(40)
         self.btn_clone_whole.clicked.connect(self._clone_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_clone_whole)
         
-        self.btn_play_whole = mdi_button("播放整体克隆声音", "volume")
+        self.btn_play_whole = mdi_button("播放克隆声音", "volume")
         self.btn_play_whole.setObjectName("secondary_button")
-        self.btn_play_whole.setFixedHeight(30)
+        self.btn_play_whole.setFixedHeight(40)
         self.btn_play_whole.setEnabled(False)
         self.btn_play_whole.clicked.connect(self._play_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_play_whole)
@@ -1550,7 +1542,7 @@ class VoiceClonePage(BasePage):
         
         def on_whole_finished(results):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("一键生成整体克隆人声")
+            self.btn_clone_whole.setText("整体克隆人声")
             self.progress_bar.setValue(100)
             self.stage_label.setText("✅ 整体克隆人声生成成功！可以开始点击一键拆分填充。")
             self._check_whole_audio_exists()
@@ -1562,7 +1554,7 @@ class VoiceClonePage(BasePage):
             
         def on_whole_error(err):
             self.btn_clone_whole.setEnabled(True)
-            self.btn_clone_whole.setText("一键生成整体克隆人声")
+            self.btn_clone_whole.setText("整体克隆人声")
             self.progress_bar.setValue(0)
             self.stage_label.setText("❌ 整体生成失败")
             if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:

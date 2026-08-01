@@ -13,45 +13,58 @@ import logging
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QGridLayout, QScrollArea, QStackedWidget,
+    QGridLayout, QScrollArea, QStackedWidget, QSizePolicy,
 )
 
+from gui.base_page import BasePage
 from utils.gui_icons import mdi_icon
 
 log = logging.getLogger(__name__)
 
 
 class _ToolCard(QFrame):
-    """媒体工具卡片：图标 + 标题 + 说明，左键点击触发 clicked。"""
+    """媒体工具卡片：图标 + 标题 + 说明，内容居中，左键点击触发 clicked。"""
     clicked = Signal()
 
     def __init__(self, icon_name, title, desc, parent=None):
         super().__init__(parent)
         self.setObjectName("tool_card")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(118)
+        self.setMinimumHeight(148)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet("""
-            #tool_card { background: #1c1c24; border: 1px solid #333; border-radius: 8px; }
-            #tool_card:hover { border: 1px solid #2ecc71; background: #22222c; }
+            #tool_card {
+                background: #1c1c24;
+                border: 1px solid #2b2b35;
+                border-radius: 12px;
+            }
+            #tool_card:hover {
+                border: 1px solid #2ecc71;
+                background: #23232e;
+            }
             #tool_card_title { font-size: 15px; font-weight: bold; color: #e5e7eb; }
             #tool_card_desc { font-size: 12px; color: #9ca3af; }
         """)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(8)
+        lay.setContentsMargins(16, 18, 16, 18)
+        lay.setSpacing(10)
+        lay.setAlignment(Qt.AlignCenter)
 
         self.icon_lbl = QLabel()
-        self.icon_lbl.setPixmap(mdi_icon(icon_name, "#2ecc71").pixmap(34, 34))
-        lay.addWidget(self.icon_lbl)
+        self.icon_lbl.setAlignment(Qt.AlignCenter)
+        self.icon_lbl.setPixmap(mdi_icon(icon_name, "#2ecc71").pixmap(44, 44))
+        lay.addWidget(self.icon_lbl, 0, Qt.AlignCenter)
 
         title_lbl = QLabel(title)
         title_lbl.setObjectName("tool_card_title")
-        lay.addWidget(title_lbl)
+        title_lbl.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title_lbl, 0, Qt.AlignCenter)
 
         desc_lbl = QLabel(desc)
         desc_lbl.setObjectName("tool_card_desc")
+        desc_lbl.setAlignment(Qt.AlignCenter)
         desc_lbl.setWordWrap(True)
-        lay.addWidget(desc_lbl)
+        lay.addWidget(desc_lbl, 0, Qt.AlignCenter)
         lay.addStretch()
 
     def mousePressEvent(self, event):
@@ -60,7 +73,7 @@ class _ToolCard(QFrame):
         super().mousePressEvent(event)
 
 
-class MediaToolsPage(QWidget):
+class MediaToolsPage(BasePage):
     """媒体工具容器：卡片菜单 + 各子工具页（懒加载）。"""
 
     # (标题, key, 图标名, 说明) —— 图标名沿用原侧边栏有效图标
@@ -79,8 +92,7 @@ class MediaToolsPage(QWidget):
     ]
 
     def __init__(self, parent_widget, main_window):
-        super().__init__(parent_widget)
-        self.main_window = main_window
+        super().__init__(parent_widget, main_window)
         self._built = set()
         self._stack = None
 
@@ -88,21 +100,25 @@ class MediaToolsPage(QWidget):
         return self._IMAGE_TOOLS + self._VIDEO_TOOLS
 
     def setup(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(12)
+        root = QVBoxLayout(self.parent_widget)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(18)
 
-        heading = QLabel("🛠️ 媒体工具")
-        heading.setObjectName("heading")
-        root.addWidget(heading)
+        heading_row = QHBoxLayout()
+        heading_lbl = QLabel("媒体工具")
+        heading_lbl.setObjectName("heading")
+        heading_row.addStretch()
+        heading_row.addWidget(heading_lbl)
+        heading_row.addStretch()
+        root.addLayout(heading_row)
 
         self._stack = QStackedWidget()
 
-        # ── 页 0：卡片菜单 ──
+        # ---- 页 0：卡片菜单 ----
         menu_page = QWidget()
         menu_lay = QVBoxLayout(menu_page)
         menu_lay.setContentsMargins(0, 0, 0, 0)
-        menu_lay.setSpacing(16)
+        menu_lay.setSpacing(18)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -111,19 +127,19 @@ class MediaToolsPage(QWidget):
         content = QWidget()
         content_lay = QVBoxLayout(content)
         content_lay.setContentsMargins(0, 0, 10, 0)
-        content_lay.setSpacing(14)
+        content_lay.setSpacing(16)
         scroll.setWidget(content)
         menu_lay.addWidget(scroll)
         self._stack.addWidget(menu_page)
 
         content_lay.addWidget(self._group_header("图形"))
         content_lay.addLayout(self._build_card_grid(self._IMAGE_TOOLS, 0))
-        content_lay.addSpacing(8)
+        content_lay.addSpacing(10)
         content_lay.addWidget(self._group_header("视频"))
         content_lay.addLayout(self._build_card_grid(self._VIDEO_TOOLS, len(self._IMAGE_TOOLS)))
         content_lay.addStretch()
 
-        # ── 页 1..n：各工具页（懒构建）──
+        # ---- 页 1..n：各工具页（懒构建） ----
         for _ in self._all_tools():
             self._stack.addWidget(QWidget())
 
@@ -132,18 +148,25 @@ class MediaToolsPage(QWidget):
 
     def _group_header(self, text):
         lbl = QLabel(text)
-        lbl.setObjectName("section_header")
+        lbl.setObjectName("group_header")
+        lbl.setStyleSheet(
+            "font-size: 16px; font-weight: bold; color: #f0f1f7;"
+            "padding: 4px 2px; border-left: 3px solid #2ecc71; padding-left: 10px;"
+        )
         return lbl
 
     def _build_card_grid(self, tools, start_index):
         grid = QGridLayout()
-        grid.setSpacing(12)
+        grid.setSpacing(14)
         cols = 3
         for i, (title, key, icon_name, desc) in enumerate(tools):
             card = _ToolCard(icon_name, title, desc)
             tool_index = 1 + start_index + i
             card.clicked.connect(lambda idx=tool_index: self._stack.setCurrentIndex(idx))
             grid.addWidget(card, i // cols, i % cols)
+        for c in range(cols):
+            grid.setColumnStretch(c, 1)
+        grid.setRowStretch(grid.rowCount(), 1)
         return grid
 
     def _ensure_tool(self, index):

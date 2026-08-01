@@ -876,6 +876,11 @@ class VectorSearchPage(BasePage):
                 "media_type": mtype,
                 "path": raw.get("path") or "",
                 "url": _serve_url(mid),
+                # 产品信息（可能为空，用于一键成片自动匹配产品）
+                "brand": raw.get("brand") or "",
+                "model": raw.get("model") or raw.get("product") or "",
+                "product": raw.get("product") or raw.get("category") or "",
+                "category": raw.get("category") or "",
             })
         if not materials:
             self.lbl_stat.setText("⚠ 未选择到有效素材")

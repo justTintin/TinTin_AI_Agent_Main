@@ -1170,6 +1170,41 @@ class CompileVideoPage(BasePage):
         self.log_box.append(f"[{ts}] {text}")
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
 
+    def _auto_select_product(self, materials):
+        """根据素材中出现最多的品牌/型号自动选择产品（无匹配则保持原选项）。"""
+        if not materials:
+            return
+        from collections import Counter
+        pairs = Counter()
+        for m in materials:
+            brand = (m.get("brand") or "").strip()
+            model = (m.get("model") or "").strip()
+            if brand or model:
+                pairs[(brand, model)] += 1
+        if not pairs:
+            return
+        (target_brand, target_model), _ = pairs.most_common(1)[0]
+        try:
+            # 遍历产品下拉框，按数据(id)反查产品库匹配品牌/型号
+            for i in range(self.combo_product.count()):
+                pid = self.combo_product.itemData(i)
+                if not pid:
+                    continue
+                it = self._product_mgr.get(pid) or {}
+                b = (it.get("brand") or "").strip()
+                mo = (it.get("model") or "").strip() or (it.get("goods_no") or "").strip()
+                if target_brand and target_model:
+                    if b == target_brand and (mo == target_model or target_model in mo or mo in target_model):
+                        self.combo_product.setCurrentIndex(i)
+                        self._log(f"📦 已根据素材自动选择产品: {self.combo_product.currentText()}")
+                        return
+                elif target_brand and b == target_brand:
+                    self.combo_product.setCurrentIndex(i)
+                    self._log(f"📦 已根据素材品牌自动选择产品: {self.combo_product.currentText()}")
+                    return
+        except Exception as e:
+            log.error(f"自动选择产品失败: {e}")
+
     def import_materials(self, materials):
         """从素材检索带入素材列表（支持多个、图片+视频混合）。"""
         self._materials = list(materials or [])
@@ -1182,6 +1217,7 @@ class CompileVideoPage(BasePage):
             item.setData(Qt.UserRole, m)
             self.material_list.addItem(item)
         self.lbl_material_count.setText(f"已选 {len(self._materials)} 个素材（图片/视频混合）")
+        self._auto_select_product(materials)
 
     def _clear_materials(self):
         self._materials = []

@@ -1,5 +1,5 @@
 {
-  "_说明": "已通过 POST /interfaces/request 提交至服务端（2026-08-01，全部 pending）。request_id：保存=REQ_8408D432，列表=REQ_D346FFFE，读取=REQ_1BA7246F，更新=REQ_36570C3A，删除=REQ_D0532DC5。服务端实现后状态置 done，并补充 /guide。",
+  "_说明": "已通过 POST /interfaces/request 提交至服务端（2026-08-01，全部 pending）。request_id：保存=REQ_A3CEB501，列表=REQ_D6F64EFD，读取=REQ_1BA7246F，更新=REQ_36570C3A，删除=REQ_D0532DC5。注意：脚本多端共享，不做机器码隔离（保存/列表已按此修正重提）。服务端实现后状态置 done，并补充 /guide。",
   "_提交地址": "POST http://192.168.111.28:8000/interfaces/request",
   "_关联PRD": "docs/PRD_V2.2.md 第七章「分镜脚本服务端存储」",
   "requests": [
@@ -7,7 +7,7 @@
       "name": "分镜脚本-保存",
       "path": "/api/storyboard/scripts",
       "method": "POST",
-      "requirement": "保存分镜脚本到服务端（按客户端机器码隔离，同一 topic 重复保存视为更新），保存成功返回脚本 id 与版本号；「一键成片 → 脚本成片」可直接读取该列表。数据字段沿用客户端现有 JSON：topic/ratio/total_duration/shot_count/shots/saved_at，shots 元素 {index, shot_type, visual, audio, sfx, duration}，与 storyboard_montage 成片任务 params.shots 一致。",
+      "requirement": "保存分镜脚本到服务端（多端共享，不做机器码隔离；同一 topic 重复保存视为更新），保存成功返回脚本 id 与版本号；「一键成片 → 脚本成片」可直接读取该列表。数据字段沿用客户端现有 JSON：topic/ratio/total_duration/shot_count/shots/saved_at，shots 元素 {index, shot_type, visual, audio, sfx, duration}，与 storyboard_montage 成片任务 params.shots 一致。",
       "params": [
         {
           "name": "topic",
@@ -47,13 +47,13 @@
         }
       ],
       "response": "{\"id\": \"script_xxx\", \"version\": 2, \"saved_at\": \"2026-08-01T10:00:00+08:00\"}",
-      "notes": "机器码隔离：服务端从请求识别 device_id（或客户端显式传参）；同一 topic+机器码重复提交覆盖更新不新增。"
+      "notes": "脚本在所有客户端间共享（不做机器码/device_id 隔离）；同一 topic 重复提交覆盖更新不新增。"
     },
     {
       "name": "分镜脚本-列表",
       "path": "/api/storyboard/scripts",
       "method": "GET",
-      "requirement": "返回当前客户端（按机器码隔离）已保存的分镜脚本列表摘要，供「一键成片 → 脚本成片」直接加载；支持分页与按选题筛选。",
+      "requirement": "返回服务端已保存的全部分镜脚本列表摘要（多端共享，不做机器码隔离），供「一键成片 → 脚本成片」直接加载；支持分页与按选题筛选。",
       "params": [
         {
           "name": "topic",
@@ -75,7 +75,7 @@
         }
       ],
       "response": "{\"items\": [{\"id\": \"script_xxx\", \"topic\": \"GPW宣传片\", \"ratio\": \"9:16\", \"shot_count\": 8, \"updated_at\": \"2026-08-01T10:00:00+08:00\"}], \"total\": 12}",
-      "notes": "列表项只返回摘要，详情走 GET /api/storyboard/scripts/{id}。"
+      "notes": "列表项只返回摘要，详情走 GET /api/storyboard/scripts/{id}；脚本在所有客户端间共享。"
     },
     {
       "name": "分镜脚本-读取",

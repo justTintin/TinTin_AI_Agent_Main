@@ -1,95 +1,203 @@
 # -*- coding: utf-8 -*-
-"""媒体工具：把「图片处理」与「视频处理」两组子页面聚合为一个标签页界面。
+"""媒体工具：把「图片处理」与「视频处理」两组子功能聚合为「分组卡片菜单」界面。
 
-侧边栏只保留一个入口「媒体工具」，内部用 QTabWidget 承载：
-  封面制作 / 图像抠图 / 图片框选OCR / 视频修复 / 视频转文字 /
-  声音克隆 / 视频去字幕 / 视频框选OCR / 批量LUT调色
-各标签懒加载：首次切换到该标签时才构建页面，缩短启动时间。
+设计参考：剪贴板卡片式界面——深色卡片（图标 + 标题 + 说明），按「图片 / 视频」分组。
+交互：点击卡片进入对应工具页（右上角「← 返回媒体工具」回卡片菜单）；工具页懒加载。
+
+卡片分组：
+  图片：封面制作 / 图像抠图 / 图片框选OCR
+  视频：视频修复 / 视频转文字 / 声音克隆 / 视频去字幕 / 视频框选OCR / 批量LUT调色
 """
 import logging
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QGridLayout, QScrollArea, QStackedWidget,
+)
+
+from utils.gui_icons import mdi_icon
 
 log = logging.getLogger(__name__)
 
 
-class MediaToolsPage(QWidget):
-    """媒体工具容器（图片处理 + 视频处理聚合）。"""
+class _ToolCard(QFrame):
+    """媒体工具卡片：图标 + 标题 + 说明，左键点击触发 clicked。"""
+    clicked = Signal()
 
-    # (标签标题, 构建 key)
-    _TABS = [
-        ("封面制作", "cover_maker"),
-        ("图像抠图", "image_matting"),
-        ("图片框选OCR", "image_folder_ocr"),
-        ("视频修复", "video_tools"),
-        ("视频转文字", "transcription"),
-        ("声音克隆", "voice_clone"),
-        ("视频去字幕", "subtitle_removal"),
-        ("视频框选OCR", "video_ocr"),
-        ("批量LUT调色", "video_lut"),
+    def __init__(self, icon_name, title, desc, parent=None):
+        super().__init__(parent)
+        self.setObjectName("tool_card")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(118)
+        self.setStyleSheet("""
+            #tool_card { background: #1c1c24; border: 1px solid #333; border-radius: 8px; }
+            #tool_card:hover { border: 1px solid #2ecc71; background: #22222c; }
+            #tool_card_title { font-size: 15px; font-weight: bold; color: #e5e7eb; }
+            #tool_card_desc { font-size: 12px; color: #9ca3af; }
+        """)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(8)
+
+        self.icon_lbl = QLabel()
+        self.icon_lbl.setPixmap(mdi_icon(icon_name, "#2ecc71").pixmap(34, 34))
+        lay.addWidget(self.icon_lbl)
+
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("tool_card_title")
+        lay.addWidget(title_lbl)
+
+        desc_lbl = QLabel(desc)
+        desc_lbl.setObjectName("tool_card_desc")
+        desc_lbl.setWordWrap(True)
+        lay.addWidget(desc_lbl)
+        lay.addStretch()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class MediaToolsPage(QWidget):
+    """媒体工具容器：卡片菜单 + 各子工具页（懒加载）。"""
+
+    # (标题, key, 图标名, 说明) —— 图标名沿用原侧边栏有效图标
+    _IMAGE_TOOLS = [
+        ("封面制作", "cover_maker", "image-edit", "商品封面图快速制作"),
+        ("图像抠图", "image_matting", "image", "智能抠图 / 去除背景"),
+        ("图片框选OCR", "image_folder_ocr", "text-box-search", "批量识别图片文字"),
+    ]
+    _VIDEO_TOOLS = [
+        ("视频修复", "video_tools", "wrench", "画质修复 / 工作流处理"),
+        ("视频转文字", "transcription", "subtitles", "视频语音自动转写"),
+        ("声音克隆", "voice_clone", "audio", "克隆音色生成配音"),
+        ("视频去字幕", "subtitle_removal", "closed-caption", "去除视频字幕 / 水印"),
+        ("视频框选OCR", "video_ocr", "text-box-search", "视频帧文字识别"),
+        ("批量LUT调色", "video_lut", "gradient", "批量应用 LUT 调色"),
     ]
 
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget)
         self.main_window = main_window
         self._built = set()
-        self._containers = []
-        self.tabs = None
+        self._stack = None
+
+    def _all_tools(self):
+        return self._IMAGE_TOOLS + self._VIDEO_TOOLS
 
     def setup(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(12)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        for title, _key in self._TABS:
-            container = QWidget()
-            self._containers.append(container)
-            self.tabs.addTab(container, title)
-        root.addWidget(self.tabs)
+        heading = QLabel("🛠️ 媒体工具")
+        heading.setObjectName("heading")
+        root.addWidget(heading)
 
-        self.tabs.currentChanged.connect(self._ensure_tab)
+        self._stack = QStackedWidget()
 
-    def _ensure_tab(self, index):
-        if index < 0 or index >= len(self._TABS) or index in self._built:
+        # ── 页 0：卡片菜单 ──
+        menu_page = QWidget()
+        menu_lay = QVBoxLayout(menu_page)
+        menu_lay.setContentsMargins(0, 0, 0, 0)
+        menu_lay.setSpacing(16)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        content = QWidget()
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(0, 0, 10, 0)
+        content_lay.setSpacing(14)
+        scroll.setWidget(content)
+        menu_lay.addWidget(scroll)
+        self._stack.addWidget(menu_page)
+
+        content_lay.addWidget(self._group_header("图片"))
+        content_lay.addLayout(self._build_card_grid(self._IMAGE_TOOLS, 0))
+        content_lay.addSpacing(8)
+        content_lay.addWidget(self._group_header("视频"))
+        content_lay.addLayout(self._build_card_grid(self._VIDEO_TOOLS, len(self._IMAGE_TOOLS)))
+        content_lay.addStretch()
+
+        # ── 页 1..n：各工具页（懒构建）──
+        for _ in self._all_tools():
+            self._stack.addWidget(QWidget())
+
+        root.addWidget(self._stack, 1)
+        self._stack.currentChanged.connect(self._ensure_tool)
+
+    def _group_header(self, text):
+        lbl = QLabel(text)
+        lbl.setObjectName("section_header")
+        return lbl
+
+    def _build_card_grid(self, tools, start_index):
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        cols = 3
+        for i, (title, key, icon_name, desc) in enumerate(tools):
+            card = _ToolCard(icon_name, title, desc)
+            tool_index = 1 + start_index + i
+            card.clicked.connect(lambda idx=tool_index: self._stack.setCurrentIndex(idx))
+            grid.addWidget(card, i // cols, i % cols)
+        return grid
+
+    def _ensure_tool(self, index):
+        if index <= 0 or index > len(self._all_tools()) or index in self._built:
             return
         self._built.add(index)
-        key = self._TABS[index][1]
+        key = self._all_tools()[index - 1][1]
         try:
-            self._build_tab(key, self._containers[index])
+            self._build_tool(key, self._stack.widget(index))
         except Exception as e:
-            log.error("[媒体工具] 标签页构建失败(%s): %s", key, e)
+            log.error("[媒体工具] 工具页构建失败(%s): %s", key, e)
 
-    def _build_tab(self, key, container):
+    def _build_tool(self, key, page):
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        bar = QHBoxLayout()
+        btn_back = QPushButton("← 返回媒体工具")
+        btn_back.setObjectName("secondary_button")
+        btn_back.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+        bar.addWidget(btn_back)
+        bar.addStretch()
+        lay.addLayout(bar)
+
+        content = QWidget()
+        lay.addWidget(content, 1)
+
         mw = self.main_window
         if key == "cover_maker":
             from gui.cover_maker_page import CoverMakerPage
-            CoverMakerPage(container, mw).setup()
+            CoverMakerPage(content, mw).setup()
         elif key == "image_matting":
             from gui.image_matting_page import ImageMattingPage
-            ImageMattingPage(container, mw).setup()
+            ImageMattingPage(content, mw).setup()
         elif key == "image_folder_ocr":
             from gui.image_folder_ocr_page import ImageFolderOcrPage
-            ImageFolderOcrPage(container, mw).setup()
+            ImageFolderOcrPage(content, mw).setup()
         elif key == "video_tools":
-            # 视频修复是内联 UI（PageSetupMixin.setup_video_tools_page），
-            # 直接以标签容器为目标构建一次。
-            mw.setup_video_tools_page(container)
+            mw.setup_video_tools_page(content)
         elif key == "transcription":
             from gui.transcription_page import TranscriptionToolPage
-            TranscriptionToolPage(container, mw).setup()
+            TranscriptionToolPage(content, mw).setup()
         elif key == "voice_clone":
             from gui.voice_clone_page import VoiceClonePage
-            VoiceClonePage(container, mw).setup()
+            VoiceClonePage(content, mw).setup()
         elif key == "subtitle_removal":
             from gui.subtitle_removal_page_v14 import SubtitleRemovalPageV14
-            SubtitleRemovalPageV14(container, mw).setup()
+            SubtitleRemovalPageV14(content, mw).setup()
         elif key == "video_ocr":
             from gui.video_ocr_page import VideoOcrPage
-            VideoOcrPage(container, mw).setup()
+            VideoOcrPage(content, mw).setup()
         elif key == "video_lut":
             from gui.video_lut_page import VideoLutPage
-            VideoLutPage(container, mw).setup()
+            VideoLutPage(content, mw).setup()
         else:
-            raise ValueError("未知媒体工具标签: %s" % key)
+            raise ValueError("未知媒体工具: %s" % key)

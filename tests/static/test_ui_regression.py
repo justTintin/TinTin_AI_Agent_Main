@@ -58,19 +58,31 @@ class TestMenuStructure(unittest.TestCase):
 
     def test_media_tools_entry_exists(self):
         src = self._sidebar_src()
-        self.assertIn('("媒体工具", 46, "image-filter")', src)
+        self.assertIn('("媒体工具", 46, "tools")', src)
 
     def test_old_image_video_sections_removed(self):
         src = self._sidebar_src()
         self.assertNotIn('QLabel("图形处理")', src)
         self.assertNotIn('QLabel("视频处理")', src)
 
-    def test_media_tools_has_nine_tabs(self):
+    def test_media_tools_has_nine_cards(self):
         src = open(os.path.join(testutil.STUDIO_DIR, "gui", "media_tools_page.py"),
                    encoding="utf-8").read()
         for title in ("封面制作", "图像抠图", "图片框选OCR", "视频修复", "视频转文字",
                       "声音克隆", "视频去字幕", "视频框选OCR", "批量LUT调色"):
             self.assertIn(title, src)
+
+    def test_media_tools_grouped_image_video(self):
+        src = open(os.path.join(testutil.STUDIO_DIR, "gui", "media_tools_page.py"),
+                   encoding="utf-8").read()
+        self.assertIn('_IMAGE_TOOLS', src)
+        self.assertIn('_VIDEO_TOOLS', src)
+        self.assertIn('self._group_header("图片")', src)
+        self.assertIn('self._group_header("视频")', src)
+        # 卡片式交互：点击卡片进入工具页 + 返回按钮
+        self.assertIn("_ToolCard", src)
+        self.assertIn("← 返回媒体工具", src)
+        self.assertIn("QStackedWidget", src)
 
 
 if __name__ == "__main__":

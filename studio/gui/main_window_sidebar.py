@@ -143,7 +143,7 @@ class SidebarMixin:
             ("音频素材", 45, "music"),
             ("即梦素材", 42, "image-multiple"),
             ("任务队列", 9, "format-list-checks"),
-            ("媒体工具", 46, "image-filter"),
+            ("媒体工具", 46, "tools"),
         ]
         for text, index, icon_name in media_menus:
             if icon_name:

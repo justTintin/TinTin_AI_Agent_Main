@@ -32,6 +32,7 @@ FEATURES = [
     ("语法/导入健康 (全部 studio)", ["TestSyntaxImports"]),
     ("UI 静态回归 (就绪/布局/分镜JSON)", ["TestUIRegression"]),
     ("样本数据有效性", ["TestSampleFiles"]),
+    ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
     ("Ollama 视频分析（在线）", ["TestOllamaVideo"]),
     ("服务端连通性（在线）", ["TestServerConnectivity"]),
 ]

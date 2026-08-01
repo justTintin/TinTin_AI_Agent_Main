@@ -24,6 +24,7 @@ PURE_MODULES = [
     ("utils", "logger_utils"),
     ("utils", "data_registry"),
     ("core", "douyin_parser"),
+    ("utils", "video_compiler"),
 ]
 
 

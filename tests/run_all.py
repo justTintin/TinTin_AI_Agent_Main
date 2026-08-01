@@ -33,13 +33,15 @@ FEATURES = [
     ("UI 静态回归 (就绪/布局/分镜JSON)", ["TestUIRegression"]),
     ("样本数据有效性", ["TestSampleFiles"]),
     ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
+    ("智能混剪服务端拼接 Worker（离线 mock）", ["TestMontageConcatWorker"]),
+    ("智能混剪镜头分割（在线 /montage/split）", ["TestMontageSplitOnline"]),
     ("Ollama 视频分析（在线）", ["TestOllamaVideo"]),
     ("服务端连通性（在线）", ["TestServerConnectivity"]),
 ]
 
 # 有计划但尚未自动化的场景（来自 docs/TEST_PLAN.md）
 MANUAL_FEATURES = [
-    "智能混剪完整流程（ffmpeg 分割→评分→拼接，需大样本视频）",
+    "智能混剪完整流程（真实多镜头拼接回归，需大样本+服务端，自动化仅覆盖 worker 与 /montage/split 冒烟）",
     "去字幕/去水印与 OCR 服务端流程（依赖服务端可用）",
     "素材检索/产品库服务端接口全量（/material/*）",
     "一键成片/脚本成片端到端",

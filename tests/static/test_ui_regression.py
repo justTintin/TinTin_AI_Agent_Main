@@ -77,7 +77,7 @@ class TestMenuStructure(unittest.TestCase):
                    encoding="utf-8").read()
         self.assertIn('_IMAGE_TOOLS', src)
         self.assertIn('_VIDEO_TOOLS', src)
-        self.assertIn('self._group_header("图片")', src)
+        self.assertIn('self._group_header("图形")', src)
         self.assertIn('self._group_header("视频")', src)
         # 卡片式交互：点击卡片进入工具页 + 返回按钮
         self.assertIn("_ToolCard", src)

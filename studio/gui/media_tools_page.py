@@ -116,7 +116,7 @@ class MediaToolsPage(QWidget):
         menu_lay.addWidget(scroll)
         self._stack.addWidget(menu_page)
 
-        content_lay.addWidget(self._group_header("图片"))
+        content_lay.addWidget(self._group_header("图形"))
         content_lay.addLayout(self._build_card_grid(self._IMAGE_TOOLS, 0))
         content_lay.addSpacing(8)
         content_lay.addWidget(self._group_header("视频"))

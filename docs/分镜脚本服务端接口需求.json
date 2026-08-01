@@ -1,0 +1,145 @@
+{
+  "_说明": "按服务端 /guide「POST /interfaces/request 提交新接口需求」契约生成的负载。当前服务端尚未实现该提交接口（openapi 无此路径，POST 返回 404），服务端实现后可直接逐条 POST 提交；或服务端直接按下列规格实现接口。",
+  "_提交地址": "POST http://192.168.111.28:8000/interfaces/request",
+  "_关联PRD": "docs/PRD_V2.2.md 第七章「分镜脚本服务端存储」",
+  "requests": [
+    {
+      "name": "分镜脚本-保存",
+      "path": "/api/storyboard/scripts",
+      "method": "POST",
+      "requirement": "保存分镜脚本到服务端（按客户端机器码隔离，同一 topic 重复保存视为更新），保存成功返回脚本 id 与版本号；「一键成片 → 脚本成片」可直接读取该列表。数据字段沿用客户端现有 JSON：topic/ratio/total_duration/shot_count/shots/saved_at，shots 元素 {index, shot_type, visual, audio, sfx, duration}，与 storyboard_montage 成片任务 params.shots 一致。",
+      "params": [
+        {
+          "name": "topic",
+          "type": "string",
+          "required": true,
+          "desc": "选题名称"
+        },
+        {
+          "name": "ratio",
+          "type": "string",
+          "required": true,
+          "desc": "画幅比例，如 9:16 / 16:9"
+        },
+        {
+          "name": "total_duration",
+          "type": "float",
+          "required": true,
+          "desc": "总时长（秒）"
+        },
+        {
+          "name": "shot_count",
+          "type": "int",
+          "required": true,
+          "desc": "镜头数量"
+        },
+        {
+          "name": "shots",
+          "type": "list[object]",
+          "required": true,
+          "desc": "镜头数组 [{index, shot_type, visual, audio, sfx, duration}]"
+        },
+        {
+          "name": "saved_at",
+          "type": "string",
+          "required": false,
+          "desc": "保存时间 ISO8601，缺省用服务端时间"
+        }
+      ],
+      "response": "{\"id\": \"script_xxx\", \"version\": 2, \"saved_at\": \"2026-08-01T10:00:00+08:00\"}",
+      "notes": "机器码隔离：服务端从请求识别 device_id（或客户端显式传参）；同一 topic+机器码重复提交覆盖更新不新增。"
+    },
+    {
+      "name": "分镜脚本-列表",
+      "path": "/api/storyboard/scripts",
+      "method": "GET",
+      "requirement": "返回当前客户端（按机器码隔离）已保存的分镜脚本列表摘要，供「一键成片 → 脚本成片」直接加载；支持分页与按选题筛选。",
+      "params": [
+        {
+          "name": "topic",
+          "type": "string",
+          "required": false,
+          "desc": "按选题筛选"
+        },
+        {
+          "name": "page",
+          "type": "int",
+          "required": false,
+          "desc": "页码，从 1 开始"
+        },
+        {
+          "name": "page_size",
+          "type": "int",
+          "required": false,
+          "desc": "每页数量，默认 20"
+        }
+      ],
+      "response": "{\"items\": [{\"id\": \"script_xxx\", \"topic\": \"GPW宣传片\", \"ratio\": \"9:16\", \"shot_count\": 8, \"updated_at\": \"2026-08-01T10:00:00+08:00\"}], \"total\": 12}",
+      "notes": "列表项只返回摘要，详情走 GET /api/storyboard/scripts/{id}。"
+    },
+    {
+      "name": "分镜脚本-读取",
+      "path": "/api/storyboard/scripts/{id}",
+      "method": "GET",
+      "requirement": "按脚本 id 返回完整分镜脚本（含 shots 明细），不存在返回 404。",
+      "params": [],
+      "response": "{\"id\": \"script_xxx\", \"topic\": \"...\", \"ratio\": \"9:16\", \"total_duration\": 30.0, \"shot_count\": 8, \"shots\": [{\"index\": 1, \"shot_type\": \"特写\", \"visual\": \"产品特写\", \"audio\": \"旁白文本\", \"sfx\": \"\", \"duration\": 5}], \"saved_at\": \"...\"}",
+      "notes": ""
+    },
+    {
+      "name": "分镜脚本-更新",
+      "path": "/api/storyboard/scripts/{id}",
+      "method": "PUT",
+      "requirement": "整体替换指定分镜脚本内容，返回新版本号；不存在返回 404。",
+      "params": [
+        {
+          "name": "topic",
+          "type": "string",
+          "required": true,
+          "desc": "选题名称"
+        },
+        {
+          "name": "ratio",
+          "type": "string",
+          "required": true,
+          "desc": "画幅比例"
+        },
+        {
+          "name": "total_duration",
+          "type": "float",
+          "required": true,
+          "desc": "总时长（秒）"
+        },
+        {
+          "name": "shot_count",
+          "type": "int",
+          "required": true,
+          "desc": "镜头数量"
+        },
+        {
+          "name": "shots",
+          "type": "list[object]",
+          "required": true,
+          "desc": "镜头数组"
+        },
+        {
+          "name": "saved_at",
+          "type": "string",
+          "required": false,
+          "desc": "保存时间"
+        }
+      ],
+      "response": "{\"id\": \"script_xxx\", \"version\": 3, \"updated_at\": \"2026-08-01T11:00:00+08:00\"}",
+      "notes": ""
+    },
+    {
+      "name": "分镜脚本-删除",
+      "path": "/api/storyboard/scripts/{id}",
+      "method": "DELETE",
+      "requirement": "删除指定分镜脚本，删除成功返回 ok；不存在返回 404。",
+      "params": [],
+      "response": "{\"ok\": true}",
+      "notes": ""
+    }
+  ]
+}

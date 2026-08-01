@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider,
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl
-from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor
+from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -355,14 +355,16 @@ class VectorSearchPage(BasePage):
         self.grid.setResizeMode(QListWidget.Adjust)
         self.grid.setMovement(QListWidget.Static)  # 不允许拖动重排
         self.grid.setSpacing(8)
-        self.grid.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.grid.setSelectionMode(QAbstractItemView.NoSelection)
         self.grid.setUniformItemSizes(True)
         self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"
                                 " QListWidget::item { background: #1c1c24; border-radius: 6px; }"
                                 " QListWidget::item:selected { background: #2a3340; border: 1px solid #2ecc71; }")
         self.grid.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self.grid.itemChanged.connect(self._on_item_changed)
+        self.grid.itemClicked.connect(self._on_item_clicked)
         right_lay.addWidget(self.grid, 1)
+        self._selected_mids = set()
+        self._last_clicked_mid = None
 
         # 选择工具栏：全选/取消全选（仅对当前页生效）
         sel_row = QHBoxLayout()
@@ -424,7 +426,9 @@ class VectorSearchPage(BasePage):
         self._thumb_cache = {}            # {material_id: QPixmap}
         self._item_by_mid = {}            # {material_id: QListWidgetItem}（worker 回填用）
         self._thumb_queue = []            # 待加载 material_id 队列
-        self._active_thumb_count = 0      # 当前在途缩略图 worker 数
+        self._active_thumb_count = 0
+        self._selected_mids = set()
+        self._last_clicked_mid = None      # 当前在途缩略图 worker 数
         self._brand_values = []           # 品牌全量（供文本过滤）
         self._loading_filters = 0
 
@@ -637,19 +641,11 @@ class VectorSearchPage(BasePage):
             lw_item.setText(fname if len(fname) <= 18 else fname[:17] + "…")
             lw_item.setToolTip(tip)
             lw_item.setForeground(QColor("#d1d5db"))
-            lw_item.setFlags(lw_item.flags() | Qt.ItemIsUserCheckable)
-            lw_item.setCheckState(Qt.Unchecked)
             lw_item.setData(Qt.UserRole, {"mid": mid, "media_type": mtype, "item": item})
 
-            if mtype == "audio":
-                lw_item.setIcon(self._pm_audio)
-            elif mid and mid in self._thumb_cache:
-                lw_item.setIcon(self._thumb_cache[mid])
-            else:
-                # 图片/视频：先占位，异步加载缩略图（服务端为视频生成首帧图）
-                lw_item.setIcon(self._pm_video if mtype == "video" else self._pm_placeholder)
-                if mid:
-                    to_load.append(mid)
+            self._apply_icon(mid, lw_item)
+            if mtype != "audio" and mid and mid not in self._thumb_cache:
+                to_load.append(mid)
 
             self.grid.addItem(lw_item)
             if mid:
@@ -693,7 +689,7 @@ class VectorSearchPage(BasePage):
             self._thumb_cache[mid] = pm
             item = self._item_by_mid.get(mid)
             if item is not None:
-                item.setIcon(pm)
+                self._apply_icon(mid, item)
         # 继续排空队列
         self._drain_thumb_queue()
 
@@ -702,6 +698,8 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     def _selected_mid(self):
         item = self.grid.currentItem()
+        if not item and getattr(self, "_last_clicked_mid", None):
+            item = self._item_by_mid.get(self._last_clicked_mid)
         if not item:
             return None, None
         d = item.data(Qt.UserRole) or {}
@@ -754,18 +752,88 @@ class VectorSearchPage(BasePage):
         dlg.exec()
 
     # ── 本页多选（全选/取消全选，仅对当前页生效）─────────────────────
+    # ── 本页多选（相册式：右上角角标，单击切换）────────────────────────
+    @staticmethod
+    def _draw_corner_badge(base_pm, checked):
+        """在缩略图右上角绘制相册式选择角标（未选=半透明空圈，选中=绿圈+对勾）。"""
+        pm = QPixmap(base_pm)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = 20
+        x = pm.width() - r - 5
+        y = 5
+        if checked:
+            p.setBrush(QColor("#2ecc71"))
+        else:
+            p.setBrush(QColor(15, 15, 20, 200))
+        p.setPen(QPen(QColor("white"), 2))
+        p.drawEllipse(x, y, r, r)
+        if checked:
+            pen = QPen(QColor("white"), 3)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            p.drawLine(x + 5, y + r * 0.55, x + r * 0.42, y + r * 0.82)
+            p.drawLine(x + r * 0.42, y + r * 0.82, x + r * 0.8, y + r * 0.22)
+        p.end()
+        return pm
+
+    def _apply_icon(self, mid, lw_item):
+        """按当前选择状态设置缩略图（选中时叠加右上角角标）。"""
+        if mid and mid in self._thumb_cache:
+            base = self._thumb_cache[mid]
+        else:
+            meta = (lw_item.data(Qt.UserRole) or {}) if lw_item is not None else {}
+            mtype = (meta.get("media_type") or "").lower()
+            base = self._pm_audio if mtype == "audio" else (self._pm_video if mtype == "video" else self._pm_placeholder)
+        if mid and mid in self._selected_mids:
+            base = self._draw_corner_badge(base, True)
+        lw_item.setIcon(base)
+
+    def _on_item_clicked(self, item):
+        """相册式：单击缩略图切换选择/取消选择。"""
+        d = item.data(Qt.UserRole) or {}
+        mid = d.get("mid")
+        if not mid:
+            return
+        self._last_clicked_mid = mid
+        if mid in self._selected_mids:
+            self._selected_mids.discard(mid)
+        else:
+            self._selected_mids.add(mid)
+        self._apply_icon(mid, item)
+        self._refresh_selected_label()
+
+    def _refresh_selected_label(self):
+        self.lbl_sel_count.setText(f"已选 {len(self._selected_mids)} 项")
+
     def _select_all_page(self):
         for i in range(self.grid.count()):
-            self.grid.item(i).setCheckState(Qt.Checked)
+            it = self.grid.item(i)
+            mid = (it.data(Qt.UserRole) or {}).get("mid")
+            if mid:
+                self._selected_mids.add(mid)
+                self._apply_icon(mid, it)
+        self._refresh_selected_label()
 
     def _clear_all_page(self):
         for i in range(self.grid.count()):
-            self.grid.item(i).setCheckState(Qt.Unchecked)
+            it = self.grid.item(i)
+            mid = (it.data(Qt.UserRole) or {}).get("mid")
+            if mid:
+                self._selected_mids.discard(mid)
+                self._apply_icon(mid, it)
+        self._refresh_selected_label()
 
     def _selected_items(self):
-        """返回当前页勾选的 item 列表。"""
-        return [self.grid.item(i) for i in range(self.grid.count())
-                if self.grid.item(i).checkState() == Qt.Checked]
+        """返回当前页右上角角标选中的 item 列表。"""
+        out = []
+        for i in range(self.grid.count()):
+            it = self.grid.item(i)
+            mid = (it.data(Qt.UserRole) or {}).get("mid")
+            if mid and mid in self._selected_mids:
+                out.append(it)
+        return out
 
     def _on_item_changed(self, _item):
-        self.lbl_sel_count.setText(f"已选 {len(self._selected_items())} 项")
+        self._refresh_selected_label()

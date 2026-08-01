@@ -35,6 +35,7 @@ FEATURES = [
     ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
     ("智能混剪服务端拼接 Worker（离线 mock）", ["TestMontageConcatWorker"]),
     ("智能混剪镜头分割（在线 /montage/split）", ["TestMontageSplitOnline"]),
+    ("Ollama 图片识别（在线）", ["TestOllamaImageRecognition"]),
     ("Ollama 视频分析（在线）", ["TestOllamaVideo"]),
     ("服务端连通性（在线）", ["TestServerConnectivity"]),
 ]

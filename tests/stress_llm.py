@@ -15,7 +15,21 @@ import threading
 import argparse
 import requests
 
-SERVER = "http://192.168.111.19:8000"
+def _server_from_config():
+    """服务端地址统一从 studio/config/ai_config.json 的 compute_server_url 读取。"""
+    try:
+        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "studio", "config", "ai_config.json")
+        with open(p, encoding="utf-8") as f:
+            url = json.load(f).get("compute_server_url", "")
+        if url:
+            return url.rstrip("/")
+    except Exception:
+        pass
+    return "http://192.168.111.28:8000"
+
+
+SERVER = _server_from_config()
 
 # ── 结果收集 ──
 errors = []

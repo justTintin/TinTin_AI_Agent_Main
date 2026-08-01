@@ -22,7 +22,7 @@
 
 ```bash
 # 服务端地址
-SERVER="http://192.168.111.30:8000"
+SERVER="http://192.168.111.28:8000"
 
 # 批量连通性检查
 curl -s -o /dev/null -w "%{http_code} %{url_effective}\n" \
@@ -458,7 +458,7 @@ echo "全部完成"
 # stress_llm.py — LLM 压力测试
 import threading, time, requests
 
-SERVER = "http://192.168.111.30:8000"
+SERVER = "http://192.168.111.28:8000"
 CONCURRENT = 10
 REQUESTS = 50
 errors = []

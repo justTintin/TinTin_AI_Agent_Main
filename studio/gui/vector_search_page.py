@@ -13,10 +13,10 @@ from utils.http_client import http_get, http_post
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QListWidget, QListWidgetItem, QAbstractItemView,
-    QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider,
+    QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
 )
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl
-from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect
+from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -75,28 +75,31 @@ def _fmt_ms(ms):
 
 
 class VideoPreviewDialog(QDialog):
-    """内置视频播放器：通过 /material/serve 流式播放服务端素材（支持 Range）。"""
+    """内置视频播放器：通过 /material/serve 流式播放服务端素材（支持 Range），右侧反推提示词面板。"""
 
-    def __init__(self, url, title="", parent=None):
+    def __init__(self, url, title="", material_id="", media_type="", parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"▶ 视频预览 - {title}")
-        self.resize(960, 600)
+        self.resize(1120, 620)
         self.setObjectName("videoPreviewDialog")
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 10)
-        lay.setSpacing(8)
+        root_lay = QHBoxLayout(self)
+        root_lay.setContentsMargins(10, 10, 10, 10)
+        root_lay.setSpacing(8)
+
+        left = QVBoxLayout()
+        left.setSpacing(8)
 
         self.video_widget = QVideoWidget()
         self.video_widget.setStyleSheet("background:#000; border-radius:6px;")
-        lay.addWidget(self.video_widget, 1)
+        left.addWidget(self.video_widget, 1)
 
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 1000)
         self.slider.setEnabled(False)
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
-        lay.addWidget(self.slider)
+        left.addWidget(self.slider)
 
         ctrl = QHBoxLayout()
         self.btn_play = QPushButton("▶ 播放")
@@ -108,7 +111,11 @@ class VideoPreviewDialog(QDialog):
         self.lbl_time = QLabel("加载中…")
         self.lbl_time.setObjectName("muted_text")
         ctrl.addWidget(self.lbl_time)
-        lay.addLayout(ctrl)
+        left.addLayout(ctrl)
+
+        root_lay.addLayout(left, 1)
+        self.prompt_panel = PromptReversePanel(material_id, media_type)
+        root_lay.addWidget(self.prompt_panel, 0)
 
         self._dragging = False
         self.player = QMediaPlayer(self)
@@ -266,6 +273,136 @@ class _ThumbWorker(BaseWorker):
             pass  # 失败时不 emit finished；BaseWorker.run() 会 emit error，由页面恢复计数
 
 
+class _FullImageWorker(BaseWorker):
+    """原图加载（/material/serve）：预览时用原图，确保清晰度。"""
+    finished = Signal(str, bytes)  # material_id, image_bytes
+
+    def __init__(self, material_id):
+        super().__init__()
+        self.material_id = str(material_id)
+
+    def do_work(self):
+        try:
+            resp = http_get(_serve_url(self.material_id), timeout=30)
+            if resp.status_code == 200 and resp.content:
+                self.finished.emit(self.material_id, resp.content)
+        except Exception:
+            pass
+
+
+class _PromptWorker(BaseWorker):
+    """服务端反推提示词：POST /prompt/image 或 /prompt/video（multipart material_id）。"""
+    finished = Signal(str, str, str)  # 正向提示词, 负向提示词, 错误信息
+
+    def __init__(self, material_id, media_type):
+        super().__init__()
+        self.material_id = str(material_id)
+        self.media_type = (media_type or "image").lower()
+
+    def do_work(self):
+        endpoint = "video" if self.media_type == "video" else "image"
+        url = f"{_get_server_url()}/prompt/{endpoint}"
+        try:
+            resp = http_post(url, files={"material_id": (None, self.material_id)}, timeout=180)
+            if resp.status_code != 200:
+                self.finished.emit("", "", f"服务端返回 {resp.status_code}")
+                return
+            data = resp.json() or {}
+            prompt = (data.get("prompt") or "").strip()
+            neg = (data.get("negative_prompt") or "").strip()
+            self.finished.emit(prompt, neg, "")
+        except Exception as e:
+            self.finished.emit("", "", str(e))
+
+
+class PromptReversePanel(QFrame):
+    """预览对话框右侧：反推按钮在上，正/负向提示词分开显示与复制。"""
+
+    def __init__(self, material_id, media_type, parent=None):
+        super().__init__(parent)
+        self.setObjectName("card")
+        self.setFixedWidth(360)
+        self._mid = material_id
+        self._mtype = (media_type or "image").lower()
+        self._worker = None
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(8)
+
+        title = QLabel("🤖 反推提示词")
+        title.setObjectName("section_header")
+        lay.addWidget(title)
+
+        # 反推按钮放在提示词文本框上方
+        self.btn_reverse = QPushButton("🔮 反推提示词")
+        self.btn_reverse.setObjectName("primary_button")
+        self.btn_reverse.clicked.connect(self._reverse_prompt)
+        lay.addWidget(self.btn_reverse)
+
+        # 正向提示词
+        row_pos = QHBoxLayout()
+        lbl_pos = QLabel("正向提示词")
+        lbl_pos.setObjectName("muted_text")
+        row_pos.addWidget(lbl_pos)
+        row_pos.addStretch(1)
+        self.btn_copy_pos = QPushButton("📋 复制正向")
+        self.btn_copy_pos.setObjectName("secondary_button")
+        self.btn_copy_pos.clicked.connect(self._copy_positive)
+        row_pos.addWidget(self.btn_copy_pos)
+        lay.addLayout(row_pos)
+
+        self.txt_prompt = QTextEdit()
+        self.txt_prompt.setPlaceholderText("点击「反推提示词」生成正向提示词…")
+        self.txt_prompt.setAcceptRichText(False)
+        self.txt_prompt.setMinimumHeight(110)
+        lay.addWidget(self.txt_prompt, 2)
+
+        # 负向提示词
+        row_neg = QHBoxLayout()
+        lbl_neg = QLabel("负向提示词")
+        lbl_neg.setObjectName("muted_text")
+        row_neg.addWidget(lbl_neg)
+        row_neg.addStretch(1)
+        self.btn_copy_neg = QPushButton("📋 复制负向")
+        self.btn_copy_neg.setObjectName("secondary_button")
+        self.btn_copy_neg.clicked.connect(self._copy_negative)
+        row_neg.addWidget(self.btn_copy_neg)
+        lay.addLayout(row_neg)
+
+        self.txt_negative = QTextEdit()
+        self.txt_negative.setPlaceholderText("负向提示词（可为空）…")
+        self.txt_negative.setAcceptRichText(False)
+        self.txt_negative.setMinimumHeight(80)
+        lay.addWidget(self.txt_negative, 1)
+
+    def _reverse_prompt(self):
+        if not self._mid:
+            self.txt_prompt.setPlainText("⚠ 缺少素材ID")
+            return
+        self.btn_reverse.setEnabled(False)
+        self.txt_prompt.setPlainText("⏳ 正在反推提示词…")
+        self.txt_negative.clear()
+        self._worker = _PromptWorker(self._mid, self._mtype)
+        self._worker.finished.connect(self._on_prompt_done)
+        self._worker.start()
+
+    def _on_prompt_done(self, prompt, neg, err):
+        self.btn_reverse.setEnabled(True)
+        if err:
+            self.txt_prompt.setPlainText(f"❌ 反推失败：{err}")
+            self.txt_negative.clear()
+            return
+        self.txt_prompt.setPlainText(prompt)
+        self.txt_negative.setPlainText(neg)
+
+    def _copy_positive(self):
+        QGuiApplication.clipboard().setText(self.txt_prompt.toPlainText())
+
+    def _copy_negative(self):
+        QGuiApplication.clipboard().setText(self.txt_negative.toPlainText())
+
+
 class VectorSearchPage(BasePage):
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
@@ -406,9 +543,10 @@ class VectorSearchPage(BasePage):
         self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
         page_row.addWidget(self.lbl_stat)
-        self.btn_copy_url = QPushButton("📋 复制地址")
-        self.btn_copy_url.setObjectName("secondary_button")
-        self.btn_copy_url.clicked.connect(self._copy_selected_url)
+        self.btn_copy_url = QPushButton("🚀 一键成片")
+        self.btn_copy_url.setObjectName("primary_button")
+        self.btn_copy_url.setToolTip("把选中的素材（图片/视频混合可多选）作为成片素材来源，跳转到「一键成片」自动填充。")
+        self.btn_copy_url.clicked.connect(self._send_to_compile)
         page_row.addWidget(self.btn_copy_url)
         right_lay.addLayout(page_row)
 
@@ -714,28 +852,76 @@ class VectorSearchPage(BasePage):
         QGuiApplication.clipboard().setText(url)
         self.lbl_stat.setText(f"已复制地址: {url}")
 
+    def _send_to_compile(self):
+        """把选中素材发送到「一键成片」（支持多个，图片+视频混合）。"""
+        items = self._selected_items()
+        if not items:
+            self.lbl_stat.setText("⚠ 请先在缩略图右上角方框选择素材")
+            return
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            self.lbl_stat.setText("❌ 无法访问主窗口")
+            return
+        materials = []
+        for it in items:
+            d = it.data(Qt.UserRole) or {}
+            mid = d.get("mid")
+            raw = d.get("item") or {}
+            if not mid:
+                continue
+            mtype = (d.get("media_type") or raw.get("media_type") or "image").lower()
+            materials.append({
+                "material_id": str(mid),
+                "filename": raw.get("filename") or it.text() or str(mid),
+                "media_type": mtype,
+                "path": raw.get("path") or "",
+                "url": _serve_url(mid),
+            })
+        if not materials:
+            self.lbl_stat.setText("⚠ 未选择到有效素材")
+            return
+        # 切换到一键成片页（第 34 页）并填充素材列表
+        try:
+            mw.switch_page(34)
+            tool = getattr(mw, "compile_video_tool", None)
+            if tool is None:
+                # 恢复当前页面
+                mw.switch_page(39)
+                self.lbl_stat.setText("❌ 一键成片页未加载")
+                return
+            tool.import_materials(materials)
+        except Exception as e:
+            self.lbl_stat.setText(f"❌ 跳转失败: {e}")
+
     def _on_item_double_clicked(self, item):
-        """双击卡片：图片弹大图预览，视频提示用地址打开。"""
+        """双击卡片：图片弹大图预览（右侧反推提示词），视频弹播放器预览。"""
         d = item.data(Qt.UserRole) or {}
         mid = d.get("mid")
         mtype = (d.get("media_type") or "").lower()
         if not mid:
             return
         if mtype == "video":
-            dlg = VideoPreviewDialog(_serve_url(mid), item.text(), self.parent_widget)
+            dlg = VideoPreviewDialog(_serve_url(mid), item.text(), mid, mtype, self.parent_widget)
             dlg.exec()
             return
-        # 图片：异步加载原图并弹大图预览
+        # 图片：异步加载原图并弹大图预览（左图右提示词面板）
         dlg = QDialog(self.parent_widget)
         dlg.setWindowTitle(f"预览 - {item.text()}")
-        dlg.setMinimumSize(500, 500)
-        dlg.resize(720, 720)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(8, 8, 8, 8)
+        dlg.setMinimumSize(900, 560)
+        dlg.resize(1120, 680)
+        root_lay = QHBoxLayout(dlg)
+        root_lay.setContentsMargins(8, 8, 8, 8)
+        root_lay.setSpacing(8)
+
+        img_area = QVBoxLayout()
         lbl = QLabel("加载中…")
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setStyleSheet("background:#000;color:#888;")
-        lay.addWidget(lbl, 1)
+        img_area.addWidget(lbl, 1)
+        root_lay.addLayout(img_area, 1)
+
+        panel = PromptReversePanel(mid, mtype)
+        root_lay.addWidget(panel, 0)
 
         def on_loaded(_mid, data):
             if not data:
@@ -746,7 +932,7 @@ class VectorSearchPage(BasePage):
                 sc = pm.scaled(lbl.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 lbl.setPixmap(sc)
 
-        w = self.track_worker(_ThumbWorker(mid))
+        w = self.track_worker(_FullImageWorker(mid))
         w.finished.connect(on_loaded)
         w.start()
         dlg.exec()
@@ -755,26 +941,28 @@ class VectorSearchPage(BasePage):
     # ── 本页多选（相册式：右上角角标，单击切换）────────────────────────
     @staticmethod
     def _draw_corner_badge(base_pm, checked):
-        """在缩略图右上角绘制相册式选择角标（未选=半透明空圈，选中=绿圈+对勾）。"""
+        """在缩略图右上角绘制选择方框复选框（未选=空方框，选中=绿底+白勾）。"""
         pm = QPixmap(base_pm)
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
-        r = 20
-        x = pm.width() - r - 5
-        y = 5
+        box = 22
+        x = pm.width() - box - 6
+        y = 6
+        rect = QRect(x, y, box, box)
         if checked:
             p.setBrush(QColor("#2ecc71"))
-        else:
-            p.setBrush(QColor(15, 15, 20, 200))
-        p.setPen(QPen(QColor("white"), 2))
-        p.drawEllipse(x, y, r, r)
-        if checked:
-            pen = QPen(QColor("white"), 3)
+            p.setPen(QPen(QColor("white"), 1.6))
+            p.drawRoundedRect(rect, 4, 4)
+            pen = QPen(QColor("white"), 2.6)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             p.setPen(pen)
-            p.drawLine(x + 5, y + r * 0.55, x + r * 0.42, y + r * 0.82)
-            p.drawLine(x + r * 0.42, y + r * 0.82, x + r * 0.8, y + r * 0.22)
+            p.drawLine(x + 5, y + box * 0.55, x + box * 0.42, y + box * 0.82)
+            p.drawLine(x + box * 0.42, y + box * 0.82, x + box * 0.78, y + box * 0.22)
+        else:
+            p.setBrush(QColor(15, 15, 20, 190))
+            p.setPen(QPen(QColor("#c3c6d2"), 1.4))
+            p.drawRoundedRect(rect, 4, 4)
         p.end()
         return pm
 
@@ -786,17 +974,23 @@ class VectorSearchPage(BasePage):
             meta = (lw_item.data(Qt.UserRole) or {}) if lw_item is not None else {}
             mtype = (meta.get("media_type") or "").lower()
             base = self._pm_audio if mtype == "audio" else (self._pm_video if mtype == "video" else self._pm_placeholder)
-        if mid and mid in self._selected_mids:
-            base = self._draw_corner_badge(base, True)
+        if mid:
+            base = self._draw_corner_badge(base, mid in self._selected_mids)
         lw_item.setIcon(base)
 
     def _on_item_clicked(self, item):
-        """相册式：单击缩略图切换选择/取消选择。"""
+        """单击：仅点击右上角选择方框区域才切换选择；其余单击仅记录当前项（双击预览）。"""
         d = item.data(Qt.UserRole) or {}
         mid = d.get("mid")
         if not mid:
             return
         self._last_clicked_mid = mid
+        # 判断点击是否落在右上角选择区域（图标右上角 ~40x40）
+        vp_pos = self.grid.viewport().mapFromGlobal(QCursor.pos())
+        item_rect = self.grid.visualItemRect(item)
+        badge_zone = QRect(item_rect.right() - 42, item_rect.top() + 2, 40, 40)
+        if not badge_zone.contains(vp_pos):
+            return
         if mid in self._selected_mids:
             self._selected_mids.discard(mid)
         else:

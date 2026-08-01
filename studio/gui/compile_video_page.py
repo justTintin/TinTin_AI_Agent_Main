@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QTextBrowser, QWidget, QTabWidget, QButtonGroup,
     QRadioButton, QDialog, QDialogButtonBox, QFormLayout, QTimeEdit,
+    QListWidget, QListWidgetItem,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -212,6 +213,7 @@ class CompileVideoPage(BasePage):
         self._product_mgr = ProductLibraryManager()
         self._last_results = []          # 最近一次成片路径列表
         self._self_check_data = None
+        self._materials = []             # 从素材检索带过来的素材列表
 
     # ════════════════════════════════════════════════════════════════════════
     #  setup：构建界面（顶层 QTabWidget：产品成片 + 脚本成片）
@@ -325,6 +327,23 @@ class CompileVideoPage(BasePage):
         self.in_folder = self._file_row(right_lay, "镜头素材目录（留空=按产品自动匹配）",
                                         self._browse_folder, folder=True,
                                         placeholder="留空则按产品自动从素材库匹配")
+        # 素材列表（来自素材检索）
+        mat_header = QHBoxLayout()
+        mat_header.addWidget(QLabel("📁 素材列表（来自素材检索，可选）"))
+        mat_header.addStretch(1)
+        self.btn_clear_materials = QPushButton("清空")
+        self.btn_clear_materials.setObjectName("secondary_button")
+        self.btn_clear_materials.clicked.connect(self._clear_materials)
+        mat_header.addWidget(self.btn_clear_materials)
+        right_lay.addLayout(mat_header)
+        self.material_list = QListWidget()
+        self.material_list.setMaximumHeight(120)
+        right_lay.addWidget(self.material_list)
+        self.lbl_material_count = QLabel("已选 0 个素材（可在「素材检索」选择后点击「一键成片」带入）")
+        self.lbl_material_count.setObjectName("muted_text")
+        self.lbl_material_count.setWordWrap(True)
+        right_lay.addWidget(self.lbl_material_count)
+
         self.in_audio = self._file_row(right_lay, "配音音频(可选)", self._browse_audio,
                                        placeholder="wav/mp3/m4a，留空则无声")
         # TTS 一键配音
@@ -906,6 +925,7 @@ class CompileVideoPage(BasePage):
             "intro": self.in_intro.text().strip(),
             "predict_platform": self.combo_predict_platform.currentText(),
             "autocheck": self.chk_autocheck.isChecked(),
+            "materials": self._materials or [],
         }
 
     @staticmethod
@@ -1149,6 +1169,24 @@ class CompileVideoPage(BasePage):
         ts = _dt.now().strftime("%H:%M:%S")
         self.log_box.append(f"[{ts}] {text}")
         self.log_box.verticalScrollBar().setValue(self.log_box.verticalScrollBar().maximum())
+
+    def import_materials(self, materials):
+        """从素材检索带入素材列表（支持多个、图片+视频混合）。"""
+        self._materials = list(materials or [])
+        self.material_list.clear()
+        for m in self._materials:
+            fname = m.get("filename") or m.get("material_id") or ""
+            mtype = (m.get("media_type") or "").lower()
+            icon = {"video": "🎬", "image": "🖼️", "audio": "🎵"}.get(mtype, "📁")
+            item = QListWidgetItem(f"{icon} {fname}")
+            item.setData(Qt.UserRole, m)
+            self.material_list.addItem(item)
+        self.lbl_material_count.setText(f"已选 {len(self._materials)} 个素材（图片/视频混合）")
+
+    def _clear_materials(self):
+        self._materials = []
+        self.material_list.clear()
+        self.lbl_material_count.setText("已选 0 个素材（可在「素材检索」选择后点击「一键成片」带入）")
 
     def _file_row(self, parent, label, on_browse, folder=False, placeholder=""):
         parent.addWidget(QLabel(label))

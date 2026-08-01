@@ -617,31 +617,16 @@ class VoiceClonePage(BasePage):
         if not samples:
             self.ref_audio_combo.addItem("❌ 未找到预设声音样本", "")
             
-        self.ref_audio_combo.addItem("📂 浏览本地音频文件...", "custom")
         
-        # Set default selection
+        # Set default selection and fill its reference text.
+        # SearchableComboBox.addItem 会以 blockSignals 选中第 0 项，
+        # 因此这里需手动触发一次以填充默认样本的参考文案。
         if self.ref_audio_combo.count() > 0:
             self.ref_audio_combo.setCurrentIndex(0)
+            self._on_ref_audio_combo_changed(0)
             
     def _on_ref_audio_combo_changed(self, index):
         data = self.ref_audio_combo.currentData()
-        if data == "custom":
-            self.ref_audio_combo.blockSignals(True)
-            path, _ = QFileDialog.getOpenFileName(
-                self.parent_widget,
-                "选择声音样本",
-                "",
-                "Audio Files (*.wav *.mp3 *.m4a);;All Files (*)"
-            )
-            self.ref_audio_combo.blockSignals(False)
-            
-            if path:
-                self._set_custom_ref_audio(path)
-            else:
-                if self.ref_audio_combo.count() > 1:
-                    self.ref_audio_combo.setCurrentIndex(0)
-            return
-
         # Enable play and transcribe button if we have a valid path
         path = self.get_ref_audio_path()
         has_valid_path = bool(path and os.path.exists(path))
@@ -688,9 +673,7 @@ class VoiceClonePage(BasePage):
 
     def get_ref_audio_path(self):
         data = self.ref_audio_combo.currentData()
-        if data and data != "custom":
-            return data
-        return ""
+        return data or ""
 
     def _play_ref_audio(self):
         path = self.get_ref_audio_path()

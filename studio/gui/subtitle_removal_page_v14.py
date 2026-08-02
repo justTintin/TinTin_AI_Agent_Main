@@ -6,6 +6,7 @@ import subprocess
 import traceback
 import time
 import math
+import json
 import av
 from PIL import Image, ImageDraw
 
@@ -1280,7 +1281,7 @@ class SubtitleRemovalPageV14(BasePage):
         elif purpose == "watermark":
             # 去水印：可旋转四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
             polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]
-            sub_areas = _json.dumps(polys)
+            sub_areas = json.dumps(polys)
         else:
             # 去字幕：轴对齐矩形相对坐标 [[ymin,ymax,xmin,xmax], ...]
             fw, fh = self.frame_width, self.frame_height
@@ -1289,7 +1290,7 @@ class SubtitleRemovalPageV14(BasePage):
                 x0, y0, w, h = _quad_aabb(q)
                 rects.append([round(y0 / fh, 4), round((y0 + h) / fh, 4),
                               round(x0 / fw, 4), round((x0 + w) / fw, 4)])
-            sub_areas = _json.dumps(rects)
+            sub_areas = json.dumps(rects)
 
         # 去水印时附带水印文字（帮助服务端精准定位要去除的水印）
         watermark_text = ""

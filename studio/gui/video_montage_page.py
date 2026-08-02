@@ -520,7 +520,10 @@ class VideoMontagePage(BasePage):
         for mt in materials:
             p = (mt.get("path") or "").strip()
             mid = mt.get("material_id")
-            if p and os.path.isfile(p):
+            mtype = (mt.get("media_type") or "").lower()
+            is_img = mtype in ("image", "jpg", "jpeg", "png", "webp", "bmp")
+            # 图片素材一律走 material://（服务端自动转静态片段），避免进本地分割
+            if (not is_img) and p and os.path.isfile(p):
                 ap = os.path.abspath(p)
                 if ap in existing:
                     continue
@@ -562,6 +565,21 @@ class VideoMontagePage(BasePage):
         msg = "已从素材检索带入： " + "；".join(parts) if parts else "未带入素材"
         self.stage_label.setText(msg)
         log.info(f"[素材检索→智能混剪] {msg}")
+        self._refresh_external_clip_list()
+
+    def _refresh_external_clip_list(self):
+        """把素材检索地址(material://)展示到独立列表（有才显示）。"""
+        lst = getattr(self, "external_clip_list", None)
+        lbl = getattr(self, "external_clip_label", None)
+        urls = getattr(self, "external_clip_urls", None) or []
+        has = bool(urls)
+        if lst is not None:
+            lst.clear()
+            for u in urls:
+                lst.addItem(u)
+            lst.setVisible(has)
+        if lbl is not None:
+            lbl.setVisible(has)
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):

@@ -525,7 +525,7 @@ class VectorSearchPage(BasePage):
         self.btn_copy_url.clicked.connect(self._send_to_compile)
         sel_row.addWidget(self.btn_copy_url)
         self.btn_montage = QPushButton("🎬 智能混剪")
-        self.btn_montage.setObjectName("secondary_button")
+        self.btn_montage.setObjectName("primary_button")
         self.btn_montage.setToolTip("把选中的视频素材发送到「智能混剪」进行分镜/拼接（素材需在本地/NAS 可访问）。")
         self.btn_montage.clicked.connect(self._send_to_montage)
         sel_row.addWidget(self.btn_montage)

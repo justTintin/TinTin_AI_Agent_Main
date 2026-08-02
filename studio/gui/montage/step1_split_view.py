@@ -49,6 +49,17 @@ class Step1SplitView(BaseStepView):
         self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)
         card_layout.addWidget(self.main_page.video_list)
 
+        # 素材检索地址（material://，直用于服务端拼接；默认隐藏，有数据才显示）
+        self.main_page.external_clip_label = QLabel("📁 素材检索地址 (material://，直用于拼接):")
+        self.main_page.external_clip_label.setVisible(False)
+        card_layout.addWidget(self.main_page.external_clip_label)
+        self.main_page.external_clip_list = QListWidget()
+        self.main_page.external_clip_list.setFixedHeight(60)
+        self.main_page.external_clip_list.setTextElideMode(Qt.ElideRight)
+        self.main_page.external_clip_list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.main_page.external_clip_list.setVisible(False)
+        card_layout.addWidget(self.main_page.external_clip_list)
+
         # SceneDetect Config
         split_row = QHBoxLayout()
         split_row.addWidget(QLabel("分割阈值 (10-100):"))

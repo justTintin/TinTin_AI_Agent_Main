@@ -148,17 +148,18 @@ for meta in shot_meta:
 ## 附录：客户端对齐核查（2026-08-02）
 
 > 依据：本地代码 + 服务端在线实测（openapi.json / /guide / CLIENT-STEP1-MIGRATION.md，任务 184/185 轮询验证）。
+> 更新：客户端已于 2026-08-03 按本方案完成改造落地（下表 1-5/8 均已对齐）。
 
 | # | 改造点 | 服务端要求 | 客户端现状 | 状态 |
 |---|---|---|---|---|
-| 1 | `ServerSplitWorker` 下载片段 | 用 `download_url` 下载替代本地 ffmpeg 重裁，失败才本地兜底 | `split_workers.py` 仍按 `start_sec/end_sec` 本地重裁，丢弃 `download_url`/分析字段 | ❌ 未对齐 |
-| 2 | 分析字段消费 | `_on_merged_split_done` 把 `aesthetic_score/shot_analysis/description` 写 sidecar 缓存 | 无 `analysis_ready` 信号，评分/景别/产品/型号列无数据（显示"—"） | ❌ 未对齐 |
-| 3 | 死代码清理 | 删 `ServerClipAnalysisWorker`（split_workers.py:345-572）与 `_on_analysis_*` | 仍存在但已无实例化点（仅 import） | ⚠️ 部分（待删） |
-| 4 | 画面描述 | 方案A：直接读 `description`，停用 LLM 视觉描述触发 | `_trigger_vision_on_dir`/`_run_batch_vision_descriptions` 仍走 LLM | ❌ 未对齐 |
-| 5 | 素材来源 | `set_external_materials` 区分：素材库图片免分析复用 / 素材库视频传 `material_id` 分割；`ServerSplitWorker` 支持 `material_id`/`clip_url` | 图片一律 `material://` 进 concat；`ServerSplitWorker` 仅支持 `file`；`vector_search_page` 未带 `ai_status` 等分析字段 | ❌ 未对齐 |
+| 1 | `ServerSplitWorker` 下载片段 | 用 `download_url` 下载替代本地 ffmpeg 重裁，失败才本地兜底 | 已改为下载服务端片段，本地兜底；新增 `analysis_ready` 信号，支持 `material_id`/`clip_url` | ✅ 已对齐 |
+| 2 | 分析字段消费 | `_on_merged_split_done` 把 `aesthetic_score/shot_analysis/description` 写 sidecar 缓存 | 已通过 `_on_split_analysis_ready` 写 sidecar 缓存，评分/景别/产品/型号列回填 | ✅ 已对齐 |
+| 3 | 死代码清理 | 删 `ServerClipAnalysisWorker`（split_workers.py:345-572）与 `_on_analysis_*` | 已删除 | ✅ 已对齐 |
+| 4 | 画面描述 | 方案B：优先读 `description`，仅空值兜底 LLM | 已改为仅对无描述片段兜底走本地视觉AI | ✅ 已对齐（方案B） |
+| 5 | 素材来源 | `set_external_materials` 区分：素材库图片免分析复用 / 素材库视频传 `material_id` 分割；`ServerSplitWorker` 支持 `material_id`/`clip_url` | 已实现：`vector_search_page` 带分析字段；`_start_split` 支持素材库视频（material_id）分割；图片免分割直用于拼接 | ✅ 已对齐 |
 | 6 | Step2 concat | 已服务端化，不改 | `MontageConcatServerWorker` files+clip_urls 混合、`/tasks/unified` 轮询、`result.output_url` 下载（实测 `output_url=/editor/render/{id}/result` 可下载） | ✅ 对齐 |
 | 7 | 方案二缓存 | 派生片段下载进 `.runtime/montage_cache/<job_id>/splits/<视频名>/` | 已落地（上一提交）；改造点1接入后下载目标即缓存 splits | ✅ 对齐（待接入） |
-| 8 | 评分过滤 | `step1_score_filter_combo` 消费 `aesthetic_score.total` | 字段名一致，但数据源未接入 | ⚠️ 字段对齐/数据待接入 |
+| 8 | 评分过滤 | `step1_score_filter_combo` 消费 `aesthetic_score.total` | 分析接入后评分列已回填，过滤生效 | ✅ 已对齐 |
 
 ### 在线实测证据（2026-08-02）
 

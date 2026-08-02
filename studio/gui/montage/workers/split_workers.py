@@ -187,7 +187,13 @@ class ServerSplitWorker(BaseWorker):
             elif self.clip_url:
                 data["clip_url"] = self.clip_url
             elif self.video_path and os.path.isfile(self.video_path):
-                files = {"file": (os.path.basename(self.video_path), open(self.video_path, "rb"), "video/mp4")}
+                # 按扩展名设置 mime：图片也可作为静态镜头上传
+                _ext = os.path.splitext(self.video_path)[1].lower()
+                _mime = {".mp4": "video/mp4", ".m4v": "video/m4v", ".mov": "video/quicktime",
+                         ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
+                         ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                         ".webp": "image/webp", ".bmp": "image/bmp", ".gif": "image/gif"}.get(_ext, "video/mp4")
+                files = {"file": (os.path.basename(self.video_path), open(self.video_path, "rb"), _mime)}
             else:
                 raise RuntimeError("没有可分割的素材（需 file / material_id / clip_url 之一）")
 

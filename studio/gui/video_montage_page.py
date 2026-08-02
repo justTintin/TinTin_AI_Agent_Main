@@ -1772,16 +1772,22 @@ class VideoMontagePage(BasePage):
     # --- Step 1 single video split ---
     # [3·分割]  _start_split
     def _start_split(self):
-        """合并后的智能镜头分割入口：对列表中所有本地视频 + 素材库视频逐个处理。
+        """合并后的智能镜头分割入口：对列表中所有素材（本地/素材库的视频和图片）逐个处理。
 
-        每个素材：服务端 /montage/split 分割 + 逐镜分析，片段下载到任务级缓存 splits/；
-        本地视频无法分割时自动挑取精华片段。图片素材免分割（素材库已分析）直用于拼接。
+        每个素材：服务端 /montage/split 处理 + 逐镜分析，片段下载到任务级缓存 splits/；
+        视频做镜头分割，图片转静态镜头并分析（is_image + 评分/景别/产品），
+        分析完成后全部镜头进入下方镜头重组。本地视频无法分割时自动挑取精华片段。
         """
         if (self.worker and self.worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
             QMessageBox.warning(self.parent_widget, "任务进行中",
                                 "上一个任务仍在运行中，请等待完成或先停止。")
             return
+
+        _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif")
+
+        def _is_img_path(p):
+            return os.path.splitext(p or "")[1].lower() in _IMAGE_EXTS
 
         items = []
         for i in range(self.video_list.count()):
@@ -1792,21 +1798,18 @@ class VideoMontagePage(BasePage):
             if not t:
                 continue
             if self._is_local_file_item(it):
+                # 本地视频/图片都进分割（图片由服务端转静态镜头+分析）
                 items.append({"kind": "local", "path": t, "display": os.path.basename(t)})
             elif t.startswith("material://"):
-                # 素材库地址：视频参与服务端分割（传 material_id/clip_url）；图片免分割（素材库已分析）
-                _meta = it.data(Qt.UserRole) or {}
-                _mtype = (_meta.get("media_type") or "").lower()
-                _is_img = _mtype in ("image", "jpg", "jpeg", "png", "webp", "bmp")
-                if not _is_img:
-                    mid = t[len("material://"):].split(" ")[0].strip()
-                    if mid:
-                        items.append({"kind": "server", "material_id": mid,
-                                      "clip_url": f"material://{mid}", "display": t})
+                # 素材库地址（视频/图片）都参与服务端处理：视频分割，图片转静态镜头+分析
+                mid = t[len("material://"):].split(" ")[0].strip()
+                if mid:
+                    items.append({"kind": "server", "material_id": mid,
+                                  "clip_url": f"material://{mid}", "display": t})
         if not items:
             QMessageBox.warning(self.parent_widget, "无素材",
-                                "上方列表中没有可分割的本地视频或素材库视频。\n"
-                                "（图片素材免分割，直接以素材检索地址用于服务端拼接。）")
+                                "上方列表中没有可处理的素材。\n"
+                                "请先添加本地视频/图片，或从素材检索带入素材。")
             return
 
         dur = self.spin_highlight_sec.value()
@@ -1840,11 +1843,14 @@ class VideoMontagePage(BasePage):
         else:
             out_summary = f"{len(per_video_splits)} 个素材各自工作目录\n(例: {per_video_splits[0]})"
 
+        local_img = sum(1 for x in items if x["kind"] == "local" and _is_img_path(x["path"]))
+        local_vid = max(0, local_n - local_img)
         confirm_msg = (f"将对列表中的 {len(items)} 个素材逐个处理：\n"
-                       f"· 本地视频 {local_n} 个：服务端分割 + 逐镜分析；\n"
-                       f"· 素材库视频 {server_n} 个：服务端按素材库地址分割 + 逐镜分析；\n"
+                       f"· 本地视频 {local_vid} 个：服务端分割 + 逐镜分析；\n"
+                       f"· 本地图片 {local_img} 个：服务端转静态镜头 + 分析；\n"
+                       f"· 素材库素材 {server_n} 个：服务端按素材库地址分割/转静态镜头 + 分析；\n"
                        f"· 无法分割的本地视频，自动挑出一段约 {dur:.0f} 秒的精华片段。\n"
-                       f"· 图片素材免分割，保持素材检索地址直用于服务端拼接。\n")
+                       f"· 分割/分析完成后，全部镜头进入下方镜头重组。\n")
         confirm_msg += (f"\n分割片段输出目录（任务级缓存，不复制原始素材）：\n{out_summary}\n"
                         f"注意：会先清空缓存各目录里已有的分镜片段。\n\n确认继续？")
         reply = QMessageBox.question(

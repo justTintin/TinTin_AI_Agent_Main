@@ -438,9 +438,8 @@ class VideoMontagePage(BasePage):
     def _refresh_source_root_hint(self):
         paths = []
         for i in range(self.video_list.count()):
-            p = self.video_list.item(i).text().strip()
-            if p:
-                paths.append(p)
+            if self._is_local_file_item(self.video_list.item(i)):
+                paths.append(self.video_list.item(i).text().strip())
         if not paths:
             self.folder_path_input.clear()
             return
@@ -462,9 +461,8 @@ class VideoMontagePage(BasePage):
 
         existing = set()
         for i in range(self.video_list.count()):
-            t = self.video_list.item(i).text().strip()
-            if t:
-                existing.add(os.path.abspath(t))
+            if self._is_local_file_item(self.video_list.item(i)):
+                existing.add(os.path.abspath(self.video_list.item(i).text().strip()))
 
         added = 0
         for p in file_paths:
@@ -483,8 +481,8 @@ class VideoMontagePage(BasePage):
         # 走「合并扫描」分支展示全部素材的分镜片段（否则会只显示列表第一项的片段）。
         all_splits_dirs = []
         for i in range(self.video_list.count()):
-            _p = self.video_list.item(i).text().strip()
-            if _p:
+            if self._is_local_file_item(self.video_list.item(i)):
+                _p = self.video_list.item(i).text().strip()
                 _vdir = os.path.dirname(_p)
                 _vbase = os.path.splitext(os.path.basename(_p))[0]
                 all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
@@ -497,6 +495,14 @@ class VideoMontagePage(BasePage):
             self.stage_label.setText("所选素材已在列表中，无新增。")
         else:
             self.stage_label.setText(f"已新增 {added} 个素材到列表。")
+
+    @staticmethod
+    def _is_local_file_item(item):
+        """列表项是否为本地可访问文件（material:// 等地址项返回 False）。"""
+        if item is None:
+            return False
+        p = item.text().strip()
+        return bool(p) and not p.startswith("material://") and os.path.isfile(p)
 
     def set_external_materials(self, materials):
         """从「素材检索」带入多个素材（仅本地/NAS 可访问路径会加入）。
@@ -515,7 +521,7 @@ class VideoMontagePage(BasePage):
         added = 0
         skipped = 0
         paths = []
-        # 素材检索地址（material://{id}）：无本地路径时直接作 concat 的 clip_urls（服务端按素材库解析）
+        # 素材检索地址（material://{id}）：直接作 concat 的 clip_urls（服务端按素材库解析），并统一显示在素材列表
         self.external_clip_urls = []
         for mt in materials:
             p = (mt.get("path") or "").strip()
@@ -535,18 +541,27 @@ class VideoMontagePage(BasePage):
                 added += 1
             elif mid:
                 self.external_clip_urls.append(f"material://{mid}")
+                label = f"material://{mid} · {mt.get('filename') or mid}"
+                if label not in existing:
+                    existing.add(label)
+                    self.video_list.addItem(QListWidgetItem(label))
+                    added += 1
             else:
                 skipped += 1
         if added:
-            try:
-                common_dir = os.path.commonpath([os.path.dirname(os.path.abspath(x)) for x in paths])
-            except Exception:
-                common_dir = os.path.dirname(os.path.abspath(paths[0]))
-            self.folder_path_input.setText(common_dir)
+            common_dir = ""
+            if paths:
+                try:
+                    common_dir = os.path.commonpath([os.path.dirname(os.path.abspath(x)) for x in paths])
+                except Exception:
+                    common_dir = os.path.dirname(os.path.abspath(paths[0]))
+            if common_dir:
+                self.folder_path_input.setText(common_dir)
             all_splits_dirs = []
             for i in range(self.video_list.count()):
-                _p = self.video_list.item(i).text().strip()
-                if _p:
+                _it = self.video_list.item(i)
+                if self._is_local_file_item(_it):
+                    _p = _it.text().strip()
                     _vdir = os.path.dirname(_p)
                     _vbase = os.path.splitext(os.path.basename(_p))[0]
                     all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
@@ -557,29 +572,12 @@ class VideoMontagePage(BasePage):
             self._check_split_clips_exist()
         parts = []
         if added:
-            parts.append(f"{added} 个本地素材已加入")
-        if self.external_clip_urls:
-            parts.append(f"{len(self.external_clip_urls)} 个素材检索地址(material://)将直用于拼接")
+            parts.append(f"{added} 个素材已加入（含素材检索地址）")
         if skipped:
             parts.append(f"{skipped} 个无效素材已跳过")
         msg = "已从素材检索带入： " + "；".join(parts) if parts else "未带入素材"
         self.stage_label.setText(msg)
         log.info(f"[素材检索→智能混剪] {msg}")
-        self._refresh_external_clip_list()
-
-    def _refresh_external_clip_list(self):
-        """把素材检索地址(material://)展示到独立列表（有才显示）。"""
-        lst = getattr(self, "external_clip_list", None)
-        lbl = getattr(self, "external_clip_label", None)
-        urls = getattr(self, "external_clip_urls", None) or []
-        has = bool(urls)
-        if lst is not None:
-            lst.clear()
-            for u in urls:
-                lst.addItem(u)
-            lst.setVisible(has)
-        if lbl is not None:
-            lbl.setVisible(has)
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
@@ -800,7 +798,7 @@ class VideoMontagePage(BasePage):
         splits_dir = ""
         if dir_path and os.path.exists(dir_path):
             selected_item = self.video_list.currentItem()
-            video_path = selected_item.text() if selected_item else ""
+            video_path = selected_item.text() if (selected_item and self._is_local_file_item(selected_item)) else ""
             if not video_path and hasattr(self, "processing_video_path") and self.processing_video_path:
                 video_path = self.processing_video_path
             log.info(f"[DIAG _check_split_clips_exist] resolved video_path='{video_path}' (source={'currentItem' if selected_item else 'processing_video_path'})")
@@ -1688,11 +1686,10 @@ class VideoMontagePage(BasePage):
 
         paths = []
         for i in range(self.video_list.count()):
-            txt = self.video_list.item(i).text().strip()
-            if txt:
-                paths.append(txt)
+            if self._is_local_file_item(self.video_list.item(i)):
+                paths.append(self.video_list.item(i).text().strip())
         if not paths:
-            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可处理的视频。")
+            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可本地分割的视频（素材检索地址素材将直用于服务端拼接）。")
             return
 
         dur = self.spin_highlight_sec.value()
@@ -1965,11 +1962,10 @@ class VideoMontagePage(BasePage):
 
         paths = []
         for i in range(self.video_list.count()):
-            txt = self.video_list.item(i).text().strip()
-            if txt:
-                paths.append(txt)
+            if self._is_local_file_item(self.video_list.item(i)):
+                paths.append(self.video_list.item(i).text().strip())
         if not paths:
-            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可处理的视频。")
+            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可本地分割的视频（素材检索地址素材将直用于服务端拼接）。")
             return
 
         dur = self.spin_highlight_sec.value()

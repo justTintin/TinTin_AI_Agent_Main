@@ -1,9 +1,9 @@
 # 服务端接口文档（客户端对接用）
 
-> 服务端地址：`http://192.168.111.28:8000`（2026-07-29 实测，原 .19 已迁移）
+> 服务端地址：`http://192.168.111.28:8000`（2026-08-02 实测，原 .19 已迁移）
 > OpenAPI 规范：`http://192.168.111.28:8000/openapi.json`
-> 框架：FastAPI (Python)，实测共 153 个路径
-> 最后同步：2026-07-29
+> 框架：FastAPI (Python)，实测共 238 个路径
+> 最后同步：2026-08-02
 
 ⚠️ **重要原则**：客户端不得自行定义接口路径和协议，必须严格对照本文档（即服务端 OpenAPI 实际暴露的端点）。
 
@@ -632,6 +632,91 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 
 ---
 
+
+## 十四、模板接口（统一模板 /templates/* + 相关模板组）
+
+> ℹ️ 客户端应优先使用**统一模板接口**（OpenAPI tag：模板统一，`/templates/*`）。
+> 旧 `/template/*`（成片模板）与 `/mg/templates`（MG 动画）仍保留兼容，但新代码应走统一接口。
+
+### 14.1 统一模板 CRUD（模板统一）
+
+| 端点 | Method | 说明 |
+|------|--------|------|
+| `/templates` | GET | 模板列表，`?type=` 过滤 `video/motion/cover`（实测还有 `beat`），含完整 params schema + effects |
+| `/templates` | POST | 保存/创建模板（同 id 覆盖更新；内置模板不可覆盖） |
+| `/templates/{template_id}` | GET | 查询单个模板完整定义 |
+| `/templates/{template_id}` | PUT | 更新自定义模板（整体替换） |
+| `/templates/{template_id}` | DELETE | 删除自定义模板（内置不可删） |
+| `/templates/validate` | POST | 校验模板定义（`TemplateIn`）→ `{"ok": true}` |
+
+### 14.2 统一模板渲染 / 预览 / 分析
+
+| 端点 | Method | 说明 |
+|------|--------|------|
+| `/templates/analyze-video` | POST | 上传动效视频 → 分析画面 → 生成统一模板定义（multipart：`file` / `material_id`） |
+| `/templates/preview` | POST | 动效/封面模板单帧预览（Remotion still），body 同 `RenderIn` |
+| `/templates/render` | POST | **统一渲染入口**：按模板 type 分发到 Remotion / 剪辑引擎，body 为 `RenderIn`，返回任务 ID |
+| `/templates/render/beat` | POST | 音乐卡点成片渲染（multipart：`template_id`+`music` 必填，`videos[]`/`clip_urls`，`params` 为 JSON 字符串） |
+| `/templates/render/result/{task_id}` | GET | 统一渲染进度/结果查询（恒返回 JSON 状态） |
+| `/templates/render/download/{task_id}` | GET | 渲染结果下载（动效 mp4 / 成片 mp4） |
+
+**`GET /templates/render/result/{task_id}` 响应**（2026-08-02 实测）：
+
+```json
+{
+  "id": "c_xxxx",
+  "status": "pending | running | completed | failed",
+  "progress": 0,
+  "result": {
+    "output_url": "/templates/render/download/c_xxxx",
+    "output_path": "...",
+    "template": "mg_intro",
+    "type": "motion"
+  },
+  "error": null
+}
+```
+
+### 14.3 请求 Schema
+
+**`TemplateIn`**（POST/PUT `/templates`、`/templates/validate`）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | ✅ | `^[a-zA-Z0-9_\-]+$`，2~64 字符 |
+| name | string | ✅ | 1~80 字符 |
+| category | string | ❌ | 默认 `custom` |
+| type | string | ❌ | `video/motion/cover`，默认 `motion`（实测含 `beat`） |
+| canvas | object | ❌ | 如 `{"width":1080,"height":1920,"fps":30}` |
+| duration | number | ❌ | 0.5~120，默认 4.0 |
+| params | array | ❌ | `ParamDef[]` |
+| effects | object | ❌ | 视频效果定义（含 `{{参数}}` 占位符） |
+
+**`ParamDef`**：`name`（必填）、`type`（默认 string）、`default`、`label`、`required`、`options[]`。
+
+**`RenderIn`**（`/templates/render`、`/templates/preview`）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| template_id | string | ✅ | 模板 id |
+| params | object | ❌ | 模板参数（按 params schema），如 `{"topic":"...","bgm":"..."}` |
+| type | string | ❌ | 渲染模式，可选覆盖模板默认（`video/motion/cover`） |
+| ratio | string | ❌ | 画面比例，默认 `9:16` |
+| width / height | int | ❌ | 输出分辨率 |
+| scale | number | ❌ | 0.2~1.0，默认 1.0 |
+
+**`/templates/render/beat` multipart 字段**：`template_id`（必填）、`params`（JSON 字符串，默认 `"{}"`，覆盖模板默认风格参数 threshold/count/time_limit/min_duration/max_duration/transition/aspect 等）、`music`（必填）、`videos[]`、`clip_urls`。
+
+### 14.4 相关模板组（并存）
+
+| 组 | 端点 | 说明 |
+|----|------|------|
+| 成片模板（旧） | `/template/list` `/template/validate` `/template/import` `/template/export/{id}` `/template/generate` `/template/match` | 旧版成片模板（category 过滤），兼容保留 |
+| MG 动画 | `/mg/templates` 及 `/mg/templates/{template_id}` | MG 动画模板 CRUD（内置不可删） |
+| 花字模板 | `/textfx/templates` 及 `/textfx/templates/{template_id}` | 花字模板（zip 上传） |
+| LLM 模板 | `/llm/templates` | 内置 LLM 提供商模板 |
+
+---
 ## 附录：客户端常见错误对照
 
 | 客户端错误写法 | 正确接口 | 说明 |
@@ -641,3 +726,9 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 | 轮询 `GET /material/score_clip/{task_id}` | `GET /tasks/unified/{task_id}` | 统一任务查询接口 |
 | VSR 参数 `ymin/ymax/xmin/xmax` 分开传 | `sub_areas` JSON 字符串 | 三种格式：空(智能)/矩形/多边形，均为相对坐标（见 §七） |
 | VSR 跳过轮询直接拼 download URL | 先轮询 `GET /vsr/result/{task_id}` | 等完成后再取文件名下载 |
+| 客户端 `GET /template/list?category=cover` | `GET /templates?type=cover` | 统一模板接口按 type 过滤（motion/video/cover/beat） |
+| 客户端 `POST /template/generate` | `POST /templates/render` | 统一渲染入口，body 为 RenderIn（template_id + params） |
+| 客户端 `POST /template/import` | `POST /templates` | 统一保存/创建模板（同 id 覆盖） |
+| 客户端 `POST /template/validate` | `POST /templates/validate` | 统一模板校验 |
+| 客户端 `GET /template/export/{id}` | `GET /templates/{id}` | 统一模板详情查询 |
+| 客户端轮询模板渲染任务 | `GET /templates/render/result/{task_id}` | 统一渲染进度/结果；下载用 `GET /templates/render/download/{task_id}` |

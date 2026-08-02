@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame,
     QWidget, QComboBox, QListWidget, QListWidgetItem, QGraphicsView, QGraphicsScene,
     QGraphicsPixmapItem, QGraphicsTextItem, QGraphicsRectItem, QFileDialog, QSlider,
-    QSpinBox, QColorDialog, QCheckBox, QInputDialog, QProgressBar, QSplitter,
+    QSpinBox, QColorDialog, QCheckBox, QInputDialog, QProgressBar, QSplitter, QTabWidget, QGroupBox, QFormLayout, QScrollArea,
 )
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QPen
 from PySide6.QtCore import Qt, Signal
@@ -30,6 +30,26 @@ from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, mdi_icon
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
+from gui.mg_template_utils import (
+    RATIOS, FALLBACK_TEMPLATES, _param_meta, _template_backend, create_value_widget,
+    widget_value, set_widget_value, color_row, merge_templates,
+    fill_template_list, select_template_by_id,
+)
+from utils.template_server_client import list_templates as list_cover_templates, generate as generate_cover
+from gui.template_render_worker import TemplateRenderWorker
+
+class CoverTemplateLoadWorker(BaseWorker):
+    """异步从服务端 /template/list?category=cover 拉取封面模板。"""
+    finished = Signal(list)
+    phase = Signal(str)
+
+    def do_work(self):
+        self.phase.emit("正在加载封面模板列表...")
+        templates = list_cover_templates(category="cover", timeout=8)
+        self.finished.emit(templates)
+
+
+
 
 CANVAS_SIZES = {"16:9（横版）": (1280, 720), "9:16（竖版）": (720, 1280), "1:1（方形）": (1080, 1080)}
 # 安全区内边距（左, 上, 右, 下，占画布比例）。竖版按短视频平台预留右侧按钮、底部字幕/进度。
@@ -174,6 +194,10 @@ class CoverMakerPage(BasePage):
         self.template_path = ""
         self._prev_ratio = None
         self._worker = None
+        self._templates = []
+        self._current_template = None
+        self._template_form_widgets = {}
+        self._last_cover_png = ""
         self.safe_insets = {k: list(v) for k, v in SAFE_INSETS.items()}  # 可被用户/预设修改
 
     # ---------------- UI ----------------
@@ -188,14 +212,10 @@ class CoverMakerPage(BasePage):
 
         root.addWidget(self._build_top_bar())
 
-        body = QSplitter(Qt.Horizontal)
-        body.addWidget(self._build_layers_panel())
-        body.addWidget(self._build_canvas())
-        body.addWidget(self._build_edit_panel())
-        body.setStretchFactor(0, 1)
-        body.setStretchFactor(1, 3)
-        body.setStretchFactor(2, 1)
-        root.addWidget(body, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_layer_tab(), "图层编辑")
+        self.tabs.addTab(self._build_template_tab(), "模板封面")
+        root.addWidget(self.tabs, 1)
 
         srow = QHBoxLayout()
         self.status = QLabel(""); self.status.setObjectName("muted_text")
@@ -830,3 +850,250 @@ class CoverMakerPage(BasePage):
             self.status.setText("已导出：" + "、".join(os.path.basename(o) for o in outs))
         else:
             self.show_error("导出失败。")
+
+    # -------------- 图层编辑标签页（原有能力保留） --------------
+    def _build_layer_tab(self):
+        body = QSplitter(Qt.Horizontal)
+        body.addWidget(self._build_layers_panel())
+        body.addWidget(self._build_canvas())
+        body.addWidget(self._build_edit_panel())
+        body.setStretchFactor(0, 1)
+        body.setStretchFactor(1, 3)
+        body.setStretchFactor(2, 1)
+        return body
+
+    # -------------- 模板封面标签页（服务端 /template/generate 渲染） --------------
+    def _build_template_tab(self):
+        panel = QWidget()
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # 左侧：模板库
+        left = QFrame()
+        left.setObjectName("card")
+        left_lay = QVBoxLayout(left)
+        left_lay.setContentsMargins(12, 12, 12, 12)
+        left_lay.setSpacing(8)
+        left_lay.addWidget(QLabel("🎬 模板库"))
+        self.list_templates = QListWidget()
+        self.list_templates.currentItemChanged.connect(self._on_template_selected)
+        left_lay.addWidget(self.list_templates, 1)
+        btn_refresh = QPushButton("🔄 刷新")
+        btn_refresh.setObjectName("secondary_button")
+        btn_refresh.clicked.connect(self._load_templates)
+        left_lay.addWidget(btn_refresh)
+        layout.addWidget(left, 1)
+
+        # 中间：预览图
+        mid = QFrame()
+        mid.setObjectName("card")
+        mid_lay = QVBoxLayout(mid)
+        mid_lay.setContentsMargins(8, 8, 8, 8)
+        self.lbl_template_preview = QLabel("选择模板并点击预览")
+        self.lbl_template_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_template_preview.setMinimumHeight(240)
+        self.lbl_template_preview.setStyleSheet("background:#1a1a1a;color:#888;")
+        self.lbl_template_preview.setWordWrap(True)
+        mid_lay.addWidget(self.lbl_template_preview)
+        layout.addWidget(mid, 3)
+
+        # 右侧：参数 + 预览/导出
+        right = QFrame()
+        right.setObjectName("card")
+        right_lay = QVBoxLayout(right)
+        right_lay.setContentsMargins(12, 12, 12, 12)
+        right_lay.setSpacing(8)
+        right_lay.addWidget(QLabel("🎛 封面参数"))
+
+        ratio_row = QHBoxLayout()
+        ratio_row.addWidget(QLabel("比例"))
+        self.combo_template_ratio = QComboBox()
+        self.combo_template_ratio.addItems(RATIOS)
+        self.combo_template_ratio.setCurrentText("9:16")
+        ratio_row.addWidget(self.combo_template_ratio)
+        ratio_row.addStretch()
+        right_lay.addLayout(ratio_row)
+
+        self.template_params_group = QGroupBox("模板自定义参数")
+        tpl_form_lay = QVBoxLayout(self.template_params_group)
+        self.scroll_template_form = QScrollArea()
+        self.scroll_template_form.setWidgetResizable(True)
+        self.scroll_template_form.setFrameShape(QFrame.NoFrame)
+        self.template_form_container = QWidget()
+        self.template_form_layout = QFormLayout(self.template_form_container)
+        self.template_form_layout.setSpacing(8)
+        self.scroll_template_form.setWidget(self.template_form_container)
+        tpl_form_lay.addWidget(self.scroll_template_form)
+        right_lay.addWidget(self.template_params_group)
+        self.template_params_group.setVisible(False)
+
+        btn_row = QHBoxLayout()
+        btn_preview = QPushButton("🔍 预览")
+        btn_preview.setObjectName("secondary_button")
+        btn_preview.clicked.connect(self._preview_template)
+        btn_row.addWidget(btn_preview)
+        btn_export = QPushButton("💾 导出封面")
+        btn_export.setObjectName("primary_button")
+        btn_export.clicked.connect(self._export_template)
+        btn_row.addWidget(btn_export)
+        right_lay.addLayout(btn_row)
+        right_lay.addStretch()
+        layout.addWidget(right, 2)
+
+        self._load_templates()
+        return panel
+
+    # -------------- 模板相关方法 --------------
+    def _load_templates(self):
+        self._templates = list(FALLBACK_TEMPLATES)
+        fill_template_list(self.list_templates, self._templates)
+        w = CoverTemplateLoadWorker()
+        w.finished.connect(self._on_templates_loaded)
+        w.phase.connect(self.status.setText)
+        self.track_worker(w)
+        w.start()
+
+    def _on_templates_loaded(self, server_templates):
+        if not server_templates:
+            self.status.setText("⚠ 未从服务端加载到模板，使用内置模板")
+        self._templates = merge_templates(server_templates, FALLBACK_TEMPLATES)
+        current_id = self._current_template.get("id") if self._current_template else None
+        fill_template_list(self.list_templates, self._templates, current_id=current_id)
+
+    def _on_template_selected(self, current, previous):
+        if current is None:
+            return
+        template = current.data(Qt.UserRole)
+        if not template:
+            return
+        self._current_template = template
+        self._apply_template_to_editor(template)
+
+    def _apply_template_to_editor(self, template):
+        self._build_template_form(template)
+        self.template_params_group.setVisible(True)
+        defaults = template.get("defaults") or {}
+        for key, val in defaults.items():
+            if key in self._template_form_widgets:
+                wtype, widget = self._template_form_widgets[key]
+                set_widget_value(widget, wtype, val)
+
+    def _build_template_form(self, template):
+        while self.template_form_layout.count():
+            item = self.template_form_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._template_form_widgets.clear()
+        params = template.get("params") or []
+        for param in params:
+            key, wtype, label, default = _param_meta(param)
+            if not key:
+                continue
+            if wtype == "scenes":
+                continue
+            widget = create_value_widget(wtype, default)
+            self._template_form_widgets[key] = (wtype, widget)
+            if wtype == "color":
+                self.template_form_layout.addRow(label, color_row(widget))
+            else:
+                self.template_form_layout.addRow(label, widget)
+
+    def _collect_template_params(self):
+        values = {}
+        for key, (wtype, widget) in self._template_form_widgets.items():
+            values[key] = widget_value(widget, wtype)
+        return values
+
+    def _build_template_request(self):
+        if not self._current_template:
+            raise ValueError("请先选择模板")
+        template_id = self._current_template.get("id") or _template_backend(self._current_template)
+        params = self._collect_template_params()
+        # 封面模板生成使用 /template/generate；topic 可选，params 由服务端模板消费
+        return {
+            "template_id": template_id,
+            "topic": params.get("title") or params.get("text") or "",
+        }
+
+    def _preview_template(self):
+        try:
+            req = self._build_template_request()
+        except Exception as e:
+            self.show_warning(str(e))
+            return
+        if not req.get("template_id"):
+            self.show_warning("请先选择模板。")
+            return
+        self.pbar.setVisible(True)
+        self.status.setText("正在提交封面模板生成任务...")
+
+        def _submit():
+            return generate_cover(req["template_id"], topic=req.get("topic", ""), top_k=1)
+
+        from utils.thread_worker import TaskWorker as Worker
+        worker = Worker(_submit)
+        def _on_task_id(task_id):
+            if not task_id:
+                self.pbar.setVisible(False)
+                self.status.setText("封面生成任务提交失败")
+                self.show_error("封面模板生成任务提交失败，请检查服务端连接。", "错误")
+                return
+            self.status.setText(f"封面任务已提交：{task_id}")
+            render_worker = TemplateRenderWorker(task_id, out_name=f"cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+            render_worker.phase.connect(self.status.setText)
+            render_worker.progress.connect(self.pbar.setValue)
+            render_worker.finished.connect(self._on_template_rendered)
+            render_worker.error.connect(self._on_template_error)
+            self._worker = render_worker
+            self.track_worker(render_worker)
+            render_worker.start()
+        def _on_err(e):
+            self.pbar.setVisible(False)
+            self.status.setText("封面任务提交异常")
+            self.show_error(f"提交异常：{e}", "错误")
+        worker.finished.connect(_on_task_id)
+        worker.error.connect(_on_err)
+        self.track_worker(worker)
+        worker.start()
+
+    def _on_template_rendered(self, mp4_path):
+        out = os.path.join(TMP_DIR, f"cover_preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+        self.status.setText("正在提取封面帧...")
+        worker = FrameExtractWorker(mp4_path, 0, out)
+
+        def _done(path):
+            self.pbar.setVisible(False)
+            self._set_template_preview(path)
+
+        worker.finished.connect(_done)
+        worker.error.connect(lambda e: (self.pbar.setVisible(False), self.show_error(str(e), "封面帧提取失败")))
+        self.track_worker(worker)
+        worker.start()
+
+    def _on_template_error(self, e):
+        self.pbar.setVisible(False)
+        self.show_error(str(e), "封面渲染失败")
+
+    def _set_template_preview(self, png_path):
+        self._last_cover_png = png_path
+        pm = QPixmap(png_path)
+        if not pm.isNull():
+            self.lbl_template_preview.setPixmap(
+                pm.scaledToWidth(self.lbl_template_preview.width() - 20, Qt.SmoothTransformation)
+            )
+            self.status.setText(f"预览完成: {os.path.basename(png_path)}")
+        else:
+            self.lbl_template_preview.setText("无法显示预览")
+            self.status.setText("预览图无效")
+
+    def _export_template(self):
+        if not self._last_cover_png or not os.path.isfile(self._last_cover_png):
+            self.status.setText("先生成预览，再导出")
+            self._preview_template()
+            return
+        os.makedirs(COVER_OUTPUT_DIR, exist_ok=True)
+        out = os.path.join(COVER_OUTPUT_DIR, datetime.now().strftime("cover_%Y%m%d_%H%M%S.png"))
+        import shutil
+        shutil.copy(self._last_cover_png, out)
+        self.status.setText(f"已导出: {out}")

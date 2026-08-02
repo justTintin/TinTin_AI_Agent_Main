@@ -642,7 +642,7 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 
 | 端点 | Method | 说明 |
 |------|--------|------|
-| `/templates` | GET | 模板列表，`?type=` 过滤 `video/motion/cover`（实测还有 `beat`），含完整 params schema + effects |
+| `/templates` | GET | 模板列表，`?type=` 过滤 `video/motion/cover/beat`；**封面模板与动效模板已分离**（2026-08-02 实测 25 个：motion 16 + cover 5 + video 2 + beat 2），含完整 params schema + effects |
 | `/templates` | POST | 保存/创建模板（同 id 覆盖更新；内置模板不可覆盖） |
 | `/templates/{template_id}` | GET | 查询单个模板完整定义 |
 | `/templates/{template_id}` | PUT | 更新自定义模板（整体替换） |
@@ -711,10 +711,31 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 
 | 组 | 端点 | 说明 |
 |----|------|------|
-| 成片模板（旧） | `/template/list` `/template/validate` `/template/import` `/template/export/{id}` `/template/generate` `/template/match` | 旧版成片模板（category 过滤），兼容保留 |
+| 成片模板（旧） | `/template/list` `/template/validate` `/template/import` `/template/export/{id}` `/template/generate` `/template/match` | 旧版成片模板（category 过滤），兼容保留；`/template/list?category=cover` 实测 total=0（封面模板只走统一接口） |
 | MG 动画 | `/mg/templates` 及 `/mg/templates/{template_id}` | MG 动画模板 CRUD（内置不可删） |
 | 花字模板 | `/textfx/templates` 及 `/textfx/templates/{template_id}` | 花字模板（zip 上传） |
 | LLM 模板 | `/llm/templates` | 内置 LLM 提供商模板 |
+### 14.5 封面模板（type=cover）与动效模板（type=motion）分离（2026-08-02 实测）
+
+服务端已把**封面模板**与**动效模板**在统一模板库中按 `type` 分开：
+
+| type | 含义 | 数量 | 模板 |
+|------|------|------|------|
+| `cover` | 封面模板：静态画面 + 参数驱动 | 5 | `cover_promo` 促销封面、`cover_title` 大字标题、`cover_quote` 金句、`cover_gradient` 渐变、`cover_clean` 极简（均 builtin） |
+| `motion` | 动效模板：视频动效 | 16 | `mg_scene`/`mg_intro`/`mg_outro`/`mg_countdown`/`mg_quote`/`mg_benchmark`/`rve_*` 等（均 builtin） |
+| `video` | 一键成片 | 2 | `ecom_15s`、`brand_30s`（params: topic/bgm） |
+| `beat` | 音乐卡点 | 2 | `beat_fast`、`beat_smooth` |
+
+封面模板参数（type=cover，2026-08-02 实测）：
+
+- `cover_promo`：title / subtitle / badge / color / bg / fontSize
+- `cover_title`：title / subtitle / color / bg / fontSize
+- `cover_quote`：title / text / author / color / bg / fontSize
+- `cover_gradient`：title / subtitle / color / bg / bg2 / fontSize
+- `cover_clean`：title / subtitle / color / bg / fontSize
+
+> 客户端获取封面模板用 `GET /templates?type=cover`（统一接口，返回 5 个内置封面模板）；
+> 旧 `/template/list?category=cover` 实测 `total=0`（不含封面模板，仅兼容保留）。
 
 ---
 ## 附录：客户端常见错误对照
@@ -726,7 +747,7 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 | 轮询 `GET /material/score_clip/{task_id}` | `GET /tasks/unified/{task_id}` | 统一任务查询接口 |
 | VSR 参数 `ymin/ymax/xmin/xmax` 分开传 | `sub_areas` JSON 字符串 | 三种格式：空(智能)/矩形/多边形，均为相对坐标（见 §七） |
 | VSR 跳过轮询直接拼 download URL | 先轮询 `GET /vsr/result/{task_id}` | 等完成后再取文件名下载 |
-| 客户端 `GET /template/list?category=cover` | `GET /templates?type=cover` | 统一模板接口按 type 过滤（motion/video/cover/beat） |
+| 客户端 `GET /template/list?category=cover` | `GET /templates?type=cover` | 统一模板接口按 type 过滤；封面模板已上线（5 个 type=cover），旧接口 total=0 |
 | 客户端 `POST /template/generate` | `POST /templates/render` | 统一渲染入口，body 为 RenderIn（template_id + params） |
 | 客户端 `POST /template/import` | `POST /templates` | 统一保存/创建模板（同 id 覆盖） |
 | 客户端 `POST /template/validate` | `POST /templates/validate` | 统一模板校验 |

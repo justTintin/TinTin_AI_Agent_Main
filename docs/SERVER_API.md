@@ -655,7 +655,7 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 |------|--------|------|
 | `/templates/analyze-video` | POST | 上传动效视频 → 分析画面 → 生成统一模板定义（multipart：`file` / `material_id`） |
 | `/templates/preview` | POST | 动效/封面模板单帧预览（Remotion still），body 同 `RenderIn` |
-| `/templates/render` | POST | **统一渲染入口**：按模板 type 分发到 Remotion / 剪辑引擎，body 为 `RenderIn`，返回任务 ID |
+| `/templates/render` | POST | **统一渲染入口**：按模板 type 分发到 Remotion / 剪辑引擎，body 为 `RenderIn`。motion/video 返回 JSON 任务 ID（轮询 result/download）；**cover 直接同步返回 PNG**（客户端用 render_cover_image） |
 | `/templates/render/beat` | POST | 音乐卡点成片渲染（multipart：`template_id`+`music` 必填，`videos[]`/`clip_urls`，`params` 为 JSON 字符串） |
 | `/templates/render/result/{task_id}` | GET | 统一渲染进度/结果查询（恒返回 JSON 状态） |
 | `/templates/render/download/{task_id}` | GET | 渲染结果下载（动效 mp4 / 成片 mp4） |

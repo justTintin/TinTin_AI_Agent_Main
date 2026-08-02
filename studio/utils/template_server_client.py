@@ -226,6 +226,43 @@ def render(template_id, params=None, ratio="9:16", width=None, height=None,
     return None
 
 
+def render_cover_image(template_id, params=None, ratio="9:16", width=None, height=None,
+                         scale=1.0, timeout=120):
+    """渲染封面（type=cover）：服务端 /templates/render 对 cover 类型直接同步返回 PNG。
+
+    与 render()（motion/video 异步任务）不同，cover 响应是 image/png 字节。
+    返回 PNG 字节（bytes）；失败返回 None。
+    """
+    url = _server_url()
+    if not url:
+        raise RuntimeError("未配置 compute_server_url")
+    if not template_id:
+        raise ValueError("template_id 不能为空")
+    body = {"template_id": template_id}
+    if params:
+        body["params"] = params
+    if ratio:
+        body["ratio"] = ratio
+    if width:
+        body["width"] = int(width)
+    if height:
+        body["height"] = int(height)
+    if scale is not None:
+        body["scale"] = float(scale)
+    try:
+        r = http_post(f"{url}/templates/render", json=body, timeout=timeout)
+        if r.status_code == 200:
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            if "image" in ctype:
+                return r.content
+            log.warning(f"[Template] render_cover_image 返回非图片类型: {ctype} {r.text[:120]}")
+            return None
+        log.warning(f"[Template] render_cover_image HTTP {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        log.warning(f"[Template] render_cover_image failed: {e}")
+    return None
+
+
 def render_beat(template_id, music, videos=None, params=None, clip_urls="", timeout=600):
     """POST /templates/render/beat（multipart）→ 返回 task_id（str）。
 

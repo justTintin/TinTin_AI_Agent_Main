@@ -416,6 +416,8 @@ class CompileVideoPage(BasePage):
         self.list_templates.setMaximumHeight(150)
         self.list_templates.currentItemChanged.connect(self._on_template_selected)
         left_lay.addWidget(self.list_templates, 1)
+        # 吸收 QSplitter 撑高的多余空间，防止 stretch 封顶后把标题/行拉伸成半屏
+        left_lay.addStretch(1)
 
         top_splitter.addWidget(left_card)
 
@@ -429,7 +431,7 @@ class CompileVideoPage(BasePage):
         right_title_row = QHBoxLayout()
         right_title_row.addWidget(right_title)
         right_title_row.addStretch()
-        self.btn_template_defaults = QPushButton("🔁 设置默认")
+        self.btn_template_defaults = mdi_button("设置默认", "refresh")
         self.btn_template_defaults.setObjectName("secondary_button")
         self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
         self.btn_template_defaults.clicked.connect(self._set_template_defaults)
@@ -437,35 +439,59 @@ class CompileVideoPage(BasePage):
         right_title_row.addWidget(self.btn_template_defaults)
         right_lay.addLayout(right_title_row)
 
-        # 字幕文案放在镜头素材目录上方
-        right_lay.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
-        self.in_subtitle = QTextEdit(); self.in_subtitle.setFixedHeight(70)
-        self.in_subtitle.setPlaceholderText("粘贴文案；按句均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
-        right_lay.addWidget(self.in_subtitle)
+        # 模板参数按内容分组为 Tab，避免全部堆在一个长布局里
+        self.tabs_params = QTabWidget()
 
-        self.in_folder = self._file_row(right_lay, "镜头素材目录（留空=按产品自动匹配）",
+        # ── Tab1 素材：镜头素材目录 / 素材列表 / 开场视频 ──
+        tab_material = QWidget()
+        lay_material = QVBoxLayout(tab_material)
+        lay_material.setContentsMargins(8, 8, 8, 8); lay_material.setSpacing(8)
+        self.in_folder = self._file_row(lay_material, "镜头素材目录（留空=按产品自动匹配）",
                                         self._browse_folder, folder=True,
                                         placeholder="留空则按产品自动从素材库匹配")
-        # 素材列表（来自素材检索）
         mat_header = QHBoxLayout()
         mat_header.addWidget(QLabel("📁 素材列表（来自素材检索，可选）"))
         mat_header.addStretch(1)
-        self.btn_clear_materials = QPushButton("清空")
+        self.btn_clear_materials = mdi_button("清空", "delete")
         self.btn_clear_materials.setObjectName("secondary_button")
         self.btn_clear_materials.clicked.connect(self._clear_materials)
         mat_header.addWidget(self.btn_clear_materials)
-        right_lay.addLayout(mat_header)
+        lay_material.addLayout(mat_header)
         self.material_list = QListWidget()
         self.material_list.setMaximumHeight(120)
-        right_lay.addWidget(self.material_list)
+        lay_material.addWidget(self.material_list)
         self.lbl_material_count = QLabel("已选 0 个素材（可在「素材检索」选择后点击「一键成片」带入）")
         self.lbl_material_count.setObjectName("muted_text")
         self.lbl_material_count.setWordWrap(True)
-        right_lay.addWidget(self.lbl_material_count)
+        lay_material.addWidget(self.lbl_material_count)
+        self.in_intro = self._file_row(lay_material, "开场视频(可选)", self._browse_intro,
+                                       placeholder="片头开场视频，拼在最前面")
+        intro_row = QHBoxLayout(); intro_row.addStretch()
+        self.btn_mg_intro = mdi_button("用动态标题生成开场(MG)", "film")
+        self.btn_mg_intro.setObjectName("secondary_button")
+        self.btn_mg_intro.clicked.connect(self._gen_mg_intro)
+        intro_row.addWidget(self.btn_mg_intro)
+        lay_material.addLayout(intro_row)
+        lay_material.addStretch()
+        self.tabs_params.addTab(tab_material, "素材")
 
-        self.in_audio = self._file_row(right_lay, "配音音频(可选)", self._browse_audio,
+        # ── Tab2 文案：字幕文案 / 配音文案 ──
+        tab_copy = QWidget()
+        lay_copy = QVBoxLayout(tab_copy)
+        lay_copy.setContentsMargins(8, 8, 8, 8); lay_copy.setSpacing(8)
+        lay_copy.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
+        self.in_subtitle = QTextEdit(); self.in_subtitle.setFixedHeight(90)
+        self.in_subtitle.setPlaceholderText("粘贴文案；按句均匀分布为字幕，并可一键 TTS 配音。留空则不加。")
+        lay_copy.addWidget(self.in_subtitle)
+        lay_copy.addStretch()
+        self.tabs_params.addTab(tab_copy, "文案")
+
+        # ── Tab3 音频：配音音频 / TTS 音色 ──
+        tab_audio = QWidget()
+        lay_audio = QVBoxLayout(tab_audio)
+        lay_audio.setContentsMargins(8, 8, 8, 8); lay_audio.setSpacing(8)
+        self.in_audio = self._file_row(lay_audio, "配音音频(可选)", self._browse_audio,
                                        placeholder="wav/mp3/m4a，留空则无声")
-        # TTS 一键配音
         tts_row = QHBoxLayout()
         tts_row.addWidget(QLabel("TTS 音色"))
         self.combo_voice = SearchableComboBox(placeholder="输入音色名称搜索…")
@@ -474,23 +500,16 @@ class CompileVideoPage(BasePage):
         self.btn_tts.setObjectName("secondary_button")
         self.btn_tts.clicked.connect(self._tts_generate)
         tts_row.addWidget(self.btn_tts)
-        right_lay.addLayout(tts_row)
+        lay_audio.addLayout(tts_row)
+        lay_audio.addStretch()
+        self.tabs_params.addTab(tab_audio, "音频")
 
-        self.in_intro = self._file_row(right_lay, "开场视频(可选)", self._browse_intro,
-                                       placeholder="片头开场视频，拼在最前面")
-        intro_row = QHBoxLayout(); intro_row.addStretch()
-        self.btn_mg_intro = mdi_button("用动态标题生成开场(MG)", "film")
-        self.btn_mg_intro.setObjectName("secondary_button")
-        self.btn_mg_intro.clicked.connect(self._gen_mg_intro)
-        intro_row.addWidget(self.btn_mg_intro)
-        right_lay.addLayout(intro_row)
-
-        self.in_cover = self._file_row(right_lay, "封面(可选)", self._browse_cover,
+        # ── Tab4 封面/其它：封面 + 模板自定义参数 ──
+        tab_other = QWidget()
+        lay_other = QVBoxLayout(tab_other)
+        lay_other.setContentsMargins(8, 8, 8, 8); lay_other.setSpacing(8)
+        self.in_cover = self._file_row(lay_other, "封面(可选)", self._browse_cover,
                                        placeholder="片头封面图，显示 2 秒")
-
-        right_lay.addStretch()
-
-        # 模板自定义参数（根据所选模板动态生成）
         self.template_params_group = QGroupBox("模板自定义参数")
         tpl_form_lay = QVBoxLayout(self.template_params_group)
         self.scroll_template_form = QScrollArea()
@@ -501,7 +520,11 @@ class CompileVideoPage(BasePage):
         self.template_form_layout.setSpacing(8)
         self.scroll_template_form.setWidget(self.template_form_container)
         tpl_form_lay.addWidget(self.scroll_template_form)
-        right_lay.addWidget(self.template_params_group)
+        lay_other.addWidget(self.template_params_group)
+        lay_other.addStretch()
+        self.tabs_params.addTab(tab_other, "封面/其它")
+
+        right_lay.addWidget(self.tabs_params, 1)
         self.template_params_group.setVisible(False)
 
         top_splitter.addWidget(right_card)

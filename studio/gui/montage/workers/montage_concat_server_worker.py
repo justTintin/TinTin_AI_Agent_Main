@@ -10,6 +10,7 @@
 """
 import os
 import time
+import json
 from contextlib import ExitStack
 import requests
 from utils.http_client import http_get, http_post
@@ -40,7 +41,8 @@ class MontageConcatServerWorker(BaseWorker):
     # 上传最低网速估算 500KB/s
     _UPLOAD_SPEED_BPS = 500 * 1024
 
-    def __init__(self, local_output_path, clips, options=None, lut_path=None, task_id=None, source_clips=None):
+    def __init__(self, local_output_path, clips, options=None, lut_path=None, task_id=None,
+                 source_clips=None, clip_urls=None):
         super().__init__()
         self.local_output_path = local_output_path
         self.clips = list(clips or [])
@@ -48,12 +50,14 @@ class MontageConcatServerWorker(BaseWorker):
         self.lut_path = (lut_path or "").strip()
         self.task_id = task_id
         self.source_clips = list(source_clips or [])
+        # 素材检索地址等（material://{id} / http / 本地路径），随 clip_urls 传给服务端，可混合 files
+        self.clip_urls = list(clip_urls or [])
         self._stopped = False
 
     def do_work(self):
         if not self.task_id:
-            if not self.clips:
-                raise RuntimeError("没有可合成的镜头文件")
+            if not self.clips and not self.clip_urls:
+                raise RuntimeError("没有可合成的镜头（本地 files 或 clip_urls 至少一项）")
             self.task_id = self._submit_concat()
         self._poll_and_download()
 
@@ -77,6 +81,9 @@ class MontageConcatServerWorker(BaseWorker):
 
         # form 字段全部用字符串（服务端从 multipart 里读取）
         data = {k: str(v) for k, v in self.options.items()}
+        if self.clip_urls:
+            data["clip_urls"] = json.dumps(self.clip_urls, ensure_ascii=False)
+            self.stage.emit(f"素材地址 clip_urls: {len(self.clip_urls)} 个")
 
         with ExitStack() as stack:
             files = []

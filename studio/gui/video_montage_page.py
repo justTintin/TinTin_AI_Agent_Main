@@ -48,7 +48,7 @@ from gui.montage.dialogs import (TextEditDialog, ScriptCompareDialog, DubbedVide
                                   FinalMixedVideosDialog, ProductCopyInputDialog, VoiceRowDetailWidget,
                                   ClipSelectionDialog)
 from gui.error_dialog import show_error_dialog
-from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker,
+from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker, ServerSplitWorker,
                                                ServerClipAnalysisWorker)
 from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorker, VideoDubbingWorker)
 from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
@@ -515,8 +515,11 @@ class VideoMontagePage(BasePage):
         added = 0
         skipped = 0
         paths = []
+        # 素材检索地址（material://{id}）：无本地路径时直接作 concat 的 clip_urls（服务端按素材库解析）
+        self.external_clip_urls = []
         for mt in materials:
             p = (mt.get("path") or "").strip()
+            mid = mt.get("material_id")
             if p and os.path.isfile(p):
                 ap = os.path.abspath(p)
                 if ap in existing:
@@ -527,6 +530,8 @@ class VideoMontagePage(BasePage):
                 self._decorate_video_item_widget(it)
                 paths.append(ap)
                 added += 1
+            elif mid:
+                self.external_clip_urls.append(f"material://{mid}")
             else:
                 skipped += 1
         if added:
@@ -547,14 +552,16 @@ class VideoMontagePage(BasePage):
             self.video_list.setCurrentItem(None)
             self._refresh_source_root_hint()
             self._check_split_clips_exist()
-            msg = f"已从素材检索带入 {added} 个素材到智能混剪"
-            if skipped:
-                msg += f"；{skipped} 个无本地路径已跳过（请确认 NAS 已挂载到本地）"
-            self.stage_label.setText(msg)
-            log.info(f"[素材检索→智能混剪] {msg}")
-        elif skipped:
-            self.stage_label.setText(f"素材均无本地路径（{skipped} 个），无法本地分割；请先在本地/NAS 挂载素材目录")
-            log.warning("[素材检索→智能混剪] 素材无本地路径，未加入")
+        parts = []
+        if added:
+            parts.append(f"{added} 个本地素材已加入")
+        if self.external_clip_urls:
+            parts.append(f"{len(self.external_clip_urls)} 个素材检索地址(material://)将直用于拼接")
+        if skipped:
+            parts.append(f"{skipped} 个无效素材已跳过")
+        msg = "已从素材检索带入： " + "；".join(parts) if parts else "未带入素材"
+        self.stage_label.setText(msg)
+        log.info(f"[素材检索→智能混剪] {msg}")
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
@@ -1765,15 +1772,34 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText(f"智能镜头分割 ({idx}/{self._merged_total})：{fname}")
         self.progress_bar.setValue(int(self._merged_done * 100 / max(1, self._merged_total)))
 
-        self.worker = PySceneDetectWorker(
+        self._start_merged_split(video_path, cur_splits_dir,
+                                self.threshold_spin.value(), int(self.min_len_spin.value()))
+
+    def _start_merged_split(self, video_path, cur_splits_dir, threshold, min_scene_len):
+        """镜头分割：优先服务端 /montage/split，失败回退本地 PySceneDetect。"""
+        self.worker = ServerSplitWorker(
             video_path=video_path,
             output_dir=cur_splits_dir,
-            threshold=self.threshold_spin.value(),
-            min_scene_len=int(self.min_len_spin.value())
+            threshold=threshold,
+            min_scene_len=min_scene_len,
         )
         self.worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.worker.finished.connect(self._on_merged_split_done)
-        self.worker.error.connect(self._on_merged_split_error)
+
+        def _on_server_split_error(err):
+            log.warning(f"[合并分割] 服务端分割失败，回退本地 PySceneDetect: {err}")
+            self.worker = PySceneDetectWorker(
+                video_path=video_path,
+                output_dir=cur_splits_dir,
+                threshold=threshold,
+                min_scene_len=min_scene_len,
+            )
+            self.worker.stage.connect(lambda t: self.stage_label.setText(t))
+            self.worker.finished.connect(self._on_merged_split_done)
+            self.worker.error.connect(self._on_merged_split_error)
+            self.worker.start()
+
+        self.worker.error.connect(_on_server_split_error)
         self.worker.start()
     # [3·分割]  _on_merged_split_done
     def _on_merged_split_done(self, out_dir, count, scenes):
@@ -2669,12 +2695,16 @@ class VideoMontagePage(BasePage):
             return
 
         self.stage_label.setText("🌐 正在上传镜头并提交服务端合成...")
+        clip_urls = list(getattr(self, "external_clip_urls", None) or [])
+        if clip_urls:
+            self.stage_label.setText(f"🌐 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")
         self.concat_worker = MontageConcatServerWorker(
             local_output_path=local_output_path,
             clips=list(selected_clips),
             options=options,
             lut_path=lut_path,
             source_clips=list(selected_clips),
+            clip_urls=clip_urls,
         )
         self.concat_worker.stage.connect(lambda t: self.stage_label.setText(t), type=Qt.QueuedConnection)
         self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v), type=Qt.QueuedConnection)

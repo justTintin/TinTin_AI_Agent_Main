@@ -107,6 +107,88 @@ class PySceneDetectWorker(BaseWorker):
 
 
 
+class ServerSplitWorker(BaseWorker):
+    """服务端镜头分割（POST /montage/split）+ 本地 ffmpeg 按起止时间裁出片段。
+
+    与 PySceneDetectWorker 同信号契约：
+        finished(output_dir, scene_count, [(start_sec, end_sec), ...])
+    服务端不可用/失败时由上层回退本地 PySceneDetectWorker。
+    """
+
+    stage = Signal(str)
+    progress = Signal(int)
+    busy = Signal(bool)
+    finished = Signal(str, int, list)
+
+    def __init__(self, video_path, output_dir, threshold=27, min_scene_len=0.5, server_url=None):
+        super().__init__()
+        self.video_path = video_path
+        self.output_dir = output_dir
+        self.threshold = threshold
+        self.min_scene_len = min_scene_len
+        self.server_url = (server_url or "").strip().rstrip("/")
+
+    def run(self):
+        try:
+            self.stage.emit("正在调用服务端镜头分割…")
+            self.progress.emit(10)
+            self.busy.emit(True)
+
+            if not self.server_url:
+                from utils import scheduled_task_client as _stc
+                self.server_url = _stc._server_url()
+            if not self.server_url:
+                raise RuntimeError("未配置 compute_server_url")
+
+            from utils.http_client import http_post
+            with open(self.video_path, "rb") as f:
+                files = {"file": (os.path.basename(self.video_path), f, "video/mp4")}
+                data = {"threshold": str(self.threshold), "min_scene_len": str(self.min_scene_len)}
+                r = http_post(f"{self.server_url}/montage/split", files=files, data=data, timeout=600)
+            if r.status_code != 200:
+                raise RuntimeError(f"服务端分割返回 {r.status_code}: {r.text[:200]}")
+
+            shots = (r.json() or {}).get("shots") or []
+            if not shots:
+                self.stage.emit("服务端未检测到镜头切点")
+                self.progress.emit(100)
+                self.finished.emit(self.output_dir, 0, [])
+                return
+
+            self.progress.emit(50)
+            self.stage.emit(f"服务端检测到 {len(shots)} 个镜头，正在本地裁出片段…")
+            os.makedirs(self.output_dir, exist_ok=True)
+            base = os.path.splitext(os.path.basename(self.video_path))[0]
+            ffmpeg = find_ffmpeg()
+            flags = 0x08000000 if os.name == "nt" else 0
+            scenes = []
+            created = 0
+            for sh in shots:
+                start = float(sh.get("start_sec") or 0)
+                end = float(sh.get("end_sec") or start)
+                idx = int(sh.get("shot_index") or (created + 1))
+                out = os.path.join(self.output_dir, f"{base}_shot_{idx:03d}.mp4")
+                cmd = [ffmpeg, "-y", "-ss", str(start), "-to", str(end),
+                       "-i", self.video_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                       "-c:a", "aac", out]
+                r2 = subprocess.run(cmd, capture_output=True, creationflags=flags)
+                if os.path.isfile(out) and os.path.getsize(out) > 0:
+                    scenes.append((start, end))
+                    created += 1
+                else:
+                    log.warning(f"[服务端分割] 裁片失败: {out} rc={r2.returncode}")
+            if not created:
+                raise RuntimeError("服务端分割返回镜头但本地裁出片段失败，请检查 ffmpeg")
+
+            self.progress.emit(100)
+            self.stage.emit("分割导出完成（服务端检测 + 本地裁切）")
+            self.finished.emit(self.output_dir, created, scenes)
+        except Exception:
+            self.busy.emit(False)
+            log.exception("服务端镜头分割失败")
+            self.error.emit(traceback.format_exc())
+
+
 class BestClipWorker(BaseWorker):
     """从整段视频里挑出"比较好的 N 秒"（清晰+适度运动），裁剪成单个片段。
 

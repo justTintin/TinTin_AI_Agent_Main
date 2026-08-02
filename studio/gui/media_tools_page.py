@@ -95,6 +95,9 @@ class MediaToolsPage(BasePage):
         super().__init__(parent_widget, main_window)
         self._built = set()
         self._stack = None
+        # 持有工具页实例引用，防止临时实例被 GC 回收导致信号连接失效
+        # （如按钮 clicked → 文件对话框无法弹出）
+        self._tool_pages = {}
 
     def _all_tools(self):
         return self._IMAGE_TOOLS + self._VIDEO_TOOLS
@@ -198,29 +201,34 @@ class MediaToolsPage(BasePage):
         mw = self.main_window
         if key == "cover_maker":
             from gui.cover_maker_page import CoverMakerPage
-            CoverMakerPage(content, mw).setup()
+            self._tool_pages[key] = CoverMakerPage(content, mw)
         elif key == "image_matting":
             from gui.image_matting_page import ImageMattingPage
-            ImageMattingPage(content, mw).setup()
+            self._tool_pages[key] = ImageMattingPage(content, mw)
         elif key == "image_folder_ocr":
             from gui.image_folder_ocr_page import ImageFolderOcrPage
-            ImageFolderOcrPage(content, mw).setup()
+            self._tool_pages[key] = ImageFolderOcrPage(content, mw)
         elif key == "video_tools":
-            mw.setup_video_tools_page(content)
+            self._tool_pages[key] = mw.setup_video_tools_page(content)
         elif key == "transcription":
             from gui.transcription_page import TranscriptionToolPage
-            TranscriptionToolPage(content, mw).setup()
+            self._tool_pages[key] = TranscriptionToolPage(content, mw)
         elif key == "voice_clone":
             from gui.voice_clone_page import VoiceClonePage
-            VoiceClonePage(content, mw).setup()
+            self._tool_pages[key] = VoiceClonePage(content, mw)
         elif key == "subtitle_removal":
             from gui.subtitle_removal_page_v14 import SubtitleRemovalPageV14
-            SubtitleRemovalPageV14(content, mw).setup()
+            self._tool_pages[key] = SubtitleRemovalPageV14(content, mw)
         elif key == "video_ocr":
             from gui.video_ocr_page import VideoOcrPage
-            VideoOcrPage(content, mw).setup()
+            self._tool_pages[key] = VideoOcrPage(content, mw)
         elif key == "video_lut":
             from gui.video_lut_page import VideoLutPage
-            VideoLutPage(content, mw).setup()
+            self._tool_pages[key] = VideoLutPage(content, mw)
         else:
             raise ValueError("未知媒体工具: %s" % key)
+        if self._tool_pages.get(key) is not None:
+            page_cls = self._tool_pages[key]
+            setup_fn = getattr(page_cls, "setup", None)
+            if setup_fn is not None:
+                setup_fn()

@@ -498,6 +498,64 @@ class VideoMontagePage(BasePage):
         else:
             self.stage_label.setText(f"已新增 {added} 个素材到列表。")
 
+    def set_external_materials(self, materials):
+        """从「素材检索」带入多个素材（仅本地/NAS 可访问路径会加入）。
+
+        materials: [{material_id, filename, media_type, path, url, ...}]
+        注：当前混剪镜头分割为本地 PySceneDetect，素材需在本地/NAS 挂载可访问；
+        只有服务端 URL 的素材会被跳过并提示。
+        """
+        if not materials:
+            return
+        existing = set()
+        for i in range(self.video_list.count()):
+            t = self.video_list.item(i).text().strip()
+            if t:
+                existing.add(os.path.abspath(t))
+        added = 0
+        skipped = 0
+        paths = []
+        for mt in materials:
+            p = (mt.get("path") or "").strip()
+            if p and os.path.isfile(p):
+                ap = os.path.abspath(p)
+                if ap in existing:
+                    continue
+                existing.add(ap)
+                it = QListWidgetItem(ap)
+                self.video_list.addItem(it)
+                self._decorate_video_item_widget(it)
+                paths.append(ap)
+                added += 1
+            else:
+                skipped += 1
+        if added:
+            try:
+                common_dir = os.path.commonpath([os.path.dirname(os.path.abspath(x)) for x in paths])
+            except Exception:
+                common_dir = os.path.dirname(os.path.abspath(paths[0]))
+            self.folder_path_input.setText(common_dir)
+            all_splits_dirs = []
+            for i in range(self.video_list.count()):
+                _p = self.video_list.item(i).text().strip()
+                if _p:
+                    _vdir = os.path.dirname(_p)
+                    _vbase = os.path.splitext(os.path.basename(_p))[0]
+                    all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
+            self._last_merged_splits_dirs = all_splits_dirs
+            self.processing_video_path = ""
+            self.video_list.setCurrentItem(None)
+            self._refresh_source_root_hint()
+            self._check_split_clips_exist()
+            msg = f"已从素材检索带入 {added} 个素材到智能混剪"
+            if skipped:
+                msg += f"；{skipped} 个无本地路径已跳过（请确认 NAS 已挂载到本地）"
+            self.stage_label.setText(msg)
+            log.info(f"[素材检索→智能混剪] {msg}")
+        elif skipped:
+            self.stage_label.setText(f"素材均无本地路径（{skipped} 个），无法本地分割；请先在本地/NAS 挂载素材目录")
+            log.warning("[素材检索→智能混剪] 素材无本地路径，未加入")
+
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
         if hasattr(self, "temp_scenes") and self.temp_scenes and len(self.temp_scenes) == len(files):

@@ -524,6 +524,11 @@ class VectorSearchPage(BasePage):
         self.btn_copy_url.setToolTip("把选中的素材（图片/视频混合可多选）作为成片素材来源，跳转到「一键成片」自动填充。")
         self.btn_copy_url.clicked.connect(self._send_to_compile)
         sel_row.addWidget(self.btn_copy_url)
+        self.btn_montage = QPushButton("🎬 智能混剪")
+        self.btn_montage.setObjectName("secondary_button")
+        self.btn_montage.setToolTip("把选中的视频素材发送到「智能混剪」进行分镜/拼接（素材需在本地/NAS 可访问）。")
+        self.btn_montage.clicked.connect(self._send_to_montage)
+        sel_row.addWidget(self.btn_montage)
         right_lay.addLayout(sel_row)
 
         # 分页控件行
@@ -853,16 +858,12 @@ class VectorSearchPage(BasePage):
         QGuiApplication.clipboard().setText(url)
         self.lbl_stat.setText(f"已复制地址: {url}")
 
-    def _send_to_compile(self):
-        """把选中素材发送到「一键成片」（支持多个，图片+视频混合）。"""
+    def _build_selected_materials(self):
+        """收集当前选中的素材为统一 dict 列表；无有效素材返回 None。"""
         items = self._selected_items()
         if not items:
             self.lbl_stat.setText("⚠ 请先在缩略图右上角方框选择素材")
-            return
-        mw = getattr(self, "main_window", None)
-        if mw is None:
-            self.lbl_stat.setText("❌ 无法访问主窗口")
-            return
+            return None
         materials = []
         for it in items:
             d = it.data(Qt.UserRole) or {}
@@ -885,6 +886,17 @@ class VectorSearchPage(BasePage):
             })
         if not materials:
             self.lbl_stat.setText("⚠ 未选择到有效素材")
+            return None
+        return materials
+
+    def _send_to_compile(self):
+        """把选中素材发送到「一键成片」（支持多个，图片+视频混合）。"""
+        materials = self._build_selected_materials()
+        if not materials:
+            return
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            self.lbl_stat.setText("❌ 无法访问主窗口")
             return
         # 切换到一键成片页（第 34 页）并填充素材列表
         try:
@@ -896,6 +908,26 @@ class VectorSearchPage(BasePage):
                 self.lbl_stat.setText("❌ 一键成片页未加载")
                 return
             tool.import_materials(materials)
+        except Exception as e:
+            self.lbl_stat.setText(f"❌ 跳转失败: {e}")
+
+    def _send_to_montage(self):
+        """把选中的视频素材发送到「智能混剪」（支持多选，需本地/NAS 可访问路径）。"""
+        materials = self._build_selected_materials()
+        if not materials:
+            return
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            self.lbl_stat.setText("❌ 无法访问主窗口")
+            return
+        try:
+            mw.switch_page(15)
+            tool = getattr(mw, "video_montage_tool", None)
+            if tool is None:
+                mw.switch_page(39)
+                self.lbl_stat.setText("❌ 智能混剪页未加载")
+                return
+            tool.set_external_materials(materials)
         except Exception as e:
             self.lbl_stat.setText(f"❌ 跳转失败: {e}")
 

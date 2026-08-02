@@ -29,6 +29,8 @@ from utils.logger_utils import log
 from utils.extension_bridge import DEFAULT_PORT, get_bridge
 
 # 扩展模块目录（apps/browser-extension/）—— 源码即浏览器加载点，无需复制副本
+from utils.file_dialog_utils import pick_directory
+from utils.gui_icons import mdi_button
 EXT_DIR = EXTENSION_DIR
 
 
@@ -229,7 +231,7 @@ class ExtensionPage(BasePage):
         row1.addWidget(QLabel("保存目录:"))
         self.edit_save_dir = QLineEdit(self.bridge.config.get("save_dir") or "")
         row1.addWidget(self.edit_save_dir, 1)
-        btn_browse = QPushButton("浏览…")
+        btn_browse = mdi_button("浏览…", "folder")
         btn_browse.setObjectName("secondary_button")
         btn_browse.clicked.connect(self._browse_save_dir)
         row1.addWidget(btn_browse)
@@ -250,7 +252,7 @@ class ExtensionPage(BasePage):
         self.edit_nas_dir = QLineEdit(self.bridge.config.get("nas_sync_dir") or "")
         self.edit_nas_dir.setPlaceholderText("本地映射网盘目录（如 Z:\\materials\\collect），下载成功后同步到此")
         row2b.addWidget(self.edit_nas_dir, 1)
-        btn_browse_nas = QPushButton("浏览…")
+        btn_browse_nas = mdi_button("浏览…", "folder")
         btn_browse_nas.setObjectName("secondary_button")
         btn_browse_nas.clicked.connect(self._browse_nas_dir)
         row2b.addWidget(btn_browse_nas)
@@ -519,13 +521,13 @@ class ExtensionPage(BasePage):
         w.start()
 
     def _browse_nas_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择 NAS 同步目录（本地映射网盘）",
+        d = pick_directory(self.parent_widget, "选择 NAS 同步目录（本地映射网盘）",
                                              self.edit_nas_dir.text() or DATA_DIR)
         if d:
             self.edit_nas_dir.setText(d)
 
     def _browse_save_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择采集保存目录",
+        d = pick_directory(self.parent_widget, "选择采集保存目录",
                                              self.edit_save_dir.text() or DATA_DIR)
         if d:
             self.edit_save_dir.setText(d)

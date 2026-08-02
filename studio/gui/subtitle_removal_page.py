@@ -18,6 +18,7 @@ from utils.logger_utils import log
 from config.paths import TMP_DIR, VSR_DIR
 from utils.platform_utils import python_binary
 
+from utils.file_dialog_utils import pick_file
 class SubtitleRemovalWorker(BaseWorker):
     progress_updated = Signal(int)
     status_updated = Signal(str)
@@ -375,7 +376,7 @@ class SubtitleRemovalPage(BasePage):
         self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
         self.video_path_input.textChanged.connect(self._on_video_path_changed)
         inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("选择文件")
+        btn_sel = mdi_button("选择文件", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_video)
         inp_row.addWidget(btn_sel)
@@ -655,7 +656,7 @@ class SubtitleRemovalPage(BasePage):
 
 
     def _select_video(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择输入视频或图片",
             "",

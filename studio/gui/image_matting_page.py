@@ -12,6 +12,8 @@ from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 from utils.logger_utils import log
 from config.paths import TMP_DIR, REMBG_DIR
 
+from utils.file_dialog_utils import pick_file, pick_save_file
+from utils.gui_icons import mdi_button
 class RembgWorker(BaseWorker):
     progress = Signal(str)
     finished = Signal(bool, str, str) # success, output_path, error_msg
@@ -178,7 +180,7 @@ class ImageMattingPage(BasePage):
         
         # Image Upload Section
         left_layout.addWidget(QLabel("1. 选择原始图像:"))
-        self.btn_select_image = QPushButton("📁 上传本地图像")
+        self.btn_select_image = mdi_button("上传本地图像", "folder")
         self.btn_select_image.setObjectName("secondary_button")
         self.btn_select_image.setCursor(Qt.PointingHandCursor)
         self.btn_select_image.clicked.connect(self.choose_image)
@@ -301,7 +303,7 @@ class ImageMattingPage(BasePage):
         return line
         
     def choose_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _ = pick_file(
             self.parent, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
@@ -385,7 +387,7 @@ class ImageMattingPage(BasePage):
         if not self.output_temp_path or not os.path.exists(self.output_temp_path):
             return
             
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent, "保存抠图结果为透明 PNG", "", "透明图像 (*.png)"
         )
         if save_path:

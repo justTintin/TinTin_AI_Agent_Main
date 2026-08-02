@@ -22,6 +22,7 @@ from gui.base_page import BasePage
 
 
 # ── 支持的文件类型 ──
+from utils.file_dialog_utils import pick_files, pick_save_file
 SUPPORTED_EXTS = frozenset({
     ".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v",
     ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".wma",
@@ -477,7 +478,7 @@ class TranscriptionToolPage(BasePage):
     # ══════════════════════════════════════════
 
     def _add_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
+        paths, _ = pick_files(
             self.parent_widget, "选择文件", "",
             "Media Files (*.mp4 *.mov *.avi *.mkv *.mp3 *.wav *.m4a *.flac *.aac *.ogg);;All Files (*)"
         )
@@ -843,7 +844,7 @@ class TranscriptionToolPage(BasePage):
         full_text = self._convert_format(f["srt_text"], fmt)
 
         default_path = f"{base}.{ext}"
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             dlg, "保存字幕", default_path,
             f"{ext.upper()} Files (*.{ext});;All Files (*)"
         )

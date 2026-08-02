@@ -21,6 +21,7 @@ from gui.montage.dialogs import ArrangeMaterialsDialog
 from utils.video_indexer import probe_media_size, classify_aspect
 
 
+from utils.file_dialog_utils import pick_directory, pick_file, pick_files
 class BeatMontageController(QObject):
     """卡点成片业务控制器（自包含，不依赖智能混剪页面）。"""
 
@@ -94,7 +95,7 @@ class BeatMontageController(QObject):
     # ═══════════════════════════════════════════════════════════
 
     def _beat_browse_music(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget, "选择卡点音乐",
             "", "Audio Files (*.mp3 *.wav *.m4a *.aac *.flac *.ogg);;All Files (*)")
         if not path:
@@ -108,7 +109,7 @@ class BeatMontageController(QObject):
     def _beat_select_materials(self):
         """选择一个或多个视频/图片素材（与智能混剪一致，去重追加）。
         图片素材在上传前会自动转成静态视频片段（默认 2 秒，随音乐节拍变化）。"""
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = pick_files(
             self.parent_widget, "选择视频/图片素材", "",
             "媒体文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v "
             "*.jpg *.jpeg *.png *.bmp *.webp);;"
@@ -199,7 +200,7 @@ class BeatMontageController(QObject):
             self._beat_apply_clips_display("已清空全部镜头素材")
 
     def _beat_browse_out_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择视频导出目录", "")
+        d = pick_directory(self.parent_widget, "选择视频导出目录", "")
         if not d:
             return
         self.beat_out_dir_input.setText(d)
@@ -512,7 +513,7 @@ class BeatMontageController(QObject):
 
         out_dir = self.beat_out_dir_input.text().strip() if hasattr(self, "beat_out_dir_input") else ""
         if not out_dir:
-            out_dir = QFileDialog.getExistingDirectory(self.parent_widget, "选择视频导出目录")
+            out_dir = pick_directory(self.parent_widget, "选择视频导出目录")
             if not out_dir:
                 return
         try:

@@ -21,6 +21,8 @@ from config.paths import TMP_DIR
 # 四边形选区辅助函数（选区统一用四点四边形表示：[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]，视频原始帧像素）
 # ═══════════════════════════════════════════════════════════════
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 def _quad_aabb(quad):
     """四点四边形 → 轴对齐外接框 (x, y, w, h)。本地 CLI 只支持矩形，用 AABB 退化。"""
     xs = [p[0] for p in quad]
@@ -546,7 +548,7 @@ class SubtitleRemovalPageV14(BasePage):
         self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
         self.video_path_input.textChanged.connect(self._on_video_path_changed)
         inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("选择文件")
+        btn_sel = mdi_button("选择文件", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_video)
         inp_row.addWidget(btn_sel)
@@ -888,7 +890,7 @@ class SubtitleRemovalPageV14(BasePage):
         splitter.setStretchFactor(1, 3)
 
     def _select_video(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择输入视频或图片",
             "",

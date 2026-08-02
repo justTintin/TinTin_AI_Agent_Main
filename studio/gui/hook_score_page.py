@@ -33,6 +33,8 @@ from utils.video_prediction_manager import (
     VideoPredictionManager, PLATFORMS, DIMENSIONS, PLAY_LEVELS)
 from config.paths import TMP_DIR
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 DIM_COLORS = {
     "吸睛力": "#e74c3c", "画面冲击": "#3498db", "悬念信息": "#f1c40f",
     "节奏": "#9b59b6", "完播预测": "#2ecc71", "平台适配": "#e67e22",
@@ -280,7 +282,7 @@ class HookScorePage(BasePage):
         h.addWidget(self.cmb_platform)
         self.in_video = QLineEdit(); self.in_video.setPlaceholderText("选择要预测的视频…")
         h.addWidget(self.in_video, 1)
-        b = QPushButton("浏览…"); b.setObjectName("secondary_button"); b.clicked.connect(self._browse)
+        b = mdi_button("浏览…", "folder"); b.setObjectName("secondary_button"); b.clicked.connect(self._browse)
         h.addWidget(b)
         self.btn_run = QPushButton("📈 开始预测"); self.btn_run.setObjectName("primary_button")
         self.btn_run.clicked.connect(self._run); h.addWidget(self.btn_run)
@@ -381,7 +383,7 @@ class HookScorePage(BasePage):
 
     # ---------- 预测 ----------
     def _browse(self):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择视频", "",
+        f, _ = pick_file(self.parent_widget, "选择视频", "",
                                            "视频 (*.mp4 *.mov *.mkv *.avi *.webm *.flv)")
         if f:
             self.in_video.setText(f)

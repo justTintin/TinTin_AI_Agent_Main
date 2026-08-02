@@ -31,7 +31,7 @@ class Step1SplitView(BaseStepView):
         self.main_page.folder_path_input.setReadOnly(True)
         row_dir.addWidget(self.main_page.folder_path_input)
         
-        btn_sel = QPushButton("选择素材")
+        btn_sel = mdi_button("选择素材", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self.main_page._select_folder)
         row_dir.addWidget(btn_sel)

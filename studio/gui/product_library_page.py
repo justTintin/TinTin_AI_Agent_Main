@@ -23,6 +23,8 @@ from utils.logger_utils import log
 from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS
 
 
+from utils.file_dialog_utils import pick_file, pick_save_file
+from utils.gui_icons import mdi_button
 def _get_server_url() -> str:
     """读取 ai_config.json 中的统一服务端地址（与 llm_proxy / compile_video_page 一致）。"""
     try:
@@ -299,11 +301,11 @@ class ProductLibraryPage(BasePage):
         self.btn_sync.setObjectName("primary_button")
         self.btn_sync.clicked.connect(self._on_sync)
         sync_bar.addWidget(self.btn_sync)
-        self.btn_import_excel = QPushButton("📥 导入表格")
+        self.btn_import_excel = mdi_button("导入表格", "folder")
         self.btn_import_excel.setObjectName("secondary_button")
         self.btn_import_excel.clicked.connect(self._on_import_excel)
         sync_bar.addWidget(self.btn_import_excel)
-        self.btn_export_template = QPushButton("📄 导出模板")
+        self.btn_export_template = mdi_button("导出模板", "save")
         self.btn_export_template.setObjectName("secondary_button")
         self.btn_export_template.clicked.connect(self._on_export_template)
         sync_bar.addWidget(self.btn_export_template)
@@ -888,7 +890,7 @@ class ProductLibraryPage(BasePage):
         import openpyxl
         from openpyxl.styles import Font, PatternFill
         from utils.product_library_manager import FIELDS
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = pick_save_file(
             self.parent_widget, "导出导入模板", "产品资料导入模板.xlsx",
             "Excel 文件 (*.xlsx)")
         if not path:
@@ -922,7 +924,7 @@ class ProductLibraryPage(BasePage):
         """从 Excel 导入产品数据（通过服务端存储）。"""
         import openpyxl
         from utils.product_library_manager import FIELDS
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")
         if not path:

@@ -13,6 +13,8 @@ from PySide6.QtGui import QColor
 from utils.logger_utils import log
 from config.paths import PROJECT_ROOT
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 VOICE_SAMPLES_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "assets", "voice_samples"))
 METADATA_PATH = os.path.join(VOICE_SAMPLES_DIR, "metadata.json")
 
@@ -102,7 +104,7 @@ class VoiceSamplesPage(BasePage):
         self.file_path_input.setPlaceholderText("点击右侧按钮选择 wav/mp3/m4a 声音文件...")
         row_file.addWidget(self.file_path_input)
         
-        btn_browse = QPushButton("浏览文件")
+        btn_browse = mdi_button("浏览文件", "folder")
         btn_browse.setObjectName("secondary_button")
         btn_browse.clicked.connect(self._browse_audio_file)
         row_file.addWidget(btn_browse)
@@ -193,7 +195,7 @@ class VoiceSamplesPage(BasePage):
         self._load_table_data()
 
     def _browse_audio_file(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择音频样本",
             "",

@@ -25,6 +25,7 @@ from gui.video_montage_page import (
     find_ffmpeg
 )
 
+from utils.file_dialog_utils import pick_directory, pick_file, pick_save_file
 class PunctuationLLMWorker(BaseWorker):
     finished = Signal(str)
 
@@ -165,7 +166,7 @@ class VoiceClonePage(BasePage):
         self.ref_audio_combo.currentIndexChanged.connect(self._on_ref_audio_combo_changed)
         row_ref_audio.addWidget(self.ref_audio_combo)
         
-        btn_sel_ref = QPushButton("选择本地人声")
+        btn_sel_ref = mdi_button("选择本地人声", "folder")
         btn_sel_ref.setObjectName("secondary_button")
         btn_sel_ref.clicked.connect(self._select_ref_audio)
         row_ref_audio.addWidget(btn_sel_ref)
@@ -233,7 +234,7 @@ class VoiceClonePage(BasePage):
         self.voice_video_dir_input.textChanged.connect(self._on_voice_video_dir_changed)
         row_vid_dir.addWidget(self.voice_video_dir_input)
         
-        btn_sel_vid_dir = QPushButton("选择输出目录")
+        btn_sel_vid_dir = mdi_button("选择输出目录", "folder")
         btn_sel_vid_dir.setObjectName("secondary_button")
         btn_sel_vid_dir.clicked.connect(self._select_voice_video_dir)
         row_vid_dir.addWidget(btn_sel_vid_dir)
@@ -404,7 +405,7 @@ class VoiceClonePage(BasePage):
         self._check_whole_audio_exists()
 
     def _select_voice_video_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self.parent_widget, "选择音频输出目录", "")
+        dir_path = pick_directory(self.parent_widget, "选择音频输出目录", "")
         if dir_path:
             self.voice_video_dir_input.setText(dir_path)
             self._check_whole_audio_exists()
@@ -648,7 +649,7 @@ class VoiceClonePage(BasePage):
         self._check_whole_audio_exists()
 
     def _select_ref_audio(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择声音样本",
             "",
@@ -1099,7 +1100,7 @@ class VoiceClonePage(BasePage):
         if not wav_path or not os.path.exists(wav_path):
             return
         
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent_widget,
             "导出克隆声音",
             os.path.basename(wav_path),

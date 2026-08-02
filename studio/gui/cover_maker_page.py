@@ -36,6 +36,7 @@ from gui.mg_template_utils import (
 )
 from utils.template_server_client import list_templates as list_cover_templates
 
+from utils.file_dialog_utils import pick_file
 try:  # PSD 图层解析（psd_tools 已内置）
     from psd_tools import PSDImage as _PSDImage
 except Exception:
@@ -254,7 +255,7 @@ class CoverMakerPage(BasePage):
         self.combo_ratio = QComboBox(); self.combo_ratio.addItems(list(CANVAS_SIZES.keys()))
         self.combo_ratio.currentTextChanged.connect(self._on_ratio_changed)
         lay.addWidget(self.combo_ratio)
-        b1 = QPushButton("上传模板"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._upload_template)
+        b1 = mdi_button("上传模板", "folder"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._upload_template)
         b1.setToolTip("上传封面模板（图片/PSD）→ 进入图层编辑模式拆分为图层处理")
         lay.addWidget(b1)
         self.chk_safe = QCheckBox("安全区"); self.chk_safe.setChecked(True)
@@ -307,7 +308,7 @@ class CoverMakerPage(BasePage):
         self.copy_input.setPlaceholderText("封面参考文案（用于 AI 建议 / 构图复刻）…")
         self.copy_input.setFixedHeight(70)
         lay.addWidget(self.copy_input)
-        bup = QPushButton("上传文案(txt)")
+        bup = mdi_button("上传文案(txt)", "folder")
         bup.setObjectName("secondary_button")
         bup.clicked.connect(self._upload_copy)
         lay.addWidget(bup)
@@ -624,7 +625,7 @@ class CoverMakerPage(BasePage):
     def _src_upload(self):
         if not self._require_image_layer():
             return
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择图片", "",
+        f, _ = pick_file(self.parent_widget, "选择图片", "",
                                            "图片 (*.png *.jpg *.jpeg *.webp *.bmp)")
         if f:
             self._set_current_image(f)
@@ -683,7 +684,7 @@ class CoverMakerPage(BasePage):
     # ---------------- 上传 / AI / 导出 ----------------
     def _upload_template(self):
         """上传封面模板（图片/PSD）→ 先进入图层编辑模式，拆分为图层处理。"""
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择封面模板（进入图层编辑）", "",
+        f, _ = pick_file(self.parent_widget, "选择封面模板（进入图层编辑）", "",
                                            "图片/PSD (*.png *.jpg *.jpeg *.webp *.psd)")
         if not f:
             return
@@ -767,7 +768,7 @@ class CoverMakerPage(BasePage):
         return ly
 
     def _upload_copy(self):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择文案文件", "", "文本 (*.txt *.md)")
+        f, _ = pick_file(self.parent_widget, "选择文案文件", "", "文本 (*.txt *.md)")
         if not f:
             return
         try:
@@ -1006,7 +1007,7 @@ class CoverMakerPage(BasePage):
         btn_preview.setObjectName("secondary_button")
         btn_preview.clicked.connect(self._preview_template)
         btn_row.addWidget(btn_preview)
-        btn_export = QPushButton("💾 导出封面")
+        btn_export = mdi_button("导出封面", "save")
         btn_export.setObjectName("primary_button")
         btn_export.clicked.connect(self._export_template)
         btn_row.addWidget(btn_export)

@@ -60,6 +60,7 @@ from gui.montage.workers.script_workers import (PunctuationSRTLLMWorker, AITextR
                                                 BatchAITextRewriteWorker, ScriptMatchLLMWorker)
 
 
+from utils.file_dialog_utils import pick_file, pick_files, pick_save_file
 class VideoMontagePage(BasePage):
     # 是否把镜头合成提交到服务端 montage_concat 执行器。
     # 服务端部署完成后设为 True；未部署前保持 False，走本地 VideoConcatWorker。
@@ -450,7 +451,7 @@ class VideoMontagePage(BasePage):
         self.folder_path_input.setText(common_dir)
     # [2·基础设施]  _select_folder
     def _select_folder(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = pick_files(
             self.parent_widget,
             "选择视频素材",
             "",
@@ -992,7 +993,7 @@ class VideoMontagePage(BasePage):
 
     # [7·混音导出]  _select_bgm
     def _select_bgm(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择背景配乐",
             "",
@@ -1002,7 +1003,7 @@ class VideoMontagePage(BasePage):
             self.bgm_input.setText(path)
     # [2·基础设施]  _select_ref_audio
     def _select_ref_audio(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择人声克隆样本",
             "",
@@ -1066,7 +1067,7 @@ class VideoMontagePage(BasePage):
         self._on_ref_audio_combo_changed(self.ref_audio_combo.currentIndex())
     # [6·配音]  _select_voice_video_dir
     def _select_voice_video_dir(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = pick_files(
             self.parent_widget,
             "选择需要克隆配音的视频",
             "",
@@ -1428,7 +1429,7 @@ class VideoMontagePage(BasePage):
         if not wav_path or not os.path.exists(wav_path):
             return
         
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent_widget,
             "导出克隆声音",
             os.path.basename(wav_path),
@@ -3303,7 +3304,7 @@ class VideoMontagePage(BasePage):
         self.mix_video_table.setCellWidget(row_idx, 4, action_w)
     # [7·混音导出]  _select_per_video_bgm
     def _select_per_video_bgm(self, filepath, button):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择背景音乐",
             os.path.dirname(filepath) if os.path.exists(os.path.dirname(filepath)) else "",
@@ -3329,7 +3330,7 @@ class VideoMontagePage(BasePage):
                 self._update_final_inputs_label()
     # [7·混音导出]  _add_mix_videos
     def _add_mix_videos(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = pick_files(
             self.parent_widget,
             "选择添加视频进行最终合成",
             "",
@@ -4278,7 +4279,7 @@ class VideoMontagePage(BasePage):
                 if dir_path:
                     default_dir = os.path.join(dir_path, "splits")
         
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = pick_files(
             self.parent_widget,
             "重新选择素材",
             default_dir,

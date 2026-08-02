@@ -34,6 +34,8 @@ from utils.logger_utils import log
 from config.paths import OUTPUTS_DIR
 from gui.searchable_combo import SearchableComboBox
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 PRODUCT_IMAGE_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "product_images")
 
 
@@ -313,7 +315,7 @@ class ProductImagePage(BasePage):
 
         # 图片操作按钮
         img_row = QHBoxLayout()
-        btn_upload = QPushButton("📁 选择图片")
+        btn_upload = mdi_button("选择图片", "folder")
         btn_upload.setObjectName("primary_button")
         btn_upload.clicked.connect(self._select_image)
         img_row.addWidget(btn_upload)
@@ -491,7 +493,7 @@ class ProductImagePage(BasePage):
         pass  # 工作流内容在提交时按需加载
 
     def _select_image(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget, "选择产品图片",
             "", "图片文件 (*.png *.jpg *.jpeg *.webp *.bmp)")
         if path:

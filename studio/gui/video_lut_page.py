@@ -25,6 +25,8 @@ from utils.hwaccel import get_video_encode_args
 
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
 
+from utils.file_dialog_utils import pick_directory, pick_file
+from utils.gui_icons import mdi_button
 def _find_ffmpeg():
     """查找 ffmpeg 可执行文件（使用平台感知的统一查找）。"""
     from utils.platform_utils import find_ffmpeg as _ff
@@ -179,7 +181,7 @@ class VideoLutPage(BasePage):
         self.input_dir_edit.setPlaceholderText("选择包含视频文件的文件夹…")
         self.input_dir_edit.textChanged.connect(self._on_input_changed)
         row_in.addWidget(self.input_dir_edit)
-        btn_browse_in = QPushButton("选择文件夹")
+        btn_browse_in = mdi_button("选择文件夹", "folder")
         btn_browse_in.setFixedWidth(90)
         btn_browse_in.clicked.connect(self._browse_input)
         row_in.addWidget(btn_browse_in)
@@ -195,7 +197,7 @@ class VideoLutPage(BasePage):
         self.lut_edit = QLineEdit()
         self.lut_edit.setPlaceholderText("选择 .cube / .3dl / .lut 文件…")
         row_lut.addWidget(self.lut_edit)
-        btn_browse_lut = QPushButton("选择文件")
+        btn_browse_lut = mdi_button("选择文件", "folder")
         btn_browse_lut.setFixedWidth(90)
         btn_browse_lut.clicked.connect(self._browse_lut)
         row_lut.addWidget(btn_browse_lut)
@@ -207,7 +209,7 @@ class VideoLutPage(BasePage):
         self.output_dir_edit = QLineEdit()
         self.output_dir_edit.setPlaceholderText("默认：输入文件夹下的 lut_output 子目录")
         row_out.addWidget(self.output_dir_edit)
-        btn_browse_out = QPushButton("选择文件夹")
+        btn_browse_out = mdi_button("选择文件夹", "folder")
         btn_browse_out.setFixedWidth(90)
         btn_browse_out.clicked.connect(self._browse_output)
         row_out.addWidget(btn_browse_out)
@@ -279,21 +281,21 @@ class VideoLutPage(BasePage):
         return lbl
 
     def _browse_input(self):
-        d = QFileDialog.getExistingDirectory(
+        d = pick_directory(
             self.parent_widget, "选择视频输入文件夹",
             self.input_dir_edit.text() or "")
         if d:
             self.input_dir_edit.setText(d)
 
     def _browse_lut(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget, "选择 LUT 文件", "",
             "LUT 文件 (*.cube *.3dl *.lut *.m3d *.dat);;所有文件 (*.*)")
         if path:
             self.lut_edit.setText(path)
 
     def _browse_output(self):
-        d = QFileDialog.getExistingDirectory(
+        d = pick_directory(
             self.parent_widget, "选择输出文件夹",
             self.output_dir_edit.text() or "")
         if d:

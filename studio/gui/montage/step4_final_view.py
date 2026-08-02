@@ -30,7 +30,7 @@ class Step4FinalView(BaseStepView):
         self.main_page.bgm_input.setReadOnly(True)
         row_bgm.addWidget(self.main_page.bgm_input)
         
-        btn_sel_bgm = QPushButton("选择背景音乐")
+        btn_sel_bgm = mdi_button("选择背景音乐", "folder")
         btn_sel_bgm.setObjectName("secondary_button")
         btn_sel_bgm.clicked.connect(self.main_page._select_bgm)
         row_bgm.addWidget(btn_sel_bgm)

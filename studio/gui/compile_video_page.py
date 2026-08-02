@@ -48,6 +48,7 @@ from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 
 
 # ─── 远程素材服务地址（与 vector_search_page 一致） ─────────────────────────
+from utils.file_dialog_utils import pick_directory, pick_file
 def _get_server_url():
     try:
         import json
@@ -1275,29 +1276,29 @@ class CompileVideoPage(BasePage):
         row = QHBoxLayout()
         edit = QLineEdit(); edit.setPlaceholderText(placeholder)
         row.addWidget(edit, 1)
-        btn = QPushButton("浏览…"); btn.setObjectName("secondary_button")
+        btn = mdi_button("浏览…", "folder"); btn.setObjectName("secondary_button")
         btn.clicked.connect(lambda: on_browse(edit))
         row.addWidget(btn)
         parent.addLayout(row)
         return edit
 
     def _browse_folder(self, edit):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择素材目录")
+        d = pick_directory(self.parent_widget, "选择素材目录")
         if d:
             edit.setText(d)
 
     def _browse_audio(self, edit):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择配音", "", "音频 (*.wav *.mp3 *.m4a *.aac *.flac)")
+        f, _ = pick_file(self.parent_widget, "选择配音", "", "音频 (*.wav *.mp3 *.m4a *.aac *.flac)")
         if f:
             edit.setText(f)
 
     def _browse_cover(self, edit):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择封面", "", "图片 (*.png *.jpg *.jpeg *.webp)")
+        f, _ = pick_file(self.parent_widget, "选择封面", "", "图片 (*.png *.jpg *.jpeg *.webp)")
         if f:
             edit.setText(f)
 
     def _browse_intro(self, edit):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择开场视频", "",
+        f, _ = pick_file(self.parent_widget, "选择开场视频", "",
                                            "视频 (*.mp4 *.mov *.mkv *.webm)")
         if f:
             edit.setText(f)

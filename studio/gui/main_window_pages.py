@@ -50,6 +50,7 @@ from PySide6.QtGui import QFont
 from utils.gui_icons import mdi_button, mdi_icon
 
 
+from utils.file_dialog_utils import pick_directory, pick_file
 class PageSetupMixin:
     def _register_lazy_page(self, index, setup_method):
         """登记懒加载页面：首次切换到该页时才调用 setup_method 构建。
@@ -317,7 +318,7 @@ class PageSetupMixin:
         self.vt_video_path_input = QLineEdit()
         self.vt_video_path_input.setPlaceholderText("请选择视频文件...")
         video_row.addWidget(self.vt_video_path_input)
-        btn_sel_video = QPushButton("浏览")
+        btn_sel_video = mdi_button("浏览", "folder")
         btn_sel_video.clicked.connect(self.select_vt_video)
         video_row.addWidget(btn_sel_video)
         config_layout.addLayout(video_row)
@@ -764,7 +765,7 @@ class PageSetupMixin:
             self.img_path_input = QLineEdit()
             self.img_path_input.setPlaceholderText("请选择图片...")
             img_row.addWidget(self.img_path_input)
-            btn_sel_img = QPushButton("浏览")
+            btn_sel_img = mdi_button("浏览", "folder")
             btn_sel_img.clicked.connect(self.select_image)
             img_row.addWidget(btn_sel_img)
             comfy_layout.addLayout(img_row)
@@ -775,7 +776,7 @@ class PageSetupMixin:
             self.aud_path_input = QLineEdit()
             self.aud_path_input.setPlaceholderText("请选择音频...")
             aud_row.addWidget(self.aud_path_input)
-            btn_sel_aud = QPushButton("浏览")
+            btn_sel_aud = mdi_button("浏览", "folder")
             btn_sel_aud.clicked.connect(self.select_audio)
             aud_row.addWidget(btn_sel_aud)
             comfy_layout.addLayout(aud_row)
@@ -799,13 +800,13 @@ class PageSetupMixin:
 
     def select_image(self):
         """数字人 ComfyUI：选择人物图片。"""
-        file, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
+        file, _ = pick_file(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
         if file:
             self.img_path_input.setText(file)
 
     def select_audio(self):
         """数字人 ComfyUI：选择驱动语音。"""
-        file, _ = QFileDialog.getOpenFileName(self, "选择音频", "", "Audio (*.mp3 *.wav)")
+        file, _ = pick_file(self, "选择音频", "", "Audio (*.mp3 *.wav)")
         if file:
             self.aud_path_input.setText(file)
 
@@ -1411,7 +1412,7 @@ class PageSetupMixin:
         self.local_cache_dir_input = QLineEdit()
         self.local_cache_dir_input.setPlaceholderText("默认为 outputs 目录，可自定义...")
         dir_row.addWidget(self.local_cache_dir_input, 1)
-        btn_browse = QPushButton("浏览...")
+        btn_browse = mdi_button("浏览...", "folder")
         btn_browse.clicked.connect(lambda: self._browse_local_cache_dir())
         dir_row.addWidget(btn_browse)
         layout.addLayout(dir_row)
@@ -1438,7 +1439,7 @@ class PageSetupMixin:
         layout.addStretch()
 
     def _browse_local_cache_dir(self):
-        d = QFileDialog.getExistingDirectory(self.local_cache_dir_input, "选择本地缓存目录")
+        d = pick_directory(self.local_cache_dir_input, "选择本地缓存目录")
         if d:
             self.local_cache_dir_input.setText(d)
 
@@ -1487,7 +1488,7 @@ class PageSetupMixin:
 
         # 按钮行
         btn_row = QHBoxLayout()
-        btn_add = QPushButton("➕ 添加 LUT 文件")
+        btn_add = mdi_button("添加 LUT 文件", "folder")
         btn_add.setObjectName("primary_button")
         btn_add.clicked.connect(self._add_lut_entry)
         btn_row.addWidget(btn_add)
@@ -1522,7 +1523,7 @@ class PageSetupMixin:
             self.lut_status.setText(f"加载失败: {e}")
 
     def _add_lut_entry(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.lut_list, "选择 LUT 还原文件", "",
             "LUT 文件 (*.cube *.3dl *.lut);;所有文件 (*.*)")
         if not path:

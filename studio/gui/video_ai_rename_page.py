@@ -29,6 +29,8 @@ from utils.logger_utils import log
 # ─────────────────────────────────────────────
 #  常量 / 知识库
 # ─────────────────────────────────────────────
+from utils.file_dialog_utils import pick_directory
+from utils.gui_icons import mdi_button
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv',
                     '.webm', '.m4v', '.ts', '.mts', '.rmvb', '.3gp'}
 
@@ -1025,7 +1027,7 @@ class VideoAiRenamePage(BasePage):
         self.folder_input = QLineEdit()
         self.folder_input.setPlaceholderText("选择包含视频文件的文件夹...")
         self.folder_input.setReadOnly(True)
-        btn_sel = QPushButton("选择文件夹")
+        btn_sel = mdi_button("选择文件夹", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_folder)
         row_folder.addWidget(lbl_folder)
@@ -1258,7 +1260,7 @@ class VideoAiRenamePage(BasePage):
 
     # ──────────────────────── 文件夹选择 ────────────────────────
     def _select_folder(self):
-        path = QFileDialog.getExistingDirectory(
+        path = pick_directory(
             self.parent_widget, "选择包含视频文件的文件夹", ""
         )
         if not path:

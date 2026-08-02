@@ -154,6 +154,8 @@ except ImportError as e:
     print("Please install PySide6 using: pip install PySide6 shiboken6")
     sys.exit(1)
 
+from utils.file_dialog_utils import pick_directory
+
 
 class LogHighlighter(QSyntaxHighlighter):
     """用 QSyntaxHighlighter 给日志按级别着色，比 setHtml 稳定。"""
@@ -1305,7 +1307,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         
         from utils import comfyui_client as comfy
         comfyui_addr = comfy.resolve_addr(self.ai_config, auto_start=False)
-        save_dir = QFileDialog.getExistingDirectory(self, "选择保存目录")
+        save_dir = pick_directory(self, "选择保存目录")
         if not save_dir: return
 
         for out in outputs:

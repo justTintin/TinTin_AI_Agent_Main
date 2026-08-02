@@ -44,6 +44,7 @@ from PySide6.QtGui import QPalette, QColor
 from PySide6.QtGui import QFont
 
 
+from utils.file_dialog_utils import pick_file
 class AIGenMixin:
     def start_comfyui_websocket(self):
         # 被动解析后端（不为监听进度而启动本地）；无可用后端则跳过
@@ -130,7 +131,7 @@ class AIGenMixin:
             self.vt_workflow_status.setText(f"❌ 加载失败: {str(e)}")
 
     def select_vt_video(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择视频", "", "Video Files (*.mp4 *.avi *.mov *.mkv)")
+        path, _ = pick_file(self, "选择视频", "", "Video Files (*.mp4 *.avi *.mov *.mkv)")
         if path:
             self.vt_video_path_input.setText(path)
 

@@ -26,6 +26,7 @@ from utils.hwaccel import get_video_encode_args
 from config.paths import OUTPUTS_DIR, TMP_DIR
 
 
+from utils.file_dialog_utils import pick_file, pick_save_file
 HOT_KEYWORDS_CN = [
     "重点", "关键", "核心", "重要", "注意", "记住", "一定要", "必须",
     "首先", "然后", "最后", "总结", "结论", "建议", "推荐",
@@ -1661,7 +1662,7 @@ class LiveClipPage(BasePage):
         self.video_path_input = QLineEdit()
         self.video_path_input.setPlaceholderText("选择直播录像（支持 40GB+，流式处理）...")
         vr.addWidget(self.video_path_input)
-        btn = QPushButton("选择视频")
+        btn = mdi_button("选择视频", "folder")
         btn.setObjectName("secondary_button")
         btn.clicked.connect(self._select_video)
         vr.addWidget(btn)
@@ -1931,7 +1932,7 @@ class LiveClipPage(BasePage):
         # ===== Actions =====
 
     def _select_video(self):
-        path, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择直播视频", "",
+        path, _ = pick_file(self.parent_widget, "选择直播视频", "",
                                               "Video (*.mp4 *.flv *.ts *.mov *.avi *.mkv);;All (*)")
         if path:
             self.video_path = path
@@ -2323,7 +2324,7 @@ class LiveClipPage(BasePage):
         default_dir = os.path.dirname(os.path.abspath(self.video_path)) if getattr(self, "video_path", "") and os.path.exists(self.video_path) else ""
         default_path = os.path.join(default_dir, f"{vname}.srt")
         
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = pick_save_file(
             self.parent_widget,
             "保存字幕文件",
             default_path,

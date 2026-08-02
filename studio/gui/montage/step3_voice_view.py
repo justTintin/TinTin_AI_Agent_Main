@@ -32,7 +32,7 @@ class Step3VoiceView(BaseStepView):
         self.main_page.voice_video_dir_input.textChanged.connect(self.main_page._on_voice_video_dir_changed)
         row_vid_dir.addWidget(self.main_page.voice_video_dir_input)
         
-        btn_sel_vid_dir = QPushButton("选择目录")
+        btn_sel_vid_dir = mdi_button("选择目录", "folder")
         btn_sel_vid_dir.setObjectName("secondary_button")
         btn_sel_vid_dir.clicked.connect(self.main_page._select_voice_video_dir)
         row_vid_dir.addWidget(btn_sel_vid_dir)

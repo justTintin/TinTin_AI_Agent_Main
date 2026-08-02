@@ -19,6 +19,8 @@ from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 from utils.logger_utils import log
 from config.paths import TMP_DIR, QWEN_IMAGE_LAYERED_DIR
 
+from utils.file_dialog_utils import pick_file, pick_save_file
+from utils.gui_icons import mdi_button
 _cached_pipeline = None
 
 class QwenLayeredWorker(BaseWorker):
@@ -393,7 +395,7 @@ class ImageLayeredPage(BasePage):
         
         # Image Upload
         left_layout.addWidget(QLabel("1. 选择原始图像:"))
-        self.btn_select_image = QPushButton("📁 上传本地图像")
+        self.btn_select_image = mdi_button("上传本地图像", "folder")
         self.btn_select_image.setObjectName("secondary_button")
         self.btn_select_image.setCursor(Qt.PointingHandCursor)
         self.btn_select_image.clicked.connect(self.choose_image)
@@ -591,7 +593,7 @@ class ImageLayeredPage(BasePage):
         self.lbl_cfg_val.setText(f"{val/10.0:.1f}")
         
     def choose_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _ = pick_file(
             self.parent, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
@@ -707,7 +709,7 @@ class ImageLayeredPage(BasePage):
         dialog.exec()
         
     def on_layer_save(self, img_path, idx):
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent, f"保存图层 {idx} 为透明 PNG", f"layer_{idx}.png", "透明图像 (*.png)"
         )
         if save_path:
@@ -720,7 +722,7 @@ class ImageLayeredPage(BasePage):
     def save_pptx(self):
         if not self.pptx_path or not os.path.exists(self.pptx_path):
             return
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent, "另存为幻灯片 PPTX 文件", "decomposed_image.pptx", "幻灯片文件 (*.pptx)"
         )
         if save_path:
@@ -733,7 +735,7 @@ class ImageLayeredPage(BasePage):
     def save_zip(self):
         if not self.zip_path or not os.path.exists(self.zip_path):
             return
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent, "另存为图层 ZIP 压缩包", "decomposed_layers.zip", "压缩包文件 (*.zip)"
         )
         if save_path:
@@ -746,7 +748,7 @@ class ImageLayeredPage(BasePage):
     def save_psd(self):
         if not self.psd_path or not os.path.exists(self.psd_path):
             return
-        save_path, _ = QFileDialog.getSaveFileName(
+        save_path, _ = pick_save_file(
             self.parent, "另存为 Photoshop PSD 工程图层文件", "decomposed_image.psd", "Photoshop 文件 (*.psd)"
         )
         if save_path:

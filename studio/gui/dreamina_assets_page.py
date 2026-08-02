@@ -12,6 +12,8 @@ from gui.base_page import BasePage
 from config.paths import MATERIALS_DIR
 
 # 常见媒体文件后缀
+from utils.file_dialog_utils import pick_directory
+from utils.gui_icons import mdi_button
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv"}
 
@@ -53,7 +55,7 @@ class DreaminaAssetsPage(BasePage):
         row.addWidget(QLabel("下载目录"))
         self.edit_dir = QLineEdit(self._current_dir)
         row.addWidget(self.edit_dir, 1)
-        btn_choose = QPushButton("选择")
+        btn_choose = mdi_button("选择", "folder")
         btn_choose.setObjectName("secondary_button")
         btn_choose.clicked.connect(self._choose_dir)
         row.addWidget(btn_choose)
@@ -112,7 +114,7 @@ class DreaminaAssetsPage(BasePage):
         return os.path.abspath(d)
 
     def _choose_dir(self):
-        d = QFileDialog.getExistingDirectory(self.parent_widget, "选择即梦素材下载目录", self._dir())
+        d = pick_directory(self.parent_widget, "选择即梦素材下载目录", self._dir())
         if not d:
             return
         self.edit_dir.setText(os.path.abspath(d))

@@ -23,6 +23,8 @@ from utils.data_registry import summarize
 from config.paths import BACKUP_DIR
 
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 def _fmt(n):
     n = float(n)
     for u in ("B", "KB", "MB", "GB"):
@@ -106,7 +108,7 @@ class BackupPage(BasePage):
         rr = QHBoxLayout()
         self.in_zip = QLineEdit(); self.in_zip.setPlaceholderText("选择备份 zip…")
         rr.addWidget(self.in_zip, 1)
-        btn_br = QPushButton("浏览…"); btn_br.setObjectName("secondary_button"); btn_br.clicked.connect(self._browse_zip)
+        btn_br = mdi_button("浏览…", "folder"); btn_br.setObjectName("secondary_button"); btn_br.clicked.connect(self._browse_zip)
         rr.addWidget(btn_br)
         self.btn_restore = QPushButton("♻️ 还原"); self.btn_restore.setObjectName("secondary_button")
         self.btn_restore.clicked.connect(self._restore)
@@ -169,7 +171,7 @@ class BackupPage(BasePage):
 
     # ---------- 还原 ----------
     def _browse_zip(self):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择备份 zip", BACKUP_DIR, "备份 (*.zip)")
+        f, _ = pick_file(self.parent_widget, "选择备份 zip", BACKUP_DIR, "备份 (*.zip)")
         if f:
             self.in_zip.setText(f)
 

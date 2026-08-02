@@ -18,6 +18,8 @@ from utils.ocr_client import check_server_ocr
 from utils.ocr_workers import VideoOcrWorker
 
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 class InteractivePreviewLabelOCR(QLabel):
     boundsChanged = Signal(int, int, int, int) # x, y, w, h
     resized = Signal()
@@ -212,7 +214,7 @@ class VideoOcrPage(BasePage):
         self.video_path_input.setPlaceholderText("请选择 .mp4/.avi/.mov 视频文件...")
         self.video_path_input.textChanged.connect(self._on_video_path_changed)
         inp_row.addWidget(self.video_path_input)
-        btn_sel = QPushButton("浏览")
+        btn_sel = mdi_button("浏览", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_video)
         inp_row.addWidget(btn_sel)
@@ -511,7 +513,7 @@ class VideoOcrPage(BasePage):
         splitter.setStretchFactor(1, 3)
 
     def _select_video(self):
-        path, _ = QFileDialog.getOpenFileName(
+        path, _ = pick_file(
             self.parent_widget,
             "选择输入视频文件",
             "",

@@ -22,6 +22,8 @@ from gui.video_ocr_page import InteractivePreviewLabelOCR
 from gui.base_page import BasePage
 
 
+from utils.file_dialog_utils import pick_directory, pick_save_file
+from utils.gui_icons import mdi_button
 class ImageFolderOcrPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -68,7 +70,7 @@ class ImageFolderOcrPage(BasePage):
         self.folder_path_input.setPlaceholderText("请选择包含图片的文件夹...")
         self.folder_path_input.textChanged.connect(self._on_folder_path_changed)
         folder_row.addWidget(self.folder_path_input)
-        btn_sel = QPushButton("浏览")
+        btn_sel = mdi_button("浏览", "folder")
         btn_sel.setObjectName("secondary_button")
         btn_sel.clicked.connect(self._select_folder)
         folder_row.addWidget(btn_sel)
@@ -198,7 +200,7 @@ class ImageFolderOcrPage(BasePage):
         self.output_path_input = QLineEdit()
         self.output_path_input.setPlaceholderText("默认输出到 outputs 目录...")
         out_row.addWidget(self.output_path_input)
-        btn_save_as = QPushButton("浏览")
+        btn_save_as = mdi_button("浏览", "folder")
         btn_save_as.setObjectName("secondary_button")
         btn_save_as.setFixedWidth(60)
         btn_save_as.clicked.connect(self._select_output_path)
@@ -274,7 +276,7 @@ class ImageFolderOcrPage(BasePage):
         splitter.setStretchFactor(1, 3)
 
     def _select_folder(self):
-        path = QFileDialog.getExistingDirectory(
+        path = pick_directory(
             self.parent_widget,
             "选择图片文件夹",
             ""
@@ -452,7 +454,7 @@ class ImageFolderOcrPage(BasePage):
     def _select_output_path(self):
         fmt = self.format_combo.currentData()
         filter_str = "CSV Files (*.csv)" if fmt == "csv" else "Text Files (*.txt)"
-        path, _ = QFileDialog.getSaveFileName(
+        path, _ = pick_save_file(
             self.parent_widget,
             "选择保存位置",
             self.output_path_input.text().strip(),

@@ -19,6 +19,8 @@ from config.paths import (WORKSPACE_ROOT, APPS_DIR,
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
 
+from utils.file_dialog_utils import pick_directory
+from utils.gui_icons import mdi_button
 class EnvInstallWorker(BaseWorker):
     log_line = Signal(str)
     stage = Signal(str)
@@ -215,7 +217,7 @@ class EnvConfigPage(BasePage):
         self.edit_mat_dir.setText(KNOWLEDGE_MEDIA_DIR)
         self.edit_mat_dir.setReadOnly(True)
         mat_row.addWidget(self.edit_mat_dir, 1)
-        btn_choose_mat = QPushButton("📂 选择目录")
+        btn_choose_mat = mdi_button("选择目录", "folder")
         btn_choose_mat.setObjectName("secondary_button")
         btn_choose_mat.clicked.connect(self._choose_materials_dir)
         mat_row.addWidget(btn_choose_mat)
@@ -313,7 +315,7 @@ class EnvConfigPage(BasePage):
     # ── 素材目录配置 ──
 
     def _choose_materials_dir(self):
-        new_dir = QFileDialog.getExistingDirectory(
+        new_dir = pick_directory(
             self.parent_widget,
             "选择素材媒体存储目录（可以是外置盘或映射盘）",
             self.edit_mat_dir.text()

@@ -26,6 +26,8 @@ from utils.platform_utils import find_ffmpeg
 from config.paths import TMP_DIR
 
 
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 def _sample_times(dur):
     """根据视频时长均匀抽取 6-10 个关键帧，以覆盖视频全片"""
     if dur <= 0:
@@ -211,7 +213,7 @@ class MarketingDetectPage(BasePage):
         self.in_video.setPlaceholderText("请选择或拖入视频文件路径…")
         h_layout.addWidget(self.in_video, 1)
         
-        btn_browse = QPushButton("浏览…")
+        btn_browse = mdi_button("浏览…", "folder")
         btn_browse.setObjectName("secondary_button")
         btn_browse.clicked.connect(self._browse)
         h_layout.addWidget(btn_browse)
@@ -340,7 +342,7 @@ class MarketingDetectPage(BasePage):
         self.test_worker.start()
 
     def _browse(self):
-        f, _ = QFileDialog.getOpenFileName(
+        f, _ = pick_file(
             self.parent_widget, "选择视频", "",
             "视频 (*.mp4 *.mov *.mkv *.avi *.webm *.flv)"
         )

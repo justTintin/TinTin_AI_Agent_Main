@@ -1610,64 +1610,6 @@ class VideoMontagePage(BasePage):
         self.voice_worker.finished.connect(self._on_voice_finished)
         self.voice_worker.error.connect(self._on_voice_error)
         self.voice_worker.start()
-    # [3·分割]  _install_scenedetect
-    def _install_scenedetect(self):
-        if hasattr(self, "_install_thread") and self._install_thread and self._install_thread.isRunning():
-            return
-
-        class InstallThread(BaseWorker):
-            stage = Signal(str)
-            finished = Signal()
-
-            def run(self):
-                try:
-                    self.stage.emit("正在安装 scenedetect[opencv]...")
-                    cmd = [sys.executable, "-m", "pip", "install", "scenedetect[opencv]"]
-                    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
-                    if p.returncode != 0:
-                        raise RuntimeError(p.stdout + "\n" + p.stderr)
-                    self.finished.emit()
-                except Exception as e:
-                    self.error.emit(str(e))
-
-        if hasattr(self, "btn_install_deps"):
-            self.btn_install_deps.setEnabled(False)
-            
-        self.stage_label.setText("正在执行依赖安装，请稍候...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-
-        self._install_thread = InstallThread()
-        self._install_thread.stage.connect(lambda txt: self.stage_label.setText(txt))
-        
-        def on_ok():
-            if hasattr(self, "btn_install_deps"):
-                self.btn_install_deps.setEnabled(True)
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(100)
-            self.stage_label.setText("依赖库 scenedetect[opencv] 安装成功！")
-            QMessageBox.information(self.parent_widget, "成功", "镜头分割依赖库安装成功！")
-            
-            # Update dependency indicator
-            self.has_scenedetect_dep = True
-            self.dep_status_widget.layout().takeAt(0).widget().deleteLater()
-            lbl = QLabel("✅ 镜头分割依赖就绪")
-            lbl.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            self.dep_status_widget.layout().addWidget(lbl)
-
-        def on_err(err):
-            if hasattr(self, "btn_install_deps"):
-                self.btn_install_deps.setEnabled(True)
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            self.stage_label.setText("安装失败。")
-            QMessageBox.critical(self.parent_widget, "安装失败", f"安装依赖失败：\n{err}")
-
-        self._install_thread.finished.connect(on_ok)
-        self._install_thread.error.connect(on_err)
-        self._install_thread.start()
-
-
     # ==================== CONTROLLER RUN WORKERS ====================
 
     # --- Step 1 single video split ---
@@ -1753,8 +1695,6 @@ class VideoMontagePage(BasePage):
         self._merged_hl_duration = dur
 
         self.btn_split.setEnabled(False)
-        if hasattr(self, "btn_gen_shot_analysis"):
-            self.btn_gen_shot_analysis.setEnabled(False)
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -1869,11 +1809,6 @@ class VideoMontagePage(BasePage):
     # [3·分割]  _on_merged_all_finished
     def _on_merged_all_finished(self):
         self.btn_split.setEnabled(True)
-        if hasattr(self, "btn_gen_shot_analysis"):
-            self.btn_gen_shot_analysis.setEnabled(True)
-            self.btn_gen_shot_analysis.setStyleSheet(
-                "background-color: #2d6a4f; color: #b7e4c7; font-weight: bold; "
-                "border: 1px solid #40916c; border-radius: 4px; padding: 4px 12px;")
         if hasattr(self, "btn_transcribe_raw"):
             self.btn_transcribe_raw.setEnabled(True)
 
@@ -3978,49 +3913,6 @@ class VideoMontagePage(BasePage):
             QMessageBox.information(
                 self.parent_widget, "描述生成完成",
                 f"已从字幕匹配到 {updated_count} 个镜头的文案描述。")
-    # [3·分割]  _gen_shot_analysis
-    def _gen_shot_analysis(self):
-        """生成镜头分析：调用服务端 /material/score_clip 逐条分析当前镜头，回填评分与描述。"""
-        tbl = getattr(self, "split_result_table", None)
-        if tbl is None or tbl.rowCount() == 0:
-            QMessageBox.warning(self.parent_widget, "无镜头", "请先执行智能镜头分割，生成镜头片段。")
-            return
-
-        clips = []
-        for r in range(tbl.rowCount()):
-            file_item = tbl.item(r, 2)
-            if file_item:
-                path = file_item.data(Qt.UserRole)
-                if path and os.path.isfile(path):
-                    clips.append(path)
-        if not clips:
-            QMessageBox.warning(self.parent_widget, "无镜头文件", "表格中没有可用的镜头片段文件。")
-            return
-
-        server_url = self._get_compute_server_url()
-        if not server_url:
-            QMessageBox.warning(self.parent_widget, "未配置服务端",
-                                "请先在「系统设置」中配置统一服务端地址（compute_server_url）。")
-            return
-
-        if getattr(self, "_analysis_worker", None) and self._analysis_worker.isRunning():
-            return
-
-        self._analysis_paths = clips
-        self._analysis_server_url = server_url
-        self.btn_gen_shot_analysis.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.stage_label.setText(f"🤖 正在调用服务端分析 {len(clips)} 个镜头...")
-        log.info(f"[镜头分析] 开始分析 {len(clips)} 个镜头，服务端地址: {server_url}/material/score_clip")
-
-        self._analysis_worker = ServerClipAnalysisWorker(clips, server_url)
-        self._analysis_worker.item_ready.connect(self._on_analysis_item_ready)
-        self._analysis_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
-        self._analysis_worker.finished.connect(self._on_analysis_all_done)
-        self._analysis_worker.error.connect(self._on_analysis_error)
-        self._analysis_worker.start()
     # [2·基础设施]  _get_compute_server_url
     def _get_compute_server_url(self):
         try:
@@ -4180,8 +4072,6 @@ class VideoMontagePage(BasePage):
         self._refresh_step1_row_visual(idx)
     # [3·分割]  _on_analysis_all_done
     def _on_analysis_all_done(self, ok, fail):
-        if hasattr(self, "btn_gen_shot_analysis"):
-            self.btn_gen_shot_analysis.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self._save_split_srt()
@@ -4206,8 +4096,6 @@ class VideoMontagePage(BasePage):
                 f"评分与描述已回填到镜头表格。")
     # [3·分割]  _on_analysis_error
     def _on_analysis_error(self, err):
-        if hasattr(self, "btn_gen_shot_analysis"):
-            self.btn_gen_shot_analysis.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("❌ 镜头分析失败")

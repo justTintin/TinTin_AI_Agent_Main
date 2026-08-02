@@ -13,7 +13,6 @@
 import os
 import json
 import base64
-import subprocess
 import shutil
 from datetime import datetime
 
@@ -31,12 +30,56 @@ from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, mdi_icon
 from config.paths import COVER_OUTPUT_DIR, TMP_DIR, PROJECT_ROOT, WORKSPACE_ROOT
 from gui.mg_template_utils import (
-    RATIOS, FALLBACK_TEMPLATES, _param_meta, _template_backend, create_value_widget,
+    RATIOS, _param_meta, _template_backend, create_value_widget,
     widget_value, set_widget_value, color_row, merge_templates,
     fill_template_list, select_template_by_id,
 )
-from utils.template_server_client import list_templates as list_cover_templates, generate as generate_cover
-from gui.template_render_worker import TemplateRenderWorker
+from utils.template_server_client import list_templates as list_cover_templates
+
+try:  # PSD 图层解析（psd_tools 已内置）
+    from psd_tools import PSDImage as _PSDImage
+except Exception:
+    _PSDImage = None
+
+
+# 封面模板兜底（type=cover，区别于动效模板 type=motion）
+COVER_FALLBACK_TEMPLATES = [
+    {
+        "id": "cover_ecom",
+        "name": "电商主图封面",
+        "type": "cover",
+        "category": "ecommerce",
+        "description": "标题+副标题+卖点+背景色（封面模板，参数驱动）",
+        "canvas": {"width": 1080, "height": 1920, "fps": 30},
+        "is_builtin": True,
+        "params": [
+            {"name": "title", "type": "string", "default": "", "label": "主标题"},
+            {"name": "subtitle", "type": "string", "default": "", "label": "副标题"},
+            {"name": "selling", "type": "string", "default": "", "label": "卖点文案"},
+            {"name": "bg_color", "type": "color", "default": "#FFFFFF", "label": "背景色"},
+            {"name": "text_color", "type": "color", "default": "#111111", "label": "文字颜色"},
+            {"name": "ratio", "type": "ratio", "default": "9:16", "label": "画面比例"},
+        ],
+        "effects": {"template": "cover_ecom"},
+    },
+    {
+        "id": "cover_simple",
+        "name": "极简封面",
+        "type": "cover",
+        "category": "minimal",
+        "description": "标题+副标题（封面模板，参数驱动）",
+        "canvas": {"width": 1080, "height": 1920, "fps": 30},
+        "is_builtin": True,
+        "params": [
+            {"name": "title", "type": "string", "default": "", "label": "主标题"},
+            {"name": "subtitle", "type": "string", "default": "", "label": "副标题"},
+            {"name": "bg_color", "type": "color", "default": "#F5F5F5", "label": "背景色"},
+            {"name": "text_color", "type": "color", "default": "#111111", "label": "文字颜色"},
+            {"name": "ratio", "type": "ratio", "default": "9:16", "label": "画面比例"},
+        ],
+        "effects": {"template": "cover_simple"},
+    },
+]
 
 class CoverTemplateLoadWorker(BaseWorker):
     """异步从服务端 /template/list?category=cover 拉取封面模板。"""
@@ -68,31 +111,6 @@ SAFE_PRESETS = {
     "小红书": {"16:9（横版）": (0.05, 0.05, 0.05, 0.08), "9:16（竖版）": (0.05, 0.06, 0.06, 0.10),
               "1:1（方形）": (0.05, 0.05, 0.05, 0.08)},
 }
-
-
-def _find_ffmpeg():
-    from utils.platform_utils import find_ffmpeg as _ff
-    return _ff()
-
-
-class FrameExtractWorker(BaseWorker):
-    finished = Signal(str)
-
-    def __init__(self, video_path, time_sec, out_path):
-        super().__init__()
-        self.video_path = video_path
-        self.time_sec = time_sec
-        self.out_path = out_path
-
-    def do_work(self):
-        os.makedirs(os.path.dirname(self.out_path), exist_ok=True)
-        cmd = [_find_ffmpeg(), "-y", "-ss", str(self.time_sec), "-i", self.video_path,
-               "-vframes", "1", "-q:v", "2", self.out_path]
-        flags = 0x08000000 if os.name == "nt" else 0
-        r = subprocess.run(cmd, capture_output=True, creationflags=flags)
-        if r.returncode != 0 or not os.path.isfile(self.out_path):
-            raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[-300:] or "抽帧失败")
-        self.finished.emit(self.out_path)
 
 
 class CoverTextAIWorker(BaseWorker):
@@ -190,7 +208,6 @@ class CoverMakerPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.layers = []            # [{name, type, item, source, geom{ratio:{x,y,scale,font,visible}}}]
-        self.current_video = ""
         self.template_path = ""
         self._prev_ratio = None
         self._worker = None
@@ -220,8 +237,10 @@ class CoverMakerPage(BasePage):
         srow.addWidget(self.pbar)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_layer_tab(), "图层编辑")
-        self.tabs.addTab(self._build_template_tab(), "模板封面")
+        self._layer_tab = self._build_layer_tab()
+        self._template_tab = self._build_template_tab()
+        self.tabs.addTab(self._layer_tab, "图层编辑")
+        self.tabs.addTab(self._template_tab, "封面模板")
         root.addWidget(self.tabs, 1)
         root.addLayout(srow)
 
@@ -235,10 +254,9 @@ class CoverMakerPage(BasePage):
         self.combo_ratio = QComboBox(); self.combo_ratio.addItems(list(CANVAS_SIZES.keys()))
         self.combo_ratio.currentTextChanged.connect(self._on_ratio_changed)
         lay.addWidget(self.combo_ratio)
-        b1 = QPushButton("上传模板(参考)"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._upload_template)
+        b1 = QPushButton("上传模板"); b1.setObjectName("secondary_button"); b1.clicked.connect(self._upload_template)
+        b1.setToolTip("上传封面模板（图片/PSD）→ 进入图层编辑模式拆分为图层处理")
         lay.addWidget(b1)
-        b2 = QPushButton("上传视频"); b2.setObjectName("secondary_button"); b2.clicked.connect(self._upload_video)
-        lay.addWidget(b2)
         self.chk_safe = QCheckBox("安全区"); self.chk_safe.setChecked(True)
         self.chk_safe.stateChanged.connect(self._update_safe_rect)
         lay.addWidget(self.chk_safe)
@@ -338,7 +356,7 @@ class CoverMakerPage(BasePage):
         # 图片图层控件
         self.img_box = QWidget(); ib = QVBoxLayout(self.img_box); ib.setContentsMargins(0, 0, 0, 0); ib.setSpacing(6)
         ib.addWidget(QLabel("图片来源"))
-        for txt, fn in (("📁 上传图片", self._src_upload), ("🎞️ 视频抽帧", self._src_frame),
+        for txt, fn in (("📁 上传图片", self._src_upload),
                         ("✂️ 抠图去背景", self._src_matting), ("🎨 即梦生成", self._src_dreamina)):
             b = QPushButton(txt); b.setObjectName("secondary_button"); b.clicked.connect(fn)
             ib.addWidget(b)
@@ -611,19 +629,6 @@ class CoverMakerPage(BasePage):
         if f:
             self._set_current_image(f)
 
-    def _src_frame(self):
-        if not self._require_image_layer():
-            return
-        if not self.current_video:
-            self.show_warning("请先在上方『上传视频』。")
-            return
-        t, ok = QInputDialog.getDouble(self.parent_widget, "抽帧时间", "从第几秒抽帧：", 1.0, 0.0, 100000.0, 1)
-        if not ok:
-            return
-        out = os.path.join(TMP_DIR, f"cover_frame_{datetime.now().strftime('%H%M%S')}.png")
-        self._run(FrameExtractWorker(self.current_video, t, out),
-                  lambda p: self._set_current_image(p), "正在抽帧…")
-
     def _src_matting(self):
         ly = self._current_layer()
         if not self._require_image_layer():
@@ -677,14 +682,89 @@ class CoverMakerPage(BasePage):
 
     # ---------------- 上传 / AI / 导出 ----------------
     def _upload_template(self):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择封面模板", "",
-                                           "图片 (*.png *.jpg *.jpeg *.webp)")
-        if f:
-            self.template_path = f
-            pm = QPixmap(f)
-            if not pm.isNull():
-                self.tpl_thumb.setPixmap(pm.scaledToHeight(86, Qt.SmoothTransformation))
-            self._update_src_label()
+        """上传封面模板（图片/PSD）→ 先进入图层编辑模式，拆分为图层处理。"""
+        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择封面模板（进入图层编辑）", "",
+                                           "图片/PSD (*.png *.jpg *.jpeg *.webp *.psd)")
+        if not f:
+            return
+        try:
+            info = self._import_template_layers(f)
+        except Exception as e:
+            self.show_error(f"导入模板失败：{e}")
+            return
+        self.template_path = info.get("preview") or f
+        if hasattr(self, "tabs") and hasattr(self, "_layer_tab"):
+            self.tabs.setCurrentWidget(self._layer_tab)
+        pm = QPixmap(info.get("preview") or f)
+        if not pm.isNull():
+            self.tpl_thumb.setPixmap(pm.scaledToHeight(86, Qt.SmoothTransformation))
+        self._update_src_label()
+        self.status.setText(info.get("message", "已进入图层编辑模式：模板已拆分为图层，可继续编辑。"))
+
+    def _import_template_layers(self, path):
+        """把上传的模板拆成图层加入编辑器。
+
+        - PSD：优先用 psd_tools 逐层解析，每个可见图层成为图片图层；
+        - 普通图片 / PSD 解析兜底：整图作为「模板参考」底层（可配合『模板→复刻构图』）。
+        返回 {"preview": 扁平预览图路径, "message": 提示}。
+        """
+        ext = os.path.splitext(path)[1].lower()
+        is_psd = ext == ".psd"
+        if is_psd and _PSDImage is not None:
+            psd = None
+            try:
+                psd = _PSDImage.open(path)
+            except Exception:
+                psd = None
+            if psd is not None:
+                layers = [ly for ly in psd.descendants() if getattr(ly, "visible", True) and not ly.is_group()]
+                added = 0
+                for ly in reversed(layers):  # psd 自上而下，reverse 后 z 自下而上
+                    try:
+                        comp = ly.composite()
+                    except Exception:
+                        continue
+                    if comp is None:
+                        continue
+                    tmp = os.path.join(TMP_DIR, f"psd_{datetime.now().strftime('%H%M%S_%f')}.png")
+                    comp.save(tmp)
+                    if self._add_image_layer_from_path(f"PSD层 {added + 1}", tmp):
+                        added += 1
+                self._refresh_layer_list()
+                self._reassign_z()
+                preview = os.path.join(TMP_DIR, f"psd_flat_{datetime.now().strftime('%H%M%S')}.png")
+                try:
+                    psd.composite().save(preview)
+                except Exception:
+                    preview = path
+                return {"preview": preview,
+                        "message": f"已导入 PSD 并拆分为 {added} 个图层，进入图层编辑模式。"}
+        # 普通图片或 PSD 兜底：整图作为底层「模板参考」
+        self._prepend_image_layer_from_path("模板参考", path)
+        self._refresh_layer_list()
+        return {"preview": path,
+                "message": "已导入模板图作为参考图层，进入图层编辑模式（可用『模板→复刻构图』自动排版）。"}
+
+    def _prepend_image_layer_from_path(self, name, path):
+        ly = self._add_image_layer_from_path(name, path)
+        if ly is not None:
+            # 移到最底层（z=0），作为参考/底图
+            self.layers.insert(0, self.layers.pop())
+            self._reassign_z()
+        return ly
+
+    def _add_image_layer_from_path(self, name, path):
+        pm = QPixmap(path)
+        if pm.isNull():
+            return None
+        ly = self._new_image_layer(name)
+        w, _h = self._canvas_size()
+        if pm.width():
+            pm = pm.scaledToWidth(w, Qt.SmoothTransformation)
+        ly["item"].setPixmap(pm)
+        ly["item"].setPos(0, 0)
+        ly["source"] = path
+        return ly
 
     def _upload_copy(self):
         f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择文案文件", "", "文本 (*.txt *.md)")
@@ -696,17 +776,9 @@ class CoverMakerPage(BasePage):
         except Exception as e:
             self.show_error(f"读取失败：{e}")
 
-    def _upload_video(self):
-        f, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择视频", "",
-                                           "视频 (*.mp4 *.mov *.mkv *.avi *.webm *.flv)")
-        if f:
-            self.current_video = f
-            self._update_src_label()
-
     def _update_src_label(self):
         t = os.path.basename(self.template_path) if self.template_path else "无模板"
-        v = os.path.basename(self.current_video) if self.current_video else "无视频"
-        self.lbl_src.setText(f"模板：{t}　视频：{v}")
+        self.lbl_src.setText(f"模板：{t}")
 
     def _ai_suggest(self):
         copy_text = self.copy_input.toPlainText().strip()
@@ -947,7 +1019,7 @@ class CoverMakerPage(BasePage):
 
     # -------------- 模板相关方法 --------------
     def _load_templates(self):
-        self._templates = list(FALLBACK_TEMPLATES)
+        self._templates = list(COVER_FALLBACK_TEMPLATES)
         fill_template_list(self.list_templates, self._templates)
         w = CoverTemplateLoadWorker()
         w.finished.connect(self._on_templates_loaded)
@@ -958,7 +1030,7 @@ class CoverMakerPage(BasePage):
     def _on_templates_loaded(self, server_templates):
         if not server_templates:
             self.status.setText("⚠ 未从服务端加载到模板，使用内置模板")
-        self._templates = merge_templates(server_templates, FALLBACK_TEMPLATES)
+        self._templates = merge_templates(server_templates, COVER_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
         fill_template_list(self.list_templates, self._templates, current_id=current_id)
 
@@ -1011,13 +1083,12 @@ class CoverMakerPage(BasePage):
             raise ValueError("请先选择模板")
         template_id = self._current_template.get("id") or _template_backend(self._current_template)
         params = self._collect_template_params()
-        # 封面模板生成使用 /template/generate；topic 可选，params 由服务端模板消费
-        return {
-            "template_id": template_id,
-            "topic": params.get("title") or params.get("text") or "",
-        }
+        # 封面模板 = 封面类参数（type=cover），params 驱动本地图层渲染；
+        # 服务端提供 type=cover 模板后也可改用 render_cover() 走统一渲染。
+        return {"template_id": template_id, "params": params}
 
     def _preview_template(self):
+        """封面模板预览：把模板参数拆到图层编辑器，本地渲染为封面 PNG。"""
         try:
             req = self._build_template_request()
         except Exception as e:
@@ -1026,55 +1097,87 @@ class CoverMakerPage(BasePage):
         if not req.get("template_id"):
             self.show_warning("请先选择模板。")
             return
+        params = req.get("params") or {}
+        ratio = params.get("ratio") or self.combo_template_ratio.currentText() or "9:16"
         self.pbar.setVisible(True)
-        self.status.setText("正在提交封面模板生成任务...")
-
-        def _submit():
-            return generate_cover(req["template_id"], topic=req.get("topic", ""), top_k=1)
-
-        from utils.thread_worker import TaskWorker as Worker
-        worker = Worker(_submit)
-        def _on_task_id(task_id):
-            if not task_id:
-                self.pbar.setVisible(False)
-                self.status.setText("封面生成任务提交失败")
-                self.show_error("封面模板生成任务提交失败，请检查服务端连接。", "错误")
-                return
-            self.status.setText(f"封面任务已提交：{task_id}")
-            render_worker = TemplateRenderWorker(task_id, out_name=f"cover_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
-            render_worker.phase.connect(self.status.setText)
-            render_worker.progress.connect(self.pbar.setValue)
-            render_worker.finished.connect(self._on_template_rendered)
-            render_worker.error.connect(self._on_template_error)
-            self._worker = render_worker
-            self.track_worker(render_worker)
-            render_worker.start()
-        def _on_err(e):
+        self.status.setText("正在按封面模板参数渲染…")
+        try:
+            self._apply_cover_params_to_layers(params, ratio)
+        except Exception as e:
             self.pbar.setVisible(False)
-            self.status.setText("封面任务提交异常")
-            self.show_error(f"提交异常：{e}", "错误")
-        worker.finished.connect(_on_task_id)
-        worker.error.connect(_on_err)
-        self.track_worker(worker)
-        worker.start()
-
-    def _on_template_rendered(self, mp4_path):
+            self.show_error(f"封面参数应用失败：{e}")
+            return
         out = os.path.join(TMP_DIR, f"cover_preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-        self.status.setText("正在提取封面帧...")
-        worker = FrameExtractWorker(mp4_path, 0, out)
-
-        def _done(path):
-            self.pbar.setVisible(False)
-            self._set_template_preview(path)
-
-        worker.finished.connect(_done)
-        worker.error.connect(lambda e: (self.pbar.setVisible(False), self.show_error(str(e), "封面帧提取失败")))
-        self.track_worker(worker)
-        worker.start()
-
-    def _on_template_error(self, e):
+        ok = self._render_current_cover(out)
         self.pbar.setVisible(False)
-        self.show_error(str(e), "封面渲染失败")
+        if ok:
+            self._set_template_preview(out)
+        else:
+            self.show_error("封面渲染失败。")
+
+    def _ratio_key(self, ratio):
+        m = {"9:16": "9:16（竖版）", "16:9": "16:9（横版）", "1:1": "1:1（方形）"}
+        return m.get((ratio or "").strip(), "9:16（竖版）")
+
+    def _render_current_cover(self, out_path):
+        """把当前图层编辑器内容按当前画布尺寸渲染为封面 PNG（本地渲染）。"""
+        ratio_key = self._ratio_key(self.combo_ratio.currentText())
+        w, h = CANVAS_SIZES[ratio_key]
+        self.scene.setSceneRect(0, 0, w, h)
+        img = QImage(w, h, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.scene.clearSelection()
+        self.safe_rect.setVisible(False)
+        self.scene.render(painter, target=img.rect(), source=self.scene.sceneRect())
+        painter.end()
+        return img.save(out_path, "PNG")
+
+    def _apply_cover_params_to_layers(self, params, ratio="9:16"):
+        """把封面模板参数（title/subtitle/selling/bg_color/text_color/ratio）拆到图层编辑器。"""
+        params = params or {}
+        # 比例：切换画布（触发 _on_ratio_changed 保存旧几何/应用新画布）
+        key = self._ratio_key(ratio)
+        if self.combo_ratio.currentText() != key:
+            self.combo_ratio.setCurrentText(key)
+
+        # 背景色（仅当背景层无图时填充）
+        bg_color = params.get("bg_color") or params.get("bg") or ""
+        bly = next((l for l in self.layers if l["type"] == "image" and l["name"] == "背景"), None)
+        if bly and bg_color:
+            c = QColor(str(bg_color))
+            if c.isValid():
+                w, h = self._canvas_size()
+                pm = QPixmap(w, h); pm.fill(c)
+                bly["item"].setPixmap(pm); bly["item"].setScale(1.0); bly["item"].setPos(0, 0)
+                bly["source"] = "(纯色背景)"
+
+        # 标题 / 副标题 / 卖点文案
+        if params.get("title"):
+            self._set_text_layer("标题", str(params["title"]))
+        if params.get("subtitle"):
+            self._set_text_layer("副标题", str(params["subtitle"]))
+        selling = params.get("selling") or params.get("selling_point") or ""
+        if selling:
+            sly = next((l for l in self.layers if l["type"] == "text" and l["name"] == "卖点"), None)
+            if sly is None:
+                _w, _h = self._canvas_size()
+                sly = self._new_text_layer("卖点", "", size=36, y=int(_h * 0.9))
+                self._refresh_layer_list()
+            sly["item"].setPlainText(str(selling))
+
+        # 文字颜色
+        text_color = params.get("text_color") or params.get("color") or ""
+        if text_color:
+            c = QColor(str(text_color))
+            if c.isValid():
+                for l in self.layers:
+                    if l["type"] == "text":
+                        l["item"].setDefaultTextColor(c)
+        self._on_layer_selected(self.layer_list.currentRow())
+        self.status.setText("封面模板参数已应用（标题/副标题/卖点/背景色/比例），可在图层编辑中继续微调。")
 
     def _set_template_preview(self, png_path):
         self._last_cover_png = png_path

@@ -144,6 +144,8 @@ def compute_clip_hash(clip_path):
 
 
 def compute_clip_quality(clip_path):
+    # 延迟导入（与 get_media_duration 一致），避免模块级依赖
+    from utils.platform_utils import find_ffprobe, run_subprocess
     """评估镜头质量分数（0~100）。基于清晰度、对比度、是否有音频。
     失败返回 -1。
     """

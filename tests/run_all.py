@@ -31,6 +31,7 @@ FEATURES = [
     ("数据备份 (backup_manager)", ["TestBackupManager"]),
     ("语法/导入健康 (全部 studio)", ["TestSyntaxImports"]),
     ("UI 静态回归 (就绪/布局/分镜JSON)", ["TestUIRegression"]),
+    ("未定义名静态检查 (AST, 全 studio)", ["TestUndefinedNames"]),
     ("样本数据有效性", ["TestSampleFiles"]),
     ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
     ("智能混剪服务端拼接 Worker（离线 mock）", ["TestMontageConcatWorker"]),

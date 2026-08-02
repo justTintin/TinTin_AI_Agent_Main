@@ -145,7 +145,7 @@ class NASClient:
     def scandir(self, path: str) -> list[dict]:
         self.connect()
         (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
-         FileAttributes, _ShareAccess, _CreateDisposition, _CreateOptions,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
          FilePipePrinterAccessMask, FileInformationClass) = self._ensure_smb()
         share, subdir = self._parse_path(path)
 

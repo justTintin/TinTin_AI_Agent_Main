@@ -112,7 +112,7 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                 "temperature": 0.2
             }
             
-            log.info(f"BatchGenerateDescriptionsWorker - 正在请求大模型 API: {url}，以整体方式生成镜头描述。")
+            log.info(f"BatchGenerateDescriptionsWorker - 正在请求大模型 API: {self.model}，以整体方式生成镜头描述。")
             res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=60)
             class _R:
                 status_code = 200

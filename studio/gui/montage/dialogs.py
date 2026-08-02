@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QLineEdit)
 from PySide6.QtCore import Qt
 from gui.montage.widgets import ReadOnlyDoubleClickLineEdit
+import subprocess
+from utils.gui_icons import mdi_button
 
 
 

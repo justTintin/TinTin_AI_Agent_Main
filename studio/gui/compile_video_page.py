@@ -1312,7 +1312,7 @@ class CompileVideoPage(BasePage):
         """加载模板库（内置 + 服务端）。"""
         self._templates = list(FALLBACK_TEMPLATES)
         fill_template_list(self.list_templates, self._templates)
-        w = VideoTemplateLoadWorker()
+        w = MGTemplateLoadWorker()
         w.finished.connect(self._on_templates_loaded)
         w.phase.connect(self._log)
         self.track_worker(w)

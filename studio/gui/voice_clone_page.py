@@ -8,7 +8,7 @@ import json
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
                                QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QTableWidget,
                                QTableWidgetItem, QHeaderView, QWidget, QGroupBox, QScrollArea, QListView,
-                               QSpinBox)
+                               QSpinBox, QDialog)
 from PySide6.QtCore import Signal, QThread, Qt, QUrl
 from utils.base_worker import BaseWorker
 from utils.gui_icons import mdi_button, mdi_icon

@@ -463,15 +463,21 @@ class InteractivePreviewLabelV14(QLabel):
                     self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]
                 elif self.drag_mode.startswith('vertex-'):
                     vi = int(self.drag_mode.split('-')[1])
-                    new_quad = [list(p) for p in sq]
-                    new_quad[vi] = [max(0, min(self.frame_w, cur[0])),
-                                    max(0, min(self.frame_h, cur[1]))]
+                    cur_f = [max(0, min(self.frame_w, cur[0])),
+                             max(0, min(self.frame_h, cur[1]))]
                     if self.allow_rotation:
+                        new_quad = [list(p) for p in sq]
+                        new_quad[vi] = cur_f
                         self.boxes[self.active_box_index] = new_quad
                     else:
-                        # 去字幕模式：轴对齐矩形（拖顶点只改外接框，不产生旋转四边形）
-                        x, y, w, h = _quad_aabb(new_quad)
-                        self.boxes[self.active_box_index] = _rect_to_quad(x, y, w, h)
+                        # 去字幕模式：轴对齐矩形，拖角点 = 经典矩形缩放（对角固定）
+                        opp = (vi + 2) % 4
+                        ox, oy = sq[opp]
+                        x0 = min(cur_f[0], ox)
+                        y0 = min(cur_f[1], oy)
+                        x1 = max(cur_f[0], ox)
+                        y1 = max(cur_f[1], oy)
+                        self.boxes[self.active_box_index] = _rect_to_quad(x0, y0, x1 - x0, y1 - y0)
 
             self.boundsChanged.emit(self.active_box_index)
         else:

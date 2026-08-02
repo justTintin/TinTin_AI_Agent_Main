@@ -17,8 +17,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect
 from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
+from gui.video_player import VideoPlayerWidget
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
@@ -90,81 +89,18 @@ class VideoPreviewDialog(QDialog):
         left = QVBoxLayout()
         left.setSpacing(8)
 
-        self.video_widget = QVideoWidget()
-        self.video_widget.setStyleSheet("background:#000; border-radius:6px;")
-        left.addWidget(self.video_widget, 1)
-
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setRange(0, 1000)
-        self.slider.setEnabled(False)
-        self.slider.sliderPressed.connect(self._on_slider_pressed)
-        self.slider.sliderReleased.connect(self._on_slider_released)
-        left.addWidget(self.slider)
-
-        ctrl = QHBoxLayout()
-        self.btn_play = QPushButton("▶ 播放")
-        self.btn_play.setObjectName("primary_button")
-        self.btn_play.setFixedWidth(90)
-        self.btn_play.clicked.connect(self._toggle_play)
-        ctrl.addWidget(self.btn_play)
-        ctrl.addStretch(1)
-        self.lbl_time = QLabel("加载中…")
-        self.lbl_time.setObjectName("muted_text")
-        ctrl.addWidget(self.lbl_time)
-        left.addLayout(ctrl)
+        # 统一视频播放器：等比显示 + 播放/暂停/停止 + 进度条 + 时间
+        self.player_widget = VideoPlayerWidget(self, autoplay=True)
+        left.addWidget(self.player_widget, 1)
 
         root_lay.addLayout(left, 1)
         self.prompt_panel = PromptReversePanel(material_id, media_type)
         root_lay.addWidget(self.prompt_panel, 0)
 
-        self._dragging = False
-        self.player = QMediaPlayer(self)
-        self._audio = QAudioOutput(self)
-        self.player.setAudioOutput(self._audio)
-        self.player.setVideoOutput(self.video_widget)
-        self.player.positionChanged.connect(self._on_position)
-        self.player.durationChanged.connect(self._on_duration)
-        self.player.playbackStateChanged.connect(self._on_state)
-        self.player.errorOccurred.connect(self._on_error)
-        self.player.setSource(QUrl(url))
-        self.player.play()
-
-    def _toggle_play(self):
-        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.player.pause()
-        else:
-            self.player.play()
-
-    def _on_state(self, state):
-        playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self.btn_play.setText("⏸ 暂停" if playing else "▶ 播放")
-
-    def _on_position(self, pos):
-        if self._dragging:
-            return
-        dur = self.player.duration()
-        if dur > 0:
-            self.slider.setValue(int(pos * 1000 / dur))
-        self.lbl_time.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")
-
-    def _on_duration(self, dur):
-        self.slider.setEnabled(dur > 0)
-
-    def _on_slider_pressed(self):
-        self._dragging = True
-
-    def _on_slider_released(self):
-        self._dragging = False
-        dur = self.player.duration()
-        if dur > 0:
-            self.player.setPosition(int(self.slider.value() * dur / 1000))
-
-    def _on_error(self, _error, error_string):
-        self.btn_play.setText("▶ 重试")
-        self.lbl_time.setText(f"❌ 播放失败: {error_string}")
+        self.player_widget.set_source(url)
 
     def closeEvent(self, event):
-        self.player.stop()
+        self.player_widget.stop()
         super().closeEvent(event)
 
 

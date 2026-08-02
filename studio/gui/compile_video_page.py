@@ -1579,26 +1579,11 @@ class CompileVideoPage(BasePage):
         self.track_worker(w); w.start()
 
     def _play_preview(self, path):
-        """用内置播放器预览成片；失败回退系统播放器。"""
+        """用统一播放器预览成片（等比显示 + 播放/暂停/停止 + 进度条 + 时间）；失败回退系统播放器。"""
         try:
-            from PySide6.QtCore import QUrl
-            from PySide6.QtMultimedia import QMediaPlayer
-            from PySide6.QtMultimediaWidgets import QVideoWidget
-            dlg = QDialog(self.parent_widget)
-            dlg.setWindowTitle("成片模板预览")
-            dlg.resize(560, 760)
-            lay = QVBoxLayout(dlg)
-            vid = QVideoWidget()
-            lay.addWidget(vid, 1)
-            player = QMediaPlayer(dlg)
-            player.setVideoOutput(vid)
-            player.setSource(QUrl.fromLocalFile(os.path.abspath(path)))
-            btn = QDialogButtonBox(QDialogButtonBox.Close)
-            btn.rejected.connect(dlg.reject)
-            lay.addWidget(btn)
-            dlg.finished.connect(lambda *_: player.stop())
-            dlg.show()
-            player.play()
+            from gui.video_player import VideoPreviewDialog
+            dlg = VideoPreviewDialog(path=path, parent=self.parent_widget,
+                                     title="成片模板预览", size=(560, 760))
             dlg.exec()
         except Exception as e:
             self._log(f"⚠ 内置播放失败，改用系统播放器: {e}")

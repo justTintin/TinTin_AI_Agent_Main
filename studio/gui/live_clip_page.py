@@ -842,6 +842,7 @@ class CoverEditDialog(QDialog):
         col1_layout.addWidget(player_title)
         
         self.video_widget = QVideoWidget()
+        self.video_widget.setAspectRatioMode(Qt.KeepAspectRatio)  # 等比完整显示
         self.video_widget.setObjectName("cover_video_widget")
         col1_layout.addWidget(self.video_widget, 1)
         

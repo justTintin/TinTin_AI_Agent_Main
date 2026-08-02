@@ -190,6 +190,8 @@ class Step2ConcatView(BaseStepView):
         player_vbox.addWidget(self.main_page.preview_title)
         
         self.main_page.preview_video_widget = QVideoWidget()
+        # 自动识别视频比例，等比完整显示（不拉伸、不裁剪）
+        self.main_page.preview_video_widget.setAspectRatioMode(Qt.KeepAspectRatio)
         self.main_page.preview_video_widget.setMinimumHeight(200)
         player_vbox.addWidget(self.main_page.preview_video_widget, 1)
 

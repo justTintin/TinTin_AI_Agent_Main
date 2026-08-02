@@ -162,6 +162,8 @@ class Step4FinalView(BaseStepView):
         right_vbox.addWidget(self.main_page.final_preview_title)
 
         self.main_page.final_video_widget = QVideoWidget()
+        # 自动识别视频比例，等比完整显示
+        self.main_page.final_video_widget.setAspectRatioMode(Qt.KeepAspectRatio)
         self.main_page.final_video_widget.setMinimumHeight(150)
         right_vbox.addWidget(self.main_page.final_video_widget, 1)
 

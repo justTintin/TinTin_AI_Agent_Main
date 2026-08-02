@@ -734,6 +734,7 @@ class VideoPlayerDialog(QDialog):
         left_v.setSpacing(6)
 
         self.video_widget = QVideoWidget()
+        self.video_widget.setAspectRatioMode(Qt.KeepAspectRatio)  # 等比完整显示
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_v.addWidget(self.video_widget, 1)
 

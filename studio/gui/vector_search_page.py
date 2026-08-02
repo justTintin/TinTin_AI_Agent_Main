@@ -883,6 +883,14 @@ class VectorSearchPage(BasePage):
                 "model": raw.get("model") or raw.get("product") or "",
                 "product": raw.get("product") or raw.get("category") or "",
                 "category": raw.get("category") or "",
+                # 素材库 AI 分析字段（智能混剪用：图片免分剰复用 /
+                # 视频传 material_id 给 /montage/split 分剰）
+                "ai_status": raw.get("ai_status") or "",
+                "scene_desc_primary": raw.get("scene_desc_primary") or "",
+                "scene_desc_secondary": raw.get("scene_desc_secondary") or "",
+                "quality_score": raw.get("quality_score"),
+                "shot_type": raw.get("shot_type") or "",
+                "ai_confidence": raw.get("ai_confidence"),
             })
         if not materials:
             self.lbl_stat.setText("⚠ 未选择到有效素材")

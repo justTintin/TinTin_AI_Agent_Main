@@ -48,8 +48,7 @@ from gui.montage.dialogs import (TextEditDialog, ScriptCompareDialog, DubbedVide
                                   FinalMixedVideosDialog, ProductCopyInputDialog, VoiceRowDetailWidget,
                                   ClipSelectionDialog)
 from gui.error_dialog import show_error_dialog
-from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker, ServerSplitWorker,
-                                               ServerClipAnalysisWorker)
+from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker, ServerSplitWorker)
 from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorker, VideoDubbingWorker)
 from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
 from gui.montage.workers.voice_workers import VoiceCloneWorker
@@ -566,11 +565,18 @@ class VideoMontagePage(BasePage):
                 })
             elif t.startswith("material://"):
                 mid = t[len("material://"):].split(" ")[0].strip()
+                _meta = it.data(Qt.UserRole) or {}
                 entries.append({
                     "kind": "server",
                     "material_id": mid,
                     "clip_url": f"material://{mid}",
                     "display": t,
+                    "media_type": (_meta.get("media_type") or "").lower(),
+                    "ai_status": _meta.get("ai_status") or "",
+                    "scene_desc_primary": _meta.get("scene_desc_primary") or "",
+                    "scene_desc_secondary": _meta.get("scene_desc_secondary") or "",
+                    "quality_score": _meta.get("quality_score"),
+                    "shot_type": _meta.get("shot_type") or "",
                 })
         return entries
 
@@ -701,7 +707,19 @@ class VideoMontagePage(BasePage):
                 label = f"material://{mid} · {mt.get('filename') or mid}"
                 if label not in existing:
                     existing.add(label)
-                    self.video_list.addItem(QListWidgetItem(label))
+                    it = QListWidgetItem(label)
+                    # 保留素材库分析字段（图片免分剰复用 / 视频传 material_id 分剰）
+                    it.setData(Qt.UserRole, {
+                        "material_id": str(mid),
+                        "media_type": mtype,
+                        "filename": mt.get("filename") or "",
+                        "ai_status": mt.get("ai_status") or "",
+                        "scene_desc_primary": mt.get("scene_desc_primary") or "",
+                        "scene_desc_secondary": mt.get("scene_desc_secondary") or "",
+                        "quality_score": mt.get("quality_score"),
+                        "shot_type": mt.get("shot_type") or "",
+                    })
+                    self.video_list.addItem(it)
                     added += 1
             else:
                 skipped += 1
@@ -1752,10 +1770,10 @@ class VideoMontagePage(BasePage):
     # --- Step 1 single video split ---
     # [3·分割]  _start_split
     def _start_split(self):
-        """合并后的智能镜头分割入口：对列表中所有视频逐个处理。
+        """合并后的智能镜头分割入口：对列表中所有本地视频 + 素材库视频逐个处理。
 
-        每个视频：先做镜头分割；无法分割（无切点或分割失败）的，
-        自动挑取一段精华片段。全部片段统一写入任务级缓存 splits 目录。
+        每个素材：服务端 /montage/split 分割 + 逐镜分析，片段下载到任务级缓存 splits/；
+        本地视频无法分割时自动挑取精华片段。图片素材免分割（素材库已分析）直用于拼接。
         """
         if (self.worker and self.worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
@@ -1763,45 +1781,69 @@ class VideoMontagePage(BasePage):
                                 "上一个任务仍在运行中，请等待完成或先停止。")
             return
 
-        paths = []
+        items = []
         for i in range(self.video_list.count()):
-            if self._is_local_file_item(self.video_list.item(i)):
-                paths.append(self.video_list.item(i).text().strip())
-        if not paths:
-            QMessageBox.warning(self.parent_widget, "无视频", "上方列表中没有可本地分割的视频（素材检索地址素材将直用于服务端拼接）。")
+            it = self.video_list.item(i)
+            if it is None:
+                continue
+            t = it.text().strip()
+            if not t:
+                continue
+            if self._is_local_file_item(it):
+                items.append({"kind": "local", "path": t, "display": os.path.basename(t)})
+            elif t.startswith("material://"):
+                # 素材库地址：视频参与服务端分割（传 material_id/clip_url）；图片免分割（素材库已分析）
+                _meta = it.data(Qt.UserRole) or {}
+                _mtype = (_meta.get("media_type") or "").lower()
+                _is_img = _mtype in ("image", "jpg", "jpeg", "png", "webp", "bmp")
+                if not _is_img:
+                    mid = t[len("material://"):].split(" ")[0].strip()
+                    if mid:
+                        items.append({"kind": "server", "material_id": mid,
+                                      "clip_url": f"material://{mid}", "display": t})
+        if not items:
+            QMessageBox.warning(self.parent_widget, "无素材",
+                                "上方列表中没有可分割的本地视频或素材库视频。\n"
+                                "（图片素材免分割，直接以素材检索地址用于服务端拼接。）")
             return
 
         dur = self.spin_highlight_sec.value()
+        local_n = sum(1 for x in items if x["kind"] == "local")
+        server_n = sum(1 for x in items if x["kind"] == "server")
 
-        # 确定共享根目录（用于界面显示）
+        # 确定共享根目录（仅本地素材时用于界面显示）
+        local_paths = [x["path"] for x in items if x["kind"] == "local"]
         shared_root = self.folder_path_input.text().strip()
-        if not shared_root or not os.path.isdir(shared_root):
+        if local_paths and (not shared_root or not os.path.isdir(shared_root)):
             try:
-                shared_root = os.path.commonpath([os.path.dirname(p) for p in paths])
+                shared_root = os.path.commonpath([os.path.dirname(p) for p in local_paths])
             except Exception:
-                shared_root = os.path.dirname(paths[0])
+                shared_root = os.path.dirname(local_paths[0])
             self.folder_path_input.setText(shared_root)
 
-        # 每个视频的分割输出到任务级缓存
-        # .runtime/montage_cache/<job_id>/splits/<视频名>/（与 _check_split_clips_exist 一致），
-        # 派生片段只写缓存、不复制原始素材
+        # 每个素材的分割输出到任务级缓存
+        # .runtime/montage_cache/<job_id>/splits/<视频名或material_id>/（与 _check_split_clips_exist 一致）
         self._ensure_montage_job()
-        per_video_splits = [self._montage_per_video_splits_dir(p) for p in paths]
+        sp_root = self._montage_splits_root()
+        per_video_splits = []
+        for x in items:
+            if x["kind"] == "local":
+                per_video_splits.append(self._montage_per_video_splits_dir(x["path"]))
+            else:
+                per_video_splits.append(os.path.join(sp_root, f"mat_{x['material_id']}"))
 
         # 显示摘要
         if len(set(per_video_splits)) == 1:
             out_summary = per_video_splits[0]
         else:
-            out_summary = f"{len(per_video_splits)} 个视频各自工作目录\n(例: {per_video_splits[0]})"
+            out_summary = f"{len(per_video_splits)} 个素材各自工作目录\n(例: {per_video_splits[0]})"
 
-        ext_count = len(getattr(self, "external_clip_urls", None) or [])
-        confirm_msg = (f"将对列表中的 {len(paths)} 个本地视频逐个处理：\n"
-                       f"· 能做镜头分割的，先做镜头分割；\n"
-                       f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n")
-        if ext_count:
-            confirm_msg += (f"另：素材列表中有 {ext_count} 个素材检索地址(material://)，"
-                            f"不参与本地分割，将直用于服务端拼接。\n")
-        confirm_msg += (f"\n本地分割片段输出目录（任务级缓存，不复制原始素材）：\n{out_summary}\n"
+        confirm_msg = (f"将对列表中的 {len(items)} 个素材逐个处理：\n"
+                       f"· 本地视频 {local_n} 个：服务端分割 + 逐镜分析；\n"
+                       f"· 素材库视频 {server_n} 个：服务端按素材库地址分割 + 逐镜分析；\n"
+                       f"· 无法分割的本地视频，自动挑出一段约 {dur:.0f} 秒的精华片段。\n"
+                       f"· 图片素材免分割，保持素材检索地址直用于服务端拼接。\n")
+        confirm_msg += (f"\n分割片段输出目录（任务级缓存，不复制原始素材）：\n{out_summary}\n"
                         f"注意：会先清空缓存各目录里已有的分镜片段。\n\n确认继续？")
         reply = QMessageBox.question(
             self.parent_widget, "智能镜头分割",
@@ -1825,14 +1867,14 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "无法准备目录", f"创建/清理 splits 目录失败：\n{e}")
             return
 
-        self._merged_queue = list(paths)
-        self._merged_total = len(paths)
+        self._merged_queue = list(items)
+        self._merged_total = len(items)
         self._merged_done = 0
         self._merged_split_ok = 0
         self._merged_hl_ok = 0
         self._merged_fail = 0
         self._merged_fail_msgs = []
-        self._merged_per_video_splits = per_video_splits  # 每个视频对应的 splits 目录
+        self._merged_per_video_splits = per_video_splits  # 每个素材对应的 splits 目录
         self._merged_hl_duration = dur
 
         self.btn_split.setEnabled(False)
@@ -1849,16 +1891,17 @@ class VideoMontagePage(BasePage):
             self._on_merged_all_finished()
             return
 
-        video_path = self._merged_queue.pop(0)
-        self._merged_cur_video = video_path
+        item = self._merged_queue.pop(0)
+        self._merged_cur_item = item
+        self._merged_cur_video = item.get("path") or item.get("display") or ""
         idx = self._merged_done + 1
-        fname = os.path.basename(video_path)
+        fname = item.get("display") or os.path.basename(item.get("path") or "")
 
-        # 当前视频的 per-video splits 目录
+        # 当前素材的 per-video splits 目录
         cur_splits_dir = self._merged_per_video_splits[self._merged_done]
         self._merged_cur_splits_dir = cur_splits_dir
 
-        if not os.path.exists(video_path):
+        if item["kind"] == "local" and not os.path.exists(item.get("path", "")):
             self._merged_fail += 1
             self._merged_fail_msgs.append(f"{fname}: 文件不存在")
             self._merged_done += 1
@@ -1868,21 +1911,32 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText(f"智能镜头分割 ({idx}/{self._merged_total})：{fname}")
         self.progress_bar.setValue(int(self._merged_done * 100 / max(1, self._merged_total)))
 
-        self._start_merged_split(video_path, cur_splits_dir,
+        self._start_merged_split(item, cur_splits_dir,
                                 self.threshold_spin.value(), int(self.min_len_spin.value()))
 
-    def _start_merged_split(self, video_path, cur_splits_dir, threshold, min_scene_len):
-        """镜头分割：优先服务端 /montage/split，失败回退本地 PySceneDetect。"""
+    def _start_merged_split(self, item, cur_splits_dir, threshold, min_scene_len):
+        """镜头分割：优先服务端 /montage/split（分割+分析合并），本地素材失败回退 PySceneDetect。"""
+        is_local = item["kind"] == "local"
+        video_path = item.get("path") if is_local else ""
         self.worker = ServerSplitWorker(
-            video_path=video_path,
+            video_path=video_path or None,
             output_dir=cur_splits_dir,
             threshold=threshold,
             min_scene_len=min_scene_len,
+            material_id=item.get("material_id", "") if not is_local else "",
+            clip_url=item.get("clip_url", "") if not is_local else "",
         )
         self.worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.worker.finished.connect(self._on_merged_split_done)
+        # 服务端分割+分析合并：逐镜分析结果写 sidecar 缓存（闭包绑定本素材目录）
+        self.worker.analysis_ready.connect(
+            lambda meta, _d=cur_splits_dir, _v=video_path: self._on_split_analysis_ready(meta, _d, _v))
 
         def _on_server_split_error(err):
+            if not is_local:
+                log.warning(f"[合并分割] 服务端分割素材库视频失败，跳过: {err}")
+                self._on_merged_split_error(err)
+                return
             log.warning(f"[合并分割] 服务端分割失败，回退本地 PySceneDetect: {err}")
             self.worker = PySceneDetectWorker(
                 video_path=video_path,
@@ -1897,23 +1951,115 @@ class VideoMontagePage(BasePage):
 
         self.worker.error.connect(_on_server_split_error)
         self.worker.start()
+    # [3·分割]  _on_split_analysis_ready
+    # [3·分割]  _on_split_analysis_ready
+    def _on_split_analysis_ready(self, shot_meta, splits_dir, video_path):
+        """服务端分割内嵌的逐镜分析结果写入 sidecar 缓存。
+
+        评分/desc/景别/产品/型号都从服务端返回，直接写盘，
+        下次 _check_split_clips_exist 扫描时回填表格。
+        """
+        if not shot_meta or not splits_dir:
+            return
+        try:
+            from utils.shot_analysis_cache import ShotAnalysisCache
+            # vbase/prefix 优先从服务端返回的片段名推导（支持素材库素材无本地文件）
+            first_fname = ""
+            for _m in shot_meta:
+                if _m.get("filename"):
+                    first_fname = _m["filename"]
+                    break
+            if first_fname and "_shot_" in first_fname:
+                vbase = first_fname.split("_shot_")[0]
+            elif video_path:
+                vbase = os.path.splitext(os.path.basename(video_path))[0]
+            else:
+                vbase = ""
+            workspace = os.path.dirname(splits_dir)
+            if not workspace:
+                return
+            cache = ShotAnalysisCache(workspace, vbase)
+            prefix = f"{vbase}_shot_" if vbase else ""
+            for meta in shot_meta:
+                fname = meta.get("filename") or ""
+                idx = meta.get("shot_index")
+                path = ""
+                # 重命名后文件名可能带时间戳/描述：按前缀匹配实际文件
+                if prefix and idx is not None and os.path.isdir(splits_dir):
+                    cand = [f for f in os.listdir(splits_dir)
+                            if f.startswith(f"{prefix}{idx:03d}") and f.lower().endswith((".mp4", ".m4v"))]
+                    if cand:
+                        path = os.path.join(splits_dir, sorted(cand)[0])
+                if not path or not os.path.isfile(path):
+                    path = os.path.join(splits_dir, fname)
+                if not os.path.isfile(path):
+                    log.warning(f"[分割分析] 找不到镜头片段: {fname}")
+                    continue
+                as_ = meta.get("aesthetic_score") or {}
+                sa = meta.get("shot_analysis") or {}
+                if not isinstance(as_, dict):
+                    as_ = {}
+                if not isinstance(sa, dict):
+                    sa = {}
+                cache.upsert(path, {
+                    "score": as_.get("total"),
+                    "desc": meta.get("description") or sa.get("scene_primary") or "",
+                    "shot_type": sa.get("shot_type") or "",
+                    "product": sa.get("product") or "",
+                    "model": sa.get("model") or "",
+                    "extra": {"aesthetic_score": as_, "shot_analysis": sa},
+                })
+                # 同步内存，避免重新扫描之前就可用
+                if meta.get("description"):
+                    self.split_descriptions[os.path.abspath(path)] = meta["description"]
+                if path in self.split_clips_cache:
+                    self.split_clips_cache[path]["score"] = as_.get("total")
+                    self.split_clips_cache[path]["shot_type"] = sa.get("shot_type") or ""
+                    self.split_clips_cache[path]["product"] = sa.get("product") or ""
+                    self.split_clips_cache[path]["model"] = sa.get("model") or ""
+                    if meta.get("description"):
+                        self.split_clips_cache[path]["desc"] = meta["description"]
+            log.info(f"[分割分析] 已写入 {len(shot_meta)} 条分析缓存 -> {splits_dir}")
+        except Exception as e:
+            log.warning(f"写入分割分析缓存失败: {e}")
+
     # [3·分割]  _on_merged_split_done
     def _on_merged_split_done(self, out_dir, count, scenes):
-        video_path = getattr(self, "_merged_cur_video", "")
-        fname = os.path.basename(video_path) if video_path else ""
+        item = getattr(self, "_merged_cur_item", None) or {}
+        is_local = item.get("kind") == "local"
+        video_path = item.get("path") or ""
+        fname = item.get("display") or os.path.basename(video_path) or ""
         if count > 0:
             self._merged_split_ok += 1
             log.info(f"[合并分割] {fname} 分割出 {count} 个镜头")
-            self._rename_video_splits_with_metadata(self._merged_cur_splits_dir, video_path, scenes)
+            # 重命名写入时间戳元数据：仅本地素材可重命名（素材库素材文件名已规范）
+            if is_local and video_path and os.path.isfile(video_path):
+                self._rename_video_splits_with_metadata(self._merged_cur_splits_dir, video_path, scenes)
             self._merged_done += 1
             self._process_next_merged_video()
         else:
-            log.info(f"[合并分割] {fname} 未检测到镜头切点，改为挑精华")
-            self._run_merged_highlight(video_path)
+            if is_local:
+                log.info(f"[合并分割] {fname} 未检测到镜头切点，改为挑精华")
+                self._run_merged_highlight(video_path)
+            else:
+                log.info(f"[合并分割] 素材库视频 {fname} 未检测到镜头切点，跳过")
+                self._merged_fail += 1
+                self._merged_fail_msgs.append(f"{fname}: 服务端未检测到镜头切点")
+                self._merged_done += 1
+                self._process_next_merged_video()
     # [3·分割]  _on_merged_split_error
     def _on_merged_split_error(self, err):
-        video_path = getattr(self, "_merged_cur_video", "")
-        fname = os.path.basename(video_path) if video_path else ""
+        item = getattr(self, "_merged_cur_item", None) or {}
+        is_local = item.get("kind") == "local"
+        video_path = item.get("path") or ""
+        fname = item.get("display") or os.path.basename(video_path) or ""
+        if not is_local:
+            log.warning(f"[合并分割] 素材库视频 {fname} 分割失败，跳过: {err}")
+            self._merged_fail += 1
+            self._merged_fail_msgs.append(f"{fname}: 服务端分割失败")
+            self._merged_done += 1
+            self._process_next_merged_video()
+            return
         log.warning(f"[合并分割] {fname} 镜头分割失败，改为挑精华: {err}")
         self._run_merged_highlight(video_path)
     # [3·分割]  _run_merged_highlight
@@ -2209,6 +2355,15 @@ class VideoMontagePage(BasePage):
             return
 
         split_video_paths = [os.path.join(splits_dir, f) for f in files]
+
+        # 方案B：服务端 /montage/split 已返回 description（已写入 split_descriptions/缓存），
+        # 本地视觉AI 仅对仍无描述的片段兜底，避免重复调用大模型
+        missing = [p for p in split_video_paths
+                   if not (self.split_descriptions.get(os.path.abspath(p)) or "").strip()]
+        if not missing:
+            log.info(f"[{source_label}] 全部片段已有画面描述（来自服务端分析），跳过本地视觉AI")
+            return
+        split_video_paths = missing
 
         # Try to find SRT for the parent video
         raw_srt = ""
@@ -2704,6 +2859,48 @@ class VideoMontagePage(BasePage):
                 pass
         return 0, 0
 
+    def _dedup_concat_clips(self, clips):
+        """提交前过滤重复镜头：同路径 / 同大小+内容指纹。
+
+        服务端 /montage/concat 对内容完全相同的片段会拒绝/失败
+        （实测任务 progress=45 失败）；客户端先在本地抛掉明显重复项。
+        返回 (deduped_list, dropped_count)。
+        """
+        import hashlib
+        seen_paths = set()
+        seen_fp = {}
+        out = []
+        dropped = 0
+        for c in clips or []:
+            p = os.path.abspath(c)
+            if p in seen_paths:
+                dropped += 1
+                continue
+            seen_paths.add(p)
+            fp = None
+            if os.path.isfile(p):
+                try:
+                    size = os.path.getsize(p)
+                    h = hashlib.md5()
+                    _SAMPLE = 256 * 1024
+                    with open(p, "rb") as f:
+                        if size <= _SAMPLE * 2:
+                            h.update(f.read())
+                        else:
+                            h.update(f.read(_SAMPLE))
+                            f.seek(-_SAMPLE, os.SEEK_END)
+                            h.update(f.read(_SAMPLE))
+                    fp = f"{size}|{h.hexdigest()}"
+                except Exception:
+                    fp = None
+            if fp is not None:
+                if fp in seen_fp:
+                    dropped += 1
+                    continue
+                seen_fp[fp] = p
+            out.append(c)
+        return out, dropped
+
     def _submit_concat_to_server(self, selected_clips, out_montage_dir, recombine_mode,
                                  target_clip_count, batch_count, randomness,
                                  selected_descriptions_list=None,
@@ -2717,6 +2914,12 @@ class VideoMontagePage(BasePage):
           - 转场名称按服务端支持列表做安全映射。
           - source 模式由本地上传第一个镜头的分辨率，不再传 0x0。
         """
+        # 过滤重复镜头（同路径/同内容），避免服务端 concat 拒绝
+        selected_clips, _dropped = self._dedup_concat_clips(selected_clips)
+        if _dropped:
+            log.info(f"[montage_concat] 已过滤 {_dropped} 个重复镜头，剩余 {len(selected_clips)} 个")
+            self.stage_label.setText(f"⚠ 已过滤 {_dropped} 个重复镜头，剩余 {len(selected_clips)} 个")
+
         # 构建输出文件名
         filename = f"montage_concat_server_{random.randint(1000, 9999)}_{batch_count}.mp4"
         local_output_path = os.path.join(out_montage_dir, filename)
@@ -4132,149 +4335,6 @@ class VideoMontagePage(BasePage):
         except Exception as e:
             log.warning(f"获取镜头分析缓存失败({clip_path}): {e}")
             return None
-    # [3·分割]  _on_analysis_item_ready
-    def _on_analysis_item_ready(self, idx, result):
-        """服务端分析完成一个镜头，回填表格。result = {score, desc, extra}"""
-        paths = getattr(self, "_analysis_paths", [])
-        if idx < 0 or idx >= len(paths):
-            return
-        path = paths[idx]
-        score = result.get("score", -1.0)
-        desc = result.get("desc", "")
-        extra = result.get("extra", {})
-
-        # 提取景别/产品/型号等字段
-        shot_type = str(extra.pop("shot_type", extra.pop("shot_scale", extra.pop("景别", ""))) or "")
-        product = str(extra.pop("product", extra.pop("product_name", extra.pop("产品", ""))) or "")
-        model = str(extra.pop("model", extra.pop("model_number", extra.pop("型号", ""))) or "")
-        duration_val = extra.pop("duration", extra.pop("时长", ""))
-
-        if path in self.split_clips_cache:
-            self.split_clips_cache[path]["score"] = score
-            if desc:
-                self.split_clips_cache[path]["desc"] = desc
-            if shot_type:
-                self.split_clips_cache[path]["shot_type"] = shot_type
-            if product:
-                self.split_clips_cache[path]["product"] = product
-            if model:
-                self.split_clips_cache[path]["model"] = model
-            if duration_val:
-                try:
-                    self.split_clips_cache[path]["duration"] = float(duration_val)
-                except (TypeError, ValueError):
-                    pass
-        if desc:
-            self.split_descriptions[path] = desc
-
-        tbl = getattr(self, "split_result_table", None)
-        if tbl is not None:
-            tbl.blockSignals(True)
-            try:
-                # Col 3: 景别
-                if shot_type:
-                    shot_item = tbl.item(idx, 3)
-                    if shot_item:
-                        shot_item.setText(shot_type)
-                # Col 4: 时长
-                if duration_val:
-                    dur_item = tbl.item(idx, 4)
-                    if dur_item:
-                        try:
-                            dur_item.setText(f"{float(duration_val):.1f}s")
-                        except (TypeError, ValueError):
-                            dur_item.setText(str(duration_val))
-                # Col 5: 主要画面
-                if desc:
-                    desc_item = tbl.item(idx, 5)
-                    if desc_item:
-                        desc_item.setText(desc)
-                # Col 6: 产品
-                if product:
-                    prod_item = tbl.item(idx, 6)
-                    if prod_item:
-                        prod_item.setText(product)
-                # Col 7: 型号
-                if model:
-                    model_item = tbl.item(idx, 7)
-                    if model_item:
-                        model_item.setText(model)
-                # Col 8: 评分
-                score_item = tbl.item(idx, 8)
-                if score_item:
-                    score_item.setText(f"{score:.1f}" if score >= 0 else "—")
-                    if score >= 8.0:
-                        score_item.setForeground(QColor("#2ecc71"))
-                    elif score >= 6.0:
-                        score_item.setForeground(QColor("#f1c40f"))
-                    elif score >= 0:
-                        score_item.setForeground(QColor("#e74c3c"))
-                # 剩余 extra 放入 tooltip
-                if extra:
-                    detail_text = " | ".join(f"{k}: {v}" for k, v in extra.items())
-                    file_item = tbl.item(idx, 2)
-                    if file_item:
-                        old_tip = file_item.toolTip() or ""
-                        file_item.setToolTip(f"{old_tip}\n分析详情: {detail_text}")
-            finally:
-                tbl.blockSignals(False)
-
-        # 同步到下一步的镜头数据
-        for clip in getattr(self, "_available_concat_clips", []):
-            if clip.get("path") == path:
-                clip["score"] = score
-                if desc:
-                    clip["desc"] = desc
-
-        # 持久化到 sidecar JSON：保存 score/景别/产品/型号/描述/其他维度，
-        # 避免重新打开应用或对同一视频重新分割后只剩"画面描述"。
-        # 合并模式下 self._shot_cache 可能为 None，或指向与当前片段不同的源视频，
-        # 因此按 clip_path 反推对应源视频缓存，确保分析结果落到正确的 sidecar JSON。
-        cache = self._get_shot_cache_for_clip(path)
-        if cache is not None:
-            try:
-                cache.upsert(path, {
-                    "score": score, "desc": desc,
-                    "shot_type": shot_type, "product": product, "model": model,
-                    "duration": duration_val,
-                    "extra": extra,
-                })
-            except Exception as e:
-                log.warning(f"镜头分析结果写缓存失败({path}): {e}")
-
-        self._refresh_step1_row_visual(idx)
-    # [3·分割]  _on_analysis_all_done
-    def _on_analysis_all_done(self, ok, fail):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(100)
-        self._save_split_srt()
-        self._apply_step1_score_filter()
-        if ok == 0 and fail > 0:
-            srv = getattr(self, "_analysis_server_url", "") or ""
-            self.stage_label.setText(f"❌ 镜头分析失败：{fail} 个镜头全部失败，服务端未返回有效数据")
-            QMessageBox.warning(
-                self.parent_widget, "镜头分析失败",
-                f"服务端镜头分析全部失败（{fail} 个镜头）。\n\n"
-                f"请求目标：{srv}/material/score_clip\n\n"
-                f"可能原因：\n"
-                f"· 该地址上的 /material/score_clip 接口未部署或未启动\n"
-                f"· 统一服务端地址（compute_server_url）配置错误，请到「系统设置」核对\n"
-                f"· 服务端返回了 HTTP 200 但未包含 score/description 字段\n\n"
-                f"请查看日志（帮助 → 系统日志）中的 [镜头分析] 详细记录。")
-        else:
-            self.stage_label.setText(f"✅ 镜头分析完成：成功 {ok} 个，失败 {fail} 个")
-            QMessageBox.information(
-                self.parent_widget, "镜头分析完成",
-                f"服务端镜头分析完成：成功 {ok} 个，失败 {fail} 个。\n"
-                f"评分与描述已回填到镜头表格。")
-    # [3·分割]  _on_analysis_error
-    def _on_analysis_error(self, err):
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 镜头分析失败")
-        self._show_long_error("镜头分析失败",
-                             f"调用服务端镜头分析接口失败：\n{err}")
-
     # [3·分割]  _on_step1_score_filter_changed
     def _on_step1_score_filter_changed(self):
         combo = getattr(self, "step1_score_filter_combo", None)

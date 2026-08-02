@@ -11,32 +11,117 @@
 
 ## 一、智能混剪相关接口
 
-### 1.1 镜头分割 `POST /montage/split`
+> 2026-08-02 服务端已上线「分割+分析合并」改造：`POST /montage/split` 一个接口完成镜头分割 + 逐镜美学评分 + 景别/产品识别 + 画面描述，并返回服务端裁好的片段下载地址；客户端不再需要本地重裁，也无需单独调 `/material/score_clip`。
+> 完整改造方案见《CLIENT-STEP1-MIGRATION.md》。
 
-上传视频，检测镜头分割，返回每个镜头的起止时间及分割后的片段文件。
+### 1.1 镜头分割+分析合并 `POST /montage/split`
+
+上传视频/图片 或 素材库素材 → 服务端镜头分割 → 裁出片段 → 逐镜分析（评分/景别/产品/描述）→ 返回片段与数据。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| file | binary | ✅ | — | 视频文件（multipart/form-data） |
+| file | binary | 二选一 | — | 客户端上传的视频/图片（multipart；视频做分割，图片转静态镜头） |
+| material_id | string | 二选一 | "" | 素材库素材 id（服务端解析后分割） |
+| clip_url | string | 二选一 | "" | 素材地址：`material://{id}` / `http(s)://...` / 本地路径 |
 | threshold | number | ❌ | 27 | 场景检测敏感度 (1-100, 越小越敏感) |
 | min_scene_len | number | ❌ | 0.5 | 最小镜头长度（秒） |
+| dedup | boolean | ❌ | true | 重复镜头检测 |
+| dedup_threshold | number | ❌ | 0.95 | 重复判定相似度阈值（0~1） |
+| product_mode | boolean | ❌ | false | 美学评分是否用电商模式 |
+| analyze | boolean | ❌ | true | 是否逐镜分析（美学评分+景别/产品识别） |
+| image_duration | number | ❌ | 3.0 | 图片转静态镜头时长（秒） |
 
-**请求示例**：
-```
-POST /montage/split
-Content-Type: multipart/form-data
+**响应**：
 
-file: <video.mp4>
-threshold: 27
-min_scene_len: 0.5
+```json
+{
+  "task_id": "abc123",
+  "filename": "video.mp4",
+  "total_shots": 5,
+  "shots": [{
+    "shot_index": 1,
+    "filename": "video_shot_001.mp4",
+    "start_sec": 0.0, "end_sec": 3.2, "duration_sec": 3.2,
+    "is_image": false,
+    "download_url": "/montage/split/clip/abc123/video_shot_001.mp4",
+    "aesthetic_score": {"total": 7.8, "clarity": 8.1, "texture": 7.5, "aesthetics": 8.0, "composition": 7.6, "color_quality": 8.2, "figure_quality": 5.0, "subject_prominence": 8.3, "engine": "quality_scorer"},
+    "shot_analysis": {"shot_type": "特写", "visual_type": "产品", "segment": "前段", "scene_primary": "黑色无线鼠标侧视图", "scene_secondary": "白色桌面自然光", "brand": "罗技", "product": "鼠标", "model": null, "confidence": 0.93},
+    "description": "黑色无线鼠标侧视图 白色桌面自然光",
+    "duplicate_group": 1, "duplicate_similarity": 0.969, "is_best_in_group": true, "aesthetic_total": 6.3
+  }],
+  "dedup": {"enabled": true, "threshold": 0.95, "total_shots": 5, "file_duplicates": 0, "aesthetic_duplicates": 1},
+  "analysis": {"enabled": true, "analyzed": 5, "total": 5}
+}
 ```
+
+> - `shots[].download_url` 为相对路径，客户端拼 `server_url + download_url` 流式下载片段；文件名保持 `{源视频名}_shot_{序号:03d}.mp4`。
+> - 评分取 `aesthetic_score.total`（与旧 `/material/score_clip` 同一 quality_scorer 引擎）；`shot_analysis` 与旧 `analyze_shot=true` 结构一致；`description` = `scene_primary + scene_secondary`。
+> - 素材库图片已整图分析过（ai_status=analyzed）时，可免分割直接复用素材库 `scene_desc_*`/`quality_score`/`shot_type`，不调本接口。
 
 ---
 
-### 1.2 镜头评分/分析 `POST /material/score_clip`
+### 1.2 分割片段下载 `GET /montage/split/clip/{task_id}/{filename}`
 
-客户端上传视频镜头 → 入成片任务队列 → 抽帧打分。
-返回成片任务 ID，客户端轮询 `GET /scheduled/tasks/{task_id}` 查看结果。
+| 参数 | 位置 | 类型 | 说明 |
+|------|------|------|------|
+| task_id | path | string | `/montage/split` 返回的任务 id |
+| filename | path | string | shots[].filename（如 `video_shot_001.mp4`） |
+
+返回 `video/mp4` 流（支持 Range）。
+
+---
+
+### 1.3 镜头拼接 `POST /montage/concat`
+
+上传已排序镜头文件 + 合成参数 → 立即创建拼接任务 → 返回 task_id。支持本地文件与素材地址混合。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| files | binary[] | 与 clip_urls 合计 ≥2 | — | 本地镜头上传（可多传） |
+| clip_urls | string | ❌ | "" | 素材地址 JSON 数组字符串：`["material://123","/abs/b.mp4","http://x/a.mp4"]`（素材检索地址/本地路径/网络地址，与 files 可混合） |
+| lut | binary | ❌ | — | 3D LUT 文件（.cube） |
+| transition | string | ❌ | fade | fade/dissolve/wipeleft/wiperight/slideup/slidedown/radial/random/none |
+| transition_duration | number | ❌ | 0.3 | 转场时长（秒） |
+| width / height | int | ❌ | 1080 / 1920 | 输出分辨率 |
+| fps | int | ❌ | 30 | 帧率 |
+| crf | int | ❌ | 20 | 编码质量 |
+| preset | string | ❌ | medium | 编码预设 |
+| image_duration | number | ❌ | 3.0 | 图片素材转静态镜头时长（秒） |
+
+**响应**：`{"id": 185, "status": "queued", "queue_position": 1, "clip_count": 2}`
+
+轮询 `GET /tasks/unified/{id}`（或 `GET /scheduled/tasks/{id}`）→ `completed` 后取 `result`：
+
+```json
+{
+  "clip_count": 2,
+  "duration": 3.73,
+  "output_url": "/editor/render/185/result",
+  "output_path": "/home/.../server/output/montage/concat_185/final.mp4",
+  "size_mb": 0.0,
+  "warnings": []
+}
+```
+
+下载成片：拼 `server_url + result.output_url`（或 `GET /montage/concat/result/{task_id}`）。
+
+> ⚠️ 实测注意：提交内容完全相同的多个片段时任务可能 failed（progress 45、result 空）；应避免重复内容镜头。
+
+---
+
+### 1.4 拼接成片下载 `GET /montage/concat/result/{task_id}`
+
+| 参数 | 位置 | 类型 | 说明 |
+|------|------|------|------|
+| task_id | path | string | `/montage/concat` 返回的任务 id |
+
+返回成片文件流。
+
+---
+
+### 1.5 镜头评分/分析 `POST /material/score_clip`（兼容保留，新代码改用 split.analyze）
+
+客户端上传视频镜头 → 入成片任务队列 → 抽帧打分。返回成片任务 ID，客户端轮询 `GET /scheduled/tasks/{task_id}` 查看结果。
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
@@ -45,50 +130,28 @@ min_scene_len: 0.5
 | analyze_shot | boolean | ❌ | false | 是否做镜头画面分析 |
 | frame_at | number | ❌ | 0.5 | 抽帧时间点（秒） |
 
-**请求示例**：
-```
-POST /material/score_clip
-Content-Type: multipart/form-data
-
-file: <clip_001.mp4>
-product_mode: false
-analyze_shot: true
-frame_at: 0.5
-```
-
-**响应**（提交成功）：
-```json
-{
-  "task_id": "xxxx-xxxx-xxxx",
-  "status": "pending"
-}
-```
-
-**轮询结果**：`GET /tasks/unified/{task_id}`（统一接口，见下方「任务队列」章节）
+**响应**（提交成功）：`{"task_id": "...", "status": "pending"}` → 轮询 `GET /tasks/unified/{task_id}`。
 
 **任务完成后的 result 字段**：
+
 ```json
 {
   "filename": "镜头片段.mp4",
   "aesthetic_score": {
     "total": 7.1,
     "engine": "laion+opencv",
-    "clarity": 7.7,
-    "texture": 4.5,
-    "aesthetics": 5.0,
-    "composition": 7.5,
-    "color_quality": 10.0,
-    "figure_quality": 5.0,
-    "subject_prominence": 10.0
+    "clarity": 7.7, "texture": 4.5, "aesthetics": 5.0, "composition": 7.5,
+    "color_quality": 10.0, "figure_quality": 5.0, "subject_prominence": 10.0
   }
 }
 ```
 
-> ℹ️ 评分在 `result.aesthetic_score.total`，不是 `result.score`。各维度分数在 `aesthetic_score` 子字段中。
+> ℹ️ 评分在 `result.aesthetic_score.total`，不是 `result.score`。
+> ℹ️ **新代码不再调用本接口**：`POST /montage/split` 的 `analyze=true` 已内嵌同等分析（同一引擎/结构）。
 
 ---
 
-### 1.3 音乐卡点 `POST /audio/beatmap`
+### 1.6 音乐卡点 `POST /audio/beatmap`
 
 上传音乐文件，入后台任务队列，返回任务 ID，客户端轮询 `GET /tasks/{id}` 取结果。
 
@@ -98,27 +161,10 @@ frame_at: 0.5
 | count | int | ❌ | 0 | 要返回的卡点片段个数（>0 时服务端从音乐中挑选 N 个片段，每段生成一个视频） |
 | segment_duration | float | ❌ | 0.0 | 每个片段的时长（秒），与 count 配合使用 |
 
-**请求示例**：
-```
-POST /audio/beatmap
-Content-Type: multipart/form-data
-
-file: <music.mp3>
-count: 3
-segment_duration: 30
-```
-
-**响应**（提交成功）：
-```json
-{
-  "task_id": "xxxx-xxxx-xxxx",
-  "status": "pending"
-}
-```
-
-**轮询结果**：`GET /tasks/unified/{task_id}`（统一接口，见下方「任务队列」章节）
+**响应**（提交成功）：`{"task_id": "...", "status": "pending"}` → 轮询 `GET /tasks/unified/{task_id}`。
 
 **任务完成后的 result 字段**：
+
 ```json
 {
   "beats": [0.52, 1.04, 1.56, 2.08, ...],
@@ -135,12 +181,11 @@ segment_duration: 30
 ```
 
 > - `beats`：全曲节拍时间戳（绝对时间）。客户端应兼容 `beats` / `beat_times` / `timestamps` / `beat_points` 等字段名。
-> - `clips`：当 `count>0` 时返回的卡点片段列表，每个片段 `{start, end, strength}` 对应一个视频；
->   客户端将落在每个片段区间内的 `beats` 作为该视频的卡点槽位，并用 `[start, end]` 裁剪对应音乐片段。
+> - `clips`：当 `count>0` 时返回的卡点片段列表，每个片段 `{start, end, strength}` 对应一个视频。
 
 ---
 
-### 1.4 卡点成片 `POST /montage/beat`
+### 1.7 卡点成片 `POST /montage/beat`
 
 一次上传音乐+全部素材，用 `variant_count` 一次生成多个卡点视频变体。
 
@@ -149,8 +194,9 @@ segment_duration: 30
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | music | binary | ✅ | 整段音乐文件（仅上传一次） |
-| videos | binary[] | ✅ | 全部镜头素材（图片/视频，多次上传同名字段） |
-| variant_count | int | ❌ | 一次生成的完整成片变体数（上限 5） |
+| videos | binary[] | 与 clip_urls 至少传一个 | 原始视频文件（可多传，服务端先做镜头分割） |
+| clip_urls | string | ❌ | 已分割素材地址 JSON 数组（本地路径/可下载 URL），与 videos 合并入素材池 |
+| variant_count | int | ❌ | 一次生成的完整成片变体数（1~5，上限 5） |
 | time_limit | number | ❌ | 每个成片时长上限（秒，0=完整有效区间） |
 | aspect_ratio | string | ❌ | 画面比例 `"16:9"`/`"9:16"`/`"1:1"` |
 | width / height | int | ❌ | 输出分辨率 |
@@ -161,7 +207,7 @@ segment_duration: 30
 
 **响应**：`{"task_id": "..."}` → 轮询 `GET /tasks/unified/{task_id}` → 完成后取结果。
 
-### 1.5 卡点成片结果 `GET /montage/result/{task_id}` / `GET /montage/result/{task_id}/{variant_index}`
+### 1.8 卡点成片结果 `GET /montage/result/{task_id}` / `GET /montage/result/{task_id}/{variant_index}`
 
 | 参数 | 位置 | 类型 | 说明 |
 |------|------|------|------|

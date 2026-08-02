@@ -6,6 +6,9 @@ Remotion（编程式 MG 动画）渲染客户端。
 - install()：在工程目录跑 npm install（首次需要，依赖较重，含无头 Chrome）。
 - render(comp_id, props, out_path)：npx remotion render src/index.ts <comp> <out> --props=<json>。
 模板元数据 TEMPLATES 同时驱动 GUI 表单。
+
+ 注意：业务已迁移到服务端渲染（见 utils/mg_server_client.py 与 gui.mg_render_worker）。
+ 本模块仅作为离线 fallback 保留，新代码不再要求客户端安装 Node/Chrome。
 """
 import os
 import json

@@ -2357,11 +2357,11 @@ class VideoMontagePage(BasePage):
         split_video_paths = [os.path.join(splits_dir, f) for f in files]
 
         # 方案B：服务端 /montage/split 已返回 description（已写入 split_descriptions/缓存），
-        # 本地视觉AI 仅对仍无描述的片段兜底，避免重复调用大模型
+        # 服务端 LLM 视觉接口（/llm/chat/completions，客户端本地只抽帧）仅对仍无描述的片段兜底，避免重复调用大模型
         missing = [p for p in split_video_paths
                    if not (self.split_descriptions.get(os.path.abspath(p)) or "").strip()]
         if not missing:
-            log.info(f"[{source_label}] 全部片段已有画面描述（来自服务端分析），跳过本地视觉AI")
+            log.info(f"[{source_label}] 全部片段已有画面描述（来自服务端分析），跳过 LLM 视觉描述")
             return
         split_video_paths = missing
 
@@ -2382,7 +2382,7 @@ class VideoMontagePage(BasePage):
                     except Exception:
                         pass
 
-        status_msg = f"🤖 正在使用本地视觉AI分析{source_label}画面内容..."
+        status_msg = f"🤖 正在使用服务端视觉AI分析{source_label}画面内容..."
         if srt_segments:
             status_msg += "（结合字幕）"
         self.stage_label.setText(status_msg)
@@ -2416,7 +2416,7 @@ class VideoMontagePage(BasePage):
 
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ 画面文案描述生成完毕！（本地视觉AI）")
+        self.stage_label.setText("✅ 画面文案描述生成完毕！（服务端视觉AI）")
 
         splits_dir = getattr(self, "_trigger_splits_dir", "")
         scenes = getattr(self, "_trigger_scenes", [])

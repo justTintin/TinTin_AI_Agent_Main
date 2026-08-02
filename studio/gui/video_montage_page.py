@@ -54,6 +54,10 @@ from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorke
 from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
 from gui.montage.workers.voice_workers import VoiceCloneWorker
 from utils import scheduled_task_client as stc
+from utils.montage_cache import (
+    new_job_id, job_root, job_splits_dir, load_manifest, save_manifest,
+    clear_montage_cache,
+)
 from gui.montage.workers.desc_workers import (BatchGenerateDescriptionsWorker, LocalVisionDescWorker)
 from gui.montage.workers.script_workers import (PunctuationSRTLLMWorker, AITextRewriteWorker,
                                                 ProductCopyWorker, SceneCopyWorker, GenScriptWorker,
@@ -105,6 +109,11 @@ class VideoMontagePage(BasePage):
         self.split_clips_list = []
         self._available_concat_clips = []
         self._step1_score_threshold = 6.0
+        # 混剪任务级缓存（方案二）：job_id 索引 + manifest 素材清单
+        self._montage_job_id = ""
+        self._montage_manifest = None
+        self._last_merged_splits_dirs = []
+        self.external_clip_urls = []
         self.assembled_video_path = ""
         self.ai_rewrite_temperature = 0.5
         self.voice_audio_durations = {}
@@ -408,6 +417,8 @@ class VideoMontagePage(BasePage):
         # 终止正在运行的分割/挑精华 worker，避免后台残留导致后续操作被静默拦截
         self._kill_running_workers()
         self._refresh_source_root_hint()
+        # 移除素材后重建 manifest 的 local/server 条目（派生片段保留）
+        self._ensure_montage_job()
         self._check_split_clips_exist()
     # [2·基础设施]  _kill_running_workers
     def _kill_running_workers(self):
@@ -479,14 +490,8 @@ class VideoMontagePage(BasePage):
         # 多素材时走合并视图：收集列表中所有视频各自的 per-video splits 目录，
         # 并清空当前选中项与 processing_video_path，使 _check_split_clips_exist
         # 走「合并扫描」分支展示全部素材的分镜片段（否则会只显示列表第一项的片段）。
-        all_splits_dirs = []
-        for i in range(self.video_list.count()):
-            if self._is_local_file_item(self.video_list.item(i)):
-                _p = self.video_list.item(i).text().strip()
-                _vdir = os.path.dirname(_p)
-                _vbase = os.path.splitext(os.path.basename(_p))[0]
-                all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
-        self._last_merged_splits_dirs = all_splits_dirs
+        self._ensure_montage_job()
+        self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
         self.processing_video_path = ""
         self.video_list.setCurrentItem(None)
         self._refresh_source_root_hint()
@@ -503,6 +508,158 @@ class VideoMontagePage(BasePage):
             return False
         p = item.text().strip()
         return bool(p) and not p.startswith("material://") and os.path.isfile(p)
+
+    # [2·基础设施]  混剪任务级缓存（方案二）辅助方法
+    def _montage_job_root(self):
+        """当前混剪任务缓存目录；未创建任务时返回空。"""
+        jid = getattr(self, "_montage_job_id", "")
+        if not jid:
+            return ""
+        return job_root(jid)
+
+    def _montage_splits_root(self):
+        """任务缓存的 splits 整体目录（各视频的派生片段分子目录在其下）。"""
+        jid = getattr(self, "_montage_job_id", "")
+        if not jid:
+            return ""
+        return job_splits_dir(jid)
+
+    def _montage_per_video_splits_dir(self, video_path):
+        """单个本地视频的派生分割片段目录。
+
+        任务缓存已创建时写到
+        .runtime/montage_cache/<job_id>/splits/<视频名>/，
+        不复制原始素材、不污染源视频目录；
+        未创建任务时回退旧式目录以兼容历史分镜。
+        """
+        base = os.path.splitext(os.path.basename(video_path))[0]
+        sp_root = self._montage_splits_root()
+        if sp_root:
+            return os.path.join(sp_root, base)
+        vdir = os.path.dirname(video_path)
+        return os.path.join(vdir, base, "splits")
+
+    def _collect_merged_splits_dirs(self):
+        """收集列表中所有本地视频的 splits 目录（合并扫描用）。"""
+        dirs = []
+        for i in range(self.video_list.count()):
+            it = self.video_list.item(i)
+            if self._is_local_file_item(it):
+                dirs.append(self._montage_per_video_splits_dir(it.text().strip()))
+        return dirs
+
+    def _manifest_entries_from_list(self):
+        """按当前素材列表生成 local/server 两类清单条目（local_clip 另行维护）。"""
+        entries = []
+        for i in range(self.video_list.count()):
+            it = self.video_list.item(i)
+            if it is None:
+                continue
+            t = it.text().strip()
+            if not t:
+                continue
+            if self._is_local_file_item(it):
+                entries.append({
+                    "kind": "local",
+                    "source_path": os.path.abspath(t),
+                    "display": os.path.basename(t),
+                })
+            elif t.startswith("material://"):
+                mid = t[len("material://"):].split(" ")[0].strip()
+                entries.append({
+                    "kind": "server",
+                    "material_id": mid,
+                    "clip_url": f"material://{mid}",
+                    "display": t,
+                })
+        return entries
+
+    def _ensure_montage_job(self):
+        """确保存在任务级缓存 job_id + manifest。
+
+        以当前素材列表重建 local/server 条目；原始素材只写引用（不拷贝），
+        已生成的派生 local_clip 片段继续保留。返回 manifest dict。
+        """
+        if not getattr(self, "_montage_job_id", ""):
+            self._montage_job_id = new_job_id()
+        old = load_manifest(self._montage_job_id)
+        old_clips = [e for e in (old.get("entries") or []) if e.get("kind") == "local_clip"]
+        manifest = {
+            "job_id": self._montage_job_id,
+            "created_at": old.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+            "entries": self._manifest_entries_from_list() + old_clips,
+            "concat_task_id": old.get("concat_task_id"),
+        }
+        save_manifest(self._montage_job_id, manifest)
+        self._montage_manifest = manifest
+        return manifest
+
+    def _sync_manifest_local_clips(self):
+        """分割完成后：把缓存 splits/ 下生成的派生片段同步进 manifest。"""
+        if not getattr(self, "_montage_job_id", ""):
+            return None
+        old = load_manifest(self._montage_job_id)
+        base_entries = [e for e in (old.get("entries") or []) if e.get("kind") != "local_clip"]
+        sp_root = self._montage_splits_root()
+        clip_entries = []
+        if sp_root and os.path.isdir(sp_root):
+            for vbase in sorted(os.listdir(sp_root)):
+                d = os.path.join(sp_root, vbase)
+                if not os.path.isdir(d):
+                    continue
+                for f in sorted(os.listdir(d)):
+                    if f.lower().endswith((".mp4", ".m4v")):
+                        clip_entries.append({
+                            "kind": "local_clip",
+                            "source_video": vbase,
+                            "filename": f,
+                            "clip_path": os.path.abspath(os.path.join(d, f)),
+                        })
+        manifest = {
+            "job_id": self._montage_job_id,
+            "created_at": old.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+            "entries": base_entries + clip_entries,
+            "concat_task_id": old.get("concat_task_id"),
+        }
+        save_manifest(self._montage_job_id, manifest)
+        self._montage_manifest = manifest
+        return manifest
+
+    def _manifest_clip_urls(self):
+        """从 manifest 取 server 条目（material://），供 concat 的 clip_urls 使用。"""
+        man = self._montage_manifest
+        if man is None and getattr(self, "_montage_job_id", ""):
+            man = load_manifest(self._montage_job_id)
+            self._montage_manifest = man
+        urls = []
+        if man:
+            for e in man.get("entries") or []:
+                if e.get("kind") == "server" and e.get("clip_url"):
+                    urls.append(e["clip_url"])
+        if not urls:
+            urls = list(getattr(self, "external_clip_urls", None) or [])
+        return urls
+
+    def _clear_montage_cache(self):
+        """清空混剪任务缓存（只删派生片段/清单，不动原素材）。"""
+        reply = QMessageBox.question(
+            self.parent_widget, "清空混剪缓存",
+            "将删除本地混剪任务缓存中的所有派生分割片段与素材清单\n"
+            "（不会删除任何原始素材文件，素材检索地址素材仍保存在服务端）。\n\n确认清空？",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        removed = clear_montage_cache()
+        self._montage_job_id = ""
+        self._montage_manifest = None
+        self._last_merged_splits_dirs = []
+        self.external_clip_urls = []
+        self.split_clips_list = []
+        if hasattr(self, "split_result_table"):
+            self.split_result_table.setRowCount(0)
+        self.stage_label.setText(f"已清空混剪缓存（{removed} 个任务目录）")
+        log.info(f"[智能混剪] 用户清空混剪缓存，移除 {removed} 个任务目录")
 
     def set_external_materials(self, materials):
         """从「素材检索」带入多个素材（仅本地/NAS 可访问路径会加入）。
@@ -557,15 +714,8 @@ class VideoMontagePage(BasePage):
                     common_dir = os.path.dirname(os.path.abspath(paths[0]))
             if common_dir:
                 self.folder_path_input.setText(common_dir)
-            all_splits_dirs = []
-            for i in range(self.video_list.count()):
-                _it = self.video_list.item(i)
-                if self._is_local_file_item(_it):
-                    _p = _it.text().strip()
-                    _vdir = os.path.dirname(_p)
-                    _vbase = os.path.splitext(os.path.basename(_p))[0]
-                    all_splits_dirs.append(os.path.join(_vdir, _vbase, "splits"))
-            self._last_merged_splits_dirs = all_splits_dirs
+            self._ensure_montage_job()
+            self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
             self.processing_video_path = ""
             self.video_list.setCurrentItem(None)
             self._refresh_source_root_hint()
@@ -699,37 +849,28 @@ class VideoMontagePage(BasePage):
             self.split_descriptions[p] = d
     # [3·分割]  _update_raw_srt_display_from_splits
     def _update_raw_srt_display_from_splits(self):
-        dir_path = self.folder_path_input.text().strip()
-        if not dir_path or not os.path.exists(dir_path):
-            return
-        splits_dir = os.path.join(dir_path, "splits")
-        if not os.path.exists(splits_dir):
-            return
-        
-        files = sorted([f for f in os.listdir(splits_dir) if f.lower().endswith((".mp4", ".m4v"))])
+        files = [os.path.abspath(p) for p in getattr(self, "split_clips_list", [])]
         if not files:
             return
-            
-        scenes = self._get_split_scenes_times(splits_dir, files)
-        
+        scenes = self._get_split_scenes_times("", files)
+
         srt_lines = []
-        for idx, f in enumerate(files, 1):
-            p = os.path.join(splits_dir, f)
+        for idx, p in enumerate(files, 1):
             norm_path = os.path.abspath(p)
             desc = self.split_descriptions.get(norm_path, f"镜头片段 {idx}")
             if idx - 1 < len(scenes):
                 start_sec, end_sec = scenes[idx-1]
             else:
                 start_sec, end_sec = 0.0, 0.0
-                
+
             start_str = format_seconds_to_srt_timestamp(start_sec)
             end_str = format_seconds_to_srt_timestamp(end_sec)
-            
+
             srt_lines.append(str(idx))
             srt_lines.append(f"{start_str} --> {end_str}")
             srt_lines.append(desc)
             srt_lines.append("")
-            
+
         srt_content = "\n".join(srt_lines)
         if hasattr(self, "raw_srt_display"):
             self.raw_srt_display.setPlainText(srt_content)
@@ -743,10 +884,9 @@ class VideoMontagePage(BasePage):
             return
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
         video_dir = os.path.dirname(video_path)
-        video_workspace_dir = os.path.join(video_dir, video_basename)
+        splits_dir = self._montage_per_video_splits_dir(video_path)
+        video_workspace_dir = os.path.dirname(splits_dir)
         srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
-        
-        splits_dir = os.path.join(video_workspace_dir, "splits")
         if not os.path.exists(splits_dir):
             return
             
@@ -803,10 +943,8 @@ class VideoMontagePage(BasePage):
                 video_path = self.processing_video_path
             log.info(f"[DIAG _check_split_clips_exist] resolved video_path='{video_path}' (source={'currentItem' if selected_item else 'processing_video_path'})")
             if video_path:
-                video_basename = os.path.splitext(os.path.basename(video_path))[0]
-                video_dir = os.path.dirname(video_path)
-                video_workspace_dir = os.path.join(video_dir, video_basename)
-                splits_dir = os.path.join(video_workspace_dir, "splits")
+                splits_dir = self._montage_per_video_splits_dir(video_path)
+                video_workspace_dir = os.path.dirname(splits_dir)
             else:
                 # 合并分割流程：扫描所有 per-video splits 目录
                 splits_dir = os.path.join(dir_path, "splits")  # 回退默认
@@ -839,7 +977,7 @@ class VideoMontagePage(BasePage):
             if files and video_path:
                 video_basename = os.path.splitext(os.path.basename(video_path))[0]
                 video_dir = os.path.dirname(video_path)
-                video_workspace_dir = os.path.join(video_dir, video_basename)
+                video_workspace_dir = os.path.dirname(splits_dir)
                 if shot_caches is not None:
                     self._shot_cache = ShotAnalysisCache(video_workspace_dir, video_basename)
                     shot_caches[(video_workspace_dir, video_basename)] = self._shot_cache
@@ -905,13 +1043,9 @@ class VideoMontagePage(BasePage):
                     # 合并扫描时每个片段可能来自不同源视频，按片段路径找对应缓存
                     if not cached and shot_caches is not None:
                         try:
-                            clip_splits_dir = os.path.dirname(norm_path)
-                            clip_workspace_dir = os.path.dirname(clip_splits_dir)
-                            clip_basename = os.path.basename(clip_workspace_dir)
-                            cache_key = (clip_workspace_dir, clip_basename)
-                            if cache_key not in shot_caches:
-                                shot_caches[cache_key] = ShotAnalysisCache(clip_workspace_dir, clip_basename)
-                            cached = shot_caches[cache_key].get(norm_path)
+                            _sc = self._get_shot_cache_for_clip(norm_path)
+                            if _sc is not None:
+                                cached = _sc.get(norm_path)
                         except Exception:
                             cached = None
 
@@ -1024,7 +1158,8 @@ class VideoMontagePage(BasePage):
                 if video_path:
                     video_basename = os.path.splitext(os.path.basename(video_path))[0]
                     video_dir = os.path.dirname(video_path)
-                    video_workspace_dir = os.path.join(video_dir, video_basename)
+                    video_workspace_dir = (os.path.dirname(splits_dir) if splits_dir
+                                           else os.path.join(video_dir, video_basename))
                     srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
                     if not os.path.exists(srt_path):
                         srt_path = os.path.join(video_dir, f"{video_basename}.srt")
@@ -1620,7 +1755,7 @@ class VideoMontagePage(BasePage):
         """合并后的智能镜头分割入口：对列表中所有视频逐个处理。
 
         每个视频：先做镜头分割；无法分割（无切点或分割失败）的，
-        自动挑取一段精华片段。全部片段统一写入共享 splits 目录。
+        自动挑取一段精华片段。全部片段统一写入任务级缓存 splits 目录。
         """
         if (self.worker and self.worker.isRunning()) or \
            (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
@@ -1647,12 +1782,11 @@ class VideoMontagePage(BasePage):
                 shared_root = os.path.dirname(paths[0])
             self.folder_path_input.setText(shared_root)
 
-        # 每个视频的分割输出到「视频目录/视频名/splits/」（与 _check_split_clips_exist 一致）
-        per_video_splits = []
-        for p in paths:
-            vdir = os.path.dirname(p)
-            vbase = os.path.splitext(os.path.basename(p))[0]
-            per_video_splits.append(os.path.join(vdir, vbase, "splits"))
+        # 每个视频的分割输出到任务级缓存
+        # .runtime/montage_cache/<job_id>/splits/<视频名>/（与 _check_split_clips_exist 一致），
+        # 派生片段只写缓存、不复制原始素材
+        self._ensure_montage_job()
+        per_video_splits = [self._montage_per_video_splits_dir(p) for p in paths]
 
         # 显示摘要
         if len(set(per_video_splits)) == 1:
@@ -1667,8 +1801,8 @@ class VideoMontagePage(BasePage):
         if ext_count:
             confirm_msg += (f"另：素材列表中有 {ext_count} 个素材检索地址(material://)，"
                             f"不参与本地分割，将直用于服务端拼接。\n")
-        confirm_msg += (f"\n本地分割片段输出目录：{out_summary}\n"
-                        f"注意：会先清空各目录里已有的分镜片段。\n\n确认继续？")
+        confirm_msg += (f"\n本地分割片段输出目录（任务级缓存，不复制原始素材）：\n{out_summary}\n"
+                        f"注意：会先清空缓存各目录里已有的分镜片段。\n\n确认继续？")
         reply = QMessageBox.question(
             self.parent_widget, "智能镜头分割",
             confirm_msg,
@@ -1677,7 +1811,7 @@ class VideoMontagePage(BasePage):
         if reply != QMessageBox.Yes:
             return
 
-        # 清空各 per-video splits 目录里旧的分镜片段
+        # 清空缓存各 per-video splits 目录里旧的分镜片段
         try:
             for sp_dir in set(per_video_splits):
                 os.makedirs(sp_dir, exist_ok=True)
@@ -1825,6 +1959,8 @@ class VideoMontagePage(BasePage):
         self.temp_scenes = []
         # 保存所有 per-video splits 目录，供 _check_split_clips_exist 扫描
         self._last_merged_splits_dirs = list(set(self._merged_per_video_splits))
+        # 分割完成，把缓存生成的派生片段同步进 manifest
+        self._sync_manifest_local_clips()
 
         msg = (f"处理完成：分割 {self._merged_split_ok} 个，挑精华 {self._merged_hl_ok} 个，"
                f"失败 {self._merged_fail} 个（共 {self._merged_total} 个视频）。")
@@ -1913,16 +2049,23 @@ class VideoMontagePage(BasePage):
         dur = self.spin_highlight_sec.value()
 
         # 同型号的多个视频，精华片段统一放进一个共享 splits 目录，便于下一步组合混剪。
-        # 共享目录 = 扫描目录/splits（与下方表格读取的位置一致）；扫描目录为空时退回视频公共父目录。
-        shared_root = self.folder_path_input.text().strip()
-        if not shared_root or not os.path.isdir(shared_root):
-            try:
-                shared_root = os.path.commonpath([os.path.dirname(p) for p in paths])
-            except Exception:
-                shared_root = os.path.dirname(paths[0])
-            # 同步扫描目录框，保证下方表格读取的 splits 与写入位置一致
-            self.folder_path_input.setText(shared_root)
-        shared_splits = os.path.join(shared_root, "splits")
+        # 任务缓存已创建时写入 .runtime/montage_cache/<job_id>/splits/highlights/，
+        # 否则退回旧式「扫描目录/splits」（与下方表格读取位置一致）。
+        self._ensure_montage_job()
+        sp_root = self._montage_splits_root()
+        if sp_root:
+            shared_splits = os.path.join(sp_root, "highlights")
+        else:
+            shared_root = self.folder_path_input.text().strip()
+            if not shared_root or not os.path.isdir(shared_root):
+                try:
+                    shared_root = os.path.commonpath([os.path.dirname(p) for p in paths])
+                except Exception:
+                    shared_root = os.path.dirname(paths[0])
+                # 同步扫描目录框，保证下方表格读取的 splits 与写入位置一致
+                self.folder_path_input.setText(shared_root)
+            shared_splits = os.path.join(shared_root, "splits")
+        self._last_merged_splits_dirs = [shared_splits]
 
         reply = QMessageBox.question(
             self.parent_widget, "批量挑精华片段",
@@ -2025,6 +2168,8 @@ class VideoMontagePage(BasePage):
         self.video_list.setCurrentItem(None)
         self.temp_scenes = []
         self._check_split_clips_exist()
+        # 把精华片段同步进 manifest（派生片段条目）
+        self._sync_manifest_local_clips()
 
         msg = (f"批量挑精华完成：成功 {self._hl_ok} 个，失败 {self._hl_fail} 个"
                f"（共 {self._hl_total}）。")
@@ -2139,7 +2284,7 @@ class VideoMontagePage(BasePage):
         if video_path:
             base_dir = os.path.dirname(video_path)
             video_basename = os.path.splitext(os.path.basename(video_path))[0]
-            splits_dir = os.path.join(base_dir, video_basename, "splits")
+            splits_dir = self._montage_per_video_splits_dir(video_path)
             if os.path.exists(splits_dir) and hasattr(self, "temp_scenes"):
                 self._rename_all_splits_with_metadata(splits_dir, self.temp_scenes)
                 self._save_split_srt()
@@ -2651,7 +2796,8 @@ class VideoMontagePage(BasePage):
             return
 
         self.stage_label.setText("🌐 正在上传镜头并提交服务端合成...")
-        clip_urls = list(getattr(self, "external_clip_urls", None) or [])
+        # 素材清单（manifest）是唯一数据源：server 条目提供 clip_urls（material://）
+        clip_urls = self._manifest_clip_urls()
         if clip_urls:
             self.stage_label.setText(f"🌐 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")
         self.concat_worker = MontageConcatServerWorker(
@@ -2666,6 +2812,7 @@ class VideoMontagePage(BasePage):
         self.concat_worker.progress.connect(lambda v: self.progress_bar.setValue(v), type=Qt.QueuedConnection)
         self.concat_worker.concat_finished.connect(lambda p: self._on_concat_finished([p]), type=Qt.QueuedConnection)
         self.concat_worker.error.connect(self._on_concat_error, type=Qt.QueuedConnection)
+        self.concat_worker.task_id_obtained.connect(self._on_concat_task_id, type=Qt.QueuedConnection)
         self.concat_worker.start()
 
 
@@ -2786,6 +2933,22 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText("❌ AI 文案生成失败")
         self._show_long_error("文案生成失败",
                              f"调用大模型生成文案时出错：\n{err}")
+    # [5·拼接合成]  _on_concat_task_id
+    def _on_concat_task_id(self, task_id):
+        """服务端合成任务提交成功后，把服务端 task_id 记入 manifest。"""
+        if not task_id:
+            return
+        if not getattr(self, "_montage_job_id", ""):
+            return
+        try:
+            man = load_manifest(self._montage_job_id)
+            man["concat_task_id"] = str(task_id)
+            save_manifest(self._montage_job_id, man)
+            self._montage_manifest = man
+            log.info(f"[智能混剪] 已记录服务端合成任务 id={task_id} 到 manifest")
+        except Exception as e:
+            log.warning(f"记录服务端合成任务 id 到 manifest 失败: {e}")
+
     # [5·拼接合成]  _on_concat_finished
     def _on_concat_finished(self, paths):
         self.btn_assemble_video.setEnabled(True)
@@ -3844,7 +4007,7 @@ class VideoMontagePage(BasePage):
 
         video_dir = os.path.dirname(video_path)
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        splits_dir = os.path.join(video_dir, video_basename, "splits")
+        splits_dir = self._montage_per_video_splits_dir(video_path)
         if not os.path.exists(splits_dir):
             QMessageBox.warning(self.parent_widget, "未分割镜头", "请先对当前视频进行镜头分割。")
             return
@@ -3854,8 +4017,9 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "无镜头文件", "分割目录中没有镜头片段文件。")
             return
 
-        # 检查是否有字幕文件
-        srt_path = os.path.join(video_dir, video_basename, f"{video_basename}.srt")
+        # 检查是否有字幕文件（优先查缓存工作目录，再回退源视频目录）
+        video_workspace_dir = os.path.dirname(splits_dir)
+        srt_path = os.path.join(video_workspace_dir, f"{video_basename}.srt")
         if not os.path.exists(srt_path):
             srt_path = os.path.join(video_dir, f"{video_basename}.srt")
 
@@ -3954,7 +4118,9 @@ class VideoMontagePage(BasePage):
             clip_path = os.path.abspath(clip_path)
             clip_splits_dir = os.path.dirname(clip_path)
             clip_workspace_dir = os.path.dirname(clip_splits_dir)
-            clip_basename = os.path.basename(clip_workspace_dir)
+            # 片段文件名为 <视频名>_shot_XXX.mp4，反推源视频名（缓存布局下 workspace 与源视频并不在同一层）
+            _base_hint = os.path.basename(clip_path).split("_shot_")[0]
+            clip_basename = _base_hint if _base_hint else os.path.basename(clip_workspace_dir)
             if not clip_workspace_dir or not clip_basename:
                 return None
             cache_key = (clip_workspace_dir, clip_basename)
@@ -4239,8 +4405,23 @@ class VideoMontagePage(BasePage):
         self._update_concat_count_lbl()
     # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):
+        sp_root = self._montage_splits_root()
+        if sp_root:
+            # 任务级缓存已创建：优先打开缓存中的分割片段目录
+            selected_item = self.video_list.currentItem()
+            if selected_item and self._is_local_file_item(selected_item):
+                target = self._montage_per_video_splits_dir(selected_item.text().strip())
+            else:
+                target = sp_root
+            os.makedirs(target, exist_ok=True)
+            try:
+                os.startfile(target)
+                return
+            except Exception as e:
+                QMessageBox.warning(self.parent_widget, "打开失败", f"无法打开文件夹:\n{e}")
+                return
         selected_item = self.video_list.currentItem()
-        if selected_item:
+        if selected_item and self._is_local_file_item(selected_item):
             video_path = selected_item.text()
             video_dir = os.path.dirname(video_path)
             video_basename = os.path.splitext(os.path.basename(video_path))[0]
@@ -4272,16 +4453,24 @@ class VideoMontagePage(BasePage):
     def _select_concat_src_dir(self):
         default_dir = self._concat_src_dir()
         if not default_dir or not os.path.exists(default_dir):
-            selected_item = self.video_list.currentItem()
-            if selected_item:
-                video_path = selected_item.text()
-                video_dir = os.path.dirname(video_path)
-                video_basename = os.path.splitext(os.path.basename(video_path))[0]
-                default_dir = os.path.join(video_dir, video_basename, "splits")
+            sp_root = self._montage_splits_root()
+            if sp_root and os.path.isdir(sp_root):
+                selected_item = self.video_list.currentItem()
+                if selected_item and self._is_local_file_item(selected_item):
+                    default_dir = self._montage_per_video_splits_dir(selected_item.text().strip())
+                else:
+                    default_dir = sp_root
             else:
-                dir_path = self.folder_path_input.text().strip()
-                if dir_path:
-                    default_dir = os.path.join(dir_path, "splits")
+                selected_item = self.video_list.currentItem()
+                if selected_item:
+                    video_path = selected_item.text()
+                    video_dir = os.path.dirname(video_path)
+                    video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                    default_dir = os.path.join(video_dir, video_basename, "splits")
+                else:
+                    dir_path = self.folder_path_input.text().strip()
+                    if dir_path:
+                        default_dir = os.path.join(dir_path, "splits")
         
         file_paths, _ = pick_files(
             self.parent_widget,

@@ -148,6 +148,13 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)
         nav_row.addWidget(self.main_page.btn_open_splits_dir)
 
+        self.main_page.btn_clear_montage_cache = mdi_button("清空混剪缓存", "broom")
+        self.main_page.btn_clear_montage_cache.setObjectName("secondary_button")
+        self.main_page.btn_clear_montage_cache.setToolTip(
+            "清除本地混剪任务缓存（分割片段/素材清单），不会删除原始素材。")
+        self.main_page.btn_clear_montage_cache.clicked.connect(self.main_page._clear_montage_cache)
+        nav_row.addWidget(self.main_page.btn_clear_montage_cache)
+
         nav_row.addStretch()
         self.main_page.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.main_page.btn_next_to_step_2.setObjectName("primary_button")

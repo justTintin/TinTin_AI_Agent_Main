@@ -518,6 +518,12 @@ class VectorSearchPage(BasePage):
         self.lbl_sel_count = QLabel("已选 0 项")
         self.lbl_sel_count.setObjectName("muted_text")
         sel_row.addWidget(self.lbl_sel_count, 1)
+        sel_row.addStretch()
+        self.btn_copy_url = QPushButton("🚀 一键成片")
+        self.btn_copy_url.setObjectName("primary_button")
+        self.btn_copy_url.setToolTip("把选中的素材（图片/视频混合可多选）作为成片素材来源，跳转到「一键成片」自动填充。")
+        self.btn_copy_url.clicked.connect(self._send_to_compile)
+        sel_row.addWidget(self.btn_copy_url)
         right_lay.addLayout(sel_row)
 
         # 分页控件行
@@ -543,11 +549,6 @@ class VectorSearchPage(BasePage):
         self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
         page_row.addWidget(self.lbl_stat)
-        self.btn_copy_url = QPushButton("🚀 一键成片")
-        self.btn_copy_url.setObjectName("primary_button")
-        self.btn_copy_url.setToolTip("把选中的素材（图片/视频混合可多选）作为成片素材来源，跳转到「一键成片」自动填充。")
-        self.btn_copy_url.clicked.connect(self._send_to_compile)
-        page_row.addWidget(self.btn_copy_url)
         right_lay.addLayout(page_row)
 
         splitter.addWidget(right)

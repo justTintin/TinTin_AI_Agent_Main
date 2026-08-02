@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QTextBrowser, QWidget, QTabWidget, QButtonGroup,
     QRadioButton, QDialog, QDialogButtonBox, QFormLayout, QTimeEdit,
-    QListWidget, QListWidgetItem,
+    QListWidget, QListWidgetItem, QScrollArea,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -39,6 +39,11 @@ from utils.voxcpm_client import synthesize_tts
 from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from utils.product_library_manager import ProductLibraryManager
 from gui.searchable_combo import SearchableComboBox
+from gui.mg_template_utils import (
+    FALLBACK_TEMPLATES, _param_meta, create_value_widget,
+    widget_value, set_widget_value, color_row, merge_templates,
+    fill_template_list, select_template_by_id, MGTemplateLoadWorker,
+)
 from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 
 
@@ -213,7 +218,13 @@ class CompileVideoPage(BasePage):
         self._product_mgr = ProductLibraryManager()
         self._last_results = []          # 最近一次成片路径列表
         self._self_check_data = None
-        self._materials = []             # 从素材检索带过来的素材列表
+        self._materials = []
+        self._templates = []
+        self._current_template = None
+        self._template_form_widgets = {}
+        self._features_text = ""
+        self._selling_text = ""
+             # 从素材检索带过来的素材列表
 
     # ════════════════════════════════════════════════════════════════════════
     #  setup：构建界面（顶层 QTabWidget：产品成片 + 脚本成片）
@@ -292,21 +303,29 @@ class CompileVideoPage(BasePage):
         prod_row.addWidget(self.btn_reload_product)
         left_lay.addLayout(prod_row)
 
-        # 性能参数
-        left_lay.addWidget(QLabel("📋 性能参数"))
-        self.txt_features = QTextBrowser()
-        self.txt_features.setOpenExternalLinks(False)
-        self.txt_features.setMinimumHeight(80)
-        self.txt_features.setPlaceholderText("选择产品后显示性能参数…")
-        left_lay.addWidget(self.txt_features, 1)
+        # 卖点文案（弹窗查看原始卖点/参数）
+        selling_row = QHBoxLayout()
+        self.btn_show_selling = QPushButton("📋 卖点文案")
+        self.btn_show_selling.setObjectName("secondary_button")
+        self.btn_show_selling.clicked.connect(self._show_selling_dialog)
+        selling_row.addWidget(self.btn_show_selling)
+        selling_row.addStretch()
+        left_lay.addLayout(selling_row)
 
-        # 核心卖点
-        left_lay.addWidget(QLabel("💡 核心卖点"))
-        self.txt_selling = QTextBrowser()
-        self.txt_selling.setOpenExternalLinks(False)
-        self.txt_selling.setMinimumHeight(80)
-        self.txt_selling.setPlaceholderText("选择产品后显示核心卖点…")
-        left_lay.addWidget(self.txt_selling, 1)
+        # 模板库
+        left_lay.addWidget(QLabel("🎬 模板库"))
+        self.list_templates = QListWidget()
+        self.list_templates.setMaximumHeight(220)
+        self.list_templates.currentItemChanged.connect(self._on_template_selected)
+        left_lay.addWidget(self.list_templates, 1)
+
+        tmpl_btn_row = QHBoxLayout()
+        self.btn_refresh_templates = QPushButton("🔄 刷新")
+        self.btn_refresh_templates.setObjectName("secondary_button")
+        self.btn_refresh_templates.clicked.connect(self._load_templates)
+        tmpl_btn_row.addWidget(self.btn_refresh_templates)
+        tmpl_btn_row.addStretch()
+        left_lay.addLayout(tmpl_btn_row)
 
         top_splitter.addWidget(left_card)
 
@@ -315,8 +334,18 @@ class CompileVideoPage(BasePage):
         right_lay = QVBoxLayout(right_card)
         right_lay.setContentsMargins(16, 14, 16, 14); right_lay.setSpacing(8)
 
-        right_title = QLabel("⚙️ 可选设置"); right_title.setStyleSheet("font-weight:bold;")
-        right_lay.addWidget(right_title)
+        right_title = QLabel("🎛 模板参数")
+        right_title.setStyleSheet("font-weight:bold;")
+        right_title_row = QHBoxLayout()
+        right_title_row.addWidget(right_title)
+        right_title_row.addStretch()
+        self.btn_template_defaults = QPushButton("🔁 设置默认")
+        self.btn_template_defaults.setObjectName("secondary_button")
+        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
+        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
+        self.btn_template_defaults.setEnabled(False)
+        right_title_row.addWidget(self.btn_template_defaults)
+        right_lay.addLayout(right_title_row)
 
         # 字幕文案放在镜头素材目录上方
         right_lay.addWidget(QLabel("字幕文案 / 配音文案(可选)"))
@@ -370,6 +399,20 @@ class CompileVideoPage(BasePage):
                                        placeholder="片头封面图，显示 2 秒")
 
         right_lay.addStretch()
+
+        # 模板自定义参数（根据所选模板动态生成）
+        self.template_params_group = QGroupBox("模板自定义参数")
+        tpl_form_lay = QVBoxLayout(self.template_params_group)
+        self.scroll_template_form = QScrollArea()
+        self.scroll_template_form.setWidgetResizable(True)
+        self.scroll_template_form.setFrameShape(QFrame.NoFrame)
+        self.template_form_container = QWidget()
+        self.template_form_layout = QFormLayout(self.template_form_container)
+        self.template_form_layout.setSpacing(8)
+        self.scroll_template_form.setWidget(self.template_form_container)
+        tpl_form_lay.addWidget(self.scroll_template_form)
+        right_lay.addWidget(self.template_params_group)
+        self.template_params_group.setVisible(False)
 
         top_splitter.addWidget(right_card)
         top_splitter.setStretchFactor(0, 1)   # 左侧产品
@@ -485,6 +528,7 @@ class CompileVideoPage(BasePage):
         # 初始化数据
         self._populate_products()
         self._populate_voices()
+        self._load_templates()
 
     # ════════════════════════════════════════════════════════════════════════
     #  脚本成片 tab（选分镜脚本 → 提交服务端成片）
@@ -804,14 +848,14 @@ class CompileVideoPage(BasePage):
     def _on_product_changed(self, _idx):
         item_id = self.combo_product.currentData() or ""
         if not item_id:
-            self.txt_features.setMarkdown("*未选择产品*")
-            self.txt_selling.setMarkdown("*未选择产品*")
+            self._features_text = ""
+            self._selling_text = ""
             return
         it = self._product_mgr.get(item_id) or {}
         feat = (it.get("features") or "").strip()
         sell = (it.get("selling_points") or "").strip()
-        self.txt_features.setMarkdown(feat if feat else "*该产品暂无性能参数*")
-        self.txt_selling.setMarkdown(sell if sell else "*该产品暂无核心卖点*")
+        self._features_text = feat
+        self._selling_text = sell
 
     def _current_product(self):
         """返回当前选中产品 dict（无则 None）。"""
@@ -863,22 +907,28 @@ class CompileVideoPage(BasePage):
         self.track_worker(worker); worker.start()
 
     def _gen_mg_intro(self):
-        from utils.remotion_client import is_installed
-        if not is_installed():
-            self.show_warning("Remotion 依赖未安装。请先到「🎞️ MG 动画」页点『安装依赖』。")
-            return
         from PySide6.QtWidgets import QInputDialog
         default = (self.in_subtitle.toPlainText().strip().splitlines() or [""])[0][:16]
         title, ok = QInputDialog.getText(self.parent_widget, "动态标题开场", "标题文字：", text=default)
         if not ok or not title.strip():
             return
-        from gui.mg_animation_page import MGRenderWorker
+        from gui.mg_render_worker import MGServerRenderWorker
+        from utils.mg_server_client import make_mg_request
         out = os.path.join(FINAL_OUTPUT_DIR, datetime.now().strftime("mgintro_%Y%m%d_%H%M%S.mp4"))
         self.btn_mg_intro.setEnabled(False); self.progress_bar.setVisible(True)
-        self.stage_label.setText("正在渲染动态标题开场(MG)…")
-        w = MGRenderWorker("TitleReveal", {"title": title.strip(), "subtitle": "",
-                                           "bg": "#101418", "color": "#FFFFFF"}, out)
+        self.stage_label.setText("正在渲染动态标题开场（MG）…")
+        request = make_mg_request(
+            template="mg_intro",
+            ratio="9:16",
+            title=title.strip(),
+            subtitle="",
+            color="#FFFFFF",
+            bg="#101418",
+            duration=3,
+        )
+        w = MGServerRenderWorker(request, title="一键成片-MG开场")
         w.phase.connect(self.stage_label.setText)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
 
         def done(path):
             self.btn_mg_intro.setEnabled(True); self.progress_bar.setVisible(False)
@@ -889,12 +939,6 @@ class CompileVideoPage(BasePage):
         w.error.connect(lambda e: (self.btn_mg_intro.setEnabled(True), self.progress_bar.setVisible(False),
                                    self.show_error(str(e), "MG 开场生成失败")))
         self.track_worker(w); w.start()
-
-    # ════════════════════════════════════════════════════════════════════════
-    #  开始执行
-    # ════════════════════════════════════════════════════════════════════════
-    #  提交服务端执行（开始执行 = 立即；添加为定时任务 = 定时）
-    # ════════════════════════════════════════════════════════════════════════
     def _collect_params(self):
         """收集当前界面完整参数为 dict（提交给服务端，服务端按需取用）。"""
         product = self._current_product() or {}
@@ -926,6 +970,8 @@ class CompileVideoPage(BasePage):
             "predict_platform": self.combo_predict_platform.currentText(),
             "autocheck": self.chk_autocheck.isChecked(),
             "materials": self._materials or [],
+            "template_id": self._current_template.get("id", "") if self._current_template else "",
+            "template_params": self._collect_template_params(),
         }
 
     @staticmethod
@@ -1260,3 +1306,96 @@ class CompileVideoPage(BasePage):
         if path and os.path.isfile(path) and os.name == "nt":
                 os.startfile(path)  # noqa
 
+    # -------------- 模板相关方法 --------------
+    def _load_templates(self):
+        """加载模板库（内置 + 服务端）。"""
+        self._templates = list(FALLBACK_TEMPLATES)
+        fill_template_list(self.list_templates, self._templates)
+        w = VideoTemplateLoadWorker()
+        w.finished.connect(self._on_templates_loaded)
+        w.phase.connect(self._log)
+        self.track_worker(w)
+        w.start()
+
+    def _on_templates_loaded(self, server_templates):
+        if not server_templates:
+            self._log("⚠ 未从服务端加载到模板，使用内置模板")
+        self._templates = merge_templates(server_templates, FALLBACK_TEMPLATES)
+        current_id = self._current_template.get("id") if self._current_template else None
+        fill_template_list(self.list_templates, self._templates, current_id=current_id)
+
+    def _on_template_selected(self, current, previous):
+        if current is None:
+            return
+        template = current.data(Qt.UserRole)
+        if not template:
+            return
+        self._current_template = template
+        self._apply_template_to_editor(template)
+
+    def _apply_template_to_editor(self, template):
+        self._build_template_form(template)
+        self.btn_template_defaults.setEnabled(True)
+        self.template_params_group.setVisible(True)
+        defaults = template.get("defaults") or {}
+        for key, val in defaults.items():
+            if key in self._template_form_widgets:
+                wtype, widget = self._template_form_widgets[key]
+                set_widget_value(widget, wtype, val)
+
+    def _build_template_form(self, template):
+        while self.template_form_layout.count():
+            item = self.template_form_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._template_form_widgets.clear()
+        params = template.get("params") or []
+        for param in params:
+            key, wtype, label, default = _param_meta(param)
+            if not key:
+                continue
+            if wtype == "scenes":
+                continue
+            widget = create_value_widget(wtype, default)
+            self._template_form_widgets[key] = (wtype, widget)
+            if wtype == "color":
+                self.template_form_layout.addRow(label, color_row(widget))
+            else:
+                self.template_form_layout.addRow(label, widget)
+
+    def _collect_template_params(self):
+        values = {}
+        for key, (wtype, widget) in self._template_form_widgets.items():
+            values[key] = widget_value(widget, wtype)
+        return values
+
+    def _set_template_defaults(self):
+        if not self._current_template:
+            return
+        defaults = self._current_template.get("defaults") or {}
+        for key, val in defaults.items():
+            if key in self._template_form_widgets:
+                wtype, widget = self._template_form_widgets[key]
+                set_widget_value(widget, wtype, val)
+        # also fill template-defined params default
+        for param in self._current_template.get("params") or []:
+            key, wtype, label, default = _param_meta(param)
+            if key and key in self._template_form_widgets:
+                wtype, widget = self._template_form_widgets[key]
+                set_widget_value(widget, wtype, default)
+
+    def _show_selling_dialog(self):
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle("卖点文案 / 性能参数")
+        dlg.setMinimumSize(420, 320)
+        layout = QVBoxLayout(dlg)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        feat = self._features_text or "*该产品暂无性能参数*"
+        sell = self._selling_text or "*该产品暂无核心卖点*"
+        browser.setMarkdown(f"## 性能参数\n\n{feat}\n\n## 核心卖点\n\n{sell}")
+        layout.addWidget(browser)
+        btn = QDialogButtonBox(QDialogButtonBox.Ok)
+        btn.accepted.connect(dlg.accept)
+        layout.addWidget(btn)
+        dlg.exec()

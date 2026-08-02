@@ -699,6 +699,8 @@ class StepBeatView(BaseStepView):
         self.main_page.beat_preview_video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.main_page.beat_preview_video.setStyleSheet("background: #000;")
         pvbox.addWidget(self.main_page.beat_preview_video, 1)
+        # 视频控件按比例 setFixedSize 封顶后，用 stretch 吸收剩余空间，避免把标题撑高
+        pvbox.addStretch(1)
         body.addWidget(preview_panel)
         # 按默认比例（1:1）初始化预览面板尺寸
         self._beat_apply_preview_aspect("1:1")

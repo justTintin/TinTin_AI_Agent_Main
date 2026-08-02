@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
     QFrame, QListWidget, QListWidgetItem, QMessageBox, QComboBox,
     QSplitter, QFormLayout, QDialog, QDialogButtonBox, QScrollArea, QWidget,
-    QTreeWidget, QTreeWidgetItem, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QHeaderView, QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QColor, QFont, QDesktopServices
@@ -655,6 +655,8 @@ class MyKnowledgePage(BasePage):
         self.samples_hint = QLabel("← 选择一个风格化条目，查看其参考素材")
         self.samples_hint.setObjectName("muted_text")
         self.samples_hint.setAlignment(Qt.AlignCenter)
+        # 占位提示固定一行高度，避免 samples_list 隐藏时被布局撑高成半屏
+        self.samples_hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         lay.addWidget(self.samples_hint)
 
         self.samples_list = QTreeWidget()

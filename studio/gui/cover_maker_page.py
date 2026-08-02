@@ -365,6 +365,7 @@ class CoverMakerPage(BasePage):
         self.img_scale = QSlider(Qt.Horizontal); self.img_scale.setRange(10, 300); self.img_scale.setValue(100)
         self.img_scale.valueChanged.connect(self._on_img_scale)
         ib.addWidget(self.img_scale)
+        ib.addStretch(1)
         self.edit_layout.addWidget(self.img_box)
 
         # 文字图层控件
@@ -380,6 +381,7 @@ class CoverMakerPage(BasePage):
         self.btn_color = QPushButton("颜色"); self.btn_color.setObjectName("secondary_button"); self.btn_color.clicked.connect(self._pick_color)
         row.addWidget(self.btn_color)
         tb.addLayout(row)
+        tb.addStretch(1)
         self.edit_layout.addWidget(self.txt_box)
 
         # 通用：不透明度
@@ -387,7 +389,8 @@ class CoverMakerPage(BasePage):
         self.opacity = QSlider(Qt.Horizontal); self.opacity.setRange(0, 100); self.opacity.setValue(100)
         self.opacity.valueChanged.connect(self._on_opacity)
         self.edit_layout.addWidget(self.opacity)
-        self.edit_layout.addStretch()
+        # stretch 必须 >0 才能吸收多余空间，避免把「文字内容/图片来源」等标签撑高
+        self.edit_layout.addStretch(1)
         self.img_box.setVisible(False); self.txt_box.setVisible(False)
         return panel
 

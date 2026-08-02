@@ -212,16 +212,17 @@ class CoverMakerPage(BasePage):
 
         root.addWidget(self._build_top_bar())
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_layer_tab(), "图层编辑")
-        self.tabs.addTab(self._build_template_tab(), "模板封面")
-        root.addWidget(self.tabs, 1)
-
+        # 底部状态栏控件需先创建：「模板封面」tab 构建时（_load_templates）会引用 self.status / self.pbar
         srow = QHBoxLayout()
         self.status = QLabel(""); self.status.setObjectName("muted_text")
         srow.addWidget(self.status, 1)
         self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(160)
         srow.addWidget(self.pbar)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_layer_tab(), "图层编辑")
+        self.tabs.addTab(self._build_template_tab(), "模板封面")
+        root.addWidget(self.tabs, 1)
         root.addLayout(srow)
 
         self._init_default_layers()

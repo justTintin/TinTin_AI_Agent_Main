@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
 """MG 动画服务端客户端（按 OpenAPI /mg/* 实现）。
 
-当前服务端 /mg/* 仅暴露：
-  GET /mg/templates          可用模板列表（含参数说明）
-  POST /mg/generate           提交渲染任务
-  GET /mg/status/{task_id}    查询进度
-  GET /mg/result/{task_id}    下载成片
+当前服务端 /mg/*（2026-08-02 实测）：
+  GET  /mg/templates            可用模板列表（含参数说明）
+  POST /mg/templates            保存/创建模板（同 id 覆盖）
+  GET  /mg/templates/{id}       查询单个模板
+  PUT  /mg/templates/{id}       更新自定义模板
+  DELETE /mg/templates/{id}     删除自定义模板
+  POST /mg/generate             提交渲染任务
+  GET  /mg/status/{task_id}     查询进度
+  GET  /mg/result/{task_id}     下载成片（video/mp4）
+  POST /mg/analyze-video        动效视频分析生成模板
+  POST /mg/preview              模板单帧预览
+  POST /mg/cover                封面渲染
 
-注意：服务端 MGRequest schema 未声明 specs/bars 等额外字段，也没有
-/mg/preview、/mg/analyze-video、/mg/templates/{id} 等端点。调用这些
-端点会 404/422。如需支持 mg_benchmark 等模板，请先让服务端在
-MGRequest schema 中新增对应字段（或开启 additionalProperties）。
+MGRequest schema 已包含 specs/bars/params（additionalProperties 开放），
+mg_benchmark 等模板可经 make_mg_request 的 kwargs 传入。
 """
 import os
 from datetime import datetime
@@ -149,9 +154,8 @@ def make_mg_request(
     mg_outro -> text/subtext; mg_countdown -> start/end/title;
     mg_quote -> quote/author。
 
-    mg_benchmark 需要服务端在 MGRequest 中新增 specs/bars 字段（或开启
-    additionalProperties）后才能使用；当前 schema 会拒绝这些额外字段。
-    额外参数通过 kwargs 传入（如 specs、bars），但需确认服务端已支持。
+    mg_benchmark 等模板的 specs/bars/params 现已在服务端 MGRequest schema 中
+    支持（additionalProperties 开放），可直接通过 kwargs 传入。
     """
     req = {
         "template": template,

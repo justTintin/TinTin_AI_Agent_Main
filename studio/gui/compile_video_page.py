@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QRadioButton, QDialog, QDialogButtonBox, QFormLayout, QTimeEdit,
     QListWidget, QListWidgetItem, QScrollArea,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QTimer
 
 from gui.base_page import BasePage
 from gui.montage.beat_montage_controller import BeatMontageController
@@ -975,6 +975,39 @@ class CompileVideoPage(BasePage):
         sell = (it.get("selling_points") or "").strip()
         self._features_text = feat
         self._selling_text = sell
+        # 自动化：产品变化后把卖点首行自动填入模板 topic 参数（若为空）
+        self._autofill_topic_from_selling()
+
+    def _autofill_topic_from_selling(self):
+        """把产品卖点首行自动填入模板 topic 参数（表单已生成且 topic 为空时）。"""
+        if not self._current_template:
+            return
+        w = self._template_form_widgets.get("topic")
+        if not w:
+            return
+        wtype, widget = w
+        try:
+            if widget_value(widget, wtype):
+                return  # 用户已填则不覆盖
+        except Exception:
+            return
+        sell = (self._selling_text or "").strip().splitlines()
+        if sell:
+            set_widget_value(widget, wtype, sell[0][:60])
+
+    def _auto_open_task_monitor(self):
+        """提交立即执行任务后，自动切到「成片任务」页并开启自动刷新。"""
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            return
+        tool = getattr(mw, "scheduled_tasks_tool", None)
+        if tool is not None and hasattr(tool, "chk_autorefresh"):
+            try:
+                tool.chk_autorefresh.setChecked(True)
+            except Exception:
+                pass
+        if hasattr(mw, "switch_page"):
+            QTimer.singleShot(500, lambda: mw.switch_page(43))
 
     def _current_product(self):
         """返回当前选中产品 dict（无则 None）。"""
@@ -1184,11 +1217,13 @@ class CompileVideoPage(BasePage):
             self.btn_make.setEnabled(True); self.btn_add_task.setEnabled(True)
             if tid:
                 self.stage_label.setText(f"✅ 已提交服务端，任务 ID={tid}")
-                self._log(f"✅ 服务端已接收，任务 ID={tid}。可在「定时任务」页监控状态。")
+                self._log(f"✅ 服务端已接收，任务 ID={tid}。可在「成片任务」页监控状态。")
                 self.show_info(f"任务已提交服务端（ID={tid}）。\n\n"
-                               + ("服务端正在执行，可在「定时任务」页查看进度。"
+                               + ("服务端正在执行，已自动打开「成片任务」页监控进度。"
                                   if immediate else
-                                  "服务端将按计划定时执行，可在「定时任务」页监控。"))
+                                  "服务端将按计划定时执行，可在「成片任务」页监控。"))
+                if immediate:
+                    self._auto_open_task_monitor()
             else:
                 self.stage_label.setText("⚠ 提交失败")
                 self._log("❌ 服务端提交失败，请检查服务端连接")
@@ -1461,6 +1496,8 @@ class CompileVideoPage(BasePage):
             if key in self._template_form_widgets:
                 wtype, widget = self._template_form_widgets[key]
                 set_widget_value(widget, wtype, val)
+        # 自动化：选中模板后若已选产品，自动填 topic 参数
+        self._autofill_topic_from_selling()
 
     def _build_template_form(self, template):
         while self.template_form_layout.count():

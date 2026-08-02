@@ -52,7 +52,7 @@ class ScheduledTasksPage(BasePage):
         list_header.addStretch()
         from PySide6.QtWidgets import QCheckBox
         self.chk_autorefresh = QCheckBox("自动刷新")
-        self.chk_autorefresh.setChecked(False)
+        self.chk_autorefresh.setChecked(True)   # 默认开启：有进行中任务时每 5 秒自动刷新
         self.chk_autorefresh.setToolTip("有进行中任务时自动每 5 秒刷新列表")
         list_header.addWidget(self.chk_autorefresh)
         self.btn_refresh = QPushButton("刷新")

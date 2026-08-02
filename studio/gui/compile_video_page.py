@@ -16,6 +16,7 @@
 """
 import os
 import json
+import time
 from datetime import datetime
 
 from PySide6.QtWidgets import (
@@ -40,11 +41,12 @@ from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from utils.product_library_manager import ProductLibraryManager
 from gui.searchable_combo import SearchableComboBox
 from gui.mg_template_utils import (
-    FALLBACK_TEMPLATES, _param_meta, create_value_widget,
+    _param_meta, create_value_widget,
     widget_value, set_widget_value, color_row, merge_templates,
-    fill_template_list, select_template_by_id, MGTemplateLoadWorker,
+    fill_template_list,
 )
-from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
+from utils.template_server_client import list_templates as list_video_templates
+from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR, TMP_DIR
 
 
 # ─── 远程素材服务地址（与 vector_search_page 一致） ─────────────────────────
@@ -212,6 +214,93 @@ class CompileVideoWorker(BaseWorker):
                     else [images[i % len(images)]] for i in range(n)] if images else [[] for _ in range(n)]
 
 
+# 成片模板兜底（type=video，独立于动效模板 type=motion）
+VIDEO_FALLBACK_TEMPLATES = [
+    {
+        "id": "ecom_15s",
+        "name": "电商带货-15s",
+        "type": "video",
+        "category": "ecommerce",
+        "description": "电商带货 15 秒成片：钩子→卖点→细节→CTA（素材服务端按主题匹配）",
+        "is_builtin": True,
+        "params": [
+            {"name": "topic", "type": "string", "default": "", "label": "主题"},
+            {"name": "bgm", "type": "string", "default": "欢快", "label": "BGM风格"},
+        ],
+        "effects": {"template": "ecom_15s"},
+    },
+    {
+        "id": "brand_30s",
+        "name": "品牌故事-30s",
+        "type": "video",
+        "category": "brand",
+        "description": "品牌故事 30 秒成片：标识→故事→亮点→价值→口号",
+        "is_builtin": True,
+        "params": [
+            {"name": "topic", "type": "string", "default": "", "label": "主题"},
+            {"name": "bgm", "type": "string", "default": "大气", "label": "BGM风格"},
+        ],
+        "effects": {"template": "brand_30s"},
+    },
+]
+
+
+class VideoTemplateLoadWorker(BaseWorker):
+    """异步从统一接口 GET /templates?type=video 拉取成片模板（区别于动效 /mg/*）。"""
+    finished = Signal(list)
+    phase = Signal(str)
+
+    def do_work(self):
+        self.phase.emit("正在加载成片模板…")
+        templates = list_video_templates(category="video", timeout=8)
+        self.finished.emit(templates)
+
+
+class TemplatePreviewWorker(BaseWorker):
+    """渲染成片模板并下载预览视频（/templates/render → result → download）。"""
+    progress = Signal(int)
+    phase = Signal(str)
+    finished = Signal(str)   # 本地 mp4 路径
+
+    def __init__(self, template_id, params, ratio):
+        super().__init__()
+        self.template_id = template_id
+        self.params = params or {}
+        self.ratio = ratio
+
+    def do_work(self):
+        from utils.template_server_client import (
+            render as _render, render_result as _result, render_download as _download,
+        )
+        self.phase.emit("正在提交预览渲染…")
+        task_id = _render(self.template_id, params=self.params, ratio=self.ratio)
+        if not task_id:
+            raise RuntimeError("预览渲染提交失败，请检查服务端连接。")
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            time.sleep(2)
+            st = _result(task_id)
+            status = (st.get("status") or "").lower()
+            try:
+                prog = int(st.get("progress") or 0)
+            except Exception:
+                prog = 0
+            self.progress.emit(prog)
+            self.phase.emit(f"预览渲染中… {prog}%")
+            if status in ("completed", "done", "success"):
+                resp = _download(task_id)
+                if resp is None:
+                    raise RuntimeError("预览渲染完成但下载失败。")
+                out = os.path.join(TMP_DIR, f"tpl_preview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4")
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with open(out, "wb") as f:
+                    f.write(resp.content)
+                return out
+            if status in ("failed", "error"):
+                raise RuntimeError(f"预览渲染失败：{st.get('error') or '未知错误'}")
+        raise RuntimeError("预览渲染超时（15 分钟）。")
+
+
 class CompileVideoPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -298,35 +387,35 @@ class CompileVideoPage(BasePage):
         prod_row = QHBoxLayout()
         self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
         prod_row.addWidget(self.combo_product, 1)
-        self.btn_reload_product = QPushButton("刷新")
+        self.btn_reload_product = mdi_button("刷新", "refresh")
         self.btn_reload_product.setObjectName("secondary_button")
         self.btn_reload_product.clicked.connect(lambda: self._populate_products())
         prod_row.addWidget(self.btn_reload_product)
-        left_lay.addLayout(prod_row)
-
-        # 卖点文案（弹窗查看原始卖点/参数）
-        selling_row = QHBoxLayout()
-        self.btn_show_selling = QPushButton("📋 卖点文案")
+        # 卖点文案放在「刷新」后面（弹窗查看原始卖点/参数），不再单独占一行
+        self.btn_show_selling = mdi_button("卖点文案", "clipboard")
         self.btn_show_selling.setObjectName("secondary_button")
         self.btn_show_selling.clicked.connect(self._show_selling_dialog)
-        selling_row.addWidget(self.btn_show_selling)
-        selling_row.addStretch()
-        left_lay.addLayout(selling_row)
+        prod_row.addWidget(self.btn_show_selling)
+        left_lay.addLayout(prod_row)
 
-        # 模板库
-        left_lay.addWidget(QLabel("🎬 模板库"))
-        self.list_templates = QListWidget()
-        self.list_templates.setMaximumHeight(220)
-        self.list_templates.currentItemChanged.connect(self._on_template_selected)
-        left_lay.addWidget(self.list_templates, 1)
-
-        tmpl_btn_row = QHBoxLayout()
-        self.btn_refresh_templates = QPushButton("🔄 刷新")
+        # 模板库（成片模板，独立于动效模板；header 行内放 预览播放/刷新，不再单独占行）
+        tmpl_header = QHBoxLayout()
+        tmpl_header.addWidget(QLabel("🎬 成片模板"))
+        tmpl_header.addStretch(1)
+        self.btn_preview_play = mdi_button("预览播放", "play")
+        self.btn_preview_play.setObjectName("secondary_button")
+        self.btn_preview_play.setToolTip("渲染当前成片模板并预览播放")
+        self.btn_preview_play.clicked.connect(self._preview_template)
+        tmpl_header.addWidget(self.btn_preview_play)
+        self.btn_refresh_templates = mdi_button("刷新", "refresh")
         self.btn_refresh_templates.setObjectName("secondary_button")
         self.btn_refresh_templates.clicked.connect(self._load_templates)
-        tmpl_btn_row.addWidget(self.btn_refresh_templates)
-        tmpl_btn_row.addStretch()
-        left_lay.addLayout(tmpl_btn_row)
+        tmpl_header.addWidget(self.btn_refresh_templates)
+        left_lay.addLayout(tmpl_header)
+        self.list_templates = QListWidget()
+        self.list_templates.setMaximumHeight(150)
+        self.list_templates.currentItemChanged.connect(self._on_template_selected)
+        left_lay.addWidget(self.list_templates, 1)
 
         top_splitter.addWidget(left_card)
 
@@ -1309,10 +1398,10 @@ class CompileVideoPage(BasePage):
 
     # -------------- 模板相关方法 --------------
     def _load_templates(self):
-        """加载模板库（内置 + 服务端）。"""
-        self._templates = list(FALLBACK_TEMPLATES)
+        """加载成片模板库（统一接口 /templates?type=video + 内置兜底）。"""
+        self._templates = list(VIDEO_FALLBACK_TEMPLATES)
         fill_template_list(self.list_templates, self._templates)
-        w = MGTemplateLoadWorker()
+        w = VideoTemplateLoadWorker()
         w.finished.connect(self._on_templates_loaded)
         w.phase.connect(self._log)
         self.track_worker(w)
@@ -1320,8 +1409,8 @@ class CompileVideoPage(BasePage):
 
     def _on_templates_loaded(self, server_templates):
         if not server_templates:
-            self._log("⚠ 未从服务端加载到模板，使用内置模板")
-        self._templates = merge_templates(server_templates, FALLBACK_TEMPLATES)
+            self._log("⚠ 未从服务端加载到成片模板，使用内置模板")
+        self._templates = merge_templates(server_templates, VIDEO_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
         fill_template_list(self.list_templates, self._templates, current_id=current_id)
 
@@ -1384,6 +1473,73 @@ class CompileVideoPage(BasePage):
             if key and key in self._template_form_widgets:
                 wtype, widget = self._template_form_widgets[key]
                 set_widget_value(widget, wtype, default)
+
+    def _preview_template(self):
+        """预览播放：渲染当前成片模板（/templates/render）→ 轮询 → 下载 → 本地播放。"""
+        if not self._current_template:
+            self.show_warning("请先选择成片模板。")
+            return
+        template_id = self._current_template.get("id")
+        params = dict(self._collect_template_params())
+        if not params.get("topic"):
+            product = self._current_product() or {}
+            selling = (product.get("selling_points") or "").strip().splitlines()
+            if selling:
+                params["topic"] = selling[0][:60]
+        ratio = self.combo_ratio.currentText()
+        self.btn_preview_play.setEnabled(False)
+        self.progress_bar.setVisible(True); self.progress_bar.setValue(0)
+        self.stage_label.setText("正在渲染成片模板（预览）…")
+        self._log(f"🎬 预览渲染：template={template_id} ratio={ratio} params={params}")
+        w = TemplatePreviewWorker(template_id, params, ratio)
+        w.progress.connect(self.progress_bar.setValue)
+        w.phase.connect(self.stage_label.setText)
+
+        def _done(out):
+            self.btn_preview_play.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.stage_label.setText(f"✅ 预览已生成：{os.path.basename(out)}")
+            self._log(f"✅ 成片模板预览：{out}")
+            self._play_preview(out)
+
+        def _err(e):
+            self.btn_preview_play.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.stage_label.setText("⚠ 预览渲染失败")
+            self.show_error(str(e), "预览渲染失败")
+
+        w.finished.connect(_done)
+        w.error.connect(_err)
+        self.track_worker(w); w.start()
+
+    def _play_preview(self, path):
+        """用内置播放器预览成片；失败回退系统播放器。"""
+        try:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtMultimedia import QMediaPlayer
+            from PySide6.QtMultimediaWidgets import QVideoWidget
+            dlg = QDialog(self.parent_widget)
+            dlg.setWindowTitle("成片模板预览")
+            dlg.resize(560, 760)
+            lay = QVBoxLayout(dlg)
+            vid = QVideoWidget()
+            lay.addWidget(vid, 1)
+            player = QMediaPlayer(dlg)
+            player.setVideoOutput(vid)
+            player.setSource(QUrl.fromLocalFile(os.path.abspath(path)))
+            btn = QDialogButtonBox(QDialogButtonBox.Close)
+            btn.rejected.connect(dlg.reject)
+            lay.addWidget(btn)
+            dlg.finished.connect(lambda *_: player.stop())
+            dlg.show()
+            player.play()
+            dlg.exec()
+        except Exception as e:
+            self._log(f"⚠ 内置播放失败，改用系统播放器: {e}")
+            try:
+                os.startfile(os.path.abspath(path))  # noqa
+            except Exception:
+                self.show_warning(f"预览文件已生成：{path}")
 
     def _show_selling_dialog(self):
         dlg = QDialog(self.parent_widget)

@@ -437,6 +437,8 @@ class VideoMontagePage(BasePage):
                     w.wait(3000)
                 except Exception:
                     pass
+                # 保留引用直到线程真正结束，避免 GC 运行中的 QThread 崩溃
+                self._retire_worker(w)
                 setattr(self, attr, None)
         # 恢复按钮状态
         for btn_attr in ("btn_split", "btn_pick_highlights", "btn_transcribe_raw"):
@@ -1914,10 +1916,29 @@ class VideoMontagePage(BasePage):
         self._start_merged_split(item, cur_splits_dir,
                                 self.threshold_spin.value(), int(self.min_len_spin.value()))
 
+    def _retire_worker(self, w):
+        """保留 QThread 引用直到线程结束，避免对象被 GC 时线程仍在运行导致崩溃。"""
+        if w is None:
+            return
+        pool = getattr(self, "_retired_workers", None)
+        if pool is None:
+            pool = []
+            self._retired_workers = pool
+        pool.append(w)
+        # 清理已结束的（引用释放）
+        for old in list(pool):
+            if old is not None and not old.isRunning():
+                try:
+                    pool.remove(old)
+                except ValueError:
+                    pass
+
     def _start_merged_split(self, item, cur_splits_dir, threshold, min_scene_len):
         """镜头分割：优先服务端 /montage/split（分割+分析合并），本地素材失败回退 PySceneDetect。"""
         is_local = item["kind"] == "local"
         video_path = item.get("path") if is_local else ""
+        # 替换前保留旧 worker 引用（避免 QThread 被 GC 时线程未结束崩溃）
+        self._retire_worker(getattr(self, "worker", None))
         self.worker = ServerSplitWorker(
             video_path=video_path or None,
             output_dir=cur_splits_dir,
@@ -1938,6 +1959,7 @@ class VideoMontagePage(BasePage):
                 self._on_merged_split_error(err)
                 return
             log.warning(f"[合并分割] 服务端分割失败，回退本地 PySceneDetect: {err}")
+            self._retire_worker(getattr(self, "worker", None))
             self.worker = PySceneDetectWorker(
                 video_path=video_path,
                 output_dir=cur_splits_dir,

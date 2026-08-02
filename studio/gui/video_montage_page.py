@@ -1053,7 +1053,9 @@ class VideoMontagePage(BasePage):
 
         # Set default directory for Step 2 and scan it
         if splits_dir and os.path.exists(splits_dir):
-            self.concat_src_dir_input.setText(splits_dir)
+            inp = getattr(self, "concat_src_dir_input", None)
+            if inp is not None:
+                inp.setText(splits_dir)
             self._scan_concat_src_dir()
         else:
             self._available_concat_clips = []
@@ -2358,7 +2360,7 @@ class VideoMontagePage(BasePage):
                                 "解决方法：在上方镜头列表中手动勾选镜头，或降低评分筛选阈值后重新过滤。")
             return
 
-        dir_path = self.concat_src_dir_input.text().strip()
+        dir_path = self._concat_src_dir()
         if not dir_path or not os.path.exists(dir_path):
             dir_path = self.folder_path_input.text().strip()
             
@@ -4254,9 +4256,16 @@ class VideoMontagePage(BasePage):
                     QMessageBox.warning(self.parent_widget, "打开失败", f"无法打开文件夹:\n{e}")
             else:
                 QMessageBox.warning(self.parent_widget, "路径无效", "请先选择有效的素材目录。")
+    def _concat_src_dir(self):
+        """当前镜头重组源目录（concat_src_dir_input 已移除时回退 folder_path_input）。"""
+        inp = getattr(self, "concat_src_dir_input", None)
+        if inp is not None:
+            return inp.text().strip()
+        return self.folder_path_input.text().strip()
+
     # [5·拼接合成]  _select_concat_src_dir
     def _select_concat_src_dir(self):
-        default_dir = self.concat_src_dir_input.text().strip()
+        default_dir = self._concat_src_dir()
         if not default_dir or not os.path.exists(default_dir):
             selected_item = self.video_list.currentItem()
             if selected_item:
@@ -4277,12 +4286,14 @@ class VideoMontagePage(BasePage):
         )
         if file_paths:
             dir_path = os.path.dirname(file_paths[0])
-            self.concat_src_dir_input.setText(dir_path)
+            inp = getattr(self, "concat_src_dir_input", None)
+            if inp is not None:
+                inp.setText(dir_path)
             self.selected_concat_clips_files = file_paths
             self._scan_concat_src_dir()
     # [5·拼接合成]  _scan_concat_src_dir
     def _scan_concat_src_dir(self):
-        dir_path = self.concat_src_dir_input.text().strip()
+        dir_path = self._concat_src_dir()
 
         if not hasattr(self, "_available_concat_clips"):
             self._available_concat_clips = []
@@ -4954,7 +4965,7 @@ class VideoMontagePage(BasePage):
 
         out_montage_dir = plan.get("out_dir") or getattr(self, "_pending_out_montage_dir", "")
         if not out_montage_dir:
-            dir_path = self.concat_src_dir_input.text().strip() or self.folder_path_input.text().strip()
+            dir_path = self._concat_src_dir()
             out_montage_dir = self._get_out_montage_dir(dir_path)
         os.makedirs(out_montage_dir, exist_ok=True)
         self._confirming_plan_index = index

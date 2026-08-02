@@ -1660,13 +1660,18 @@ class VideoMontagePage(BasePage):
         else:
             out_summary = f"{len(per_video_splits)} 个视频各自工作目录\n(例: {per_video_splits[0]})"
 
+        ext_count = len(getattr(self, "external_clip_urls", None) or [])
+        confirm_msg = (f"将对列表中的 {len(paths)} 个本地视频逐个处理：\n"
+                       f"· 能做镜头分割的，先做镜头分割；\n"
+                       f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n")
+        if ext_count:
+            confirm_msg += (f"另：素材列表中有 {ext_count} 个素材检索地址(material://)，"
+                            f"不参与本地分割，将直用于服务端拼接。\n")
+        confirm_msg += (f"\n本地分割片段输出目录：{out_summary}\n"
+                        f"注意：会先清空各目录里已有的分镜片段。\n\n确认继续？")
         reply = QMessageBox.question(
             self.parent_widget, "智能镜头分割",
-            f"将对列表中全部 {len(paths)} 个视频逐个处理：\n"
-            f"· 能做镜头分割的，先做镜头分割；\n"
-            f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n\n"
-            f"输出目录：{out_summary}\n"
-            f"注意：会先清空各目录里已有的分镜片段。\n\n确认继续？",
+            confirm_msg,
             QMessageBox.Yes | QMessageBox.No
         )
         if reply != QMessageBox.Yes:

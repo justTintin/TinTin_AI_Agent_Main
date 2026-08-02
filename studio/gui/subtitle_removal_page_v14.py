@@ -269,6 +269,7 @@ class InteractivePreviewLabelV14(QLabel):
         self.rotate_center = None    # 旋转中心（帧坐标）
         self.rotate_start_angle = 0.0  # 按下旋转把手时的起始角度
         self._rotate_cursor_cache = None
+        self.allow_rotation = True   # False=去字幕(轴对齐矩形,无旋转把手); True=去水印(可旋转四边形)
 
     def sizeHint(self):
         return QSize(400, 300)
@@ -299,7 +300,12 @@ class InteractivePreviewLabelV14(QLabel):
         return inside
 
     def _rotation_vertex_index(self):
-        """返回视觉'右下角'的顶点下标（x+y 最大的角），用作旋转把手。"""
+        """返回视觉'右下角'的顶点下标（x+y 最大的角），用作旋转把手。
+
+        去字幕模式（allow_rotation=False）不提供旋转把手，返回 -1。
+        """
+        if not self.allow_rotation:
+            return -1
         if self.active_box_index < 0 or not self.boxes:
             return -1
         quad = self.boxes[self.active_box_index]
@@ -460,7 +466,12 @@ class InteractivePreviewLabelV14(QLabel):
                     new_quad = [list(p) for p in sq]
                     new_quad[vi] = [max(0, min(self.frame_w, cur[0])),
                                     max(0, min(self.frame_h, cur[1]))]
-                    self.boxes[self.active_box_index] = new_quad
+                    if self.allow_rotation:
+                        self.boxes[self.active_box_index] = new_quad
+                    else:
+                        # 去字幕模式：轴对齐矩形（拖顶点只改外接框，不产生旋转四边形）
+                        x, y, w, h = _quad_aabb(new_quad)
+                        self.boxes[self.active_box_index] = _rect_to_quad(x, y, w, h)
 
             self.boundsChanged.emit(self.active_box_index)
         else:
@@ -521,7 +532,7 @@ class SubtitleRemovalPageV14(BasePage):
         main_layout.setSpacing(16)
 
         # Title
-        heading = QLabel("视频去字幕")
+        heading = QLabel("视频去水印字幕")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -715,6 +726,9 @@ class SubtitleRemovalPageV14(BasePage):
         self.watermark_container.setVisible(False)  # 默认去字幕，隐藏
         controls_layout.addWidget(self.watermark_container)
         self.purpose_combo.currentIndexChanged.connect(self._on_purpose_changed)
+        # 默认「去字幕」：轴对齐矩形，无旋转把手
+        if hasattr(self, "preview_label"):
+            self.preview_label.allow_rotation = (self._get_purpose() == "watermark")
 
         # Combined Subtitle Area Manager & Editor (Visual Design Optimized)
         box_manage_group = QFrame()
@@ -999,9 +1013,16 @@ class SubtitleRemovalPageV14(BasePage):
         return self.purpose_combo.currentData() if hasattr(self, "purpose_combo") else "subtitle"
 
     def _on_purpose_changed(self, _idx):
-        """用途切换：去水印时显示水印文字输入。"""
+        """用途切换：去水印显示水印文字输入且支持旋转四边形；去字幕用轴对齐矩形。"""
         is_watermark = self._get_purpose() == "watermark"
         self.watermark_container.setVisible(is_watermark)
+        if hasattr(self, "preview_label"):
+            self.preview_label.allow_rotation = is_watermark
+            if not is_watermark and self.boxes:
+                # 去字幕：把已有选区规范化为轴对齐矩形
+                self.boxes = [_rect_to_quad(*_quad_aabb(q)) for q in self.boxes]
+                self._update_box_list_widget()
+            self.update_preview()
 
     def _on_mode_switched(self, _idx):
         """切换智能/标注模式：显隐选区管理区，两种模式都强制走服务端。"""
@@ -1122,29 +1143,43 @@ class SubtitleRemovalPageV14(BasePage):
             # 绘制四边形选区（智能去除模式下不画）
             draw = ImageDraw.Draw(resized_img)
             if self._is_select_mode():
+                allow_rot = getattr(self.preview_label, "allow_rotation", True)
                 for idx, quad in enumerate(self.boxes):
-                    # 帧坐标 → 显示坐标
-                    pts = [(int(p[0] * target_w / w_img), int(p[1] * target_h / h_img)) for p in quad]
                     is_active = (idx == self.active_box_index)
                     outline = "#00ff00" if is_active else "#00ffff"
                     width = 3 if is_active else 2
-                    draw.polygon(pts, outline=outline, width=width)
-                    # 激活框：3 个角为拉伸方块手柄，右下角为旋转圆环把手
-                    if is_active:
-                        hs = 5  # 手柄半边长
-                        rot_i = self.preview_label._rotation_vertex_index()
-                        for vi, (hx, hy) in enumerate(pts):
-                            if vi == rot_i:
-                                # 旋转把手：黄色圆环 + 斜向箭头
-                                draw.ellipse([hx - 7, hy - 7, hx + 7, hy + 7],
-                                             outline="#ffd400", width=2)
-                                ax0, ay0 = hx + 3, hy - 8
-                                ax1, ay1 = hx + 10, hy - 14
-                                draw.line([ax0, ay0, ax1, ay1], fill="#ffd400", width=2)
-                                draw.polygon(
-                                    [(ax1, ay1 - 4), (ax1 + 4, ay1), (ax1 - 2, ay1 + 2)],
-                                    fill="#ffd400")
-                            else:
+                    if allow_rot:
+                        # 去水印：可旋转四边形 + 右下角旋转圆环把手
+                        pts = [(int(p[0] * target_w / w_img), int(p[1] * target_h / h_img)) for p in quad]
+                        draw.polygon(pts, outline=outline, width=width)
+                        if is_active:
+                            hs = 5  # 手柄半边长
+                            rot_i = self.preview_label._rotation_vertex_index()
+                            for vi, (hx, hy) in enumerate(pts):
+                                if vi == rot_i:
+                                    # 旋转把手：黄色圆环 + 斜向箭头
+                                    draw.ellipse([hx - 7, hy - 7, hx + 7, hy + 7],
+                                                 outline="#ffd400", width=2)
+                                    ax0, ay0 = hx + 3, hy - 8
+                                    ax1, ay1 = hx + 10, hy - 14
+                                    draw.line([ax0, ay0, ax1, ay1], fill="#ffd400", width=2)
+                                    draw.polygon(
+                                        [(ax1, ay1 - 4), (ax1 + 4, ay1), (ax1 - 2, ay1 + 2)],
+                                        fill="#ffd400")
+                                else:
+                                    draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
+                                                   fill="#00ff00", outline="#ffffff")
+                    else:
+                        # 去字幕：轴对齐矩形框（无旋转把手）
+                        x0, y0, w, h = _quad_aabb(quad)
+                        ax = x0 * target_w // w_img
+                        ay = y0 * target_h // h_img
+                        bx = (x0 + w) * target_w // w_img
+                        by = (y0 + h) * target_h // h_img
+                        draw.rectangle([ax, ay, bx, by], outline=outline, width=width)
+                        if is_active:
+                            hs = 5
+                            for hx, hy in ((ax, ay), (bx, ay), (bx, by), (ax, by)):
                                 draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
                                                fill="#00ff00", outline="#ffffff")
 
@@ -1236,10 +1271,19 @@ class SubtitleRemovalPageV14(BasePage):
         # 智能识别模式：空 sub_areas，服务端自动检测；标注选区模式：四边形相对坐标
         if self._is_smart_mode():
             sub_areas = ""
-        else:
-            # 每个四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
+        elif purpose == "watermark":
+            # 去水印：可旋转四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
             polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]
             sub_areas = _json.dumps(polys)
+        else:
+            # 去字幕：轴对齐矩形相对坐标 [[ymin,ymax,xmin,xmax], ...]
+            fw, fh = self.frame_width, self.frame_height
+            rects = []
+            for q in self.boxes:
+                x0, y0, w, h = _quad_aabb(q)
+                rects.append([round(y0 / fh, 4), round((y0 + h) / fh, 4),
+                              round(x0 / fw, 4), round((x0 + w) / fw, 4)])
+            sub_areas = _json.dumps(rects)
 
         # 去水印时附带水印文字（帮助服务端精准定位要去除的水印）
         watermark_text = ""

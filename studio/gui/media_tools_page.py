@@ -86,7 +86,7 @@ class MediaToolsPage(BasePage):
         ("视频修复", "video_tools", "wrench", "画质修复 / 工作流处理"),
         ("视频转文字", "transcription", "subtitles", "视频语音自动转写"),
         ("声音克隆", "voice_clone", "audio", "克隆音色生成配音"),
-        ("视频去字幕", "subtitle_removal", "closed-caption", "去除视频字幕 / 水印"),
+        ("视频去水印字幕", "subtitle_removal", "closed-caption", "去除字幕 / 台标水印"),
         ("视频框选OCR", "video_ocr", "text-box-search", "视频帧文字识别"),
         ("批量LUT调色", "video_lut", "gradient", "批量应用 LUT 调色"),
     ]

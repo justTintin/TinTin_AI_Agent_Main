@@ -186,7 +186,7 @@ class _GridRowsFilter(QObject):
         self.cols = max(3, cols)
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Resize:
+        if event.type() in (QEvent.Resize, QEvent.Show):
             self.apply()
         return False
 
@@ -194,8 +194,14 @@ class _GridRowsFilter(QObject):
         vp = self.grid.viewport()
         if vp is None:
             return
+        w = vp.width()
+        if w <= 0:
+            # 页面尚未显示（宽为 0）：延迟到布局稳定后重算
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(80, self.apply)
+            return
         # 每行固定 cols 个：列宽 = 视口宽 / cols；行高固定，保证行间距合理
-        col_w = max(80, vp.width() // self.cols)
+        col_w = max(80, w // self.cols)
         row_h = 215
         self.grid.setGridSize(QSize(col_w, row_h))
         icon = max(70, min(160, col_w - 25))
@@ -488,8 +494,8 @@ class VectorSearchPage(BasePage):
 
         sidebar = QFrame()
         sidebar.setObjectName("card")
-        sidebar.setMinimumWidth(150)
-        sidebar.setMaximumWidth(190)  # 侧边栏更窄，右侧网格能完整显示每行 10 个素材
+        sidebar.setMinimumWidth(120)
+        sidebar.setMaximumWidth(160)  # 侧边栏更窄，右侧网格能完整显示每行 10 个素材
         sb_lay = QVBoxLayout(sidebar)
         sb_lay.setContentsMargins(12, 12, 12, 12)
         sb_lay.setSpacing(6)
@@ -541,6 +547,7 @@ class VectorSearchPage(BasePage):
         self.grid.setUniformItemSizes(True)
         # 每列固定显示 10 个素材：动态调整 gridSize/iconSize
         self._grid_rows_filter = _GridRowsFilter(self.grid, cols=10)
+        self.grid.installEventFilter(self._grid_rows_filter)
         self.grid.viewport().installEventFilter(self._grid_rows_filter)
         self._grid_rows_filter.apply()
         self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"
@@ -867,6 +874,18 @@ class VectorSearchPage(BasePage):
         self._total = 0
         self._update_page_label()
 
+    def refresh(self):
+        """页面激活时调用：仅当上次加载失败/无结果时自动重试，避免打断浏览。"""
+        if not hasattr(self, "_last_params"):
+            return
+        if self._total > 0 and self._results:
+            return
+        try:
+            self._do_search()
+        except Exception as e:
+            from utils.logger_utils import log as _log
+            _log.warning(f"[素材检索] 激活刷新失败: {e}")
+
     def _update_page_label(self):
         page_size = self._page_size or 1
         cur_page = (self._offset // page_size) + 1 if self._total > 0 else 0
@@ -938,6 +957,13 @@ class VectorSearchPage(BasePage):
         # 排队异步加载未命中的缩略图（并发节流）
         self._thumb_queue = list(to_load)
         self._drain_thumb_queue()
+        # 数据填充后强制按当前视口重算列宽（刚进入页面时 Resize 可能未触发，
+        # 否则仍用初始列宽导致每行显示不全）
+        try:
+            self._grid_rows_filter.apply()
+            QTimer.singleShot(50, self._grid_rows_filter.apply)
+        except Exception:
+            pass
 
     def _drain_thumb_queue(self):
         """按并发上限从队列启动缩略图 worker。"""

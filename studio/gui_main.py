@@ -1000,6 +1000,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 45:  # 音频素材
             if hasattr(self, "audio_material_tool"):
                 self.audio_material_tool.refresh()
+        elif index == 39:  # 素材检索（进入页面时若上次加载失败自动重试）
+            if hasattr(self, "vector_search_tool"):
+                try:
+                    self.vector_search_tool.refresh()
+                except Exception as e:
+                    log.error(f"刷新素材检索失败: {e}")
         elif index == 38: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()

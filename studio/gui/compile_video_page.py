@@ -302,6 +302,44 @@ class TemplatePreviewWorker(BaseWorker):
         raise RuntimeError("预览渲染超时（15 分钟）。")
 
 
+class ScriptListLoader(BaseWorker):
+    """从服务端 GET /api/storyboard/scripts 拉取分镜脚本列表摘要。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        from utils.http_client import http_get
+        base = _get_server_url()
+        if not base:
+            raise RuntimeError("未配置服务端地址")
+        r = http_get(f"{base}/api/storyboard/scripts",
+                     params={"page": 1, "page_size": 100}, timeout=15)
+        if r.status_code == 200:
+            items = (r.json() or {}).get("items") or []
+            self.finished.emit(items)
+            return
+        raise RuntimeError(f"脚本列表接口返回 HTTP {r.status_code}")
+
+
+class ScriptDetailLoader(BaseWorker):
+    """从服务端 GET /api/storyboard/scripts/{id} 拉取完整分镜脚本。"""
+    finished = Signal(dict)
+
+    def __init__(self, script_id):
+        super().__init__()
+        self.script_id = script_id
+
+    def do_work(self):
+        from utils.http_client import http_get
+        base = _get_server_url()
+        if not base:
+            raise RuntimeError("未配置服务端地址")
+        r = http_get(f"{base}/api/storyboard/scripts/{self.script_id}", timeout=15)
+        if r.status_code == 200:
+            self.finished.emit(r.json() or {})
+            return
+        raise RuntimeError(f"脚本详情接口返回 HTTP {r.status_code}")
+
+
 class CompileVideoPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -726,32 +764,68 @@ class CompileVideoPage(BasePage):
         self._populate_scripts()
 
     def _populate_scripts(self):
-        """扫描 KNOWLEDGE_MEDIA_DIR/*/storyboard/*.json，填充脚本下拉。"""
+        """从服务端拉取分镜脚本列表（失败回退本地扫描）。"""
         self.combo_script.blockSignals(True)
         self.combo_script.clear()
+        self.combo_script.addItem("— 请选择脚本 —", None)
+        self.combo_script.setCurrentIndex(0)
+        self.combo_script.blockSignals(False)
+        self._current_script_data = None
+        self.script_status.setText("正在从服务端加载脚本…")
+        w = self.track_worker(ScriptListLoader())
+        w.finished.connect(self._on_scripts_loaded)
+        w.error.connect(self._on_scripts_load_error)
+        w.start()
+
+    def _on_scripts_loaded(self, items):
+        scripts = []
+        for it in items or []:
+            sid = it.get("id")
+            if not sid:
+                continue
+            scripts.append({
+                "id": sid,
+                "topic": it.get("topic", ""),
+                "ratio": it.get("ratio", "9:16"),
+                "shot_count": it.get("shot_count", 0),
+                "saved_at": it.get("saved_at", ""),
+            })
+        self.combo_script.blockSignals(True)
+        self.combo_script.clear()
+        self.combo_script.addItem("— 请选择脚本 —", None)
+        for s in scripts:
+            label = f"[{s['topic']}] {s['shot_count']}镜"
+            if s.get("saved_at"):
+                label += f" · {s['saved_at']}"
+            self.combo_script.addItem(label, s)
+        self.combo_script.setCurrentIndex(0)
+        self.combo_script.blockSignals(False)
+        if scripts:
+            self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+            self.script_status.setText(f"共 {len(scripts)} 个脚本（来自服务端）")
+        else:
+            self.script_preview.setMarkdown(
+                "## ⚠ 服务端暂无分镜脚本\n\n"
+                "在「分镜脚本创作」页生成脚本并保存（会自动上传服务端）后，回到本页点「刷新」即可看到。")
+            self.script_status.setText("服务端暂无脚本")
+
+    def _on_scripts_load_error(self, msg):
+        log.warning(f"从服务端加载脚本失败，回退本地扫描: {msg}")
         scripts = self._scan_storyboard_scripts()
+        self.combo_script.blockSignals(True)
+        self.combo_script.clear()
         self.combo_script.addItem("— 请选择脚本 —", None)
         for s in scripts:
             label = f"[{s['topic']}] {s['name']}（{s['shot_count']}镜/{s['total_duration']}s）"
             self.combo_script.addItem(label, s)
         self.combo_script.setCurrentIndex(0)
         self.combo_script.blockSignals(False)
-
-        if not scripts:
-            # 空状态引导：告诉用户脚本从哪来、默认目录、怎么生成
-            self.script_preview.setMarkdown(
-                f"## ⚠ 暂无可用的分镜脚本\n\n"
-                f"**脚本来源**：在「分镜脚本创作」页生成脚本后，保存时选择 **JSON 格式**即可在此选用。\n\n"
-                f"**默认扫描目录**：\n```\n{KNOWLEDGE_MEDIA_DIR}\\<选题名>\\storyboard\\*.json\n```\n\n"
-                f"**当前该目录下没有 JSON 脚本。** 请按以下步骤生成：\n"
-                f"1. 进入「分镜脚本创作」页\n"
-                f"2. 生成或编辑分镜（每镜头含画面描述 + 旁白文案 + 时长）\n"
-                f"3. 点「保存」→ 导出格式选 **JSON（.json，供脚本成片）**\n"
-                f"4. 回到本页点「刷新」即可看到脚本")
-            self.script_status.setText(f"未找到脚本（扫描目录：{KNOWLEDGE_MEDIA_DIR}）")
-        else:
+        if scripts:
             self.script_preview.setMarkdown("*选择上方脚本查看预览*")
-            self.script_status.setText(f"共 {len(scripts)} 个脚本")
+            self.script_status.setText(f"服务端不可用，已回退本地（{len(scripts)} 个脚本）")
+        else:
+            self.script_preview.setMarkdown("## ⚠ 暂无可用的分镜脚本\n\n服务端不可用且本地也未找到脚本。")
+            self.script_status.setText("未找到脚本（服务端不可用）")
 
     @staticmethod
     def _scan_storyboard_scripts():
@@ -792,26 +866,53 @@ class CompileVideoPage(BasePage):
         return results
 
     def _current_script(self):
-        """返回当前选中的脚本 dict（无则 None）。"""
+        """返回当前选中的完整脚本 dict（无则 None）。"""
+        if getattr(self, "_current_script_data", None):
+            return self._current_script_data
         return self.combo_script.currentData() if hasattr(self, "combo_script") else None
 
     def _on_script_changed(self, _idx):
         s = self._current_script()
         if not s:
+            self._current_script_data = None
             self.script_preview.setMarkdown("*选择上方脚本查看预览*")
             return
+        sid = s.get("id")
+        if sid:
+            # 服务端脚本：异步拉取完整内容
+            self._current_script_data = None
+            self.script_preview.setMarkdown("*正在加载脚本内容…*")
+            w = self.track_worker(ScriptDetailLoader(sid))
+            w.finished.connect(self._on_script_detail_loaded)
+            w.error.connect(lambda e, _sid=sid: self._on_script_detail_error(e, _sid))
+            w.start()
+        else:
+            # 本地回退脚本：直接使用
+            self._current_script_data = s
+            self._apply_script_to_ui(s)
+
+    def _on_script_detail_loaded(self, script):
+        if not script:
+            return
+        self._current_script_data = script
+        self._apply_script_to_ui(script)
+
+    def _on_script_detail_error(self, err, sid):
+        log.warning(f"加载脚本详情失败({sid}): {err}")
+        self.script_preview.setMarkdown(f"⚠ 脚本加载失败：{err}")
+
+    def _apply_script_to_ui(self, s):
         # 比例默认取脚本里的
         idx = self.script_combo_ratio.findText(s.get("ratio", "9:16"))
         if idx >= 0:
             self.script_combo_ratio.setCurrentIndex(idx)
-        # 渲染预览
         self.script_preview.setMarkdown(self._render_script_preview(s))
 
     @staticmethod
     def _render_script_preview(s):
         shots = s.get("shots", [])
         lines = [
-            f"### {s.get('topic','')} — {s.get('name','')}",
+            f"### {s.get('topic','')}",
             "",
             f"- **画幅**：{s.get('ratio','9:16')}　**总时长**：{s.get('total_duration',0)}s　**镜头数**：{s.get('shot_count',0)}",
             "",
@@ -820,7 +921,7 @@ class CompileVideoPage(BasePage):
         ]
         for sh in shots:
             vis = str(sh.get("visual", "")).replace("|", "｜").replace("\n", " ").strip()
-            nar = str(sh.get("narration", "")).replace("|", "｜").replace("\n", " ").strip()
+            nar = str(sh.get("audio", "") or sh.get("narration", "")).replace("|", "｜").replace("\n", " ").strip()
             mat = str(sh.get("material_path", "")).replace("|", "｜").strip()
             lines.append(f"| {sh.get('index','')} | {sh.get('duration','')}s | {vis} | {nar or '—'} | {mat or '—'} |")
         return "\n".join(lines)
@@ -843,7 +944,7 @@ class CompileVideoPage(BasePage):
                 "shot_type": sh.get("shot_type", ""),
                 "duration": sh.get("duration", 3),
                 "visual": sh.get("visual", ""),
-                "audio": sh.get("narration", "") or sh.get("audio", ""),  # 文案字段对齐
+                "audio": sh.get("audio", "") or sh.get("narration", ""),  # 文案字段对齐（服务端脚本已是 audio）
                 # 以下服务端不一定用，但保留供未来扩展（如服务端支持指定素材）
                 "material_path": sh.get("material_path", ""),
                 "material_type": sh.get("material_type", ""),
@@ -855,7 +956,7 @@ class CompileVideoPage(BasePage):
             "voice_settings": {"speaker": "default"},
             "count": self.script_spin_count.value(),   # 变体数量（服务端进化选最优）
             # 客户端附加信息（服务端按需取用，不影响执行）
-            "script_name": s.get("name", ""),
+            "script_name": s.get("name", "") or s.get("id", ""),
             "script_path": s.get("path", ""),
             "topic": s.get("topic", ""),
             "ratio": self.script_combo_ratio.currentText(),

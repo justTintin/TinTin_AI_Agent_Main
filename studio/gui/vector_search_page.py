@@ -108,14 +108,14 @@ class _SearchWorker(BaseWorker):
     """素材检索：有关键词走 /material/search（语义），否则走 /material/list（浏览）。"""
     finished = Signal(list, int)
 
-    def __init__(self, query="", brand="", category="", media_type="", model="", white_bg=False, limit=50, offset=0):
+    def __init__(self, query="", brand="", category="", media_type="", model="", background_type="", limit=50, offset=0):
         super().__init__()
         self.query = query
         self.brand = brand
         self.category = category
         self.media_type = media_type
         self.model = model
-        self.white_bg = white_bg
+        self.background_type = background_type
         self.limit = limit
         self.offset = offset
 
@@ -144,8 +144,8 @@ class _SearchWorker(BaseWorker):
                     params["media_type"] = self.media_type
                 if self.model:
                     params["model"] = self.model
-                if self.white_bg:
-                    params["white_bg"] = "1"
+                if self.background_type:
+                    params["background_type"] = self.background_type
                 resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -684,7 +684,7 @@ class VectorSearchPage(BasePage):
             "category": self._current_data(self.category_list) or "",
             "media_type": "" if _white_bg else _mtype,
             "model": self.model_filter_input.text().strip(),
-            "white_bg": _white_bg,
+            "background_type": "white" if _white_bg else "",
         }
 
     def _do_search(self):
@@ -708,7 +708,7 @@ class VectorSearchPage(BasePage):
         w = self.track_worker(_SearchWorker(
             query=p["query"], brand=p["brand"], category=p["category"],
             media_type=p["media_type"], model=p.get("model", ""),
-            white_bg=bool(p.get("white_bg", False)),
+            background_type=p.get("background_type", ""),
             limit=self._page_size, offset=self._offset))
         w.finished.connect(self._on_search_done)
         w.error.connect(lambda m: self._on_search_error(m))

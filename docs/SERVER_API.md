@@ -2,7 +2,7 @@
 
 > 服务端地址：`http://192.168.111.28:8000`（2026-08-02 实测，原 .19 已迁移）
 > OpenAPI 规范：`http://192.168.111.28:8000/openapi.json`
-> 框架：FastAPI (Python)，实测共 240 个路径
+> 框架：FastAPI (Python)，实测共 241 个路径
 > 最后同步：2026-08-03
 
 ⚠️ **重要原则**：客户端不得自行定义接口路径和协议，必须严格对照本文档（即服务端 OpenAPI 实际暴露的端点）。
@@ -362,10 +362,11 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 
 | 端点 | Method | 说明 |
 |------|--------|------|
-| `/material/list` | GET | 分页列表，支持 search/media_type/brand/category/model/score_range/file_hash/tag/favorite/ai_status/share_name/cursor/search_mode/dup 等筛选；**brand 传归一化名、model 模糊匹配** |
+| `/material/list` | GET | 分页列表，支持 search/media_type/brand/category/model/background_type/score_range/file_hash/tag/favorite/ai_status/share_name/cursor/search_mode/dup 等筛选；**brand 传归一化名、model 模糊匹配、background_type 按背景类型（白底=white）** |
 | `/material/schema` | GET | 可搜索字段字典（含去重值） |
 | `/material/distinct` | GET | 字段去重值（原始值，品牌请用归一化接口） |
 | `/material/backfill_brand` | POST | **品牌/型号归一化回填**（罗技/Logitech/罗技科技 → 罗技），后台任务；body.limit 最多处理条数（0/缺省=全部），进度轮询 GET /material/tasks/{task_id} |
+| `/material/backfill_background` | POST | **背景类型回填**（白/黑/纯色/渐变/绿幕/蓝幕/透明/场景），后台任务；body.limit 最多处理条数（0/缺省=全部缺 background_type 的素材），进度轮询 GET /material/tasks/{task_id} |
 | `/material/duplicates` | GET | 素材库重复检测：文件重复(hash) + 美学重复(embedding 余弦相似度，threshold 默认0.95，limit 默认100) |
 | `/material/stats` | GET | 统计信息 |
 | `/material/status` | GET | 服务状态 |
@@ -393,6 +394,10 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 > - 素材筛选品牌时传归一化名：实测 `/material/list?brand=罗技(Logitech)` 返回 93 条，且返回素材 brand 已是归一化值。
 > - 旧数据可通过 `POST /material/backfill_brand` 回填归一化。
 > - **注意**：`/material/search`（语义搜索）不接受 brand 参数（传了返回 400），品牌/型号筛选仅在浏览模式（/material/list）生效。
+
+> **背景类型过滤（2026-08-03 服务端已上线）**：
+> - `/material/list` 新增 `background_type` 参数，取值（distinct）：`gradient`/`scene`/`transparent`/`white`；**白底图过滤传 `background_type=white`**（实测返回标记为 white 的素材）。
+> - 客户端素材检索“白底图”选项已接入该参数；旧数据可通过 `POST /material/backfill_background` 回填。
 
 ### 3.7 相似素材 / 标签（新增）
 

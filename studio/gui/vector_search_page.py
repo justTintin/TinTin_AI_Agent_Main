@@ -386,14 +386,23 @@ class VectorSearchPage(BasePage):
         root.addLayout(hdr)
 
         search_row = QHBoxLayout()
-        # 类型（全部/图片/视频/白底图）移到搜索栏最前面
+        # 类型（全部/图片/视频）移到搜索栏最前面
         self.type_combo = QComboBox()
         self.type_combo.addItem("全部", "")
         self.type_combo.addItem("🖼 图片", "image")
         self.type_combo.addItem("🎬 视频", "video")
-        self.type_combo.addItem("⬜ 白底图", "white_bg")
-        self.type_combo.currentIndexChanged.connect(self._on_side_filter_changed)
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         search_row.addWidget(self.type_combo)
+        # 背景类型：图片下的分类（白底/黑底/纯色/渐变/绿幕/蓝幕/透明/场景），选图片时启用
+        self.bg_combo = QComboBox()
+        self.bg_combo.addItem("全部背景", "")
+        for _txt, _val in [("⬜ 白底图", "white"), ("⬛ 黑底图", "black"), ("🎨 纯色", "solid"),
+                           ("🌫 渐变", "gradient"), ("🟢 绿幕", "greenscreen"), ("🔵 蓝幕", "bluescreen"),
+                           ("🫧 透明", "transparent"), ("🏞 场景", "scene")]:
+            self.bg_combo.addItem(_txt, _val)
+        self.bg_combo.setEnabled(False)
+        self.bg_combo.currentIndexChanged.connect(self._on_bg_type_changed)
+        search_row.addWidget(self.bg_combo)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入关键词语义搜索（留空 = 浏览全部素材）")
         self.search_input.returnPressed.connect(self._do_search)
@@ -580,7 +589,7 @@ class VectorSearchPage(BasePage):
         total = stats.get("total", 0)
         by_type = stats.get("by_type", {})
         self.lbl_stats.setText(
-            f"共 {total:,} 个素材\n图片 {by_type.get('image', 0):,} · 视频 {by_type.get('video', 0):,}")
+            f"共 {total:,} 个素材 · 图片 {by_type.get('image', 0):,} · 视频 {by_type.get('video', 0):,}")
 
     def _on_distinct_loaded(self, field, values):
         values = [v for v in (values or []) if v and str(v).strip()]
@@ -638,6 +647,21 @@ class VectorSearchPage(BasePage):
         it = list_widget.currentItem()
         return it.data(Qt.UserRole) if it else ""
 
+    def _on_type_changed(self, *_args):
+        # 背景类型是图片下的分类：仅当类型=图片时启用
+        is_image = (self.type_combo.currentData() == "image")
+        self.bg_combo.setEnabled(is_image)
+        if not is_image:
+            self.bg_combo.setCurrentIndex(0)
+        self._on_side_filter_changed()
+
+    def _on_bg_type_changed(self, *_args):
+        # 选择背景类型时自动切到「图片」，并触发搜索
+        if self.bg_combo.currentData() and self.type_combo.currentData() != "image":
+            self.type_combo.setCurrentIndex(1)  # 图片（内部会触发 _on_type_changed -> 搜索）
+            return
+        self._on_side_filter_changed()
+
     def _on_model_filter_changed(self, _text):
         # 型号输入防抖：停顿后触发搜索
         if not hasattr(self, "_last_params"):
@@ -677,14 +701,16 @@ class VectorSearchPage(BasePage):
     def _collect_params(self):
         """收集当前筛选条件（搜索与翻页共用）。"""
         _mtype = self.type_combo.currentData() or ""
-        _white_bg = (_mtype == "white_bg")
+        _bg = self.bg_combo.currentData() or ""
+        # 背景类型是图片下的分类：仅在类型=图片时生效
+        _use_bg = bool(_bg) and _mtype == "image"
         return {
             "query": self.search_input.text().strip(),
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
-            "media_type": "" if _white_bg else _mtype,
+            "media_type": "image" if _use_bg else _mtype,
             "model": self.model_filter_input.text().strip(),
-            "background_type": "white" if _white_bg else "",
+            "background_type": _bg if _use_bg else "",
         }
 
     def _do_search(self):

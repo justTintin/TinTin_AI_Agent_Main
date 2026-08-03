@@ -1061,7 +1061,10 @@ class StoryboardPage(BasePage):
         shots = self._collect_shots()
         orient = {"9:16": "竖屏", "16:9": "横屏", "1:1": "方形"}.get(ratio, ratio)
         total_dur = sum(s["duration"] for s in shots)
-        topic = (self.feishu_record or {}).get("topic", "") or default_name
+        # 优先沿用「继续创作」加载的服务端脚本 topic（服务端按 topic 覆盖更新），
+        # 其次飞书选题，最后用默认文件名
+        topic = (getattr(self, "_server_script_topic", "") or ""
+                 or (self.feishu_record or {}).get("topic", "") or default_name)
 
         # ── 保存选项对话框 ──
         dlg = QDialog(self.parent_widget)
@@ -1095,6 +1098,14 @@ class StoryboardPage(BasePage):
         chk_feishu.setToolTip("" if (appid and appsecret) else "请先在「环境配置」页配置飞书 AppID/AppSecret")
         dl.addWidget(chk_feishu)
 
+        # ── 服务端同步选项（脚本成片直接从服务端读取）──
+        server_base = _sb_server_url()
+        chk_server = QCheckBox("同步到服务端（供「脚本成片」直接选择）")
+        chk_server.setChecked(bool(server_base))
+        chk_server.setEnabled(bool(server_base))
+        chk_server.setToolTip("" if server_base else "未配置服务端地址（系统设置 → 统一计算节点地址），保存后仅留在本地")
+        dl.addWidget(chk_server)
+
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Ok).setText("保存")
         bb.button(QDialogButtonBox.Cancel).setText("取消")
@@ -1110,6 +1121,7 @@ class StoryboardPage(BasePage):
         do_md = fmt_md.isChecked() or fmt_both.isChecked() or fmt_all.isChecked()
         do_json = fmt_json.isChecked() or fmt_all.isChecked()
         do_feishu = chk_feishu.isChecked()
+        do_server = chk_server.isChecked()
 
         # 保存到配置的素材目录（与浏览器下载目录对齐）
         import re as _re
@@ -1150,12 +1162,90 @@ class StoryboardPage(BasePage):
         if do_feishu:
             self._upload_to_feishu("docx")
 
+        # 同步到服务端（异步 POST /api/storyboard/scripts，同 topic 覆盖更新）
+        server_note = ""
+        if do_server:
+            self._upload_storyboard_to_server(topic, ratio, total_dur, shots)
+            server_note = "\n\n（已发起同步到服务端，状态见页面底部提示；\n可在「一键成片 → 脚本成片」刷新后直接选择）"
+
+
         self.show_info(
             f"分镜脚本已保存至：\n{out_dir}\n\n"
             + "\n".join(os.path.basename(f) for f in saved_files)
-            + "\n\n（已自动生成 .json，可在「一键成片 → 脚本成片」中刷新后选择）",
+            + server_note,
             "保存成功",
         )
+
+    def _upload_storyboard_to_server(self, topic, ratio, total_dur, shots):
+        """把分镜脚本上传到服务端（POST /api/storyboard/scripts，异步）。
+
+        服务端契约（docs/分镜脚本服务端接口需求.json）：
+          保存字段 topic/ratio/total_duration/shot_count/shots/saved_at；
+          shots 元素 {index, shot_type, visual, audio, sfx, duration}——
+          客户端本地字段 narration → 服务端 audio，保留素材字段供未来扩展。
+        同 topic 重复保存视为更新（不新增）。
+        返回 True 表示已发起且请求成功；失败仅记日志，不影响本地保存。
+        """
+        from utils.thread_worker import TaskWorker as Worker
+        base = _sb_server_url()
+        if not base:
+            log.warning("[分镜脚本] 未配置服务端地址，跳过上传")
+            return False
+
+        # 字段对齐：narration → audio（服务端 storyboard_montage 契约）
+        server_shots = []
+        for sh in shots or []:
+            server_shots.append({
+                "index": sh.get("index", 0),
+                "shot_type": sh.get("shot_type", ""),
+                "duration": sh.get("duration", 3),
+                "visual": sh.get("visual", ""),
+                "audio": sh.get("audio", "") or sh.get("narration", ""),
+                "sfx": sh.get("sfx", ""),
+                "material_path": sh.get("material_path", ""),
+                "material_type": sh.get("material_type", ""),
+                "material_hash": sh.get("material_hash", ""),
+            })
+        payload = {
+            "topic": topic or "未命名分镜脚本",
+            "ratio": ratio,
+            "total_duration": float(total_dur or 0),
+            "shot_count": len(server_shots),
+            "shots": server_shots,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+        def _do():
+            from utils.http_client import http_post
+            resp = http_post(f"{base}/api/storyboard/scripts", json=payload, timeout=20)
+            if resp.status_code in (200, 201):
+                log.info(f"[分镜脚本] 已上传服务端 topic={payload['topic']} shots={len(server_shots)}")
+                return True
+            log.warning(f"[分镜脚本] 上传失败 HTTP {resp.status_code}: {resp.text[:200]}")
+            return False
+
+        def _done(ok):
+            if not ok:
+                self.lbl_status.setText("⚠ 分镜脚本已保存到本地，但同步服务端失败")
+                log.warning("[分镜脚本] 同步服务端失败（详见日志）")
+            else:
+                self.lbl_status.setText("✅ 分镜脚本已保存并同步到服务端")
+                # 刷新「继续创作」下拉，服务端脚本立即可见
+                try:
+                    self._reload_sb_scripts()
+                except Exception:
+                    pass
+
+        def _err(e):
+            self.lbl_status.setText("⚠ 分镜脚本已保存到本地，但同步服务端失败")
+            log.warning(f"[分镜脚本] 同步服务端异常: {e}")
+
+        w = Worker(_do)
+        w.finished.connect(_done)
+        w.error.connect(_err)
+        self.track_worker(w)
+        w.start()
+        return True
 
     def _export_storyboard_excel(self, path, topic, ratio, orient, style_name, total_dur, shots):
         try:
@@ -1291,6 +1381,7 @@ class StoryboardPage(BasePage):
             # 创建新脚本：清空当前内容
             self.edit_copy.clear()
             self._render_shots([])
+            self._server_script_topic = ""
             self.lbl_status.setText("已切换到「创建新脚本」模式。")
             return
         w = self.track_worker(_StoryboardScriptDetailLoader(sel["id"]))
@@ -1312,6 +1403,7 @@ class StoryboardPage(BasePage):
             self.combo_shot_ratio.setCurrentText(ratio)
         # 分镜脚本
         self._render_shots(shots)
+        self._server_script_topic = (script.get("topic") or "").strip()
         self.lbl_status.setText(f"已载入脚本「{script.get('topic', '')}」（{len(shots)} 镜），可继续编辑并生成。")
 
     def _reload_stylizations(self):

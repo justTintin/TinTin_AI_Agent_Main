@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QMenu,
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
 )
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect, QObject, QEvent
 from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor, QAction
 from gui.video_player import VideoPlayerWidget
 
@@ -175,6 +175,64 @@ class _DistinctLoader(BaseWorker):
         except Exception:
             pass
         self.finished.emit(self.field, [])
+
+
+class _GridRowsFilter(QObject):
+    """让素材网格每列固定显示 rows 个素材：随视口尺寸动态调整 gridSize/iconSize。"""
+
+    def __init__(self, grid, rows=10):
+        super().__init__(grid)
+        self.grid = grid
+        self.rows = max(3, rows)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self.apply()
+        return False
+
+    def apply(self):
+        vp = self.grid.viewport()
+        if vp is None:
+            return
+        row_h = max(70, vp.height() // self.rows)
+        self.grid.setGridSize(QSize(185, row_h))
+        icon = max(56, min(160, row_h - 30))
+        self.grid.setIconSize(QSize(icon, icon))
+
+
+class _BrandCountLoader(BaseWorker):
+    """批量查询每个品牌在素材库中的素材数量，用于过滤无对应素材的品牌。"""
+    finished = Signal(dict)  # {brand: total}
+
+    def __init__(self, brands):
+        super().__init__()
+        self.brands = list(brands or [])
+
+    def do_work(self):
+        from concurrent.futures import ThreadPoolExecutor
+        base = _get_server_url()
+        if not base:
+            self.finished.emit({b: -1 for b in self.brands})
+            return
+
+        def _count(brand):
+            try:
+                r = http_get(f"{base}/material/list",
+                             params={"page": 1, "size": 1, "brand": brand}, timeout=15)
+                if r.status_code == 200:
+                    return brand, int((r.json() or {}).get("total") or 0)
+            except Exception:
+                pass
+            return brand, -1
+
+        counts = {}
+        try:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                for brand, total in ex.map(_count, self.brands):
+                    counts[brand] = total
+        except Exception:
+            counts = {b: -1 for b in self.brands}
+        self.finished.emit(counts)
 
 
 class _NormalizedBrandsLoader(BaseWorker):
@@ -478,6 +536,10 @@ class VectorSearchPage(BasePage):
         self.grid.setSpacing(8)
         self.grid.setSelectionMode(QAbstractItemView.NoSelection)
         self.grid.setUniformItemSizes(True)
+        # 每列固定显示 10 个素材：动态调整 gridSize/iconSize
+        self._grid_rows_filter = _GridRowsFilter(self.grid, rows=10)
+        self.grid.viewport().installEventFilter(self._grid_rows_filter)
+        self._grid_rows_filter.apply()
         self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"
                                 " QListWidget::item { background: #1c1c24; border-radius: 6px; }"
                                 " QListWidget::item:selected { background: #2a3340; border: 1px solid #2ecc71; }")
@@ -529,11 +591,13 @@ class VectorSearchPage(BasePage):
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
         page_row.addWidget(QLabel("每页:"))
-        self.spin_limit = QSpinBox()
-        self.spin_limit.setRange(10, 200)
-        self.spin_limit.setValue(50)
-        self.spin_limit.setFixedWidth(60)
-        page_row.addWidget(self.spin_limit)
+        self.combo_limit = QComboBox()
+        self.combo_limit.addItem("50", 50)
+        self.combo_limit.addItem("100", 100)
+        self.combo_limit.addItem("200", 200)
+        self.combo_limit.setCurrentIndex(0)
+        self.combo_limit.setFixedWidth(64)
+        page_row.addWidget(self.combo_limit)
         page_row.addStretch()
         self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
@@ -605,6 +669,10 @@ class VectorSearchPage(BasePage):
         if field == "brand":
             self._brand_values = values
             self._rebuild_brand_list("")
+            # 只保留素材库实际有素材的品牌（避免 海帝星 等产品库品牌无对应素材）
+            w = self.track_worker(_BrandCountLoader(values))
+            w.finished.connect(self._on_brand_counts)
+            w.start()
         elif field == "category":
             self.category_list.blockSignals(True)
             self.category_list.clear()
@@ -647,6 +715,16 @@ class VectorSearchPage(BasePage):
                     self.brand_list.setCurrentRow(i)
                     break
         self.brand_list.blockSignals(False)
+
+    def _on_brand_counts(self, counts):
+        if not counts or not self._brand_values:
+            return
+        # 全部查询失败（-1）时保留原列表，避免误过滤
+        if not any(v > 0 for v in counts.values()):
+            return
+        kept = [b for b in self._brand_values if counts.get(b, -1) > 0]
+        self._brand_values = kept
+        self._rebuild_brand_list("")
 
     def _apply_brand_text_filter(self, text):
         self._rebuild_brand_list(text)
@@ -737,7 +815,7 @@ class VectorSearchPage(BasePage):
     def _do_search(self):
         params = self._collect_params()
         self._last_params = params
-        self._page_size = self.spin_limit.value()
+        self._page_size = int(self.combo_limit.currentData() or 50)
         self._offset = 0  # 新搜索回到第一页
         self._run_search()
 

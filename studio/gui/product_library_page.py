@@ -666,17 +666,37 @@ class ProductLibraryPage(BasePage):
 
     # ---------------- 树 ----------------
     def refresh_tree(self):
+        """刷新产品树（HTTP 放后台线程，避免服务端异常时卡界面）。"""
+        from utils.thread_worker import TaskWorker as Worker
+        if getattr(self, "_tree_worker", None) and self._tree_worker.isRunning():
+            return
         keyword = self.search_input.text().strip() if hasattr(self, "search_input") else ""
+        # search()/grouped() 会同步请求服务端，放后台线程执行
+        w = Worker(self._fetch_tree_data, keyword)
+        self._tree_worker = w
+        w.finished.connect(self._on_tree_data_ready)
+        w.error.connect(lambda e: log.error(f"刷新产品库失败: {e}"))
+        w.start()
+
+    def _fetch_tree_data(self, keyword):
+        """后台线程：按关键词搜索或取 grouped 树（只碰 manager，不碰 UI）。"""
+        if keyword:
+            return keyword, list(self.manager.search(keyword))
+        return keyword, self.manager.grouped()
+
+    def _on_tree_data_ready(self, payload):
+        keyword, tree = payload
         self.tree.clear()
         if keyword:
-            for it in self.manager.search(keyword):
+            items = tree or []
+            for it in items:
                 label = f"{it.get('brand','')} {it.get('model','')}".strip() or "(未命名)"
                 node = QTreeWidgetItem([label])
                 node.setData(0, Qt.UserRole, it.get("id"))
                 self.tree.addTopLevelItem(node)
             self.tree.expandAll()
             return
-        tree = self.manager.grouped()
+        tree = tree or {}
         for cat in sorted(tree.keys()):
             cat_node = QTreeWidgetItem([f"📂 {cat}"])
             cat_node.setData(0, Qt.UserRole, None)

@@ -84,7 +84,18 @@ class ProductLibraryManager:
         self.machine_id = machine_id or _get_machine_id()
         self.items: list[dict] = []
         self._cache_time: float = 0
-        self.load()
+        # 构造时后台预加载（load() 会同步请求服务端 /grouped，
+        # 直接调用会在 GUI 线程阻塞，服务端异常时导致界面卡死）
+        self._load_thread = None
+        self._start_async_load()
+
+    def _start_async_load(self):
+        """后台线程预加载产品缓存，避免阻塞 GUI 线程。"""
+        import threading
+        if self._load_thread is not None and self._load_thread.is_alive():
+            return
+        self._load_thread = threading.Thread(target=self.load, daemon=True)
+        self._load_thread.start()
 
     # ── HTTP 底层 ──────────────────────────────────────────────────────────
 

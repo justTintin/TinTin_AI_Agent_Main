@@ -80,29 +80,47 @@ class ServicesMixin:
             QMessageBox.critical(self, "错误", "保存 VoxCPM 配置失败，请检查文件权限。")
 
     def _ollama_refresh_status(self):
-        from utils.ollama_manager import OllamaManager
-        mgr = OllamaManager.get()
+        from utils.thread_worker import TaskWorker as Worker
+        # 后台线程探测（resilient_get 自带 3 次重试 + 指数退避，
+        # 服务端异常时可能耗时数十秒，绝不能阻塞 GUI 线程）
+        if getattr(self, "_ollama_probe_worker", None) and self._ollama_probe_worker.isRunning():
+            return
 
-        # 纯远程模式：检测远程连通性，连通则列出远程模型
-        if mgr.is_running():
-            models = mgr.list_local_models()
-            self.ollama_status_lbl.setText("● 已连接（远程）")
-            self._set_ollama_status_state("green")
-            self.ollama_models_lbl.setText(
-                "远程模型: " + ("、".join(models) if models else "（无）")
-            )
-            cur = self.llm_vision_model_input.currentText().strip()
-            self.llm_vision_model_input.blockSignals(True)
-            self.llm_vision_model_input.clear()
-            for m in models:
-                self.llm_vision_model_input.addItem(m)
-            if cur:
-                self.llm_vision_model_input.setCurrentText(cur)
-            self.llm_vision_model_input.blockSignals(False)
-        else:
-            self.ollama_status_lbl.setText("● 连接失败")
-            self._set_ollama_status_state("red")
-            self.ollama_models_lbl.setText("请检查远程地址及网络")
+        def _probe():
+            from utils.ollama_manager import OllamaManager
+            mgr = OllamaManager.get()
+            running = mgr.is_running()
+            models = mgr.list_local_models() if running else []
+            return running, models
+
+        def _done(result):
+            try:
+                running, models = result or (False, [])
+                if running:
+                    self.ollama_status_lbl.setText("● 已连接（远程）")
+                    self._set_ollama_status_state("green")
+                    self.ollama_models_lbl.setText(
+                        "远程模型: " + ("、".join(models) if models else "（无）")
+                    )
+                    cur = self.llm_vision_model_input.currentText().strip()
+                    self.llm_vision_model_input.blockSignals(True)
+                    self.llm_vision_model_input.clear()
+                    for m in models:
+                        self.llm_vision_model_input.addItem(m)
+                    if cur:
+                        self.llm_vision_model_input.setCurrentText(cur)
+                    self.llm_vision_model_input.blockSignals(False)
+                else:
+                    self.ollama_status_lbl.setText("● 连接失败")
+                    self._set_ollama_status_state("red")
+                    self.ollama_models_lbl.setText("请检查远程地址及网络")
+            except Exception as e:
+                log.warning(f"[Ollama] 状态刷新失败: {e}")
+
+        w = Worker(_probe)
+        w.finished.connect(_done)
+        self._ollama_probe_worker = w
+        w.start()
 
     def _set_ollama_status_state(self, state):
         self.ollama_status_lbl.setProperty("state", state)

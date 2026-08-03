@@ -128,8 +128,22 @@ class ScheduledTasksPage(BasePage):
 
     # ── 数据刷新（调服务端）──────────────────────────────────────────────
     def refresh(self):
-        """从服务端拉取任务列表并刷新表格。"""
-        items = stc.list_tasks()
+        """从服务端拉取任务列表并刷新表格（HTTP 放后台线程，避免服务端异常时卡界面）。"""
+        from utils.thread_worker import TaskWorker as Worker
+        if getattr(self, "_refresh_worker", None) and self._refresh_worker.isRunning():
+            return
+        w = Worker(stc.list_tasks)
+        self._refresh_worker = w
+        w.finished.connect(self._on_refresh_done)
+        w.error.connect(self._on_refresh_error)
+        w.start()
+
+    def _on_refresh_error(self, msg):
+        log.warning(f"[成片任务] 刷新失败: {msg}")
+
+    def _on_refresh_done(self, items):
+        """后台拉取完成，主线程刷新表格（保持原有逻辑）。"""
+        items = items or []
         self.table.setRowCount(len(items))
         self.table.clearContents()
         has_active = False  # 是否有 pending/running 任务（决定是否继续轮询）
@@ -172,7 +186,14 @@ class ScheduledTasksPage(BasePage):
         if not name_item:
             return
         tid = name_item.data(Qt.UserRole)
-        t = stc.get_task(tid)
+        from utils.thread_worker import TaskWorker as Worker
+        self.detail.setMarkdown(f"*正在加载任务 {tid} 详情…*")
+        w = Worker(lambda: stc.get_task(tid))
+        w.finished.connect(self._on_task_detail_loaded)
+        w.error.connect(lambda e: log.warning(f"[成片任务] 加载详情失败: {e}"))
+        w.start()
+
+    def _on_task_detail_loaded(self, t):
         if t:
             self._current_task_full = t
             self.btn_view_log.setVisible(True)

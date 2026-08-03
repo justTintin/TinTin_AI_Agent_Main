@@ -1048,11 +1048,25 @@ class CompileVideoPage(BasePage):
     #  产品选择
     # ════════════════════════════════════════════════════════════════════════
     def _populate_products(self):
+        from utils.thread_worker import TaskWorker as Worker
+        self.combo_product.blockSignals(True)
+        self.combo_product.clear()
+        # 先放一个占位空项
+        self.combo_product.addItem("— 请选择产品 —", "")
+        self.combo_product.setCurrentIndex(0)
+        self.combo_product.blockSignals(False)
+        # grouped() 会同步请求服务端 /grouped，必须放后台线程，避免服务端异常时卡界面
+        w = Worker(self._product_mgr.grouped)
+        w.finished.connect(self._on_products_loaded)
+        w.error.connect(self._on_products_error)
+        self.track_worker(w)
+        w.start()
+
+    def _on_products_loaded(self, grouped):
+        grouped = grouped or {}
         self.combo_product.blockSignals(True)
         self.combo_product.clear()
         try:
-            grouped = self._product_mgr.grouped()
-            # 先放一个占位空项
             self.combo_product.addItem("— 请选择产品 —", "")
             for cat, brands in grouped.items():
                 for brand, items in brands.items():
@@ -1065,6 +1079,10 @@ class CompileVideoPage(BasePage):
             self._log(f"⚠ 载入产品库失败: {e}")
         self.combo_product.setCurrentIndex(0)
         self.combo_product.blockSignals(False)
+
+    def _on_products_error(self, msg):
+        log.error(f"载入产品库失败: {msg}")
+        self._log(f"⚠ 载入产品库失败: {msg}")
 
     def _on_product_changed(self, _idx):
         item_id = self.combo_product.currentData() or ""

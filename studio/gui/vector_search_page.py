@@ -698,23 +698,19 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     @staticmethod
     def _clean_brand_values(values):
-        """素材库品牌值本地归一化合并 + 噪音过滤（纯符号/纯数字/过短等剔除）。"""
-        try:
-            from utils.brand_normalizer import canonical_name
-        except Exception:
-            canonical_name = lambda s: s
+        """素材库品牌值：服务端已做归一化，客户端原样使用（仅去空白 + 去重）。
+
+        注意：不能在这里再做品牌归一化/噪音过滤——服务端返回的
+        「罗技(Logitech)」已归一化，本地二次处理（如加空格）会导致
+        /material/list?brand=xxx 匹配不到数据（如罗技 69155 条 → 0 条）。
+        """
         out, seen = [], set()
         for v in values or []:
             s = str(v).strip()
-            if not s or len(s) < 2:
+            if not s or s in seen:
                 continue
-            if s.isdigit() or all(ch in "*-_|/\\#@$%^&*()[]{}<>.,;:'\" 　" for ch in s):
-                continue
-            canon = (canonical_name(s) or s).strip()
-            if not canon or canon in seen:
-                continue
-            seen.add(canon)
-            out.append(canon)
+            seen.add(s)
+            out.append(s)
         return out
 
     def _rebuild_brand_list(self, text_filter):

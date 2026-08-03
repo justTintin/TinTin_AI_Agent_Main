@@ -644,10 +644,10 @@ class VectorSearchPage(BasePage):
         w = self.track_worker(_StatsLoader())
         w.finished.connect(self._on_stats_loaded)
         w.start()
-        # 品牌：服务端已归一化（/api/product-library/clients/{machine_id}/brands）
-        w = self.track_worker(_NormalizedBrandsLoader())
+        # 品牌：素材库实际品牌（/material/distinct?field=brand，服务端已收敛）
+        # 注：产品库 ERP 品牌与素材库无关，不再作为素材检索品牌来源
+        w = self.track_worker(_DistinctLoader("brand"))
         w.finished.connect(self._on_distinct_loaded)
-        w.error.connect(self._on_brands_load_error)
         w.start()
         # 分类：仍用 distinct
         w = self.track_worker(_DistinctLoader("category"))
@@ -667,12 +667,9 @@ class VectorSearchPage(BasePage):
     def _on_distinct_loaded(self, field, values):
         values = [v for v in (values or []) if v and str(v).strip()]
         if field == "brand":
-            self._brand_values = values
+            # 素材库实际品牌：本地再做归一化合并 + 噪音过滤（均有对应素材）
+            self._brand_values = self._clean_brand_values(values)
             self._rebuild_brand_list("")
-            # 只保留素材库实际有素材的品牌（避免 海帝星 等产品库品牌无对应素材）
-            w = self.track_worker(_BrandCountLoader(values))
-            w.finished.connect(self._on_brand_counts)
-            w.start()
         elif field == "category":
             self.category_list.blockSignals(True)
             self.category_list.clear()
@@ -689,6 +686,27 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     #  侧边栏筛选
     # ══════════════════════════════════════════
+    @staticmethod
+    def _clean_brand_values(values):
+        """素材库品牌值本地归一化合并 + 噪音过滤（纯符号/纯数字/过短等剔除）。"""
+        try:
+            from utils.brand_normalizer import canonical_name
+        except Exception:
+            canonical_name = lambda s: s
+        out, seen = [], set()
+        for v in values or []:
+            s = str(v).strip()
+            if not s or len(s) < 2:
+                continue
+            if s.isdigit() or all(ch in "*-_|/\\#@$%^&*()[]{}<>.,;:'\" 　" for ch in s):
+                continue
+            canon = (canonical_name(s) or s).strip()
+            if not canon or canon in seen:
+                continue
+            seen.add(canon)
+            out.append(canon)
+        return out
+
     def _rebuild_brand_list(self, text_filter):
         cur = self._current_data(self.brand_list)
         self.brand_list.blockSignals(True)
@@ -715,16 +733,6 @@ class VectorSearchPage(BasePage):
                     self.brand_list.setCurrentRow(i)
                     break
         self.brand_list.blockSignals(False)
-
-    def _on_brand_counts(self, counts):
-        if not counts or not self._brand_values:
-            return
-        # 全部查询失败（-1）时保留原列表，避免误过滤
-        if not any(v > 0 for v in counts.values()):
-            return
-        kept = [b for b in self._brand_values if counts.get(b, -1) > 0]
-        self._brand_values = kept
-        self._rebuild_brand_list("")
 
     def _apply_brand_text_filter(self, text):
         self._rebuild_brand_list(text)

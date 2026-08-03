@@ -11,7 +11,7 @@ import os
 import requests
 from utils.http_client import http_get, http_post
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QListWidget, QListWidgetItem, QAbstractItemView,
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
 )
@@ -108,13 +108,14 @@ class _SearchWorker(BaseWorker):
     """素材检索：有关键词走 /material/search（语义），否则走 /material/list（浏览）。"""
     finished = Signal(list, int)
 
-    def __init__(self, query="", brand="", category="", media_type="", model="", limit=50, offset=0):
+    def __init__(self, query="", brand="", category="", media_type="", model="", white_bg=False, limit=50, offset=0):
         super().__init__()
         self.query = query
         self.brand = brand
         self.category = category
         self.media_type = media_type
         self.model = model
+        self.white_bg = white_bg
         self.limit = limit
         self.offset = offset
 
@@ -143,6 +144,8 @@ class _SearchWorker(BaseWorker):
                     params["media_type"] = self.media_type
                 if self.model:
                     params["model"] = self.model
+                if self.white_bg:
+                    params["white_bg"] = "1"
                 resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -375,10 +378,22 @@ class VectorSearchPage(BasePage):
         title = QLabel("🔍 素材检索")
         title.setObjectName("heading")
         hdr.addWidget(title)
+        # 素材库统计跟随标题，用当前小字（不再作为侧边栏大标题）
+        self.lbl_stats = QLabel("加载中…")
+        self.lbl_stats.setObjectName("muted_text")
+        hdr.addWidget(self.lbl_stats)
         hdr.addStretch()
         root.addLayout(hdr)
 
         search_row = QHBoxLayout()
+        # 类型（全部/图片/视频/白底图）移到搜索栏最前面
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("全部", "")
+        self.type_combo.addItem("🖼 图片", "image")
+        self.type_combo.addItem("🎬 视频", "video")
+        self.type_combo.addItem("⬜ 白底图", "white_bg")
+        self.type_combo.currentIndexChanged.connect(self._on_side_filter_changed)
+        search_row.addWidget(self.type_combo)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入关键词语义搜索（留空 = 浏览全部素材）")
         self.search_input.returnPressed.connect(self._do_search)
@@ -400,25 +415,7 @@ class VectorSearchPage(BasePage):
         sb_lay.setContentsMargins(12, 12, 12, 12)
         sb_lay.setSpacing(6)
 
-        # 库统计
-        sb_lay.addWidget(self._side_header("📊 素材库"))
-        self.lbl_stats = QLabel("加载中…")
-        self.lbl_stats.setObjectName("muted_text")
-        self.lbl_stats.setWordWrap(True)
-        sb_lay.addWidget(self.lbl_stats)
-
-        # 类型
-        sb_lay.addWidget(self._side_header("类型"))
-        self.type_list = QListWidget()
-        self.type_list.setObjectName("side_list")
-        for text, data in [("全部", ""), ("🖼 图片", "image"), ("🎬 视频", "video")]:
-            it = QListWidgetItem(text)
-            it.setData(Qt.UserRole, data)
-            self.type_list.addItem(it)
-        self.type_list.setCurrentRow(0)
-        self.type_list.setMaximumHeight(88)
-        self.type_list.currentRowChanged.connect(self._on_side_filter_changed)
-        sb_lay.addWidget(self.type_list)
+        # 库统计已移到顶部标题后；类型已移到顶部搜索栏（含白底图）
 
         # 品牌（带快速过滤）
         sb_lay.addWidget(self._side_header("品牌"))
@@ -679,12 +676,15 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     def _collect_params(self):
         """收集当前筛选条件（搜索与翻页共用）。"""
+        _mtype = self.type_combo.currentData() or ""
+        _white_bg = (_mtype == "white_bg")
         return {
             "query": self.search_input.text().strip(),
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
-            "media_type": self._current_data(self.type_list) or "",
+            "media_type": "" if _white_bg else _mtype,
             "model": self.model_filter_input.text().strip(),
+            "white_bg": _white_bg,
         }
 
     def _do_search(self):
@@ -708,6 +708,7 @@ class VectorSearchPage(BasePage):
         w = self.track_worker(_SearchWorker(
             query=p["query"], brand=p["brand"], category=p["category"],
             media_type=p["media_type"], model=p.get("model", ""),
+            white_bg=bool(p.get("white_bg", False)),
             limit=self._page_size, offset=self._offset))
         w.finished.connect(self._on_search_done)
         w.error.connect(lambda m: self._on_search_error(m))

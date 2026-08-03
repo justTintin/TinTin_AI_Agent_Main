@@ -252,20 +252,21 @@ class ProductImagePage(BasePage):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        # 标题行
+        # 标题行：标题 + 服务端状态（介绍放标题后）
         title_row = QHBoxLayout()
         heading = QLabel("🖼️ 产品生图")
         heading.setObjectName("heading")
         title_row.addWidget(heading)
+        self.lbl_server_status = QLabel("检测服务端…")
+        self.lbl_server_status.setObjectName("muted_text")
+        self.lbl_server_status.setWordWrap(True)
+        self.lbl_server_status.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        title_row.addWidget(self.lbl_server_status)
         title_row.addStretch()
         root.addLayout(title_row)
 
-        # 服务端状态/刷新独立一行（标题行不放其它控件，避免被资源监控遮挡）
+        # 刷新按钮独立一行（避免被右上角资源监控遮挡）
         status_row = QHBoxLayout()
-        self.lbl_server_status = QLabel("检测服务端…")
-        self.lbl_server_status.setObjectName("muted_text")
-        status_row.addWidget(self.lbl_server_status)
-        status_row.addStretch()
         btn_refresh = QPushButton("🔄 刷新")
         btn_refresh.setObjectName("secondary_button")
         btn_refresh.clicked.connect(self._refresh_all)

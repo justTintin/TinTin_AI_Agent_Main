@@ -682,13 +682,18 @@ class StoryboardPage(BasePage):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(20)
 
-        # 标题行：仅标题（长描述独立一行，避免被右上角资源监控遮挡）
+        # 标题行：标题 + 介绍（介绍放标题后，stretch 推开资源监控区）
+        hdr = QHBoxLayout()
         heading = QLabel("🎬 分镜脚本创作")
         heading.setObjectName("heading")
-        layout.addWidget(heading)
+        hdr.addWidget(heading)
         desc = QLabel("视频分镜设计 + 即梦 / MG 动画素材生成")
         desc.setObjectName("muted_text")
-        layout.addWidget(desc)
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(desc)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setObjectName("themeSplitter")

@@ -221,14 +221,18 @@ class MGAnimationPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
+        hdr = QHBoxLayout()
         heading = QLabel("🎬 MG 动画")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
 
         sub = QLabel("选择模板、填写参数，服务端渲染 MG 动画。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_left_panel())

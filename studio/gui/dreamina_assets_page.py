@@ -29,14 +29,18 @@ class DreaminaAssetsPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(14)
 
+        hdr = QHBoxLayout()
         heading = QLabel("🧺 即梦素材")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
 
         tip = QLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库。")
         tip.setObjectName("muted_text")
         tip.setWordWrap(True)
-        root.addWidget(tip)
+        tip.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(tip)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         root.addWidget(self._build_dir_card())
         root.addWidget(self._build_files_card(), 1)

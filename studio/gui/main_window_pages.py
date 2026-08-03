@@ -1354,13 +1354,17 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("⚙️ 系统配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
+        hdr.addWidget(title)
         hint = QLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setWordWrap(True)
+        hint.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(hint)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         # 开机自动运行（默认开启）
         self.autostart_chk = QCheckBox("🚀 开机自动运行（登录 Windows 后自动启动本程序）")
@@ -1399,13 +1403,16 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("📁 本地缓存配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
+        hdr.addWidget(title)
         hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setWordWrap(True)
+        hdr.addWidget(hint, 1)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         dir_row = QHBoxLayout()
         dir_row.addWidget(QLabel("缓存目录:"))

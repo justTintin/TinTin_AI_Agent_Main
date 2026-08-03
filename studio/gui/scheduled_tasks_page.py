@@ -36,12 +36,16 @@ class ScheduledTasksPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
+        hdr = QHBoxLayout()
         heading = QLabel("⏰ 成片任务")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
         sub = QLabel("监控服务端成片任务（产品成片 / 脚本成片）的执行状态与输出结果。任务由服务端调度执行，客户端仅提交与监控。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         # ── 任务列表 ───────────────────────────────────────────────────────
         list_card = QFrame(); list_card.setObjectName("card")

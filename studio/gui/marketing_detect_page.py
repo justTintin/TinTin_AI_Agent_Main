@@ -165,15 +165,19 @@ class MarketingDetectPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(12)
 
-        # 1. 标题与说明
+        # 1. 标题与说明（介绍放标题后）
+        hdr = QHBoxLayout()
         heading = QLabel("📢 视频营销检测")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
         
         sub = QLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
         warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")

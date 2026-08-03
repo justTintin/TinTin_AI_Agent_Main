@@ -37,7 +37,7 @@ class DreaminaAssetsPage(BasePage):
         tip = QLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库。")
         tip.setObjectName("muted_text")
         tip.setWordWrap(True)
-        tip.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        tip.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(tip)
         hdr.addStretch()
         root.addLayout(hdr)

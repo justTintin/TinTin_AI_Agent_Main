@@ -292,10 +292,10 @@ class ProductLibraryPage(BasePage):
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
-        subtitle = QLabel("基础数据从旺店通仓库同步（库存 + 品类自动归类），按 品类 → 品牌 → 型号 统一管理，供后续 AI 文案创作调用")
+        subtitle = QLabel("基础数据从旺店通仓库同步，按 品类 → 品牌 → 型号 统一管理，供 AI 文案创作调用")
         subtitle.setObjectName("muted_text")
         subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        subtitle.setMaximumWidth(1100)  # 限宽换行（2 行内），右侧留白避让资源监控
         hdr.addWidget(subtitle)
         hdr.addStretch()
         root.addLayout(hdr)

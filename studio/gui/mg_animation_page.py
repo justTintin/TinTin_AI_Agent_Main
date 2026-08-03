@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
+# -*- coding: utf-8 -*-"""
 MG 动画页（服务端渲染版，按 OpenAPI /mg/* 实现）。
 业务流：
   1. 左侧展示内置模板 + 服务端模板。
@@ -229,7 +228,7 @@ class MGAnimationPage(BasePage):
         sub = QLabel("选择模板、填写参数，服务端渲染 MG 动画。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
-        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)
@@ -303,7 +302,8 @@ class MGAnimationPage(BasePage):
         ml.addRow("后端", self.combo_meta_backend)
         ml.addRow("参数定义", self.edit_meta_params)
         layout.addWidget(meta)
-        layout.addStretch(1)
+
+        layout.addStretch(0)
 
         return panel
 

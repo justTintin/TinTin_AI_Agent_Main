@@ -300,15 +300,17 @@ class MyKnowledgePage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(16)
 
+        hdr = QHBoxLayout()
         heading = QLabel("📚 我的知识库")
         heading.setObjectName("heading")
-        root.addWidget(heading)
-
-        subtitle = QLabel(
-            "收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整"
-        )
+        hdr.addWidget(heading)
+        subtitle = QLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整")
         subtitle.setObjectName("muted_text")
-        root.addWidget(subtitle)
+        subtitle.setWordWrap(True)
+        subtitle.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        hdr.addWidget(subtitle)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         # ── 工具栏 ──
         bar = QHBoxLayout()

@@ -667,6 +667,61 @@ class ShotMaterialDialog(QDialog):
 
 # ─────────────────────────────── Main Page ──────────────────────────────────
 
+def _sb_server_url():
+    """读取服务端统一地址（compute_server_url）。"""
+    try:
+        import json as _json
+        from config.paths import AI_CONFIG_FILE
+        import os as _os
+        if _os.path.isfile(AI_CONFIG_FILE):
+            cfg = _json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
+    return ""
+
+
+class _StoryboardScriptListLoader(BaseWorker):
+    """从服务端 GET /api/storyboard/scripts 拉取已有分镜脚本列表摘要。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        from utils.http_client import http_get
+        base = _sb_server_url()
+        if not base:
+            self.error.emit("未配置服务端地址")
+            return
+        r = http_get(f"{base}/api/storyboard/scripts",
+                     params={"page": 1, "page_size": 100}, timeout=15)
+        if r.status_code == 200:
+            self.finished.emit((r.json() or {}).get("items") or [])
+            return
+        self.error.emit(f"脚本列表接口返回 HTTP {r.status_code}")
+
+
+class _StoryboardScriptDetailLoader(BaseWorker):
+    """从服务端 GET /api/storyboard/scripts/{id} 拉取完整分镜脚本。"""
+    finished = Signal(dict)
+
+    def __init__(self, script_id):
+        super().__init__()
+        self.script_id = script_id
+
+    def do_work(self):
+        from utils.http_client import http_get
+        base = _sb_server_url()
+        if not base:
+            self.error.emit("未配置服务端地址")
+            return
+        r = http_get(f"{base}/api/storyboard/scripts/{self.script_id}", timeout=15)
+        if r.status_code == 200:
+            self.finished.emit(r.json() or {})
+            return
+        self.error.emit(f"脚本详情接口返回 HTTP {r.status_code}")
+
+
 class StoryboardPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -690,7 +745,7 @@ class StoryboardPage(BasePage):
         desc = QLabel("视频分镜设计 + 即梦 / MG 动画素材生成")
         desc.setObjectName("muted_text")
         desc.setWordWrap(True)
-        desc.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(desc)
         hdr.addStretch()
         layout.addLayout(hdr)
@@ -721,6 +776,7 @@ class StoryboardPage(BasePage):
         layout.addLayout(status_row)
 
         self._reload_stylizations()
+        self._reload_sb_scripts()
 
     def _build_left(self):
         scroll = QScrollArea()
@@ -731,6 +787,25 @@ class StoryboardPage(BasePage):
         col = QVBoxLayout(container)
         col.setContentsMargins(0, 0, 10, 0)
         col.setSpacing(14)
+
+        # ── 已有脚本：搜索选择 + 继续创作 ────────────────────────────────
+        card_script = QFrame()
+        card_script.setObjectName("card")
+        sxp = QVBoxLayout(card_script)
+        sxp.setContentsMargins(20, 16, 20, 16)
+        sxp.setSpacing(10)
+        sxp.addWidget(self._card_title("📂 已有脚本（继续创作）"))
+        scr_row = QHBoxLayout()
+        self.combo_sb_script = SearchableComboBox(placeholder="搜索服务端已有脚本…")
+        self.combo_sb_script.addItem("── 创建新脚本 ──", None)
+        scr_row.addWidget(self.combo_sb_script, 1)
+        self.btn_continue_sb = QPushButton("继续创作")
+        self.btn_continue_sb.setObjectName("primary_button")
+        self.btn_continue_sb.setToolTip("按选中脚本数据填充风格化、视频文案与分镜脚本")
+        self.btn_continue_sb.clicked.connect(self._continue_from_script)
+        scr_row.addWidget(self.btn_continue_sb)
+        sxp.addLayout(scr_row)
+        col.addWidget(card_script)
 
         # ── 风格化 ────────────────────────────────────────────
         card_style = QFrame()
@@ -851,12 +926,8 @@ class StoryboardPage(BasePage):
         self.sb_scroll.setWidget(self.sb_container)
         sb.addWidget(self.sb_scroll, 1)
 
-        # 飞书同步行
+        # 飞书同步行：同步按钮放左边，关联状态放右边
         feishu_row = QHBoxLayout()
-        self.lbl_feishu_info = QLabel("飞书关联：无")
-        self.lbl_feishu_info.setObjectName("muted_text")
-        feishu_row.addWidget(self.lbl_feishu_info)
-        feishu_row.addStretch()
         self.btn_sync_bitable = QPushButton("📊 同步到多维表格")
         self.btn_sync_bitable.setObjectName("secondary_button")
         self.btn_sync_bitable.setEnabled(False)
@@ -867,6 +938,10 @@ class StoryboardPage(BasePage):
         self.btn_sync_docx.setEnabled(False)
         self.btn_sync_docx.clicked.connect(lambda: self._upload_to_feishu("docx"))
         feishu_row.addWidget(self.btn_sync_docx)
+        feishu_row.addStretch()
+        self.lbl_feishu_info = QLabel("飞书关联：无")
+        self.lbl_feishu_info.setObjectName("muted_text")
+        feishu_row.addWidget(self.lbl_feishu_info)
         sb.addLayout(feishu_row)
 
         appid, appsecret, *_ = self._get_feishu_config()
@@ -874,14 +949,14 @@ class StoryboardPage(BasePage):
             self.btn_sync_bitable.setEnabled(True)
             self.btn_sync_docx.setEnabled(True)
 
-        # 底部操作行
+        # 底部操作行：保存按钮放右下角
         bottom_row = QHBoxLayout()
+        bottom_row.addStretch()
         btn_save = QPushButton("💾 保存分镜脚本")
         btn_save.setObjectName("secondary_button")
         btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录")
         btn_save.clicked.connect(self._save_storyboard)
         bottom_row.addWidget(btn_save)
-        bottom_row.addStretch()
         sb.addLayout(bottom_row)
 
         col.addWidget(card_sb, 1)
@@ -1182,6 +1257,63 @@ class StoryboardPage(BasePage):
             _json.dump(data, f, ensure_ascii=False, indent=2)
 
     # ──────────────────── 风格化 ────────────────────────────────────
+    def _reload_sb_scripts(self):
+        """从服务端加载已有分镜脚本，填充「继续创作」下拉。"""
+        w = self.track_worker(_StoryboardScriptListLoader())
+        w.finished.connect(self._on_sb_scripts_loaded)
+        w.error.connect(lambda e: log.warning(f"加载已有脚本失败: {e}"))
+        w.start()
+
+    def _on_sb_scripts_loaded(self, items):
+        cur = self.combo_sb_script.currentData()
+        self.combo_sb_script.blockSignals(True)
+        self.combo_sb_script.clear()
+        self.combo_sb_script.addItem("── 创建新脚本 ──", None)
+        for it in items or []:
+            sid = it.get("id")
+            if not sid:
+                continue
+            label = f"[{it.get('topic', '')}] {it.get('shot_count', 0)}镜"
+            if it.get("saved_at"):
+                label += f" · {it['saved_at']}"
+            self.combo_sb_script.addItem(label, {"id": sid, "topic": it.get("topic", "")})
+        self.combo_sb_script.blockSignals(False)
+        if cur and isinstance(cur, dict):
+            for i in range(self.combo_sb_script.count()):
+                d = self.combo_sb_script.itemData(i)
+                if isinstance(d, dict) and d.get("id") == cur.get("id"):
+                    self.combo_sb_script.setCurrentIndex(i)
+                    break
+
+    def _continue_from_script(self):
+        sel = self.combo_sb_script.currentData()
+        if not sel or not sel.get("id"):
+            # 创建新脚本：清空当前内容
+            self.edit_copy.clear()
+            self._render_shots([])
+            self.lbl_status.setText("已切换到「创建新脚本」模式。")
+            return
+        w = self.track_worker(_StoryboardScriptDetailLoader(sel["id"]))
+        w.finished.connect(self._apply_server_script)
+        w.error.connect(lambda e: self.show_error(f"加载脚本失败：{e}"))
+        w.start()
+        self.lbl_status.setText("正在加载脚本…")
+
+    def _apply_server_script(self, script):
+        if not script:
+            return
+        shots = script.get("shots") or []
+        # 视频文案：镜头旁白拼接
+        copy_lines = [str(sh.get("audio") or "").strip() for sh in shots if (sh.get("audio") or "").strip()]
+        self.edit_copy.setPlainText(chr(10).join(copy_lines) if copy_lines else "")
+        # 画幅
+        ratio = script.get("ratio") or ""
+        if ratio in ("9:16", "16:9", "1:1"):
+            self.combo_shot_ratio.setCurrentText(ratio)
+        # 分镜脚本
+        self._render_shots(shots)
+        self.lbl_status.setText(f"已载入脚本「{script.get('topic', '')}」（{len(shots)} 镜），可继续编辑并生成。")
+
     def _reload_stylizations(self):
         mgr = MyKnowledgeManager()
         items = [it for it in mgr.items if it.get("type") == STYLIZATION_TYPE]

@@ -926,38 +926,33 @@ class StoryboardPage(BasePage):
         self.sb_scroll.setWidget(self.sb_container)
         sb.addWidget(self.sb_scroll, 1)
 
-        # 飞书同步行：同步按钮放左边，关联状态放右边
-        feishu_row = QHBoxLayout()
+        # 操作行（同一行）：同步多维表格 → 创建飞书文档 → 飞书关联状态 → 保存分镜脚本
+        bottom_row = QHBoxLayout()
         self.btn_sync_bitable = QPushButton("📊 同步到多维表格")
         self.btn_sync_bitable.setObjectName("secondary_button")
         self.btn_sync_bitable.setEnabled(False)
         self.btn_sync_bitable.clicked.connect(lambda: self._upload_to_feishu("bitable"))
-        feishu_row.addWidget(self.btn_sync_bitable)
+        bottom_row.addWidget(self.btn_sync_bitable)
         self.btn_sync_docx = QPushButton("📝 创建飞书文档")
         self.btn_sync_docx.setObjectName("secondary_button")
         self.btn_sync_docx.setEnabled(False)
         self.btn_sync_docx.clicked.connect(lambda: self._upload_to_feishu("docx"))
-        feishu_row.addWidget(self.btn_sync_docx)
-        feishu_row.addStretch()
+        bottom_row.addWidget(self.btn_sync_docx)
         self.lbl_feishu_info = QLabel("飞书关联：无")
         self.lbl_feishu_info.setObjectName("muted_text")
-        feishu_row.addWidget(self.lbl_feishu_info)
-        sb.addLayout(feishu_row)
+        bottom_row.addWidget(self.lbl_feishu_info)
+        bottom_row.addStretch()
+        btn_save = QPushButton("💾 保存分镜脚本")
+        btn_save.setObjectName("secondary_button")
+        btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录，并同步到服务端")
+        btn_save.clicked.connect(self._save_storyboard)
+        bottom_row.addWidget(btn_save)
+        sb.addLayout(bottom_row)
 
         appid, appsecret, *_ = self._get_feishu_config()
         if appid and appsecret:
             self.btn_sync_bitable.setEnabled(True)
             self.btn_sync_docx.setEnabled(True)
-
-        # 底部操作行：保存按钮放右下角
-        bottom_row = QHBoxLayout()
-        bottom_row.addStretch()
-        btn_save = QPushButton("💾 保存分镜脚本")
-        btn_save.setObjectName("secondary_button")
-        btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录")
-        btn_save.clicked.connect(self._save_storyboard)
-        bottom_row.addWidget(btn_save)
-        sb.addLayout(bottom_row)
 
         col.addWidget(card_sb, 1)
         return panel

@@ -625,10 +625,7 @@ class CompileVideoPage(BasePage):
         s_lay.addLayout(row2)
         right_lay.addWidget(setting_group)
 
-        # ── 输出段：结果列表 + 日志 + 进度条 ───────────────────────────────
-        out_splitter = QSplitter(Qt.Horizontal)
-
-        # 左：结果列表 + 进度条
+        # ── 输出结果（占主要空间，供预览）─────────────────────────────────
         out_left = QWidget()
         ol_lay = QVBoxLayout(out_left); ol_lay.setContentsMargins(0, 0, 0, 0); ol_lay.setSpacing(6)
         ol_lay.addWidget(QLabel("🎞️ 输出结果"))
@@ -649,29 +646,21 @@ class CompileVideoPage(BasePage):
         ol_lay.addWidget(self.progress_bar)
         self.stage_label = QLabel(""); self.stage_label.setObjectName("muted_text")
         ol_lay.addWidget(self.stage_label)
-        out_splitter.addWidget(out_left)
+        right_lay.addWidget(out_left, 1)
 
-        # 右：执行日志
-        out_right = QWidget()
-        or_lay = QVBoxLayout(out_right); or_lay.setContentsMargins(0, 0, 0, 0); or_lay.setSpacing(6)
-        # 执行日志：默认折叠隐藏，点击标题展开/收起
+        # ── 执行日志：放最下面，固定小高度，默认折叠（空间让给输出结果）──
         self.btn_toggle_log = QPushButton("📜 执行日志（点击展开）")
         self.btn_toggle_log.setCheckable(True)
         self.btn_toggle_log.setChecked(False)
         self.btn_toggle_log.setObjectName("secondary_button")
         self.btn_toggle_log.clicked.connect(self._toggle_log_visible)
-        or_lay.addWidget(self.btn_toggle_log)
+        right_lay.addWidget(self.btn_toggle_log)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setStyleSheet("background: #1a1a2e; color: #c8d6e5; font-size: 12px; border-radius: 6px;")
-        self.log_box.setVisible(False)  # 默认折叠
-        or_lay.addWidget(self.log_box, 1)
-        out_splitter.addWidget(out_right)
-
-        out_splitter.setStretchFactor(0, 1)
-        out_splitter.setStretchFactor(1, 1)
-        out_splitter.setSizes([420, 420])
-        right_lay.addWidget(out_splitter, 1)
+        self.log_box.setFixedHeight(120)   # 展开后也只占底部小高度
+        self.log_box.setVisible(False)     # 默认折叠
+        right_lay.addWidget(self.log_box)
 
         # 评分预测状态行
         score_row = QHBoxLayout()

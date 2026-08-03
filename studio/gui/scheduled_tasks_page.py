@@ -13,7 +13,7 @@
 import os
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDialog, QDialogButtonBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QTextBrowser, QWidget,
 )
@@ -40,7 +40,7 @@ class ScheduledTasksPage(BasePage):
         heading = QLabel("⏰ 成片任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = QLabel("监控服务端成片任务（产品成片 / 脚本成片）的执行状态与输出结果。任务由服务端调度执行，客户端仅提交与监控。")
+        sub = QLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
         sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
         hdr.addWidget(sub)
@@ -67,7 +67,7 @@ class ScheduledTasksPage(BasePage):
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["ID", "标题", "类型", "状态", "进度", "创建时间", "操作"])
+            ["task_id", "标题", "类型", "状态", "进度", "创建时间", "操作"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -92,6 +92,17 @@ class ScheduledTasksPage(BasePage):
         self.detail.setMinimumHeight(100)
         self.detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
         dl.addWidget(self.detail, 1)
+
+        # 查看日志入口（服务端任务 logs 字段）
+        log_row = QHBoxLayout()
+        log_row.addStretch()
+        self.btn_view_log = QPushButton("📜 查看日志")
+        self.btn_view_log.setObjectName("secondary_button")
+        self.btn_view_log.setToolTip("查看该任务的服务端执行日志（logs）")
+        self.btn_view_log.clicked.connect(self._view_task_log)
+        self.btn_view_log.setVisible(False)
+        log_row.addWidget(self.btn_view_log)
+        dl.addLayout(log_row)
 
         # 变体打分区（仅当任务已完成且有 all_variants 时显示）
         self.variants_title = QLabel("🎯 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
@@ -147,6 +158,9 @@ class ScheduledTasksPage(BasePage):
                 has_active = True
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
+        self._current_task_full = None
+        if hasattr(self, "btn_view_log"):
+            self.btn_view_log.setVisible(False)
         # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
         if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
             self._poll_timer.start()
@@ -160,6 +174,8 @@ class ScheduledTasksPage(BasePage):
         tid = name_item.data(Qt.UserRole)
         t = stc.get_task(tid)
         if t:
+            self._current_task_full = t
+            self.btn_view_log.setVisible(True)
             self.detail.setMarkdown(self._render_detail(t))
             self._populate_variants(t)   # 填充变体打分区
 
@@ -189,6 +205,28 @@ class ScheduledTasksPage(BasePage):
         else:
             lines.append("（无）")
         return "\n".join(lines)
+
+    def _view_task_log(self):
+        """弹窗查看任务服务端执行日志（logs / error_msg）。"""
+        t = getattr(self, "_current_task_full", None)
+        if not t:
+            return
+        logs = t.get("logs") or ""
+        err = t.get("error_msg") or ""
+        text = logs if logs else (err if err else "（该任务暂无日志）")
+        if not isinstance(text, str):
+            text = str(text)
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle(f"任务日志 - {t.get('id')}")
+        dlg.resize(760, 480)
+        lay = QVBoxLayout(dlg)
+        tb = QTextBrowser()
+        tb.setPlainText(text)
+        lay.addWidget(tb, 1)
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+        dlg.exec()
 
     # ── 变体打分区 ──────────────────────────────────────────────────────────
     def _populate_variants(self, t):

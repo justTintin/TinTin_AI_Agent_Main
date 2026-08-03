@@ -178,12 +178,12 @@ class _DistinctLoader(BaseWorker):
 
 
 class _GridRowsFilter(QObject):
-    """让素材网格每列固定显示 rows 个素材：随视口尺寸动态调整 gridSize/iconSize。"""
+    """让素材网格每行固定显示 cols 个素材：随视口宽度动态调整列宽，行高保持合理。"""
 
-    def __init__(self, grid, rows=10):
+    def __init__(self, grid, cols=10):
         super().__init__(grid)
         self.grid = grid
-        self.rows = max(3, rows)
+        self.cols = max(3, cols)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Resize:
@@ -194,9 +194,11 @@ class _GridRowsFilter(QObject):
         vp = self.grid.viewport()
         if vp is None:
             return
-        row_h = max(70, vp.height() // self.rows)
-        self.grid.setGridSize(QSize(185, row_h))
-        icon = max(56, min(160, row_h - 30))
+        # 每行固定 cols 个：列宽 = 视口宽 / cols；行高固定，保证行间距合理
+        col_w = max(80, vp.width() // self.cols)
+        row_h = 215
+        self.grid.setGridSize(QSize(col_w, row_h))
+        icon = max(70, min(160, col_w - 25))
         self.grid.setIconSize(QSize(icon, icon))
 
 
@@ -537,7 +539,7 @@ class VectorSearchPage(BasePage):
         self.grid.setSelectionMode(QAbstractItemView.NoSelection)
         self.grid.setUniformItemSizes(True)
         # 每列固定显示 10 个素材：动态调整 gridSize/iconSize
-        self._grid_rows_filter = _GridRowsFilter(self.grid, rows=10)
+        self._grid_rows_filter = _GridRowsFilter(self.grid, cols=10)
         self.grid.viewport().installEventFilter(self._grid_rows_filter)
         self._grid_rows_filter.apply()
         self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"

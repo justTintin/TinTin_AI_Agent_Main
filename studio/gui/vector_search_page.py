@@ -200,11 +200,12 @@ class _GridRowsFilter(QObject):
             from PySide6.QtCore import QTimer as _QT
             _QT.singleShot(80, self.apply)
             return
-        # 每行固定 cols 个：列宽 = 视口宽 / cols；行高固定，保证行间距合理
+        # 每行固定 cols 个：列宽 = 视口宽 / cols；图标撑满列宽（留少量边距），
+        # 不再 clamp 到 160——否则列宽大时格子左右留白，素材看起来没撑满
         col_w = max(80, w // self.cols)
-        row_h = 215
+        icon = max(70, col_w - 6)
+        row_h = icon + 52   # 图标 + 文件名行高
         self.grid.setGridSize(QSize(col_w, row_h))
-        icon = max(70, min(160, col_w - 25))
         self.grid.setIconSize(QSize(icon, icon))
 
 
@@ -979,16 +980,20 @@ class VectorSearchPage(BasePage):
         mid = str(mid)
         pm = QPixmap()
         if data and pm.loadFromData(data) and not pm.isNull():
-            # 缩放到图标尺寸（保持比例）
-            pm = pm.scaled(_THUMB_ICON_SIZE.width(), _THUMB_ICON_SIZE.height(),
+            # 按当前网格图标尺寸缩放（随列宽动态变化，不再固定 160，
+            # 否则列宽大时图标从 160 放大显示会模糊/留白）
+            cur = self.grid.iconSize()
+            isz_w = max(70, cur.width())
+            isz_h = max(70, cur.height())
+            pm = pm.scaled(isz_w, isz_h,
                            Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             # 居中裁剪到正方形，避免 IconMode 下拉伸变形
-            if pm.width() != _THUMB_ICON_SIZE.width() or pm.height() != _THUMB_ICON_SIZE.height():
-                cropped = QPixmap(_THUMB_ICON_SIZE)
+            if pm.width() != isz_w or pm.height() != isz_h:
+                cropped = QPixmap(isz_w, isz_h)
                 cropped.fill(QColor("#16161f"))
                 p = QPainter(cropped)
-                x = (_THUMB_ICON_SIZE.width() - pm.width()) // 2
-                y = (_THUMB_ICON_SIZE.height() - pm.height()) // 2
+                x = (isz_w - pm.width()) // 2
+                y = (isz_h - pm.height()) // 2
                 p.drawPixmap(x, y, pm)
                 p.end()
                 pm = cropped

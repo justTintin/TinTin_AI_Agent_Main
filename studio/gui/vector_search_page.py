@@ -108,12 +108,13 @@ class _SearchWorker(BaseWorker):
     """素材检索：有关键词走 /material/search（语义），否则走 /material/list（浏览）。"""
     finished = Signal(list, int)
 
-    def __init__(self, query="", brand="", category="", media_type="", limit=50, offset=0):
+    def __init__(self, query="", brand="", category="", media_type="", model="", limit=50, offset=0):
         super().__init__()
         self.query = query
         self.brand = brand
         self.category = category
         self.media_type = media_type
+        self.model = model
         self.limit = limit
         self.offset = offset
 
@@ -121,13 +122,8 @@ class _SearchWorker(BaseWorker):
         try:
             base = _get_server_url()
             if self.query:
+                # 语义搜索接口不接受 brand 过滤（传了会 400），只传关键词
                 params = {"query": self.query, "limit": self.limit, "offset": self.offset}
-                if self.brand:
-                    params["brand"] = self.brand
-                if self.category:
-                    params["category"] = self.category
-                if self.media_type:
-                    params["media_type"] = self.media_type
                 resp = http_post(f"{base}/material/search", json=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -135,7 +131,8 @@ class _SearchWorker(BaseWorker):
                 results = data.get("results") or data.get("data") or []
                 total = data.get("total") or len(results)
             else:
-                # 浏览模式：服务端 /material/list 用 page/size 分页（limit/offset 无效）
+                # 浏览模式：服务端 /material/list 用 page/size 分页（limit/offset 无效），
+                # 支持 brand（归一化）/ category / media_type / model（模糊）组合过滤
                 params = {"size": self.limit,
                           "page": (self.offset // self.limit) + 1 if self.limit else 1}
                 if self.brand:
@@ -144,6 +141,8 @@ class _SearchWorker(BaseWorker):
                     params["category"] = self.category
                 if self.media_type:
                     params["media_type"] = self.media_type
+                if self.model:
+                    params["model"] = self.model
                 resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -173,6 +172,32 @@ class _DistinctLoader(BaseWorker):
         except Exception:
             pass
         self.finished.emit(self.field, [])
+
+
+class _NormalizedBrandsLoader(BaseWorker):
+    """异步获取归一化品牌列表（/api/product-library/clients/{machine_id}/brands）。
+
+    服务端已对品牌做归一化处理（如 罗技/Logitech -> 罗技(Logitech)），
+    素材检索品牌筛选用归一化品牌，替代 /material/distinct 的原始乱值。
+    """
+    finished = Signal(str, list)  # "brand", values
+
+    def do_work(self):
+        try:
+            from utils.license import get_machine_id
+            mid = get_machine_id() or ""
+            if not mid:
+                self.error.emit("无法获取机器码（machine_id）")
+                return
+            url = f"{_get_server_url()}/api/product-library/clients/{mid}/brands"
+            resp = http_get(url, timeout=15)
+            if resp.status_code == 200:
+                values = (resp.json() or {}).get("brands") or []
+                self.finished.emit("brand", values)
+                return
+            self.error.emit(f"品牌接口返回 HTTP {resp.status_code}")
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class _StatsLoader(BaseWorker):
@@ -406,6 +431,14 @@ class VectorSearchPage(BasePage):
         self.brand_list.currentRowChanged.connect(self._on_side_filter_changed)
         sb_lay.addWidget(self.brand_list, 1)
 
+        # 型号（模糊过滤，服务端 /material/list 支持 model 参数）
+        sb_lay.addWidget(self._side_header("型号"))
+        self.model_filter_input = QLineEdit()
+        self.model_filter_input.setPlaceholderText("输入型号关键词过滤…")
+        self.model_filter_input.setClearButtonEnabled(True)
+        self.model_filter_input.textChanged.connect(self._on_model_filter_changed)
+        sb_lay.addWidget(self.model_filter_input)
+
         # 分类
         sb_lay.addWidget(self._side_header("分类"))
         self.category_list = QListWidget()
@@ -532,10 +565,15 @@ class VectorSearchPage(BasePage):
         w = self.track_worker(_StatsLoader())
         w.finished.connect(self._on_stats_loaded)
         w.start()
-        for field in ("brand", "category"):
-            w = self.track_worker(_DistinctLoader(field))
-            w.finished.connect(self._on_distinct_loaded)
-            w.start()
+        # 品牌：服务端已归一化（/api/product-library/clients/{machine_id}/brands）
+        w = self.track_worker(_NormalizedBrandsLoader())
+        w.finished.connect(self._on_distinct_loaded)
+        w.error.connect(self._on_brands_load_error)
+        w.start()
+        # 分类：仍用 distinct
+        w = self.track_worker(_DistinctLoader("category"))
+        w.finished.connect(self._on_distinct_loaded)
+        w.start()
         self._do_search()  # 空关键词 → 浏览全部
 
     def _on_stats_loaded(self, stats):
@@ -603,6 +641,33 @@ class VectorSearchPage(BasePage):
         it = list_widget.currentItem()
         return it.data(Qt.UserRole) if it else ""
 
+    def _on_model_filter_changed(self, _text):
+        # 型号输入防抖：停顿后触发搜索
+        if not hasattr(self, "_last_params"):
+            return
+        if not hasattr(self, "_model_debounce"):
+            from PySide6.QtCore import QTimer as _QTimer
+            # 页面本体非 QObject（BasePage），用无父 QTimer 并保持引用
+            self._model_debounce = _QTimer()
+            self._model_debounce.setSingleShot(True)
+            self._model_debounce.setInterval(350)
+            self._model_debounce.timeout.connect(self._do_search)
+        self._model_debounce.start()
+
+    def _on_brands_load_error(self, msg):
+        # 归一化品牌接口不可用时回退原始 distinct 品牌
+        try:
+            from utils.logger_utils import log as _log
+            _log.warning(f"[素材检索] 归一化品牌加载失败，回退 distinct: {msg}")
+        except Exception:
+            pass
+        if hasattr(self, "_brand_fallback_done"):
+            return
+        self._brand_fallback_done = True
+        w = self.track_worker(_DistinctLoader("brand"))
+        w.finished.connect(self._on_distinct_loaded)
+        w.start()
+
     def _on_side_filter_changed(self, *_args):
         # 初始化填充列表期间不触发搜索
         if not hasattr(self, "_last_params"):
@@ -619,6 +684,7 @@ class VectorSearchPage(BasePage):
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
             "media_type": self._current_data(self.type_list) or "",
+            "model": self.model_filter_input.text().strip(),
         }
 
     def _do_search(self):
@@ -641,7 +707,8 @@ class VectorSearchPage(BasePage):
 
         w = self.track_worker(_SearchWorker(
             query=p["query"], brand=p["brand"], category=p["category"],
-            media_type=p["media_type"], limit=self._page_size, offset=self._offset))
+            media_type=p["media_type"], model=p.get("model", ""),
+            limit=self._page_size, offset=self._offset))
         w.finished.connect(self._on_search_done)
         w.error.connect(lambda m: self._on_search_error(m))
         w.start()

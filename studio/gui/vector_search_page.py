@@ -12,11 +12,11 @@ import requests
 from utils.http_client import http_get, http_post
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
-    QListWidget, QListWidgetItem, QAbstractItemView,
+    QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QMenu,
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect
-from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor
+from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor, QAction
 from gui.video_player import VideoPlayerWidget
 
 from gui.base_page import BasePage
@@ -393,16 +393,25 @@ class VectorSearchPage(BasePage):
         self.type_combo.addItem("🎬 视频", "video")
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         search_row.addWidget(self.type_combo)
-        # 背景类型：图片下的分类（白底/黑底/纯色/渐变/绿幕/蓝幕/透明/场景），选图片时启用
-        self.bg_combo = QComboBox()
-        self.bg_combo.addItem("全部背景", "")
+        # 背景类型：图片下的分类（白底/黑底/纯色/渐变/绿幕/蓝幕/透明/场景），支持多选，选图片时启用
+        self.bg_menu_btn = QToolButton()
+        self.bg_menu_btn.setText("背景")
+        self.bg_menu_btn.setToolTip("选择背景类型（可多选，仅图片下生效）")
+        self.bg_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        self.bg_menu = QMenu(self.bg_menu_btn)
+        self._bg_actions = []
         for _txt, _val in [("⬜ 白底图", "white"), ("⬛ 黑底图", "black"), ("🎨 纯色", "solid"),
                            ("🌫 渐变", "gradient"), ("🟢 绿幕", "greenscreen"), ("🔵 蓝幕", "bluescreen"),
                            ("🫧 透明", "transparent"), ("🏞 场景", "scene")]:
-            self.bg_combo.addItem(_txt, _val)
-        self.bg_combo.setEnabled(False)
-        self.bg_combo.currentIndexChanged.connect(self._on_bg_type_changed)
-        search_row.addWidget(self.bg_combo)
+            _act = QAction(_txt, self.bg_menu)
+            _act.setCheckable(True)
+            _act.setData(_val)
+            _act.toggled.connect(self._on_bg_selection_changed)
+            self.bg_menu.addAction(_act)
+            self._bg_actions.append(_act)
+        self.bg_menu_btn.setMenu(self.bg_menu)
+        self.bg_menu_btn.setEnabled(False)
+        search_row.addWidget(self.bg_menu_btn)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入关键词语义搜索（留空 = 浏览全部素材）")
         self.search_input.returnPressed.connect(self._do_search)
@@ -650,16 +659,28 @@ class VectorSearchPage(BasePage):
     def _on_type_changed(self, *_args):
         # 背景类型是图片下的分类：仅当类型=图片时启用
         is_image = (self.type_combo.currentData() == "image")
-        self.bg_combo.setEnabled(is_image)
+        self.bg_menu_btn.setEnabled(is_image)
         if not is_image:
-            self.bg_combo.setCurrentIndex(0)
+            for _act in getattr(self, "_bg_actions", []):
+                _act.blockSignals(True)
+                _act.setChecked(False)
+                _act.blockSignals(False)
+            self._update_bg_btn_text()
         self._on_side_filter_changed()
 
-    def _on_bg_type_changed(self, *_args):
-        # 选择背景类型时自动切到「图片」，并触发搜索
-        if self.bg_combo.currentData() and self.type_combo.currentData() != "image":
+    def _update_bg_btn_text(self):
+        sel = [a.text() for a in getattr(self, "_bg_actions", []) if a.isChecked()]
+        if sel:
+            self.bg_menu_btn.setText(f"背景 ({len(sel)})")
+        else:
+            self.bg_menu_btn.setText("背景")
+
+    def _on_bg_selection_changed(self, *_args):
+        # 选择背景类型时自动切到「图片」，并触发搜索（多选）
+        if any(a.isChecked() for a in getattr(self, "_bg_actions", []))                 and self.type_combo.currentData() != "image":
             self.type_combo.setCurrentIndex(1)  # 图片（内部会触发 _on_type_changed -> 搜索）
             return
+        self._update_bg_btn_text()
         self._on_side_filter_changed()
 
     def _on_model_filter_changed(self, _text):
@@ -701,16 +722,16 @@ class VectorSearchPage(BasePage):
     def _collect_params(self):
         """收集当前筛选条件（搜索与翻页共用）。"""
         _mtype = self.type_combo.currentData() or ""
-        _bg = self.bg_combo.currentData() or ""
-        # 背景类型是图片下的分类：仅在类型=图片时生效
-        _use_bg = bool(_bg) and _mtype == "image"
+        # 背景类型多选，逗号拼接（服务端需支持逗号分隔多值，暂按单值忽略其余）
+        _bgs = [a.data() for a in getattr(self, "_bg_actions", []) if a.isChecked()]
+        _use_bg = bool(_bgs) and _mtype == "image"
         return {
             "query": self.search_input.text().strip(),
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
             "media_type": "image" if _use_bg else _mtype,
             "model": self.model_filter_input.text().strip(),
-            "background_type": _bg if _use_bg else "",
+            "background_type": ",".join(_bgs) if _use_bg else "",
         }
 
     def _do_search(self):

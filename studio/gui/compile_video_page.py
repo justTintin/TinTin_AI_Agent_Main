@@ -303,25 +303,16 @@ class TemplatePreviewWorker(BaseWorker):
 
 
 class ScriptListLoader(BaseWorker):
-    """从服务端 GET /api/storyboard/scripts 拉取分镜脚本列表摘要。"""
+    """从服务端拉取分镜脚本列表摘要（双路径兼容，见 utils.storyboard_client）。"""
     finished = Signal(list)
 
     def do_work(self):
-        from utils.http_client import http_get
-        base = _get_server_url()
-        if not base:
-            raise RuntimeError("未配置服务端地址")
-        r = http_get(f"{base}/api/storyboard/scripts",
-                     params={"page": 1, "page_size": 100}, timeout=15)
-        if r.status_code == 200:
-            items = (r.json() or {}).get("items") or []
-            self.finished.emit(items)
-            return
-        raise RuntimeError(f"脚本列表接口返回 HTTP {r.status_code}")
+        from utils.storyboard_client import list_scripts
+        self.finished.emit(list_scripts(page=1, page_size=100))
 
 
 class ScriptDetailLoader(BaseWorker):
-    """从服务端 GET /api/storyboard/scripts/{id} 拉取完整分镜脚本。"""
+    """从服务端拉取完整分镜脚本（双路径兼容，见 utils.storyboard_client）。"""
     finished = Signal(dict)
 
     def __init__(self, script_id):
@@ -329,15 +320,8 @@ class ScriptDetailLoader(BaseWorker):
         self.script_id = script_id
 
     def do_work(self):
-        from utils.http_client import http_get
-        base = _get_server_url()
-        if not base:
-            raise RuntimeError("未配置服务端地址")
-        r = http_get(f"{base}/api/storyboard/scripts/{self.script_id}", timeout=15)
-        if r.status_code == 200:
-            self.finished.emit(r.json() or {})
-            return
-        raise RuntimeError(f"脚本详情接口返回 HTTP {r.status_code}")
+        from utils.storyboard_client import get_script
+        self.finished.emit(get_script(self.script_id))
 
 
 class CompileVideoPage(BasePage):
@@ -812,6 +796,7 @@ class CompileVideoPage(BasePage):
 
     def _on_scripts_load_error(self, msg):
         log.warning(f"从服务端加载脚本失败，回退本地扫描: {msg}")
+        self.script_status.setText(f"⚠ 服务端脚本加载失败：{msg}（已回退本地扫描）")
         scripts = self._scan_storyboard_scripts()
         self.combo_script.blockSignals(True)
         self.combo_script.clear()

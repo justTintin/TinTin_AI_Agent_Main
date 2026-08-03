@@ -688,17 +688,8 @@ class _StoryboardScriptListLoader(BaseWorker):
     finished = Signal(list)
 
     def do_work(self):
-        from utils.http_client import http_get
-        base = _sb_server_url()
-        if not base:
-            self.error.emit("未配置服务端地址")
-            return
-        r = http_get(f"{base}/api/storyboard/scripts",
-                     params={"page": 1, "page_size": 100}, timeout=15)
-        if r.status_code == 200:
-            self.finished.emit((r.json() or {}).get("items") or [])
-            return
-        self.error.emit(f"脚本列表接口返回 HTTP {r.status_code}")
+        from utils.storyboard_client import list_scripts
+        self.finished.emit(list_scripts(page=1, page_size=100))
 
 
 class _StoryboardScriptDetailLoader(BaseWorker):
@@ -710,16 +701,8 @@ class _StoryboardScriptDetailLoader(BaseWorker):
         self.script_id = script_id
 
     def do_work(self):
-        from utils.http_client import http_get
-        base = _sb_server_url()
-        if not base:
-            self.error.emit("未配置服务端地址")
-            return
-        r = http_get(f"{base}/api/storyboard/scripts/{self.script_id}", timeout=15)
-        if r.status_code == 200:
-            self.finished.emit(r.json() or {})
-            return
-        self.error.emit(f"脚本详情接口返回 HTTP {r.status_code}")
+        from utils.storyboard_client import get_script
+        self.finished.emit(get_script(self.script_id))
 
 
 class StoryboardPage(BasePage):
@@ -1211,13 +1194,13 @@ class StoryboardPage(BasePage):
         }
 
         def _do():
-            from utils.http_client import http_post
-            resp = http_post(f"{base}/api/storyboard/scripts", json=payload, timeout=20)
-            if resp.status_code in (200, 201):
+            from utils.storyboard_client import save_script
+            ok = save_script(payload)
+            if ok:
                 log.info(f"[分镜脚本] 已上传服务端 topic={payload['topic']} shots={len(server_shots)}")
-                return True
-            log.warning(f"[分镜脚本] 上传失败 HTTP {resp.status_code}: {resp.text[:200]}")
-            return False
+            else:
+                log.warning(f"[分镜脚本] 上传失败 topic={payload['topic']}")
+            return ok
 
         def _done(ok):
             if not ok:
@@ -1346,8 +1329,17 @@ class StoryboardPage(BasePage):
         """从服务端加载已有分镜脚本，填充「继续创作」下拉。"""
         w = self.track_worker(_StoryboardScriptListLoader())
         w.finished.connect(self._on_sb_scripts_loaded)
-        w.error.connect(lambda e: log.warning(f"加载已有脚本失败: {e}"))
+        w.error.connect(self._on_sb_scripts_load_error)
         w.start()
+
+    def _on_sb_scripts_load_error(self, msg):
+        log.warning(f"加载已有脚本失败: {msg}")
+        hint = "服务端不可达或未实现接口"
+        if "404" in str(msg):
+            hint = "服务端未实现分镜脚本接口（404）"
+        elif "无法连接" in str(msg):
+            hint = "服务端不可达，请检查统一计算节点地址"
+        self.lbl_status.setText(f"⚠ 加载服务端脚本失败：{hint}（{msg}）")
 
     def _on_sb_scripts_loaded(self, items):
         cur = self.combo_sb_script.currentData()

@@ -401,7 +401,7 @@ class VectorSearchPage(BasePage):
         self.bg_menu = QMenu(self.bg_menu_btn)
         self._bg_actions = []
         for _txt, _val in [("⬜ 白底图", "white"), ("⬛ 黑底图", "black"), ("🎨 纯色", "solid"),
-                           ("🌫 渐变", "gradient"), ("🟢 绿幕", "greenscreen"), ("🔵 蓝幕", "bluescreen"),
+                           ("🌫 渐变", "gradient"), ("🟢 绿幕", "green_screen"), ("🔵 蓝幕", "blue_screen"),
                            ("🫧 透明", "transparent"), ("🏞 场景", "scene")]:
             _act = QAction(_txt, self.bg_menu)
             _act.setCheckable(True)
@@ -703,9 +703,9 @@ class VectorSearchPage(BasePage):
             _log.warning(f"[素材检索] 归一化品牌加载失败，回退 distinct: {msg}")
         except Exception:
             pass
-        if hasattr(self, "_brand_fallback_done"):
+        if hasattr(self, "_is_brand_fallback_done"):
             return
-        self._brand_fallback_done = True
+        self._is_brand_fallback_done = True
         w = self.track_worker(_DistinctLoader("brand"))
         w.finished.connect(self._on_distinct_loaded)
         w.start()
@@ -724,14 +724,14 @@ class VectorSearchPage(BasePage):
         _mtype = self.type_combo.currentData() or ""
         # 背景类型多选，逗号拼接（服务端需支持逗号分隔多值，暂按单值忽略其余）
         _bgs = [a.data() for a in getattr(self, "_bg_actions", []) if a.isChecked()]
-        _use_bg = bool(_bgs) and _mtype == "image"
+        is_bg_used = bool(_bgs) and _mtype == "image"
         return {
             "query": self.search_input.text().strip(),
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
-            "media_type": "image" if _use_bg else _mtype,
+            "media_type": "image" if is_bg_used else _mtype,
             "model": self.model_filter_input.text().strip(),
-            "background_type": ",".join(_bgs) if _use_bg else "",
+            "background_type": ",".join(_bgs) if is_bg_used else "",
         }
 
     def _do_search(self):

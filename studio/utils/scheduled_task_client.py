@@ -75,7 +75,7 @@ def get_task(task_id, timeout=10):
 def create_task(task_type, title, params, schedule=None, timeout=15):
     """POST /scheduled/tasks → 提交任务，返回新任务 id（失败返回 None）。
 
-    task_type: 服务端执行器类型，一键成片用 'video_montage'
+    task_type: 服务端执行器类型，一键成片用 'product_montage'（命名规范 NAMING-CONVENTIONS）
     title: 任务标题
     params: 客户端完整参数 dict（产品/素材/配音/字幕/条数/时长...，服务端按需取用）
     schedule: 定时配置 dict（None 或不含调度字段 = 立即执行）；含 mode/time/date/weekdays/interval_hours 等 = 定时执行

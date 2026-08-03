@@ -1196,7 +1196,7 @@ class CompileVideoPage(BasePage):
         """收集当前界面完整参数为 dict（提交给服务端，服务端按需取用）。"""
         product = self._current_product() or {}
         return {
-            # 服务端 video_montage 执行器识别的参数
+            # 服务端 product_montage 执行器识别的参数
             "products": [{
                 "brand": product.get("brand", ""),
                 "model": product.get("model", ""),
@@ -1240,7 +1240,7 @@ class CompileVideoPage(BasePage):
         return out
 
     def _make(self):
-        """开始执行 = 提交服务端立即执行（task_type=video_montage）。"""
+        """开始执行 = 提交服务端立即执行（task_type=product_montage）。"""
         product = self._current_product()
         if not product:
             self.show_warning("请先选择产品（产品是一键成片的起点）。")
@@ -1310,7 +1310,7 @@ class CompileVideoPage(BasePage):
         # 用 TaskWorker 异步提交（避免阻塞 UI）
         from utils.thread_worker import TaskWorker as Worker
         def _do_submit():
-            tid = stc.create_task("video_montage", task_title, params, schedule=schedule)
+            tid = stc.create_task("product_montage", task_title, params, schedule=schedule)
             return tid
 
         worker = Worker(_do_submit)

@@ -5,7 +5,7 @@
 架构（thin client）：
 - 任务的存储/调度/执行全部在服务端，本页只 GET 列表 + 展示状态/结果 + 删除
 - 后台轮询 Worker 每 N 秒刷新一次（任务进行中时自动更新 progress/status）
-- 「立即运行」= 提交一个立即执行的任务（task_type=video_montage）给服务端
+- 「立即运行」= 提交一个立即执行的任务（task_type=product_montage）给服务端
 
 服务端任务字段：id, task_type, title, params, status, progress, error_msg,
                 result({video_url}), created_at, updated_at, completed_at
@@ -317,7 +317,7 @@ class ScheduledTasksPage(BasePage):
     # ── 格式化 helper ─────────────────────────────────────────────────────
     @staticmethod
     def _type_label(t):
-        return {"video_montage": "产品成片", "compile_video": "产品成片",
+        return {"product_montage": "产品成片", "video_montage": "产品成片", "compile_video": "产品成片",
                 "storyboard_montage": "脚本成片",
                 "script_montage": "脚本成片"}.get(t, t or "—")
 

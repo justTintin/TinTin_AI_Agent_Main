@@ -487,8 +487,8 @@ class VectorSearchPage(BasePage):
 
         sidebar = QFrame()
         sidebar.setObjectName("card")
-        sidebar.setMinimumWidth(190)
-        sidebar.setMaximumWidth(240)
+        sidebar.setMinimumWidth(150)
+        sidebar.setMaximumWidth(190)  # 侧边栏更窄，右侧网格能完整显示每行 10 个素材
         sb_lay = QVBoxLayout(sidebar)
         sb_lay.setContentsMargins(12, 12, 12, 12)
         sb_lay.setSpacing(6)

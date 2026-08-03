@@ -42,7 +42,7 @@ class ScheduledTasksPage(BasePage):
         hdr.addWidget(heading)
         sub = QLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)

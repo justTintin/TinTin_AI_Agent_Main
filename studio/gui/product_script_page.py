@@ -49,7 +49,7 @@ class ProductScriptPage(BasePage):
         desc = QLabel("基于产品资料与风格化画像，一键生成产品文案与分镜脚本")
         desc.setObjectName("muted_text")
         desc.setWordWrap(True)
-        desc.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(desc)
         hdr.addStretch()
         layout.addLayout(hdr)

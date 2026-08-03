@@ -260,7 +260,7 @@ class ProductImagePage(BasePage):
         self.lbl_server_status = QLabel("检测服务端…")
         self.lbl_server_status.setObjectName("muted_text")
         self.lbl_server_status.setWordWrap(True)
-        self.lbl_server_status.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        self.lbl_server_status.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         title_row.addWidget(self.lbl_server_status)
         title_row.addStretch()
         root.addLayout(title_row)

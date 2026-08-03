@@ -307,7 +307,7 @@ class MyKnowledgePage(BasePage):
         subtitle = QLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整")
         subtitle.setObjectName("muted_text")
         subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        subtitle.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(subtitle)
         hdr.addStretch()
         root.addLayout(hdr)

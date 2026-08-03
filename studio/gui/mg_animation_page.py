@@ -302,17 +302,6 @@ class MGAnimationPage(BasePage):
         ml.addRow("后端", self.combo_meta_backend)
         ml.addRow("参数定义", self.edit_meta_params)
         layout.addWidget(meta)
-
-        layout.addStretch(0)
-
-        return panel
-
-    def _build_right_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-
         # 通用样式
         common = QGroupBox("通用样式")
         cl = QFormLayout(common)
@@ -355,6 +344,17 @@ class MGAnimationPage(BasePage):
         self.scroll_form.setWidget(self.form_container)
         fgl.addWidget(self.scroll_form)
         layout.addWidget(form_group, 1)
+
+
+
+        return panel
+
+    def _build_right_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
 
         # Scenes 编辑器（仅含 scenes 参数时显示）
         self.scenes_group = QGroupBox("Scenes（多段文字动画，最多 30 段）")

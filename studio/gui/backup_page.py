@@ -72,7 +72,7 @@ class BackupPage(BasePage):
         hdr.addWidget(heading)
         sub = QLabel("配置(密钥) + 业务数据(产品资料/我的知识库/素材索引/账号/声音样本) 一键备份还原；素材外部目录支持迁移重定位。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        sub.setMaximumWidth(920)  # 限宽换行，右侧留白避让资源监控
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)

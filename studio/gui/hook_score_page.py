@@ -248,13 +248,17 @@ class HookScorePage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(12)
 
+        hdr = QHBoxLayout()
         heading = QLabel("📈 视频评价预测")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
         sub = QLabel("选投放平台 → 上传视频 → 视觉模型按该平台推荐逻辑预测表现（综合分 + 预测量级 + 多维评分）。"
                      "发布后回填真实播放量与平台评价，模型会据此自我校准。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
         warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")

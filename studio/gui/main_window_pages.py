@@ -1519,14 +1519,16 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("🎬 视频 LUT 还原配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
-        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用。\n"
-                       "格式支持：.cube / .3dl / .lut")
+        hdr.addWidget(title)
+        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用；格式支持：.cube / .3dl / .lut")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(hint)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         # 列表
         self.lut_list = QListWidget()

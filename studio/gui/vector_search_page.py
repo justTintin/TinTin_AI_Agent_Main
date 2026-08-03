@@ -441,6 +441,7 @@ class VectorSearchPage(BasePage):
         # 素材库统计跟随标题，用当前小字（不再作为侧边栏大标题）
         self.lbl_stats = QLabel("加载中…")
         self.lbl_stats.setObjectName("muted_text")
+        self.lbl_stats.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(self.lbl_stats)
         hdr.addStretch()
         root.addLayout(hdr)

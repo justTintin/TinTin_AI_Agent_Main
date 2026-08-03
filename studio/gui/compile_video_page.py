@@ -453,8 +453,8 @@ class CompileVideoPage(BasePage):
         left_lay.addLayout(tmpl_header)
         self.list_templates = QListWidget()
         self.list_templates.currentItemChanged.connect(self._on_template_selected)
-        # 模板列表 stretch=1 且不封顶：占满左侧剩余空间到底部
-        left_lay.addWidget(self.list_templates, 1)
+        self.list_templates.setMaximumHeight(170)
+        left_lay.addWidget(self.list_templates)
 
         top_splitter.addWidget(left_card)
 
@@ -462,19 +462,6 @@ class CompileVideoPage(BasePage):
         right_card = QFrame(); right_card.setObjectName("card")
         right_lay = QVBoxLayout(right_card)
         right_lay.setContentsMargins(16, 14, 16, 14); right_lay.setSpacing(8)
-
-        right_title = QLabel("🎛 模板参数")
-        right_title.setStyleSheet("font-weight:bold;")
-        right_title_row = QHBoxLayout()
-        right_title_row.addWidget(right_title)
-        right_title_row.addStretch()
-        self.btn_template_defaults = mdi_button("设置默认", "refresh")
-        self.btn_template_defaults.setObjectName("secondary_button")
-        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
-        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
-        self.btn_template_defaults.setEnabled(False)
-        right_title_row.addWidget(self.btn_template_defaults)
-        right_lay.addLayout(right_title_row)
 
         # 模板参数按内容分组为 Tab，避免全部堆在一个长布局里
         self.tabs_params = QTabWidget()
@@ -568,13 +555,25 @@ class CompileVideoPage(BasePage):
         lay_other.addStretch(1)
         self.tabs_params.addTab(tab_other, "其它")
 
-        right_lay.addWidget(self.tabs_params, 1)
+        # 模板参数放在左侧「成片模板」下面
+        tpl_title_row = QHBoxLayout()
+        tpl_title_row.addWidget(QLabel("🎛 模板参数"))
+        tpl_title_row.addStretch()
+        self.btn_template_defaults = mdi_button("设置默认", "refresh")
+        self.btn_template_defaults.setObjectName("secondary_button")
+        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
+        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
+        self.btn_template_defaults.setEnabled(False)
+        tpl_title_row.addWidget(self.btn_template_defaults)
+        left_lay.addLayout(tpl_title_row)
+        left_lay.addWidget(self.tabs_params, 1)
         self.template_params_group.setVisible(False)
 
         top_splitter.addWidget(right_card)
-        top_splitter.setStretchFactor(0, 1)   # 左侧产品
-        top_splitter.setStretchFactor(1, 1)   # 右侧可选
-        top_splitter.setSizes([420, 520])
+        # 左右比例 3:7（左=产品/模板/模板参数，右=设置/输出/日志）
+        top_splitter.setStretchFactor(0, 3)
+        top_splitter.setStretchFactor(1, 7)
+        top_splitter.setSizes([300, 700])
         root.addWidget(top_splitter, 2)
 
         # ── 设置段 ────────────────────────────────────────────────────────
@@ -624,7 +623,7 @@ class CompileVideoPage(BasePage):
         self.btn_add_task.clicked.connect(self._add_scheduled_task)
         row2.addWidget(self.btn_add_task)
         s_lay.addLayout(row2)
-        root.addWidget(setting_group)
+        right_lay.addWidget(setting_group)
 
         # ── 输出段：结果列表 + 日志 + 进度条 ───────────────────────────────
         out_splitter = QSplitter(Qt.Horizontal)
@@ -655,17 +654,24 @@ class CompileVideoPage(BasePage):
         # 右：执行日志
         out_right = QWidget()
         or_lay = QVBoxLayout(out_right); or_lay.setContentsMargins(0, 0, 0, 0); or_lay.setSpacing(6)
-        or_lay.addWidget(QLabel("📜 执行日志"))
+        # 执行日志：默认折叠隐藏，点击标题展开/收起
+        self.btn_toggle_log = QPushButton("📜 执行日志（点击展开）")
+        self.btn_toggle_log.setCheckable(True)
+        self.btn_toggle_log.setChecked(False)
+        self.btn_toggle_log.setObjectName("secondary_button")
+        self.btn_toggle_log.clicked.connect(self._toggle_log_visible)
+        or_lay.addWidget(self.btn_toggle_log)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setStyleSheet("background: #1a1a2e; color: #c8d6e5; font-size: 12px; border-radius: 6px;")
+        self.log_box.setVisible(False)  # 默认折叠
         or_lay.addWidget(self.log_box, 1)
         out_splitter.addWidget(out_right)
 
         out_splitter.setStretchFactor(0, 1)
         out_splitter.setStretchFactor(1, 1)
         out_splitter.setSizes([420, 420])
-        root.addWidget(out_splitter, 1)
+        right_lay.addWidget(out_splitter, 1)
 
         # 评分预测状态行
         score_row = QHBoxLayout()
@@ -686,6 +692,12 @@ class CompileVideoPage(BasePage):
         self._populate_products()
         self._populate_voices()
         self._load_templates()
+
+    def _toggle_log_visible(self):
+        """执行日志展开/收起。"""
+        show = self.btn_toggle_log.isChecked()
+        self.log_box.setVisible(show)
+        self.btn_toggle_log.setText("📜 执行日志（点击折叠）" if show else "📜 执行日志（点击展开）")
 
     # ════════════════════════════════════════════════════════════════════════
     #  脚本成片 tab（选分镜脚本 → 提交服务端成片）

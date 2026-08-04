@@ -569,18 +569,19 @@ class PageSetupMixin:
         self.llm_vox_status_val = QLabel("服务状态: 请填写远程 API 地址并保存"); self.llm_vox_status_val.setObjectName("muted_text"); lg3.addWidget(self.llm_vox_status_val)
         scroll_layout.addWidget(g3)
 
-        # ───── 视觉模型（Ollama 托管）—— 合并原「Ollama 远程视觉服务」与「当前视觉模型」两个分组 ─────
-        g4 = QGroupBox("👁️ 视觉模型（Ollama）"); g4.setObjectName("model_groupbox"); g4.setProperty("section", "vision"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        # ───── Ollama 服务（外部）—— 外部 Ollama 地址 + 视觉模型选择 ─────
+        g4 = QGroupBox("🦙 Ollama 服务（外部）"); g4.setObjectName("model_groupbox"); g4.setProperty("section", "vision"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
         # 状态行：连通状态 + 已下载模型列表 + 刷新按钮
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
-            setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl),
+            setattr(self,'ollama_models_lbl',QLabel("视觉模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl),
             setattr(self,'btn_ollama_refresh',mdi_button("刷新", "refresh")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
             r.addWidget(self.btn_ollama_refresh))))
-        # 地址 + 模型选择
-        _inp(lg4, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
+        # 外部 Ollama 地址
+        _inp(lg4, "外部 Ollama 地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
+        # 视觉模型选择（由服务端 /llm/vision/models 提供，服务端控制默认值）
         _rl(lg4, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
             self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
-            self.llm_vision_model_input.lineEdit().setPlaceholderText("刷新后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
+            self.llm_vision_model_input.lineEdit().setPlaceholderText("刷新后从服务端加载已下载视觉模型"), r.addWidget(self.llm_vision_model_input)))
         rr_vm = QHBoxLayout(); rr_vm.addStretch()
         b_vm_test = mdi_button("测试连接", "search"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
         b_vm_save = mdi_button("保存", "save"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)

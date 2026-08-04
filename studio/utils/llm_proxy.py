@@ -48,22 +48,6 @@ def _get_default_model() -> str:
     return cfg.get("llm_model") or "deepseek-v4-flash"
 
 
-def _messages_contain_image(messages) -> bool:
-    """判断消息列表是否含图片（多模态 content list 的 image_url）。"""
-    try:
-        for m in messages or []:
-            content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "image_url":
-                        return True
-            elif isinstance(content, str) and content.strip().startswith("data:image"):
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def llm_chat(
     system: str,
     user: str,
@@ -157,10 +141,7 @@ def llm_chat_messages(
     if not base:
         raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
 
-    # 多模态（含图片）请求：模型由服务端自动选择（服务端管理视觉模型），
-    # 不强制默认文本模型；仅纯文本请求才用默认模型
-    has_image = _messages_contain_image(messages)
-    if not model and not has_image:
+    if not model:
         model = _get_default_model()
 
     url = f"{base}/llm/chat/completions"

@@ -81,58 +81,39 @@ class ServicesMixin:
 
     def _ollama_refresh_status(self):
         from utils.thread_worker import TaskWorker as Worker
+        # 后台线程探测（resilient_get 自带 3 次重试 + 指数退避，
+        # 服务端异常时可能耗时数十秒，绝不能阻塞 GUI 线程）
         if getattr(self, "_ollama_probe_worker", None) and self._ollama_probe_worker.isRunning():
             return
 
         def _probe():
-            # 视觉模型由服务端管理：拉取 ollama 视觉模型列表（服务端控制的默认值）
-            from utils.http_client import http_get
-            server_url = ""
-            try:
-                from config.paths import AI_CONFIG_FILE
-                import json as _json, os as _os
-                if _os.path.isfile(AI_CONFIG_FILE):
-                    cfg = _json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
-                    server_url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            except Exception:
-                pass
-            if not server_url:
-                return False, [], ""
-            try:
-                resp = http_get(f"{server_url}/llm/vision/models", timeout=10, quiet=True)
-                if resp.status_code != 200:
-                    return False, [], ""
-                d = resp.json()
-                vision = d.get("vision_models") or []
-                return True, vision, d.get("default") or ""
-            except Exception:
-                return False, [], ""
+            from utils.ollama_manager import OllamaManager
+            mgr = OllamaManager.get()
+            running = mgr.is_running()
+            models = mgr.list_local_models() if running else []
+            return running, models
 
         def _done(result):
             try:
-                running, models, default_model = result or (False, [], "")
+                running, models = result or (False, [])
                 if running:
-                    self.ollama_status_lbl.setText("● 已连接（服务端管理）")
+                    self.ollama_status_lbl.setText("● 已连接（远程）")
                     self._set_ollama_status_state("green")
                     self.ollama_models_lbl.setText(
-                        "服务端视觉模型: " + ("、".join(models) if models else "（无）")
+                        "远程模型: " + ("、".join(models) if models else "（无）")
                     )
                     cur = self.llm_vision_model_input.currentText().strip()
                     self.llm_vision_model_input.blockSignals(True)
                     self.llm_vision_model_input.clear()
                     for m in models:
                         self.llm_vision_model_input.addItem(m)
-                    if not cur and default_model:
-                        cur = default_model
-                    if cur and self.llm_vision_model_input.findText(cur) < 0:
-                        self.llm_vision_model_input.addItem(cur)
                     if cur:
                         self.llm_vision_model_input.setCurrentText(cur)
                     self.llm_vision_model_input.blockSignals(False)
                 else:
-                    self.ollama_status_lbl.setText("● 服务端未返回视觉模型")
+                    self.ollama_status_lbl.setText("● 连接失败")
                     self._set_ollama_status_state("red")
-                    self.ollama_models_lbl.setText("请检查服务端 ollama 配置")
+                    self.ollama_models_lbl.setText("请检查远程地址及网络")
             except Exception as e:
                 log.warning(f"[Ollama] 状态刷新失败: {e}")
 

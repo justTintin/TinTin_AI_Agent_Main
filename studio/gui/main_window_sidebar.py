@@ -140,7 +140,7 @@ class SidebarMixin:
         media_menus = [
             ("素材生成", 32, "palette"),
             ("素材检索", 39, "text-box-search"),
-            ("音频素材", 45, "music"),
+            ("音频分析", 45, "music"),
             ("即梦素材", 42, "image-multiple"),
             ("任务队列", 9, "format-list-checks"),
             ("媒体工具", 46, "tools"),

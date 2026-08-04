@@ -165,11 +165,11 @@ class MarketingDetectPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(12)
 
-        # 1. 标题与说明
+        # 1. 标题与说明（介绍独立一行，暂不并排标题）
         heading = QLabel("📢 视频营销检测")
         heading.setObjectName("heading")
         root.addWidget(heading)
-        
+
         sub = QLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)

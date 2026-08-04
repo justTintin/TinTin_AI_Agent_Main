@@ -139,11 +139,13 @@ class ExtensionPage(BasePage):
         title = QLabel("🧩 扩展插件")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        hdr.addStretch()
-        root.addLayout(hdr)
         desc = QLabel("浏览器素材采集扩展（仿 Billfish 采集插件）")
         desc.setObjectName("muted_text")
-        root.addWidget(desc)
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(desc)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         root.addWidget(self._build_browser_card())
         root.addWidget(self._build_bridge_card())

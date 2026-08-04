@@ -302,6 +302,28 @@ class TemplatePreviewWorker(BaseWorker):
         raise RuntimeError("预览渲染超时（15 分钟）。")
 
 
+class ScriptListLoader(BaseWorker):
+    """从服务端拉取分镜脚本列表摘要（双路径兼容，见 utils.storyboard_client）。"""
+    finished = Signal(list)
+
+    def do_work(self):
+        from utils.storyboard_client import list_scripts
+        self.finished.emit(list_scripts(page=1, page_size=100))
+
+
+class ScriptDetailLoader(BaseWorker):
+    """从服务端拉取完整分镜脚本（双路径兼容，见 utils.storyboard_client）。"""
+    finished = Signal(dict)
+
+    def __init__(self, script_id):
+        super().__init__()
+        self.script_id = script_id
+
+    def do_work(self):
+        from utils.storyboard_client import get_script
+        self.finished.emit(get_script(self.script_id))
+
+
 class CompileVideoPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -415,8 +437,8 @@ class CompileVideoPage(BasePage):
         left_lay.addLayout(tmpl_header)
         self.list_templates = QListWidget()
         self.list_templates.currentItemChanged.connect(self._on_template_selected)
-        # 模板列表 stretch=1 且不封顶：占满左侧剩余空间到底部
-        left_lay.addWidget(self.list_templates, 1)
+        self.list_templates.setMaximumHeight(170)
+        left_lay.addWidget(self.list_templates)
 
         top_splitter.addWidget(left_card)
 
@@ -424,19 +446,6 @@ class CompileVideoPage(BasePage):
         right_card = QFrame(); right_card.setObjectName("card")
         right_lay = QVBoxLayout(right_card)
         right_lay.setContentsMargins(16, 14, 16, 14); right_lay.setSpacing(8)
-
-        right_title = QLabel("🎛 模板参数")
-        right_title.setStyleSheet("font-weight:bold;")
-        right_title_row = QHBoxLayout()
-        right_title_row.addWidget(right_title)
-        right_title_row.addStretch()
-        self.btn_template_defaults = mdi_button("设置默认", "refresh")
-        self.btn_template_defaults.setObjectName("secondary_button")
-        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
-        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
-        self.btn_template_defaults.setEnabled(False)
-        right_title_row.addWidget(self.btn_template_defaults)
-        right_lay.addLayout(right_title_row)
 
         # 模板参数按内容分组为 Tab，避免全部堆在一个长布局里
         self.tabs_params = QTabWidget()
@@ -530,13 +539,25 @@ class CompileVideoPage(BasePage):
         lay_other.addStretch(1)
         self.tabs_params.addTab(tab_other, "其它")
 
-        right_lay.addWidget(self.tabs_params, 1)
+        # 模板参数放在左侧「成片模板」下面
+        tpl_title_row = QHBoxLayout()
+        tpl_title_row.addWidget(QLabel("🎛 模板参数"))
+        tpl_title_row.addStretch()
+        self.btn_template_defaults = mdi_button("设置默认", "refresh")
+        self.btn_template_defaults.setObjectName("secondary_button")
+        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
+        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
+        self.btn_template_defaults.setEnabled(False)
+        tpl_title_row.addWidget(self.btn_template_defaults)
+        left_lay.addLayout(tpl_title_row)
+        left_lay.addWidget(self.tabs_params, 1)
         self.template_params_group.setVisible(False)
 
         top_splitter.addWidget(right_card)
-        top_splitter.setStretchFactor(0, 1)   # 左侧产品
-        top_splitter.setStretchFactor(1, 1)   # 右侧可选
-        top_splitter.setSizes([420, 520])
+        # 左右比例 3:7（左=产品/模板/模板参数，右=设置/输出/日志）
+        top_splitter.setStretchFactor(0, 3)
+        top_splitter.setStretchFactor(1, 7)
+        top_splitter.setSizes([300, 700])
         root.addWidget(top_splitter, 2)
 
         # ── 设置段 ────────────────────────────────────────────────────────
@@ -586,12 +607,9 @@ class CompileVideoPage(BasePage):
         self.btn_add_task.clicked.connect(self._add_scheduled_task)
         row2.addWidget(self.btn_add_task)
         s_lay.addLayout(row2)
-        root.addWidget(setting_group)
+        right_lay.addWidget(setting_group)
 
-        # ── 输出段：结果列表 + 日志 + 进度条 ───────────────────────────────
-        out_splitter = QSplitter(Qt.Horizontal)
-
-        # 左：结果列表 + 进度条
+        # ── 输出结果（占主要空间，供预览）─────────────────────────────────
         out_left = QWidget()
         ol_lay = QVBoxLayout(out_left); ol_lay.setContentsMargins(0, 0, 0, 0); ol_lay.setSpacing(6)
         ol_lay.addWidget(QLabel("🎞️ 输出结果"))
@@ -612,22 +630,21 @@ class CompileVideoPage(BasePage):
         ol_lay.addWidget(self.progress_bar)
         self.stage_label = QLabel(""); self.stage_label.setObjectName("muted_text")
         ol_lay.addWidget(self.stage_label)
-        out_splitter.addWidget(out_left)
+        right_lay.addWidget(out_left, 1)
 
-        # 右：执行日志
-        out_right = QWidget()
-        or_lay = QVBoxLayout(out_right); or_lay.setContentsMargins(0, 0, 0, 0); or_lay.setSpacing(6)
-        or_lay.addWidget(QLabel("📜 执行日志"))
+        # ── 执行日志：放最下面，固定小高度，默认折叠（空间让给输出结果）──
+        self.btn_toggle_log = QPushButton("📜 执行日志（点击展开）")
+        self.btn_toggle_log.setCheckable(True)
+        self.btn_toggle_log.setChecked(False)
+        self.btn_toggle_log.setObjectName("secondary_button")
+        self.btn_toggle_log.clicked.connect(self._toggle_log_visible)
+        right_lay.addWidget(self.btn_toggle_log)
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setStyleSheet("background: #1a1a2e; color: #c8d6e5; font-size: 12px; border-radius: 6px;")
-        or_lay.addWidget(self.log_box, 1)
-        out_splitter.addWidget(out_right)
-
-        out_splitter.setStretchFactor(0, 1)
-        out_splitter.setStretchFactor(1, 1)
-        out_splitter.setSizes([420, 420])
-        root.addWidget(out_splitter, 1)
+        self.log_box.setFixedHeight(120)   # 展开后也只占底部小高度
+        self.log_box.setVisible(False)     # 默认折叠
+        right_lay.addWidget(self.log_box)
 
         # 评分预测状态行
         score_row = QHBoxLayout()
@@ -648,6 +665,12 @@ class CompileVideoPage(BasePage):
         self._populate_products()
         self._populate_voices()
         self._load_templates()
+
+    def _toggle_log_visible(self):
+        """执行日志展开/收起。"""
+        show = self.btn_toggle_log.isChecked()
+        self.log_box.setVisible(show)
+        self.btn_toggle_log.setText("📜 执行日志（点击折叠）" if show else "📜 执行日志（点击展开）")
 
     # ════════════════════════════════════════════════════════════════════════
     #  脚本成片 tab（选分镜脚本 → 提交服务端成片）
@@ -726,32 +749,69 @@ class CompileVideoPage(BasePage):
         self._populate_scripts()
 
     def _populate_scripts(self):
-        """扫描 KNOWLEDGE_MEDIA_DIR/*/storyboard/*.json，填充脚本下拉。"""
+        """从服务端拉取分镜脚本列表（失败回退本地扫描）。"""
         self.combo_script.blockSignals(True)
         self.combo_script.clear()
+        self.combo_script.addItem("— 请选择脚本 —", None)
+        self.combo_script.setCurrentIndex(0)
+        self.combo_script.blockSignals(False)
+        self._current_script_data = None
+        self.script_status.setText("正在从服务端加载脚本…")
+        w = self.track_worker(ScriptListLoader())
+        w.finished.connect(self._on_scripts_loaded)
+        w.error.connect(self._on_scripts_load_error)
+        w.start()
+
+    def _on_scripts_loaded(self, items):
+        scripts = []
+        for it in items or []:
+            sid = it.get("id")
+            if not sid:
+                continue
+            scripts.append({
+                "id": sid,
+                "topic": it.get("topic", ""),
+                "ratio": it.get("ratio", "9:16"),
+                "shot_count": it.get("shot_count", 0),
+                "saved_at": it.get("saved_at", ""),
+            })
+        self.combo_script.blockSignals(True)
+        self.combo_script.clear()
+        self.combo_script.addItem("— 请选择脚本 —", None)
+        for s in scripts:
+            label = f"[{s['topic']}] {s['shot_count']}镜"
+            if s.get("saved_at"):
+                label += f" · {s['saved_at']}"
+            self.combo_script.addItem(label, s)
+        self.combo_script.setCurrentIndex(0)
+        self.combo_script.blockSignals(False)
+        if scripts:
+            self.script_preview.setMarkdown("*选择上方脚本查看预览*")
+            self.script_status.setText(f"共 {len(scripts)} 个脚本（来自服务端）")
+        else:
+            self.script_preview.setMarkdown(
+                "## ⚠ 服务端暂无分镜脚本\n\n"
+                "在「分镜脚本创作」页生成脚本并保存（会自动上传服务端）后，回到本页点「刷新」即可看到。")
+            self.script_status.setText("服务端暂无脚本")
+
+    def _on_scripts_load_error(self, msg):
+        log.warning(f"从服务端加载脚本失败，回退本地扫描: {msg}")
+        self.script_status.setText(f"⚠ 服务端脚本加载失败：{msg}（已回退本地扫描）")
         scripts = self._scan_storyboard_scripts()
+        self.combo_script.blockSignals(True)
+        self.combo_script.clear()
         self.combo_script.addItem("— 请选择脚本 —", None)
         for s in scripts:
             label = f"[{s['topic']}] {s['name']}（{s['shot_count']}镜/{s['total_duration']}s）"
             self.combo_script.addItem(label, s)
         self.combo_script.setCurrentIndex(0)
         self.combo_script.blockSignals(False)
-
-        if not scripts:
-            # 空状态引导：告诉用户脚本从哪来、默认目录、怎么生成
-            self.script_preview.setMarkdown(
-                f"## ⚠ 暂无可用的分镜脚本\n\n"
-                f"**脚本来源**：在「分镜脚本创作」页生成脚本后，保存时选择 **JSON 格式**即可在此选用。\n\n"
-                f"**默认扫描目录**：\n```\n{KNOWLEDGE_MEDIA_DIR}\\<选题名>\\storyboard\\*.json\n```\n\n"
-                f"**当前该目录下没有 JSON 脚本。** 请按以下步骤生成：\n"
-                f"1. 进入「分镜脚本创作」页\n"
-                f"2. 生成或编辑分镜（每镜头含画面描述 + 旁白文案 + 时长）\n"
-                f"3. 点「保存」→ 导出格式选 **JSON（.json，供脚本成片）**\n"
-                f"4. 回到本页点「刷新」即可看到脚本")
-            self.script_status.setText(f"未找到脚本（扫描目录：{KNOWLEDGE_MEDIA_DIR}）")
-        else:
+        if scripts:
             self.script_preview.setMarkdown("*选择上方脚本查看预览*")
-            self.script_status.setText(f"共 {len(scripts)} 个脚本")
+            self.script_status.setText(f"服务端不可用，已回退本地（{len(scripts)} 个脚本）")
+        else:
+            self.script_preview.setMarkdown("## ⚠ 暂无可用的分镜脚本\n\n服务端不可用且本地也未找到脚本。")
+            self.script_status.setText("未找到脚本（服务端不可用）")
 
     @staticmethod
     def _scan_storyboard_scripts():
@@ -792,26 +852,53 @@ class CompileVideoPage(BasePage):
         return results
 
     def _current_script(self):
-        """返回当前选中的脚本 dict（无则 None）。"""
+        """返回当前选中的完整脚本 dict（无则 None）。"""
+        if getattr(self, "_current_script_data", None):
+            return self._current_script_data
         return self.combo_script.currentData() if hasattr(self, "combo_script") else None
 
     def _on_script_changed(self, _idx):
         s = self._current_script()
         if not s:
+            self._current_script_data = None
             self.script_preview.setMarkdown("*选择上方脚本查看预览*")
             return
+        sid = s.get("id")
+        if sid:
+            # 服务端脚本：异步拉取完整内容
+            self._current_script_data = None
+            self.script_preview.setMarkdown("*正在加载脚本内容…*")
+            w = self.track_worker(ScriptDetailLoader(sid))
+            w.finished.connect(self._on_script_detail_loaded)
+            w.error.connect(lambda e, _sid=sid: self._on_script_detail_error(e, _sid))
+            w.start()
+        else:
+            # 本地回退脚本：直接使用
+            self._current_script_data = s
+            self._apply_script_to_ui(s)
+
+    def _on_script_detail_loaded(self, script):
+        if not script:
+            return
+        self._current_script_data = script
+        self._apply_script_to_ui(script)
+
+    def _on_script_detail_error(self, err, sid):
+        log.warning(f"加载脚本详情失败({sid}): {err}")
+        self.script_preview.setMarkdown(f"⚠ 脚本加载失败：{err}")
+
+    def _apply_script_to_ui(self, s):
         # 比例默认取脚本里的
         idx = self.script_combo_ratio.findText(s.get("ratio", "9:16"))
         if idx >= 0:
             self.script_combo_ratio.setCurrentIndex(idx)
-        # 渲染预览
         self.script_preview.setMarkdown(self._render_script_preview(s))
 
     @staticmethod
     def _render_script_preview(s):
         shots = s.get("shots", [])
         lines = [
-            f"### {s.get('topic','')} — {s.get('name','')}",
+            f"### {s.get('topic','')}",
             "",
             f"- **画幅**：{s.get('ratio','9:16')}　**总时长**：{s.get('total_duration',0)}s　**镜头数**：{s.get('shot_count',0)}",
             "",
@@ -820,7 +907,7 @@ class CompileVideoPage(BasePage):
         ]
         for sh in shots:
             vis = str(sh.get("visual", "")).replace("|", "｜").replace("\n", " ").strip()
-            nar = str(sh.get("narration", "")).replace("|", "｜").replace("\n", " ").strip()
+            nar = str(sh.get("audio", "") or sh.get("narration", "")).replace("|", "｜").replace("\n", " ").strip()
             mat = str(sh.get("material_path", "")).replace("|", "｜").strip()
             lines.append(f"| {sh.get('index','')} | {sh.get('duration','')}s | {vis} | {nar or '—'} | {mat or '—'} |")
         return "\n".join(lines)
@@ -843,7 +930,7 @@ class CompileVideoPage(BasePage):
                 "shot_type": sh.get("shot_type", ""),
                 "duration": sh.get("duration", 3),
                 "visual": sh.get("visual", ""),
-                "audio": sh.get("narration", "") or sh.get("audio", ""),  # 文案字段对齐
+                "audio": sh.get("audio", "") or sh.get("narration", ""),  # 文案字段对齐（服务端脚本已是 audio）
                 # 以下服务端不一定用，但保留供未来扩展（如服务端支持指定素材）
                 "material_path": sh.get("material_path", ""),
                 "material_type": sh.get("material_type", ""),
@@ -855,7 +942,7 @@ class CompileVideoPage(BasePage):
             "voice_settings": {"speaker": "default"},
             "count": self.script_spin_count.value(),   # 变体数量（服务端进化选最优）
             # 客户端附加信息（服务端按需取用，不影响执行）
-            "script_name": s.get("name", ""),
+            "script_name": s.get("name", "") or s.get("id", ""),
             "script_path": s.get("path", ""),
             "topic": s.get("topic", ""),
             "ratio": self.script_combo_ratio.currentText(),
@@ -946,11 +1033,25 @@ class CompileVideoPage(BasePage):
     #  产品选择
     # ════════════════════════════════════════════════════════════════════════
     def _populate_products(self):
+        from utils.thread_worker import TaskWorker as Worker
+        self.combo_product.blockSignals(True)
+        self.combo_product.clear()
+        # 先放一个占位空项
+        self.combo_product.addItem("— 请选择产品 —", "")
+        self.combo_product.setCurrentIndex(0)
+        self.combo_product.blockSignals(False)
+        # grouped() 会同步请求服务端 /grouped，必须放后台线程，避免服务端异常时卡界面
+        w = Worker(self._product_mgr.grouped)
+        w.finished.connect(self._on_products_loaded)
+        w.error.connect(self._on_products_error)
+        self.track_worker(w)
+        w.start()
+
+    def _on_products_loaded(self, grouped):
+        grouped = grouped or {}
         self.combo_product.blockSignals(True)
         self.combo_product.clear()
         try:
-            grouped = self._product_mgr.grouped()
-            # 先放一个占位空项
             self.combo_product.addItem("— 请选择产品 —", "")
             for cat, brands in grouped.items():
                 for brand, items in brands.items():
@@ -963,6 +1064,10 @@ class CompileVideoPage(BasePage):
             self._log(f"⚠ 载入产品库失败: {e}")
         self.combo_product.setCurrentIndex(0)
         self.combo_product.blockSignals(False)
+
+    def _on_products_error(self, msg):
+        log.error(f"载入产品库失败: {msg}")
+        self._log(f"⚠ 载入产品库失败: {msg}")
 
     def _on_product_changed(self, _idx):
         item_id = self.combo_product.currentData() or ""
@@ -1095,7 +1200,7 @@ class CompileVideoPage(BasePage):
         """收集当前界面完整参数为 dict（提交给服务端，服务端按需取用）。"""
         product = self._current_product() or {}
         return {
-            # 服务端 video_montage 执行器识别的参数
+            # 服务端 product_montage 执行器识别的参数
             "products": [{
                 "brand": product.get("brand", ""),
                 "model": product.get("model", ""),
@@ -1139,7 +1244,7 @@ class CompileVideoPage(BasePage):
         return out
 
     def _make(self):
-        """开始执行 = 提交服务端立即执行（task_type=video_montage）。"""
+        """开始执行 = 提交服务端立即执行（task_type=product_montage）。"""
         product = self._current_product()
         if not product:
             self.show_warning("请先选择产品（产品是一键成片的起点）。")
@@ -1209,7 +1314,7 @@ class CompileVideoPage(BasePage):
         # 用 TaskWorker 异步提交（避免阻塞 UI）
         from utils.thread_worker import TaskWorker as Worker
         def _do_submit():
-            tid = stc.create_task("video_montage", task_title, params, schedule=schedule)
+            tid = stc.create_task("product_montage", task_title, params, schedule=schedule)
             return tid
 
         worker = Worker(_do_submit)
@@ -1579,26 +1684,11 @@ class CompileVideoPage(BasePage):
         self.track_worker(w); w.start()
 
     def _play_preview(self, path):
-        """用内置播放器预览成片；失败回退系统播放器。"""
+        """用统一播放器预览成片（等比显示 + 播放/暂停/停止 + 进度条 + 时间）；失败回退系统播放器。"""
         try:
-            from PySide6.QtCore import QUrl
-            from PySide6.QtMultimedia import QMediaPlayer
-            from PySide6.QtMultimediaWidgets import QVideoWidget
-            dlg = QDialog(self.parent_widget)
-            dlg.setWindowTitle("成片模板预览")
-            dlg.resize(560, 760)
-            lay = QVBoxLayout(dlg)
-            vid = QVideoWidget()
-            lay.addWidget(vid, 1)
-            player = QMediaPlayer(dlg)
-            player.setVideoOutput(vid)
-            player.setSource(QUrl.fromLocalFile(os.path.abspath(path)))
-            btn = QDialogButtonBox(QDialogButtonBox.Close)
-            btn.rejected.connect(dlg.reject)
-            lay.addWidget(btn)
-            dlg.finished.connect(lambda *_: player.stop())
-            dlg.show()
-            player.play()
+            from gui.video_player import VideoPreviewDialog
+            dlg = VideoPreviewDialog(path=path, parent=self.parent_widget,
+                                     title="成片模板预览", size=(560, 760))
             dlg.exec()
         except Exception as e:
             self._log(f"⚠ 内置播放失败，改用系统播放器: {e}")

@@ -42,9 +42,17 @@ class ProductScriptPage(BasePage):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(16)
 
-        heading = QLabel("🛒 产品文案创作（产品资料 + 我的知识库）")
+        hdr = QHBoxLayout()
+        heading = QLabel("🛒 产品文案创作")
         heading.setObjectName("heading")
-        layout.addWidget(heading)
+        hdr.addWidget(heading)
+        desc = QLabel("基于产品资料与风格化画像，一键生成产品文案与分镜脚本")
+        desc.setObjectName("muted_text")
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(desc)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         splitter = QSplitter(Qt.Horizontal)
         left_panel = self._build_left()

@@ -34,7 +34,7 @@ from core.creator_browser_controller import CreatorBrowserController
 from utils.thread_worker import TaskWorker as Worker
 from gui.threads import SystemMonitorThread, ComfyWSThread
 from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+from PySide6.QtWidgets import (QTextBrowser,QApplication, QMainWindow, QWidget, QVBoxLayout,
                                  QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
                                  QFrame, QSizePolicy, QLineEdit, QTableWidget, 
                                  QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
@@ -854,10 +854,47 @@ class PageSetupMixin:
             self.task_table.setColumnWidth(5, 140)
             self.task_table.setColumnWidth(6, 100)
             self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.task_table.cellClicked.connect(self._on_task_row_clicked)
             task_layout.addWidget(self.task_table)
         
-            layout.addWidget(task_card, 1)
-    
+            layout.addWidget(task_card, 2)
+
+            # ── 任务详情（点击选中任务行时显示）────────────────────────────
+            detail_card = QFrame(); detail_card.setObjectName("card")
+            dl = QVBoxLayout(detail_card); dl.setContentsMargins(12, 10, 12, 10); dl.setSpacing(6)
+            dl.addWidget(QLabel("🔍 任务详情（点击上方任务行查看）"))
+            self.task_detail = QTextBrowser()
+            self.task_detail.setMinimumHeight(120)
+            self.task_detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
+            dl.addWidget(self.task_detail, 1)
+            layout.addWidget(detail_card, 1)
+
+    def _on_task_row_clicked(self, row, _col):
+        """点击任务行：在下方详情区展示该任务的参数/结果/错误。"""
+        item = self.task_table.item(row, 0)
+        if not item:
+            return
+        t = item.data(0x0100)  # 完整任务 dict（同步时存入）
+        if not t:
+            return
+        lines = [
+            f"### {t.get('title') or t.get('type') or '任务'}",
+            "",
+            f"- **任务 ID**：`{t.get('id') or ''}`",
+            f"- **类型**：{t.get('type', '')}",
+            f"- **状态**：{t.get('status', '')}",
+            f"- **进度**：{t.get('progress', 0)}%",
+        ]
+        if t.get("client_ip"):
+            lines.append(f"- **来源 IP**：{t.get('client_ip')}")
+        if t.get("error"):
+            lines.append(f"- **错误**：`{t.get('error')}`")
+        if t.get("params"):
+            lines.append(f"- **参数**：`{str(t.get('params'))[:400]}`")
+        if t.get("result"):
+            lines.append(f"- **结果**：`{str(t.get('result'))[:400]}`")
+        self.task_detail.setMarkdown("\n".join(lines))
+
     def _sync_server_tasks_async(self):
         """异步版本：HTTP 请求放 Worker 线程，UI 更新回主线程。"""
         from utils.thread_worker import TaskWorker as Worker
@@ -923,7 +960,9 @@ class PageSetupMixin:
                 time_str = _dt.datetime.fromtimestamp(created_ts).strftime("%m-%d %H:%M") if created_ts else ""
                 row = self.task_table.rowCount()
                 self.task_table.insertRow(row)
-                self.task_table.setItem(row, 0, QTableWidgetItem(tid))
+                item0 = QTableWidgetItem(tid)
+                item0.setData(0x0100, t)  # 存完整任务 dict，供详情展示
+                self.task_table.setItem(row, 0, item0)
                 self.task_table.setItem(row, 1, QTableWidgetItem(t.get("type", "未知")))
                 source_item = QTableWidgetItem("服务端")
                 source_item.setForeground(QColor("#60a5fa"))
@@ -1354,13 +1393,17 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("⚙️ 系统配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
+        hdr.addWidget(title)
         hint = QLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setWordWrap(True)
+        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(hint)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         # 开机自动运行（默认开启）
         self.autostart_chk = QCheckBox("🚀 开机自动运行（登录 Windows 后自动启动本程序）")
@@ -1399,13 +1442,17 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("📁 本地缓存配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
+        hdr.addWidget(title)
         hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setWordWrap(True)
+        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(hint)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         dir_row = QHBoxLayout()
         dir_row.addWidget(QLabel("缓存目录:"))
@@ -1472,14 +1519,16 @@ class PageSetupMixin:
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
+        hdr = QHBoxLayout()
         title = QLabel("🎬 视频 LUT 还原配置")
         title.setObjectName("heading")
-        layout.addWidget(title)
-
-        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用。\n"
-                       "格式支持：.cube / .3dl / .lut")
+        hdr.addWidget(title)
+        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用；格式支持：.cube / .3dl / .lut")
         hint.setObjectName("muted_text")
-        layout.addWidget(hint)
+        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(hint)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         # 列表
         self.lut_list = QListWidget()

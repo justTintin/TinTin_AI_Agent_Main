@@ -5,7 +5,7 @@
 架构（thin client）：
 - 任务的存储/调度/执行全部在服务端，本页只 GET 列表 + 展示状态/结果 + 删除
 - 后台轮询 Worker 每 N 秒刷新一次（任务进行中时自动更新 progress/status）
-- 「立即运行」= 提交一个立即执行的任务（task_type=video_montage）给服务端
+- 「立即运行」= 提交一个立即执行的任务（task_type=product_montage）给服务端
 
 服务端任务字段：id, task_type, title, params, status, progress, error_msg,
                 result({video_url}), created_at, updated_at, completed_at
@@ -13,7 +13,7 @@
 import os
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDialog, QDialogButtonBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QTextBrowser, QWidget,
 )
@@ -36,12 +36,16 @@ class ScheduledTasksPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
+        hdr = QHBoxLayout()
         heading = QLabel("⏰ 成片任务")
         heading.setObjectName("heading")
-        root.addWidget(heading)
-        sub = QLabel("监控服务端成片任务（产品成片 / 脚本成片）的执行状态与输出结果。任务由服务端调度执行，客户端仅提交与监控。")
+        hdr.addWidget(heading)
+        sub = QLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         # ── 任务列表 ───────────────────────────────────────────────────────
         list_card = QFrame(); list_card.setObjectName("card")
@@ -63,7 +67,7 @@ class ScheduledTasksPage(BasePage):
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["ID", "标题", "类型", "状态", "进度", "创建时间", "操作"])
+            ["task_id", "标题", "类型", "状态", "进度", "创建时间", "操作"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -89,6 +93,17 @@ class ScheduledTasksPage(BasePage):
         self.detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
         dl.addWidget(self.detail, 1)
 
+        # 查看日志入口（服务端任务 logs 字段）
+        log_row = QHBoxLayout()
+        log_row.addStretch()
+        self.btn_view_log = QPushButton("📜 查看日志")
+        self.btn_view_log.setObjectName("secondary_button")
+        self.btn_view_log.setToolTip("查看该任务的服务端执行日志（logs）")
+        self.btn_view_log.clicked.connect(self._view_task_log)
+        self.btn_view_log.setVisible(False)
+        log_row.addWidget(self.btn_view_log)
+        dl.addLayout(log_row)
+
         # 变体打分区（仅当任务已完成且有 all_variants 时显示）
         self.variants_title = QLabel("🎯 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
         self.variants_title.setStyleSheet("font-weight:bold; color:#3b82f6;")
@@ -113,8 +128,22 @@ class ScheduledTasksPage(BasePage):
 
     # ── 数据刷新（调服务端）──────────────────────────────────────────────
     def refresh(self):
-        """从服务端拉取任务列表并刷新表格。"""
-        items = stc.list_tasks()
+        """从服务端拉取任务列表并刷新表格（HTTP 放后台线程，避免服务端异常时卡界面）。"""
+        from utils.thread_worker import TaskWorker as Worker
+        if getattr(self, "_refresh_worker", None) and self._refresh_worker.isRunning():
+            return
+        w = Worker(stc.list_tasks)
+        self._refresh_worker = w
+        w.finished.connect(self._on_refresh_done)
+        w.error.connect(self._on_refresh_error)
+        w.start()
+
+    def _on_refresh_error(self, msg):
+        log.warning(f"[成片任务] 刷新失败: {msg}")
+
+    def _on_refresh_done(self, items):
+        """后台拉取完成，主线程刷新表格（保持原有逻辑）。"""
+        items = items or []
         self.table.setRowCount(len(items))
         self.table.clearContents()
         has_active = False  # 是否有 pending/running 任务（决定是否继续轮询）
@@ -143,6 +172,9 @@ class ScheduledTasksPage(BasePage):
                 has_active = True
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
+        self._current_task_full = None
+        if hasattr(self, "btn_view_log"):
+            self.btn_view_log.setVisible(False)
         # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
         if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
             self._poll_timer.start()
@@ -154,8 +186,17 @@ class ScheduledTasksPage(BasePage):
         if not name_item:
             return
         tid = name_item.data(Qt.UserRole)
-        t = stc.get_task(tid)
+        from utils.thread_worker import TaskWorker as Worker
+        self.detail.setMarkdown(f"*正在加载任务 {tid} 详情…*")
+        w = Worker(lambda: stc.get_task(tid))
+        w.finished.connect(self._on_task_detail_loaded)
+        w.error.connect(lambda e: log.warning(f"[成片任务] 加载详情失败: {e}"))
+        w.start()
+
+    def _on_task_detail_loaded(self, t):
         if t:
+            self._current_task_full = t
+            self.btn_view_log.setVisible(True)
             self.detail.setMarkdown(self._render_detail(t))
             self._populate_variants(t)   # 填充变体打分区
 
@@ -185,6 +226,28 @@ class ScheduledTasksPage(BasePage):
         else:
             lines.append("（无）")
         return "\n".join(lines)
+
+    def _view_task_log(self):
+        """弹窗查看任务服务端执行日志（logs / error_msg）。"""
+        t = getattr(self, "_current_task_full", None)
+        if not t:
+            return
+        logs = t.get("logs") or ""
+        err = t.get("error_msg") or ""
+        text = logs if logs else (err if err else "（该任务暂无日志）")
+        if not isinstance(text, str):
+            text = str(text)
+        dlg = QDialog(self.parent_widget)
+        dlg.setWindowTitle(f"任务日志 - {t.get('id')}")
+        dlg.resize(760, 480)
+        lay = QVBoxLayout(dlg)
+        tb = QTextBrowser()
+        tb.setPlainText(text)
+        lay.addWidget(tb, 1)
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+        dlg.exec()
 
     # ── 变体打分区 ──────────────────────────────────────────────────────────
     def _populate_variants(self, t):
@@ -317,7 +380,7 @@ class ScheduledTasksPage(BasePage):
     # ── 格式化 helper ─────────────────────────────────────────────────────
     @staticmethod
     def _type_label(t):
-        return {"video_montage": "产品成片", "compile_video": "产品成片",
+        return {"product_montage": "产品成片", "video_montage": "产品成片", "compile_video": "产品成片",
                 "storyboard_montage": "脚本成片",
                 "script_montage": "脚本成片"}.get(t, t or "—")
 

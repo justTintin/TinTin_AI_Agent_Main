@@ -158,6 +158,7 @@ class TranscriptionToolPage(BasePage):
         right_lay.setContentsMargins(0, 0, 0, 0)
 
         self._video_widget = QVideoWidget()
+        self._video_widget.setAspectRatioMode(Qt.KeepAspectRatio)  # 等比完整显示
         self._video_widget.setMinimumSize(320, 240)
         self._video_widget.setStyleSheet("background: #000;")
         right_lay.addWidget(self._video_widget, 1)

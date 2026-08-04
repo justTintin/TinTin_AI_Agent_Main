@@ -141,6 +141,49 @@ def classify_audio(item):
     return ""
 
 
+def _ext_from_content_type(ct):
+    """根据 Content-Type 推断本地缓存文件的扩展名。"""
+    ct = (ct or "").lower()
+    for mime, ext in [("audio/mpeg", ".mp3"), ("audio/mp3", ".mp3"),
+                      ("audio/wav", ".wav"), ("audio/x-wav", ".wav"),
+                      ("audio/ogg", ".ogg"), ("audio/mp4", ".m4a"),
+                      ("audio/aac", ".aac"), ("audio/flac", ".flac")]:
+        if mime in ct:
+            return ext
+    return ".mp3"
+
+
+class _AudioPreviewWorker(BaseWorker):
+    """后台下载音频到本地临时文件，再交给 QMediaPlayer 播放。
+
+    原因：直接 setSource(服务端 HTTP 流) 时，服务端异常/网络卡顿会
+    让播放器后端在主线程无超时等待，导致整个界面卡死。
+    先下载（带超时）到本地再播放，服务端异常只会提示失败，不阻塞 GUI。
+    """
+    finished = Signal(str)  # 本地临时文件路径
+
+    def __init__(self, url, mid):
+        super().__init__()
+        self.url = url
+        self.mid = mid
+
+    def do_work(self):
+        import tempfile
+        resp = http_get(self.url, timeout=20)
+        if resp.status_code != 200:
+            raise RuntimeError(f"服务端返回 HTTP {resp.status_code}")
+        data = resp.content
+        if not data:
+            raise RuntimeError("服务端返回空内容")
+        ext = _ext_from_content_type(resp.headers.get("Content-Type", ""))
+        cache_dir = os.path.join(tempfile.gettempdir(), "audio_preview")
+        os.makedirs(cache_dir, exist_ok=True)
+        path = os.path.join(cache_dir, f"{self.mid}{ext}")
+        with open(path, "wb") as f:
+            f.write(data)
+        self.finished.emit(path)
+
+
 class _AudioListWorker(BaseWorker):
     """音频库列表：走 /audio/library（分页 + keyword/emotion/style/genre 筛选）。"""
     finished = Signal(list, int)
@@ -236,6 +279,8 @@ class AudioMaterialPage(BasePage):
         self._player = None
         self._audio_output = None
         self._playing_mid = None
+        self._playing_name = ""
+        self._preview_worker = None
 
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
@@ -491,21 +536,51 @@ class AudioMaterialPage(BasePage):
                 and player.playbackState() == QMediaPlayer.PlaybackState.PlayingState):
             self._stop_preview()
             return
-        player.setSource(QUrl(_serve_url(mid)))
-        player.play()
+        # 防重入：同一音频的下载任务已在跑则跳过（双击会先触发单击）
+        if (getattr(self, "_preview_worker", None)
+                and self._preview_worker.isRunning()
+                and getattr(self, "_preview_mid", "") == mid):
+            return
+        # 先后台下载到本地再播放：避免服务端异常时 QMediaPlayer 主线程卡死
         self._playing_mid = mid
-        self.lbl_now_playing.setText(f"▶ 播放中: {data.get('filename', mid)}")
+        self._playing_name = data.get("filename", mid)
+        self._preview_mid = mid
+        self.lbl_now_playing.setText(f"⏳ 加载中: {self._playing_name}…")
+        self._preview_worker = _AudioPreviewWorker(_serve_url(mid), mid)
+        self._preview_worker.finished.connect(self._on_preview_ready)
+        self._preview_worker.error.connect(self._on_preview_error)
+        self._preview_worker.start()
+
+    def _on_preview_ready(self, path):
+        if self._playing_mid is None:
+            return
+        player = self._ensure_player()
+        # 先清空旧源再设置，避免 QMediaPlayer 切换源时卡死
+        player.stop()
+        player.setSource(QUrl())
+        player.setSource(QUrl.fromLocalFile(path))
+        player.play()
+        self.lbl_now_playing.setText(f"▶ 播放中: {self._playing_name or ''}")
+
+    def _on_preview_error(self, msg):
+        self._playing_mid = None
+        self._playing_name = ""
+        self.lbl_now_playing.setText(f"❌ 播放失败（服务端不可达？）：{msg}")
 
     def _stop_preview(self):
         if self._player is not None:
             self._player.stop()
         self._playing_mid = None
+        self._playing_name = ""
         self.lbl_now_playing.setText("未在播放")
 
     def _on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self._playing_mid = None
             self.lbl_now_playing.setText("播放完成")
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self._playing_mid = None
+            self.lbl_now_playing.setText("❌ 无法播放该音频（格式不支持或文件损坏）")
 
     # ── 分页 ──
     def _update_page_label(self):

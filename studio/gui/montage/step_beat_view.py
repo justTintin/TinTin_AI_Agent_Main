@@ -695,6 +695,8 @@ class StepBeatView(BaseStepView):
         pvbox.addWidget(self.main_page.beat_preview_title)
         # 视频预览（播放服务端下载的卡点视频）
         self.main_page.beat_preview_video = QVideoWidget()
+        # 自动识别视频比例，等比完整显示（不拉伸、不裁剪）
+        self.main_page.beat_preview_video.setAspectRatioMode(Qt.KeepAspectRatio)
         self.main_page.beat_preview_video.setMinimumSize(200, 150)
         self.main_page.beat_preview_video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.main_page.beat_preview_video.setStyleSheet("background: #000;")

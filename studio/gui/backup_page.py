@@ -66,12 +66,16 @@ class BackupPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(14)
 
+        hdr = QHBoxLayout()
         heading = QLabel("💾 数据备份 / 还原 / 迁移")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
         sub = QLabel("配置(密钥) + 业务数据(产品资料/我的知识库/素材索引/账号/声音样本) 一键备份还原；素材外部目录支持迁移重定位。")
         sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         # 数据盘点
         inv = QFrame(); inv.setObjectName("card")

@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
+# -*- coding: utf-8 -*-"""
 MG 动画页（服务端渲染版，按 OpenAPI /mg/* 实现）。
 业务流：
   1. 左侧展示内置模板 + 服务端模板。
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QTimer
 
 from gui.base_page import BasePage
+from gui.searchable_combo import SearchableComboBox
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from gui.mg_render_worker import MGServerRenderWorker
@@ -220,14 +220,18 @@ class MGAnimationPage(BasePage):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
+        hdr = QHBoxLayout()
         heading = QLabel("🎬 MG 动画")
         heading.setObjectName("heading")
-        root.addWidget(heading)
+        hdr.addWidget(heading)
 
         sub = QLabel("选择模板、填写参数，服务端渲染 MG 动画。")
         sub.setObjectName("muted_text")
         sub.setWordWrap(True)
-        root.addWidget(sub)
+        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_left_panel())
@@ -266,19 +270,12 @@ class MGAnimationPage(BasePage):
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
-        self.list_templates = QListWidget()
-        self.list_templates.currentItemChanged.connect(self._on_template_selected)
-        layout.addWidget(self.list_templates, 1)
+        # 模板库：可搜索下拉框
+        self.combo_template = SearchableComboBox(placeholder="搜索模板名称…")
+        self.combo_template.currentIndexChanged.connect(self._on_template_selected)
+        layout.addWidget(self.combo_template)
 
-        return panel
-
-    def _build_right_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-
-        # 模板元信息只读显示区
+        # 模板信息：选择后显示在下拉框下面
         meta = QGroupBox("模板信息")
         ml = QFormLayout(meta)
         ml.setSpacing(8)
@@ -296,7 +293,7 @@ class MGAnimationPage(BasePage):
         self.combo_meta_backend.setEnabled(False)
         self.edit_meta_params = QTextEdit()
         self.edit_meta_params.setToolTip("模板参数定义（JSON 数组）")
-        self.edit_meta_params.setMaximumHeight(100)
+        self.edit_meta_params.setMaximumHeight(90)
         self.edit_meta_params.setReadOnly(True)
 
         ml.addRow("模板 ID", self.edit_meta_id)
@@ -305,7 +302,6 @@ class MGAnimationPage(BasePage):
         ml.addRow("后端", self.combo_meta_backend)
         ml.addRow("参数定义", self.edit_meta_params)
         layout.addWidget(meta)
-
         # 通用样式
         common = QGroupBox("通用样式")
         cl = QFormLayout(common)
@@ -348,6 +344,17 @@ class MGAnimationPage(BasePage):
         self.scroll_form.setWidget(self.form_container)
         fgl.addWidget(self.scroll_form)
         layout.addWidget(form_group, 1)
+
+
+
+        return panel
+
+    def _build_right_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
 
         # Scenes 编辑器（仅含 scenes 参数时显示）
         self.scenes_group = QGroupBox("Scenes（多段文字动画，最多 30 段）")
@@ -408,8 +415,8 @@ class MGAnimationPage(BasePage):
         # 任务列表
         task_group = QGroupBox("渲染任务")
         tgl = QVBoxLayout(task_group)
-        self.table_tasks = QTableWidget(0, 6)
-        self.table_tasks.setHorizontalHeaderLabels(["时间", "模板", "比例", "状态", "进度", "操作"])
+        self.table_tasks = QTableWidget(0, 7)
+        self.table_tasks.setHorizontalHeaderLabels(["时间", "任务ID", "模板", "比例", "状态", "进度", "操作"])
         self.table_tasks.horizontalHeader().setStretchLastSection(True)
         self.table_tasks.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_tasks.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -452,41 +459,20 @@ class MGAnimationPage(BasePage):
         w.start()
 
     def _fill_template_list(self):
-        self.list_templates.clear()
         builtins = [t for t in self._templates if t.get("is_builtin") or t.get("builtin")]
         customs = [t for t in self._templates if not (t.get("is_builtin") or t.get("builtin"))]
-
-        if builtins:
-            header = QListWidgetItem("━━ 内置模板 ━━")
-            header.setFlags(Qt.NoItemFlags)
-            header.setForeground(Qt.GlobalColor.gray)
-            self.list_templates.addItem(header)
-            for t in builtins:
-                item = QListWidgetItem(t.get("name", t.get("id", "")))
-                item.setData(Qt.UserRole, t)
-                item.setToolTip(t.get("description", ""))
-                self.list_templates.addItem(item)
-
-        if customs:
-            header = QListWidgetItem("━━ 自定义模板 ━━")
-            header.setFlags(Qt.NoItemFlags)
-            header.setForeground(Qt.GlobalColor.gray)
-            self.list_templates.addItem(header)
-            for t in customs:
+        items = []
+        for t in builtins + customs:
+            label = t.get("name", t.get("id", ""))
+            if not (t.get("is_builtin") or t.get("builtin")):
                 backend = t.get("backend", "")
-                label = t.get("name", t.get("id", ""))
                 if backend:
                     label += f" [{backend}]"
-                item = QListWidgetItem(label)
-                item.setData(Qt.UserRole, t)
-                item.setToolTip(t.get("description", ""))
-                self.list_templates.addItem(item)
-
-        # 默认选中第一个可用模板
-        for i in range(self.list_templates.count()):
-            if self.list_templates.item(i).flags() & Qt.ItemIsSelectable:
-                self.list_templates.setCurrentRow(i)
-                break
+            items.append((label, t))
+        # setItems 期间不触发 currentIndexChanged，随后默认选中第一项并应用模板信息
+        self.combo_template.setItems(items)
+        if self.combo_template.count() > 0:
+            self._on_template_selected(self.combo_template.currentIndex())
 
     def _on_templates_loaded(self, server_templates):
         self.status.setText("")
@@ -514,17 +500,16 @@ class MGAnimationPage(BasePage):
             self._select_template_by_id(current_id)
 
     def _select_template_by_id(self, template_id):
-        for i in range(self.list_templates.count()):
-            item = self.list_templates.item(i)
-            t = item.data(Qt.UserRole)
+        for i in range(self.combo_template.count()):
+            t = self.combo_template.itemData(i)
             if t and t.get("id") == template_id:
-                self.list_templates.setCurrentItem(item)
+                self.combo_template.setCurrentIndex(i)
                 return
 
-    def _on_template_selected(self, current, previous):
-        if current is None:
+    def _on_template_selected(self, index):
+        if index < 0:
             return
-        template = current.data(Qt.UserRole)
+        template = self.combo_template.itemData(index)
         if not template:
             return
         self._current_template = template
@@ -883,16 +868,17 @@ class MGAnimationPage(BasePage):
         self.table_tasks.setRowCount(len(self._tasks))
         for i, rec in enumerate(self._tasks):
             self.table_tasks.setItem(i, 0, QTableWidgetItem(rec["time"]))
-            self.table_tasks.setItem(i, 1, QTableWidgetItem(rec["template"]))
-            self.table_tasks.setItem(i, 2, QTableWidgetItem(rec["ratio"]))
-            self.table_tasks.setItem(i, 3, QTableWidgetItem(rec["status"]))
-            self.table_tasks.setItem(i, 4, QTableWidgetItem(f"{rec['progress']}%"))
+            self.table_tasks.setItem(i, 1, QTableWidgetItem(str(rec.get("task_id", ""))))
+            self.table_tasks.setItem(i, 2, QTableWidgetItem(rec["template"]))
+            self.table_tasks.setItem(i, 3, QTableWidgetItem(rec["ratio"]))
+            self.table_tasks.setItem(i, 4, QTableWidgetItem(rec["status"]))
+            self.table_tasks.setItem(i, 5, QTableWidgetItem(f"{rec['progress']}%"))
             action = "打开" if rec["local_path"] and os.path.isfile(rec["local_path"]) else ""
-            self.table_tasks.setItem(i, 5, QTableWidgetItem(action))
+            self.table_tasks.setItem(i, 6, QTableWidgetItem(action))
         self.table_tasks.resizeColumnsToContents()
 
     def _on_task_cell_clicked(self, row, col):
-        if col != 5 or row >= len(self._tasks):
+        if col != 6 or row >= len(self._tasks):
             return
         path = self._tasks[row].get("local_path")
         if path and os.path.isfile(path) and os.name == "nt":

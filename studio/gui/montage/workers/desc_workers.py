@@ -160,7 +160,7 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
 
 class LocalVisionDescWorker(BaseWorker):
-    """使用本地 Ollama 视觉模型（qwen2.5vl）分析每个分割镜头的画面内容，生成画面描述文案。
+    """调用服务端 /llm/chat/completions 视觉模型（模型名由 llm_vision_model 配置）分析每个分割镜头的画面内容，生成画面描述文案；客户端本地仅抽帧。
 
     有字幕时：结合字幕文案 + 画面截图，生成带营销感的描述。
     无字幕时：纯画面视觉分析。

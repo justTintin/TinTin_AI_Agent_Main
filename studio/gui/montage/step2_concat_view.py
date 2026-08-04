@@ -22,16 +22,6 @@ class Step2ConcatView(BaseStepView):
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(16)
 
-        # Source split clips directory input (carried from Step 1, read-only)
-        row_src = QHBoxLayout()
-        row_src.addWidget(QLabel("待排列镜头目录:"))
-        self.main_page.concat_src_dir_input = QLineEdit()
-        self.main_page.concat_src_dir_input.setPlaceholderText("由上一步镜头分割自动带入...")
-        self.main_page.concat_src_dir_input.setReadOnly(True)
-        row_src.addWidget(self.main_page.concat_src_dir_input)
-        card_layout.addLayout(row_src)
-
-
         # ── 参数设置组（统一边框背景）──
         params_group = QFrame()
         params_group.setStyleSheet(
@@ -200,6 +190,8 @@ class Step2ConcatView(BaseStepView):
         player_vbox.addWidget(self.main_page.preview_title)
         
         self.main_page.preview_video_widget = QVideoWidget()
+        # 自动识别视频比例，等比完整显示（不拉伸、不裁剪）
+        self.main_page.preview_video_widget.setAspectRatioMode(Qt.KeepAspectRatio)
         self.main_page.preview_video_widget.setMinimumHeight(200)
         player_vbox.addWidget(self.main_page.preview_video_widget, 1)
 

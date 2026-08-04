@@ -11,14 +11,13 @@ import os
 import requests
 from utils.http_client import http_get, http_post
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QListWidget, QListWidgetItem, QAbstractItemView,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
+    QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QMenu,
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
 )
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect
-from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect, QObject, QEvent
+from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor, QAction
+from gui.video_player import VideoPlayerWidget
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
@@ -90,81 +89,18 @@ class VideoPreviewDialog(QDialog):
         left = QVBoxLayout()
         left.setSpacing(8)
 
-        self.video_widget = QVideoWidget()
-        self.video_widget.setStyleSheet("background:#000; border-radius:6px;")
-        left.addWidget(self.video_widget, 1)
-
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setRange(0, 1000)
-        self.slider.setEnabled(False)
-        self.slider.sliderPressed.connect(self._on_slider_pressed)
-        self.slider.sliderReleased.connect(self._on_slider_released)
-        left.addWidget(self.slider)
-
-        ctrl = QHBoxLayout()
-        self.btn_play = QPushButton("▶ 播放")
-        self.btn_play.setObjectName("primary_button")
-        self.btn_play.setFixedWidth(90)
-        self.btn_play.clicked.connect(self._toggle_play)
-        ctrl.addWidget(self.btn_play)
-        ctrl.addStretch(1)
-        self.lbl_time = QLabel("加载中…")
-        self.lbl_time.setObjectName("muted_text")
-        ctrl.addWidget(self.lbl_time)
-        left.addLayout(ctrl)
+        # 统一视频播放器：等比显示 + 播放/暂停/停止 + 进度条 + 时间
+        self.player_widget = VideoPlayerWidget(self, autoplay=True)
+        left.addWidget(self.player_widget, 1)
 
         root_lay.addLayout(left, 1)
         self.prompt_panel = PromptReversePanel(material_id, media_type)
         root_lay.addWidget(self.prompt_panel, 0)
 
-        self._dragging = False
-        self.player = QMediaPlayer(self)
-        self._audio = QAudioOutput(self)
-        self.player.setAudioOutput(self._audio)
-        self.player.setVideoOutput(self.video_widget)
-        self.player.positionChanged.connect(self._on_position)
-        self.player.durationChanged.connect(self._on_duration)
-        self.player.playbackStateChanged.connect(self._on_state)
-        self.player.errorOccurred.connect(self._on_error)
-        self.player.setSource(QUrl(url))
-        self.player.play()
-
-    def _toggle_play(self):
-        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.player.pause()
-        else:
-            self.player.play()
-
-    def _on_state(self, state):
-        playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self.btn_play.setText("⏸ 暂停" if playing else "▶ 播放")
-
-    def _on_position(self, pos):
-        if self._dragging:
-            return
-        dur = self.player.duration()
-        if dur > 0:
-            self.slider.setValue(int(pos * 1000 / dur))
-        self.lbl_time.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")
-
-    def _on_duration(self, dur):
-        self.slider.setEnabled(dur > 0)
-
-    def _on_slider_pressed(self):
-        self._dragging = True
-
-    def _on_slider_released(self):
-        self._dragging = False
-        dur = self.player.duration()
-        if dur > 0:
-            self.player.setPosition(int(self.slider.value() * dur / 1000))
-
-    def _on_error(self, _error, error_string):
-        self.btn_play.setText("▶ 重试")
-        self.lbl_time.setText(f"❌ 播放失败: {error_string}")
+        self.player_widget.set_source(url)
 
     def closeEvent(self, event):
-        self.player.stop()
+        self.player_widget.stop()
         super().closeEvent(event)
 
 
@@ -172,12 +108,14 @@ class _SearchWorker(BaseWorker):
     """素材检索：有关键词走 /material/search（语义），否则走 /material/list（浏览）。"""
     finished = Signal(list, int)
 
-    def __init__(self, query="", brand="", category="", media_type="", limit=50, offset=0):
+    def __init__(self, query="", brand="", category="", media_type="", model="", background_type="", limit=50, offset=0):
         super().__init__()
         self.query = query
         self.brand = brand
         self.category = category
         self.media_type = media_type
+        self.model = model
+        self.background_type = background_type
         self.limit = limit
         self.offset = offset
 
@@ -185,13 +123,8 @@ class _SearchWorker(BaseWorker):
         try:
             base = _get_server_url()
             if self.query:
+                # 语义搜索接口不接受 brand 过滤（传了会 400），只传关键词
                 params = {"query": self.query, "limit": self.limit, "offset": self.offset}
-                if self.brand:
-                    params["brand"] = self.brand
-                if self.category:
-                    params["category"] = self.category
-                if self.media_type:
-                    params["media_type"] = self.media_type
                 resp = http_post(f"{base}/material/search", json=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -199,7 +132,8 @@ class _SearchWorker(BaseWorker):
                 results = data.get("results") or data.get("data") or []
                 total = data.get("total") or len(results)
             else:
-                # 浏览模式：服务端 /material/list 用 page/size 分页（limit/offset 无效）
+                # 浏览模式：服务端 /material/list 用 page/size 分页（limit/offset 无效），
+                # 支持 brand（归一化）/ category / media_type / model（模糊）组合过滤
                 params = {"size": self.limit,
                           "page": (self.offset // self.limit) + 1 if self.limit else 1}
                 if self.brand:
@@ -208,6 +142,10 @@ class _SearchWorker(BaseWorker):
                     params["category"] = self.category
                 if self.media_type:
                     params["media_type"] = self.media_type
+                if self.model:
+                    params["model"] = self.model
+                if self.background_type:
+                    params["background_type"] = self.background_type
                 resp = http_get(f"{base}/material/list", params=params, timeout=20)
                 if resp.status_code != 200:
                     raise RuntimeError(f"服务器返回 {resp.status_code}: {resp.text[:200]}")
@@ -237,6 +175,99 @@ class _DistinctLoader(BaseWorker):
         except Exception:
             pass
         self.finished.emit(self.field, [])
+
+
+class _GridRowsFilter(QObject):
+    """让素材网格每行固定显示 cols 个素材：随视口宽度动态调整列宽，行高保持合理。"""
+
+    def __init__(self, grid, cols=10):
+        super().__init__(grid)
+        self.grid = grid
+        self.cols = max(3, cols)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Resize, QEvent.Show):
+            self.apply()
+        return False
+
+    def apply(self):
+        vp = self.grid.viewport()
+        if vp is None:
+            return
+        w = vp.width()
+        if w <= 0:
+            # 页面尚未显示（宽为 0）：延迟到布局稳定后重算
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(80, self.apply)
+            return
+        # 每行固定 cols 个：列宽 = 视口宽 / cols；图标撑满列宽（留少量边距），
+        # 不再 clamp 到 160——否则列宽大时格子左右留白，素材看起来没撑满
+        col_w = max(80, w // self.cols)
+        icon = max(70, col_w - 6)
+        row_h = icon + 52   # 图标 + 文件名行高
+        self.grid.setGridSize(QSize(col_w, row_h))
+        self.grid.setIconSize(QSize(icon, icon))
+
+
+class _BrandCountLoader(BaseWorker):
+    """批量查询每个品牌在素材库中的素材数量，用于过滤无对应素材的品牌。"""
+    finished = Signal(dict)  # {brand: total}
+
+    def __init__(self, brands):
+        super().__init__()
+        self.brands = list(brands or [])
+
+    def do_work(self):
+        from concurrent.futures import ThreadPoolExecutor
+        base = _get_server_url()
+        if not base:
+            self.finished.emit({b: -1 for b in self.brands})
+            return
+
+        def _count(brand):
+            try:
+                r = http_get(f"{base}/material/list",
+                             params={"page": 1, "size": 1, "brand": brand}, timeout=15)
+                if r.status_code == 200:
+                    return brand, int((r.json() or {}).get("total") or 0)
+            except Exception:
+                pass
+            return brand, -1
+
+        counts = {}
+        try:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                for brand, total in ex.map(_count, self.brands):
+                    counts[brand] = total
+        except Exception:
+            counts = {b: -1 for b in self.brands}
+        self.finished.emit(counts)
+
+
+class _NormalizedBrandsLoader(BaseWorker):
+    """异步获取归一化品牌列表（/api/product-library/clients/{machine_id}/brands）。
+
+    服务端已对品牌做归一化处理（如 罗技/Logitech -> 罗技(Logitech)），
+    素材检索品牌筛选用归一化品牌，替代 /material/distinct 的原始乱值。
+    """
+    finished = Signal(str, list)  # "brand", values
+
+    def do_work(self):
+        try:
+            from utils.license import get_machine_id
+            mid = get_machine_id() or ""
+            if not mid:
+                self.error.emit("无法获取机器码（machine_id）")
+                return
+            url = f"{_get_server_url()}/api/product-library/clients/{mid}/brands"
+            resp = http_get(url, timeout=15)
+            if resp.status_code == 200:
+                values = (resp.json() or {}).get("brands") or []
+                self.finished.emit("brand", values)
+                return
+            self.error.emit(f"品牌接口返回 HTTP {resp.status_code}")
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class _StatsLoader(BaseWorker):
@@ -414,10 +445,41 @@ class VectorSearchPage(BasePage):
         title = QLabel("🔍 素材检索")
         title.setObjectName("heading")
         hdr.addWidget(title)
+        # 素材库统计跟随标题，用当前小字（不再作为侧边栏大标题）
+        self.lbl_stats = QLabel("加载中…")
+        self.lbl_stats.setObjectName("muted_text")
+        self.lbl_stats.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        hdr.addWidget(self.lbl_stats)
         hdr.addStretch()
         root.addLayout(hdr)
 
         search_row = QHBoxLayout()
+        # 类型（全部/图片/视频）移到搜索栏最前面
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("全部", "")
+        self.type_combo.addItem("🖼 图片", "image")
+        self.type_combo.addItem("🎬 视频", "video")
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+        search_row.addWidget(self.type_combo)
+        # 背景类型：图片下的分类（白底/黑底/纯色/渐变/绿幕/蓝幕/透明/场景），支持多选，选图片时启用
+        self.bg_menu_btn = QToolButton()
+        self.bg_menu_btn.setText("背景")
+        self.bg_menu_btn.setToolTip("选择背景类型（可多选，仅图片下生效）")
+        self.bg_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        self.bg_menu = QMenu(self.bg_menu_btn)
+        self._bg_actions = []
+        for _txt, _val in [("⬜ 白底图", "white"), ("⬛ 黑底图", "black"), ("🎨 纯色", "solid"),
+                           ("🌫 渐变", "gradient"), ("🟢 绿幕", "green_screen"), ("🔵 蓝幕", "blue_screen"),
+                           ("🫧 透明", "transparent"), ("🏞 场景", "scene")]:
+            _act = QAction(_txt, self.bg_menu)
+            _act.setCheckable(True)
+            _act.setData(_val)
+            _act.toggled.connect(self._on_bg_selection_changed)
+            self.bg_menu.addAction(_act)
+            self._bg_actions.append(_act)
+        self.bg_menu_btn.setMenu(self.bg_menu)
+        self.bg_menu_btn.setEnabled(False)
+        search_row.addWidget(self.bg_menu_btn)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入关键词语义搜索（留空 = 浏览全部素材）")
         self.search_input.returnPressed.connect(self._do_search)
@@ -433,31 +495,13 @@ class VectorSearchPage(BasePage):
 
         sidebar = QFrame()
         sidebar.setObjectName("card")
-        sidebar.setMinimumWidth(190)
-        sidebar.setMaximumWidth(240)
+        sidebar.setMinimumWidth(120)
+        sidebar.setMaximumWidth(160)  # 侧边栏更窄，右侧网格能完整显示每行 10 个素材
         sb_lay = QVBoxLayout(sidebar)
         sb_lay.setContentsMargins(12, 12, 12, 12)
         sb_lay.setSpacing(6)
 
-        # 库统计
-        sb_lay.addWidget(self._side_header("📊 素材库"))
-        self.lbl_stats = QLabel("加载中…")
-        self.lbl_stats.setObjectName("muted_text")
-        self.lbl_stats.setWordWrap(True)
-        sb_lay.addWidget(self.lbl_stats)
-
-        # 类型
-        sb_lay.addWidget(self._side_header("类型"))
-        self.type_list = QListWidget()
-        self.type_list.setObjectName("side_list")
-        for text, data in [("全部", ""), ("🖼 图片", "image"), ("🎬 视频", "video")]:
-            it = QListWidgetItem(text)
-            it.setData(Qt.UserRole, data)
-            self.type_list.addItem(it)
-        self.type_list.setCurrentRow(0)
-        self.type_list.setMaximumHeight(88)
-        self.type_list.currentRowChanged.connect(self._on_side_filter_changed)
-        sb_lay.addWidget(self.type_list)
+        # 库统计已移到顶部标题后；类型已移到顶部搜索栏（含白底图）
 
         # 品牌（带快速过滤）
         sb_lay.addWidget(self._side_header("品牌"))
@@ -469,6 +513,14 @@ class VectorSearchPage(BasePage):
         self.brand_list.setObjectName("side_list")
         self.brand_list.currentRowChanged.connect(self._on_side_filter_changed)
         sb_lay.addWidget(self.brand_list, 1)
+
+        # 型号（模糊过滤，服务端 /material/list 支持 model 参数）
+        sb_lay.addWidget(self._side_header("型号"))
+        self.model_filter_input = QLineEdit()
+        self.model_filter_input.setPlaceholderText("输入型号关键词过滤…")
+        self.model_filter_input.setClearButtonEnabled(True)
+        self.model_filter_input.textChanged.connect(self._on_model_filter_changed)
+        sb_lay.addWidget(self.model_filter_input)
 
         # 分类
         sb_lay.addWidget(self._side_header("分类"))
@@ -494,6 +546,11 @@ class VectorSearchPage(BasePage):
         self.grid.setSpacing(8)
         self.grid.setSelectionMode(QAbstractItemView.NoSelection)
         self.grid.setUniformItemSizes(True)
+        # 每列固定显示 10 个素材：动态调整 gridSize/iconSize
+        self._grid_rows_filter = _GridRowsFilter(self.grid, cols=10)
+        self.grid.installEventFilter(self._grid_rows_filter)
+        self.grid.viewport().installEventFilter(self._grid_rows_filter)
+        self._grid_rows_filter.apply()
         self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"
                                 " QListWidget::item { background: #1c1c24; border-radius: 6px; }"
                                 " QListWidget::item:selected { background: #2a3340; border: 1px solid #2ecc71; }")
@@ -545,11 +602,13 @@ class VectorSearchPage(BasePage):
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
         page_row.addWidget(QLabel("每页:"))
-        self.spin_limit = QSpinBox()
-        self.spin_limit.setRange(10, 200)
-        self.spin_limit.setValue(50)
-        self.spin_limit.setFixedWidth(60)
-        page_row.addWidget(self.spin_limit)
+        self.combo_limit = QComboBox()
+        self.combo_limit.addItem("50", 50)
+        self.combo_limit.addItem("100", 100)
+        self.combo_limit.addItem("200", 200)
+        self.combo_limit.setCurrentIndex(0)
+        self.combo_limit.setFixedWidth(64)
+        page_row.addWidget(self.combo_limit)
         page_row.addStretch()
         self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
@@ -596,10 +655,15 @@ class VectorSearchPage(BasePage):
         w = self.track_worker(_StatsLoader())
         w.finished.connect(self._on_stats_loaded)
         w.start()
-        for field in ("brand", "category"):
-            w = self.track_worker(_DistinctLoader(field))
-            w.finished.connect(self._on_distinct_loaded)
-            w.start()
+        # 品牌：素材库实际品牌（/material/distinct?field=brand，服务端已收敛）
+        # 注：产品库 ERP 品牌与素材库无关，不再作为素材检索品牌来源
+        w = self.track_worker(_DistinctLoader("brand"))
+        w.finished.connect(self._on_distinct_loaded)
+        w.start()
+        # 分类：仍用 distinct
+        w = self.track_worker(_DistinctLoader("category"))
+        w.finished.connect(self._on_distinct_loaded)
+        w.start()
         self._do_search()  # 空关键词 → 浏览全部
 
     def _on_stats_loaded(self, stats):
@@ -609,12 +673,13 @@ class VectorSearchPage(BasePage):
         total = stats.get("total", 0)
         by_type = stats.get("by_type", {})
         self.lbl_stats.setText(
-            f"共 {total:,} 个素材\n图片 {by_type.get('image', 0):,} · 视频 {by_type.get('video', 0):,}")
+            f"共 {total:,} 个素材 · 图片 {by_type.get('image', 0):,} · 视频 {by_type.get('video', 0):,}")
 
     def _on_distinct_loaded(self, field, values):
         values = [v for v in (values or []) if v and str(v).strip()]
         if field == "brand":
-            self._brand_values = values
+            # 素材库实际品牌：本地再做归一化合并 + 噪音过滤（均有对应素材）
+            self._brand_values = self._clean_brand_values(values)
             self._rebuild_brand_list("")
         elif field == "category":
             self.category_list.blockSignals(True)
@@ -632,6 +697,23 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     #  侧边栏筛选
     # ══════════════════════════════════════════
+    @staticmethod
+    def _clean_brand_values(values):
+        """素材库品牌值：服务端已做归一化，客户端原样使用（仅去空白 + 去重）。
+
+        注意：不能在这里再做品牌归一化/噪音过滤——服务端返回的
+        「罗技(Logitech)」已归一化，本地二次处理（如加空格）会导致
+        /material/list?brand=xxx 匹配不到数据（如罗技 69155 条 → 0 条）。
+        """
+        out, seen = [], set()
+        for v in values or []:
+            s = str(v).strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+        return out
+
     def _rebuild_brand_list(self, text_filter):
         cur = self._current_data(self.brand_list)
         self.brand_list.blockSignals(True)
@@ -667,6 +749,60 @@ class VectorSearchPage(BasePage):
         it = list_widget.currentItem()
         return it.data(Qt.UserRole) if it else ""
 
+    def _on_type_changed(self, *_args):
+        # 背景类型是图片下的分类：仅当类型=图片时启用
+        is_image = (self.type_combo.currentData() == "image")
+        self.bg_menu_btn.setEnabled(is_image)
+        if not is_image:
+            for _act in getattr(self, "_bg_actions", []):
+                _act.blockSignals(True)
+                _act.setChecked(False)
+                _act.blockSignals(False)
+            self._update_bg_btn_text()
+        self._on_side_filter_changed()
+
+    def _update_bg_btn_text(self):
+        sel = [a.text() for a in getattr(self, "_bg_actions", []) if a.isChecked()]
+        if sel:
+            self.bg_menu_btn.setText(f"背景 ({len(sel)})")
+        else:
+            self.bg_menu_btn.setText("背景")
+
+    def _on_bg_selection_changed(self, *_args):
+        # 选择背景类型时自动切到「图片」，并触发搜索（多选）
+        if any(a.isChecked() for a in getattr(self, "_bg_actions", []))                 and self.type_combo.currentData() != "image":
+            self.type_combo.setCurrentIndex(1)  # 图片（内部会触发 _on_type_changed -> 搜索）
+            return
+        self._update_bg_btn_text()
+        self._on_side_filter_changed()
+
+    def _on_model_filter_changed(self, _text):
+        # 型号输入防抖：停顿后触发搜索
+        if not hasattr(self, "_last_params"):
+            return
+        if not hasattr(self, "_model_debounce"):
+            from PySide6.QtCore import QTimer as _QTimer
+            # 页面本体非 QObject（BasePage），用无父 QTimer 并保持引用
+            self._model_debounce = _QTimer()
+            self._model_debounce.setSingleShot(True)
+            self._model_debounce.setInterval(350)
+            self._model_debounce.timeout.connect(self._do_search)
+        self._model_debounce.start()
+
+    def _on_brands_load_error(self, msg):
+        # 归一化品牌接口不可用时回退原始 distinct 品牌
+        try:
+            from utils.logger_utils import log as _log
+            _log.warning(f"[素材检索] 归一化品牌加载失败，回退 distinct: {msg}")
+        except Exception:
+            pass
+        if hasattr(self, "_is_brand_fallback_done"):
+            return
+        self._is_brand_fallback_done = True
+        w = self.track_worker(_DistinctLoader("brand"))
+        w.finished.connect(self._on_distinct_loaded)
+        w.start()
+
     def _on_side_filter_changed(self, *_args):
         # 初始化填充列表期间不触发搜索
         if not hasattr(self, "_last_params"):
@@ -678,17 +814,23 @@ class VectorSearchPage(BasePage):
     # ══════════════════════════════════════════
     def _collect_params(self):
         """收集当前筛选条件（搜索与翻页共用）。"""
+        _mtype = self.type_combo.currentData() or ""
+        # 背景类型多选，逗号拼接（服务端需支持逗号分隔多值，暂按单值忽略其余）
+        _bgs = [a.data() for a in getattr(self, "_bg_actions", []) if a.isChecked()]
+        is_bg_used = bool(_bgs) and _mtype == "image"
         return {
             "query": self.search_input.text().strip(),
             "brand": self._current_data(self.brand_list) or "",
             "category": self._current_data(self.category_list) or "",
-            "media_type": self._current_data(self.type_list) or "",
+            "media_type": "image" if is_bg_used else _mtype,
+            "model": self.model_filter_input.text().strip(),
+            "background_type": ",".join(_bgs) if is_bg_used else "",
         }
 
     def _do_search(self):
         params = self._collect_params()
         self._last_params = params
-        self._page_size = self.spin_limit.value()
+        self._page_size = int(self.combo_limit.currentData() or 50)
         self._offset = 0  # 新搜索回到第一页
         self._run_search()
 
@@ -705,7 +847,9 @@ class VectorSearchPage(BasePage):
 
         w = self.track_worker(_SearchWorker(
             query=p["query"], brand=p["brand"], category=p["category"],
-            media_type=p["media_type"], limit=self._page_size, offset=self._offset))
+            media_type=p["media_type"], model=p.get("model", ""),
+            background_type=p.get("background_type", ""),
+            limit=self._page_size, offset=self._offset))
         w.finished.connect(self._on_search_done)
         w.error.connect(lambda m: self._on_search_error(m))
         w.start()
@@ -726,6 +870,18 @@ class VectorSearchPage(BasePage):
         self.grid.clear()
         self._total = 0
         self._update_page_label()
+
+    def refresh(self):
+        """页面激活时调用：仅当上次加载失败/无结果时自动重试，避免打断浏览。"""
+        if not hasattr(self, "_last_params"):
+            return
+        if self._total > 0 and self._results:
+            return
+        try:
+            self._do_search()
+        except Exception as e:
+            from utils.logger_utils import log as _log
+            _log.warning(f"[素材检索] 激活刷新失败: {e}")
 
     def _update_page_label(self):
         page_size = self._page_size or 1
@@ -798,6 +954,13 @@ class VectorSearchPage(BasePage):
         # 排队异步加载未命中的缩略图（并发节流）
         self._thumb_queue = list(to_load)
         self._drain_thumb_queue()
+        # 数据填充后强制按当前视口重算列宽（刚进入页面时 Resize 可能未触发，
+        # 否则仍用初始列宽导致每行显示不全）
+        try:
+            self._grid_rows_filter.apply()
+            QTimer.singleShot(50, self._grid_rows_filter.apply)
+        except Exception:
+            pass
 
     def _drain_thumb_queue(self):
         """按并发上限从队列启动缩略图 worker。"""
@@ -817,16 +980,20 @@ class VectorSearchPage(BasePage):
         mid = str(mid)
         pm = QPixmap()
         if data and pm.loadFromData(data) and not pm.isNull():
-            # 缩放到图标尺寸（保持比例）
-            pm = pm.scaled(_THUMB_ICON_SIZE.width(), _THUMB_ICON_SIZE.height(),
+            # 按当前网格图标尺寸缩放（随列宽动态变化，不再固定 160，
+            # 否则列宽大时图标从 160 放大显示会模糊/留白）
+            cur = self.grid.iconSize()
+            isz_w = max(70, cur.width())
+            isz_h = max(70, cur.height())
+            pm = pm.scaled(isz_w, isz_h,
                            Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             # 居中裁剪到正方形，避免 IconMode 下拉伸变形
-            if pm.width() != _THUMB_ICON_SIZE.width() or pm.height() != _THUMB_ICON_SIZE.height():
-                cropped = QPixmap(_THUMB_ICON_SIZE)
+            if pm.width() != isz_w or pm.height() != isz_h:
+                cropped = QPixmap(isz_w, isz_h)
                 cropped.fill(QColor("#16161f"))
                 p = QPainter(cropped)
-                x = (_THUMB_ICON_SIZE.width() - pm.width()) // 2
-                y = (_THUMB_ICON_SIZE.height() - pm.height()) // 2
+                x = (isz_w - pm.width()) // 2
+                y = (isz_h - pm.height()) // 2
                 p.drawPixmap(x, y, pm)
                 p.end()
                 pm = cropped
@@ -883,6 +1050,14 @@ class VectorSearchPage(BasePage):
                 "model": raw.get("model") or raw.get("product") or "",
                 "product": raw.get("product") or raw.get("category") or "",
                 "category": raw.get("category") or "",
+                # 素材库 AI 分析字段（智能混剪用：图片免分剰复用 /
+                # 视频传 material_id 给 /montage/split 分剰）
+                "ai_status": raw.get("ai_status") or "",
+                "scene_desc_primary": raw.get("scene_desc_primary") or "",
+                "scene_desc_secondary": raw.get("scene_desc_secondary") or "",
+                "quality_score": raw.get("quality_score"),
+                "shot_type": raw.get("shot_type") or "",
+                "ai_confidence": raw.get("ai_confidence"),
             })
         if not materials:
             self.lbl_stat.setText("⚠ 未选择到有效素材")

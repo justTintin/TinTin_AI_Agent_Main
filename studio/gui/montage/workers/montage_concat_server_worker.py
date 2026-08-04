@@ -33,6 +33,7 @@ class MontageConcatServerWorker(BaseWorker):
     stage = Signal(str)
     progress = Signal(int)
     concat_finished = Signal(str)
+    task_id_obtained = Signal(str)
 
     # 轮询间隔（秒）
     _POLL_INTERVAL = 3.0
@@ -111,6 +112,8 @@ class MontageConcatServerWorker(BaseWorker):
         task_id = resp.get("id")
         if not task_id:
             raise RuntimeError(f"montage_concat 未返回任务 id: {resp}")
+        # 通知页面把服务端 task_id 记入任务缓存 manifest
+        self.task_id_obtained.emit(str(task_id))
         self.progress.emit(30)
         log.info(f"[montage_concat] 已提交任务 id={task_id}, response={resp}")
         return task_id

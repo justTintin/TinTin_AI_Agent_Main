@@ -78,28 +78,6 @@ class Step1SplitView(BaseStepView):
 
         split_row.addStretch()
 
-        # Dependencies auto check in UI
-        try:
-            import scenedetect
-            self.main_page.has_scenedetect_dep = True
-        except ImportError:
-            self.main_page.has_scenedetect_dep = False
-
-        self.main_page.dep_status_widget = QWidget()
-        dep_layout = QHBoxLayout(self.main_page.dep_status_widget)
-        dep_layout.setContentsMargins(0, 0, 0, 0)
-        
-        if self.main_page.has_scenedetect_dep:
-            lbl_dep = QLabel("✅ 镜头分割依赖就绪")
-            lbl_dep.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            dep_layout.addWidget(lbl_dep)
-        else:
-            self.main_page.btn_install_deps = mdi_button("安装智能分割依赖", "wrench")
-            self.main_page.btn_install_deps.setObjectName("secondary_button")
-            self.main_page.btn_install_deps.clicked.connect(self.main_page._install_scenedetect)
-            dep_layout.addWidget(self.main_page.btn_install_deps)
-            
-        split_row.addWidget(self.main_page.dep_status_widget)
 
         # 单视频镜头分割（合并挑精华：可分割的先分割，无法分割的自动挑精华）
         self.main_page.btn_split = mdi_button("开始智能镜头分割", "cut")
@@ -111,14 +89,6 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_split.clicked.connect(self.main_page._start_split)
         split_row.addWidget(self.main_page.btn_split)
 
-        self.main_page.btn_gen_shot_analysis = mdi_button("生成镜头分析", "sparkles")
-        self.main_page.btn_gen_shot_analysis.setObjectName("secondary_button")
-        self.main_page.btn_gen_shot_analysis.setFixedHeight(35)
-        self.main_page.btn_gen_shot_analysis.setToolTip(
-            "调用服务端 /material/score_clip 对每个镜头做 AI 分析，\n"
-            "返回的评分与画面描述自动填入下方表格。")
-        self.main_page.btn_gen_shot_analysis.clicked.connect(self.main_page._gen_shot_analysis)
-        split_row.addWidget(self.main_page.btn_gen_shot_analysis)
         card_layout.addLayout(split_row)
 
         # Split results table view (with score filter row above)
@@ -177,6 +147,13 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_open_splits_dir.setObjectName("secondary_button")
         self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)
         nav_row.addWidget(self.main_page.btn_open_splits_dir)
+
+        self.main_page.btn_clear_montage_cache = mdi_button("清空混剪缓存", "broom")
+        self.main_page.btn_clear_montage_cache.setObjectName("secondary_button")
+        self.main_page.btn_clear_montage_cache.setToolTip(
+            "清除本地混剪任务缓存（分割片段/素材清单），不会删除原始素材。")
+        self.main_page.btn_clear_montage_cache.clicked.connect(self.main_page._clear_montage_cache)
+        nav_row.addWidget(self.main_page.btn_clear_montage_cache)
 
         nav_row.addStretch()
         self.main_page.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")

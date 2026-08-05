@@ -1478,18 +1478,18 @@ class StoryboardPage(BasePage):
         edit_sfx = QLineEdit()
         edit_sfx.setText(sfx)
         edit_sfx.setPlaceholderText("如：轻松背景音乐、键盘敲击声…")
-        hdr.addWidget(edit_sfx, 1)
+        hdr.addWidget(edit_sfx, 1)  # 音效输入框占据剩余空间，按钮紧随其后贴在右侧
+        btn_mat = QPushButton("🔍 引用素材")
+        btn_mat.setObjectName("secondary_button")
+        btn_mat.setFixedHeight(26)
+        hdr.addWidget(btn_mat)
         v.addLayout(hdr)
 
-        # 素材行：引用素材按钮在预览图上方（独立一行，避免被挤压裁切）
+        # 素材行：显示已绑定素材信息
         mat_row = QHBoxLayout()
         mat_lbl = QLabel("")
         mat_lbl.setObjectName("muted_text")
         mat_row.addWidget(mat_lbl, 1)
-        btn_mat = QPushButton("🔍 引用素材")
-        btn_mat.setObjectName("secondary_button")
-        btn_mat.setFixedHeight(26)
-        mat_row.addWidget(btn_mat)
         v.addLayout(mat_row)
 
         # 内容行：画面描述 + 旁白（左） | 缩略图（右）

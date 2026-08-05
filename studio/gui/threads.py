@@ -132,7 +132,6 @@ class AIStatusCheckThread(QThread):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
                     server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
-                    model   = cfg.get("llm_vision_model", "").strip()
 
                     if server_url:
                         # 健康探活：单次请求、不重试不打日志（避免服务不可达时刷屏）

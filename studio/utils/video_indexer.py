@@ -323,7 +323,7 @@ def frame_to_b64(path: str) -> str:
 
 # ─── 视觉 LLM：提取 AI 标签（语义标签列表，区别于重命名页的品牌/型号）─────────
 
-def call_vision_for_tags(frames_b64: list[str], model: str) -> list[str]:
+def call_vision_for_tags(frames_b64: list[str]) -> list[str]:
     """
     把多帧 base64 图片一次发给视觉模型，提取画面语义标签列表。
     返回 ["键盘", "机械轴", "俯拍", "客制化"] 格式。
@@ -480,10 +480,9 @@ class VideoIndexWorker(BaseWorker):
             ai_cfg = {}
             with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 ai_cfg = json.load(f)
-            model = ai_cfg.get("llm_vision_model", "")
-            if model and frame_paths:
+            if frame_paths:
                 frames_b64 = [frame_to_b64(p) for p in frame_paths[:6]]
-                ai_tags = call_vision_for_tags(frames_b64, model)
+                ai_tags = call_vision_for_tags(frames_b64)
                 self._log(f"  标签: {ai_tags}")
             else:
                 self._log("  视觉模型未配置，跳过标签提取")

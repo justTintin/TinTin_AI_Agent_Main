@@ -7,6 +7,7 @@
 卡片分组：
   图片：封面制作 / 图像抠图 / 图片框选OCR
   视频：视频修复 / 视频转文字 / 声音克隆 / 视频去字幕 / 视频框选OCR / 批量LUT调色
+  提示词：图片反推提示词 / 视频反推提示词
 """
 import logging
 
@@ -76,7 +77,7 @@ class _ToolCard(QFrame):
 class MediaToolsPage(BasePage):
     """媒体工具容器：卡片菜单 + 各子工具页（懒加载）。"""
 
-    # (标题, key, 图标名, 说明) —— 图标名沿用原侧边栏有效图标
+    # (标题, key, 图标名, 说明)
     _IMAGE_TOOLS = [
         ("封面制作", "cover_maker", "image-edit", "商品封面图快速制作"),
         ("图像抠图", "image_matting", "image", "智能抠图 / 去除背景"),
@@ -90,6 +91,10 @@ class MediaToolsPage(BasePage):
         ("视频框选OCR", "video_ocr", "text-box-search", "视频帧文字识别"),
         ("批量LUT调色", "video_lut", "gradient", "批量应用 LUT 调色"),
     ]
+    _PROMPT_TOOLS = [
+        ("图片反推提示词", "image_prompt", "image", "上传图片，AI 生成绘画提示词"),
+        ("视频反推提示词", "video_prompt", "video", "上传视频，框选片段生成提示词"),
+    ]
 
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
@@ -100,7 +105,7 @@ class MediaToolsPage(BasePage):
         self._tool_pages = {}
 
     def _all_tools(self):
-        return self._IMAGE_TOOLS + self._VIDEO_TOOLS
+        return self._IMAGE_TOOLS + self._VIDEO_TOOLS + self._PROMPT_TOOLS
 
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
@@ -140,6 +145,10 @@ class MediaToolsPage(BasePage):
         content_lay.addSpacing(10)
         content_lay.addWidget(self._group_header("视频"))
         content_lay.addLayout(self._build_card_grid(self._VIDEO_TOOLS, len(self._IMAGE_TOOLS)))
+        content_lay.addSpacing(10)
+        content_lay.addWidget(self._group_header("提示词"))
+        content_lay.addLayout(self._build_card_grid(
+            self._PROMPT_TOOLS, len(self._IMAGE_TOOLS) + len(self._VIDEO_TOOLS)))
         content_lay.addStretch()
 
         # ---- 页 1..n：各工具页（懒构建） ----
@@ -225,6 +234,12 @@ class MediaToolsPage(BasePage):
         elif key == "video_lut":
             from gui.video_lut_page import VideoLutPage
             self._tool_pages[key] = VideoLutPage(content, mw)
+        elif key == "image_prompt":
+            from gui.prompt_reverse_page import ImagePromptReversePage
+            self._tool_pages[key] = ImagePromptReversePage(content, mw)
+        elif key == "video_prompt":
+            from gui.prompt_reverse_page import VideoPromptReversePage
+            self._tool_pages[key] = VideoPromptReversePage(content, mw)
         else:
             raise ValueError("未知媒体工具: %s" % key)
         if self._tool_pages.get(key) is not None:

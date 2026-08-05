@@ -5,9 +5,9 @@
 整体布局（上左右下三段式）：
     ┌─ heading ────────────────────────────────────────────┐
     ├─ 上段（QSplitter 横向）                              │
-    │   左：产品选择（必选，任务起点）+ 性能参数/核心卖点      │
-    │   右：可选设置（字幕文案/素材目录/配音/TTS/开场/封面） │
-    ├─ 设置段（QGroupBox）：视频条数/总时长/比例/平台 + 执行  │
+    │   左：产品选择（必选，任务起点）+ 成片模板/模板参数      │
+    │   右：概述（模板信息，不含分镜脚本）+ 输出结果 + 日志   │
+    ├─ 底部：变体数量/总时长/比例/平台 + 执行按钮            │
     └─ 输出段：结果列表 + 执行日志 + 进度条                  │
 
 产品库读取用 ProductLibraryManager；远程素材匹配用 /material/search；
@@ -41,9 +41,7 @@ from utils.video_prediction_manager import PLATFORMS, VideoPredictionManager
 from utils.product_library_manager import ProductLibraryManager
 from gui.searchable_combo import SearchableComboBox
 from gui.mg_template_utils import (
-    _param_meta, create_value_widget,
-    widget_value, set_widget_value, color_row, merge_templates,
-    fill_template_list,
+    merge_templates,
 )
 from utils.template_server_client import list_templates as list_video_templates
 from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR, TMP_DIR
@@ -334,7 +332,6 @@ class CompileVideoPage(BasePage):
         self._materials = []
         self._templates = []
         self._current_template = None
-        self._template_form_widgets = {}
         self._features_text = ""
         self._selling_text = ""
              # 从素材检索带过来的素材列表
@@ -421,28 +418,30 @@ class CompileVideoPage(BasePage):
         prod_row.addWidget(self.btn_show_selling)
         left_lay.addLayout(prod_row)
 
-        # 模板库（成片模板，独立于动效模板；header 行内放 预览播放/刷新，不再单独占行）
+        # 模板库（成片模板，独立于动效模板；header 行内放 刷新，每个模板后放预览播放）
         tmpl_header = QHBoxLayout()
         tmpl_header.addWidget(QLabel("🎬 成片模板"))
         tmpl_header.addStretch(1)
-        self.btn_preview_play = mdi_button("预览播放", "play")
-        self.btn_preview_play.setObjectName("secondary_button")
-        self.btn_preview_play.setToolTip("渲染当前成片模板并预览播放")
-        self.btn_preview_play.clicked.connect(self._preview_template)
-        tmpl_header.addWidget(self.btn_preview_play)
         self.btn_refresh_templates = mdi_button("刷新", "refresh")
         self.btn_refresh_templates.setObjectName("secondary_button")
         self.btn_refresh_templates.clicked.connect(self._load_templates)
         tmpl_header.addWidget(self.btn_refresh_templates)
         left_lay.addLayout(tmpl_header)
-        self.list_templates = QListWidget()
-        self.list_templates.currentItemChanged.connect(self._on_template_selected)
-        self.list_templates.setMaximumHeight(170)
+        self.list_templates = QTableWidget(0, 2)
+        self.list_templates.setHorizontalHeaderLabels(["模板", "预览"])
+        self.list_templates.verticalHeader().setVisible(False)
+        self.list_templates.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.list_templates.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.list_templates.currentItemChanged.connect(self._on_template_item_changed)
+        self.list_templates.setMaximumHeight(220)
+        self.list_templates.setColumnWidth(1, 60)
+        self.list_templates.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.list_templates.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
         left_lay.addWidget(self.list_templates)
 
         top_splitter.addWidget(left_card)
 
-        # 右：可选设置
+        # 右：概述 + 输出结果
         right_card = QFrame(); right_card.setObjectName("card")
         right_lay = QVBoxLayout(right_card)
         right_lay.setContentsMargins(16, 14, 16, 14); right_lay.setSpacing(8)
@@ -521,72 +520,31 @@ class CompileVideoPage(BasePage):
         lay_cover.addStretch(1)
         self.tabs_params.addTab(tab_cover, "开场封面")
 
-        # ── Tab5 其它：模板自定义参数 ──
-        tab_other = QWidget()
-        lay_other = QVBoxLayout(tab_other)
-        lay_other.setContentsMargins(8, 8, 8, 8); lay_other.setSpacing(8)
-        self.template_params_group = QGroupBox("模板自定义参数")
-        tpl_form_lay = QVBoxLayout(self.template_params_group)
-        self.scroll_template_form = QScrollArea()
-        self.scroll_template_form.setWidgetResizable(True)
-        self.scroll_template_form.setFrameShape(QFrame.NoFrame)
-        self.template_form_container = QWidget()
-        self.template_form_layout = QFormLayout(self.template_form_container)
-        self.template_form_layout.setSpacing(8)
-        self.scroll_template_form.setWidget(self.template_form_container)
-        tpl_form_lay.addWidget(self.scroll_template_form)
-        lay_other.addWidget(self.template_params_group)
-        lay_other.addStretch(1)
-        self.tabs_params.addTab(tab_other, "其它")
-
-        # 模板参数放在左侧「成片模板」下面
-        tpl_title_row = QHBoxLayout()
-        tpl_title_row.addWidget(QLabel("🎛 模板参数"))
-        tpl_title_row.addStretch()
-        self.btn_template_defaults = mdi_button("设置默认", "refresh")
-        self.btn_template_defaults.setObjectName("secondary_button")
-        self.btn_template_defaults.setToolTip("将模板参数恢复为默认值")
-        self.btn_template_defaults.clicked.connect(self._set_template_defaults)
-        self.btn_template_defaults.setEnabled(False)
-        tpl_title_row.addWidget(self.btn_template_defaults)
-        left_lay.addLayout(tpl_title_row)
+        left_lay.addWidget(QLabel("🎬 模板参数"))
         left_lay.addWidget(self.tabs_params, 1)
-        self.template_params_group.setVisible(False)
 
         top_splitter.addWidget(right_card)
-        # 左右比例 3:7（左=产品/模板/模板参数，右=设置/输出/日志）
+        # 左右比例 3:7（左=产品/模板/模板参数，右=概述/输出/日志）
         top_splitter.setStretchFactor(0, 3)
         top_splitter.setStretchFactor(1, 7)
         top_splitter.setSizes([300, 700])
         root.addWidget(top_splitter, 2)
 
-        # ── 设置段 ────────────────────────────────────────────────────────
-        setting_group = QGroupBox("设置")
-        s_lay = QVBoxLayout(setting_group); s_lay.setSpacing(10)
+        action_frame = QFrame()
+        action_frame.setObjectName("card")
+        action_layout = QVBoxLayout(action_frame); action_layout.setSpacing(10); action_layout.setContentsMargins(16, 14, 16, 14)
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("变体数量"))
         self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10); self.spin_count.setValue(5)
         self.spin_count.setToolTip("服务端生成 N 个变体（不同风格/节奏），用进化机制选最优的 1 个输出。\n数值越大选择空间越大但耗时越长。")
         row1.addWidget(self.spin_count)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("视频总时长"))
-        self.spin_total_dur = QDoubleSpinBox()
-        self.spin_total_dur.setRange(0.0, 600.0); self.spin_total_dur.setValue(0.0)
-        self.spin_total_dur.setSuffix(" 秒")
-        self.spin_total_dur.setToolTip("仅无配音时生效：按总时长/图片数计算每张时长。0=用「每张时长」。")
-        row1.addWidget(self.spin_total_dur)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("每张时长(无配音时)"))
-        self.spin_dur = QDoubleSpinBox(); self.spin_dur.setRange(0.5, 30.0); self.spin_dur.setValue(3.0)
-        self.spin_dur.setSuffix(" 秒")
-        row1.addWidget(self.spin_dur)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("比例"))
-        self.combo_ratio = QComboBox(); self.combo_ratio.addItems(list(RATIO_SIZES.keys()))
-        row1.addWidget(self.combo_ratio)
         row1.addStretch()
-        s_lay.addLayout(row1)
+        action_layout.addLayout(row1)
+        # 视频总时长/每张时长/比例由模板定义，不在客户端暴露设置
+        self.spin_total_dur = 0.0
+        self.spin_dur = 3.0
+        self.combo_ratio = '9:16'
 
         row2 = QHBoxLayout()
         self.chk_autocheck = QCheckBox("成片后自动视频评价预测")
@@ -606,8 +564,22 @@ class CompileVideoPage(BasePage):
         self.btn_add_task.setToolTip("把当前配置提交给服务端，由服务端定时执行（可在「定时任务」页监控状态）")
         self.btn_add_task.clicked.connect(self._add_scheduled_task)
         row2.addWidget(self.btn_add_task)
-        s_lay.addLayout(row2)
-        right_lay.addWidget(setting_group)
+        action_layout.addLayout(row2)
+        root.addWidget(action_frame)
+
+
+        # ── 模板概述（不含分镜脚本信息，抽取脚本中的素材/口播/音频）────
+        self.overview_group = QGroupBox("概述")
+        ov_lay = QVBoxLayout(self.overview_group); ov_lay.setSpacing(8); ov_lay.setContentsMargins(8, 8, 8, 8)
+        self.overview_scroll = QScrollArea()
+        self.overview_scroll.setWidgetResizable(True)
+        self.overview_scroll.setFrameShape(QFrame.NoFrame)
+        self.overview_container = QWidget()
+        self.overview_form = QFormLayout(self.overview_container)
+        self.overview_form.setSpacing(8)
+        self.overview_scroll.setWidget(self.overview_container)
+        ov_lay.addWidget(self.overview_scroll)
+        right_lay.addWidget(self.overview_group)
 
         # ── 输出结果（占主要空间，供预览）─────────────────────────────────
         out_left = QWidget()
@@ -630,6 +602,21 @@ class CompileVideoPage(BasePage):
         ol_lay.addWidget(self.progress_bar)
         self.stage_label = QLabel(""); self.stage_label.setObjectName("muted_text")
         ol_lay.addWidget(self.stage_label)
+
+        # 评分预测状态行（放在输出结果卡片内，避免底部空行）
+        score_widget = QWidget()
+        score_row = QHBoxLayout(score_widget); score_row.setContentsMargins(0, 0, 0, 0); score_row.setSpacing(6)
+        self.score_label = QLabel("")
+        self.score_label.setObjectName("muted_text"); self.score_label.setWordWrap(True)
+        score_row.addWidget(self.score_label, 1)
+        self.btn_detail = mdi_button("查看详情/建议", "right")
+        self.btn_detail.setObjectName("secondary_button")
+        self.btn_detail.clicked.connect(self._open_detail)
+        self.btn_detail.setVisible(False)
+        score_row.addWidget(self.btn_detail)
+        self.score_widget = score_widget
+        self.score_widget.setVisible(False)
+        ol_lay.addWidget(score_widget)
         right_lay.addWidget(out_left, 1)
 
         # ── 执行日志：放最下面，固定小高度，默认折叠（空间让给输出结果）──
@@ -645,18 +632,6 @@ class CompileVideoPage(BasePage):
         self.log_box.setFixedHeight(120)   # 展开后也只占底部小高度
         self.log_box.setVisible(False)     # 默认折叠
         right_lay.addWidget(self.log_box)
-
-        # 评分预测状态行
-        score_row = QHBoxLayout()
-        self.score_label = QLabel("")
-        self.score_label.setObjectName("muted_text"); self.score_label.setWordWrap(True)
-        score_row.addWidget(self.score_label, 1)
-        self.btn_detail = mdi_button("查看详情/建议", "right")
-        self.btn_detail.setObjectName("secondary_button")
-        self.btn_detail.clicked.connect(self._open_detail)
-        self.btn_detail.setVisible(False)
-        score_row.addWidget(self.btn_detail)
-        root.addLayout(score_row)
 
         # 信号绑定
         self.combo_product.currentIndexChanged.connect(self._on_product_changed)
@@ -1080,26 +1055,6 @@ class CompileVideoPage(BasePage):
         sell = (it.get("selling_points") or "").strip()
         self._features_text = feat
         self._selling_text = sell
-        # 自动化：产品变化后把卖点首行自动填入模板 topic 参数（若为空）
-        self._autofill_topic_from_selling()
-
-    def _autofill_topic_from_selling(self):
-        """把产品卖点首行自动填入模板 topic 参数（表单已生成且 topic 为空时）。"""
-        if not self._current_template:
-            return
-        w = self._template_form_widgets.get("topic")
-        if not w:
-            return
-        wtype, widget = w
-        try:
-            if widget_value(widget, wtype):
-                return  # 用户已填则不覆盖
-        except Exception:
-            return
-        sell = (self._selling_text or "").strip().splitlines()
-        if sell:
-            set_widget_value(widget, wtype, sell[0][:60])
-
     def _auto_open_task_monitor(self):
         """提交立即执行任务后，自动切到「成片任务」页并开启自动刷新。"""
         mw = getattr(self, "main_window", None)
@@ -1211,7 +1166,7 @@ class CompileVideoPage(BasePage):
             }],
             "script_hint": self.in_subtitle.toPlainText().strip() or
                             (product.get("selling_points", "") or "")[:120],
-            "max_duration": int(self.spin_total_dur.value()) if self.spin_total_dur.value() > 0 else 30,
+            "max_duration": int(self.spin_total_dur) if self.spin_total_dur > 0 else 30,
             # 客户端完整参数（服务端按自身实现取用）
             "product_id": product.get("id", ""),
             "product_label": self.combo_product.currentText(),
@@ -1219,10 +1174,10 @@ class CompileVideoPage(BasePage):
             "audio": self.in_audio.text().strip(),
             "cover": self.in_cover.text().strip(),
             "subtitle": self.in_subtitle.toPlainText().strip(),
-            "ratio": self.combo_ratio.currentText(),
-            "per_dur": self.spin_dur.value(),
+            "ratio": self.combo_ratio,
+            "per_dur": self.spin_dur,
             "count": self.spin_count.value(),
-            "total_dur": self.spin_total_dur.value(),
+            "total_dur": self.spin_total_dur,
             "intro": self.in_intro.text().strip(),
             "predict_platform": self.combo_predict_platform.currentText(),
             "autocheck": self.chk_autocheck.isChecked(),
@@ -1376,7 +1331,7 @@ class CompileVideoPage(BasePage):
         out_dir = FINAL_OUTPUT_DIR
         os.makedirs(out_dir, exist_ok=True)
         count = self.spin_count.value()
-        total_dur = self.spin_total_dur.value()
+        total_dur = self.spin_total_dur
         self.btn_make.setEnabled(False)
         self.progress_bar.setValue(0)
         self.result_table.setRowCount(0)
@@ -1387,8 +1342,8 @@ class CompileVideoPage(BasePage):
             self.in_audio.text().strip(),
             self.in_cover.text().strip(),
             self.in_subtitle.toPlainText().strip(),
-            self.combo_ratio.currentText(),
-            self.spin_dur.value(),
+            self.combo_ratio,
+            self.spin_dur,
             count=count,
             total_dur=total_dur,
             intro=self.in_intro.text().strip(),
@@ -1420,7 +1375,7 @@ class CompileVideoPage(BasePage):
         # 自动视频评价预测（只对第一个成片）
         if self.chk_autocheck.isChecked() and self._last_results:
             cfg = self.ai_config
-            if cfg.get("llm_vision_api_url") and cfg.get("llm_vision_model"):
+            if cfg.get("llm_vision_api_url"):
                 from gui.hook_score_page import HookScoreWorker
                 platform = self.combo_predict_platform.currentText()
                 self._predict_platform = platform
@@ -1429,6 +1384,7 @@ class CompileVideoPage(BasePage):
                 except Exception:
                     calib = ""
                 self.score_label.setText(f"⏳ 正在按「{platform}」做视频评价预测…")
+                self.score_widget.setVisible(True)
                 out = self._last_results[0]
                 sw = HookScoreWorker(out, cfg, platform=platform, calibration=calib)
                 sw.finished.connect(self._on_self_check)
@@ -1436,8 +1392,10 @@ class CompileVideoPage(BasePage):
                 self.track_worker(sw); sw.start()
             else:
                 self.score_label.setText("（未配置视觉模型，跳过视频评价预测。）")
+                self.score_widget.setVisible(True)
 
     def _on_self_check(self, data):
+        self.score_widget.setVisible(True)
         self._self_check_data = data
         total = data.get("total", "—")
         level = data.get("play_level", "")
@@ -1565,11 +1523,100 @@ class CompileVideoPage(BasePage):
         if path and os.path.isfile(path) and os.name == "nt":
                 os.startfile(path)  # noqa
 
+
+    def _video_url_for_template(self, template):
+        """从模板字段中提取预览视频地址。"""
+        if not template:
+            return ""
+        for key in ("video_url", "preview_url", "download_url", "url",
+                    "video", "preview", "output_url", "media_url", "file"):
+            v = template.get(key)
+            if isinstance(v, dict):
+                for sub in ("url", "download_url", "video_url", "path"):
+                    sv = v.get(sub)
+                    if isinstance(sv, str) and sv.strip():
+                        return sv.strip()
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return ""
+
+    def _play_template_video(self, url):
+        """播放模板返回的视频地址。"""
+        if not url:
+            return
+        self._log(f"▶ 播放模板预览: {url}")
+        self._play_preview(url)
+
+    def _fill_template_list(self, templates, current_id=None):
+        """用表格展示模板，每行后面带一个播放按钮。"""
+        self.list_templates.clearContents()
+        self.list_templates.setRowCount(0)
+        builtins = [t for t in templates if t.get("is_builtin") or t.get("builtin")]
+        customs = [t for t in templates if not (t.get("is_builtin") or t.get("builtin"))]
+        current_row = 0
+
+        def _add_header(label):
+            nonlocal current_row
+            self.list_templates.insertRow(current_row)
+            header_item = QTableWidgetItem(label)
+            header_item.setFlags(Qt.NoItemFlags)
+            header_item.setForeground(Qt.GlobalColor.gray)
+            self.list_templates.setItem(current_row, 0, header_item)
+            self.list_templates.setSpan(current_row, 0, 1, 2)
+            current_row += 1
+
+        def _add_template(t):
+            nonlocal current_row
+            self.list_templates.insertRow(current_row)
+            name = t.get("name") or t.get("id", "")
+            backend = t.get("backend")
+            if backend:
+                name += f" [{backend}]"
+            item = QTableWidgetItem(name)
+            item.setData(Qt.UserRole, t)
+            item.setToolTip(t.get("description", ""))
+            item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.list_templates.setItem(current_row, 0, item)
+            url = self._video_url_for_template(t)
+            if url:
+                btn = QPushButton("▶")
+                btn.setFixedSize(32, 26)
+                btn.setToolTip(f"播放预览: {url}")
+                btn.clicked.connect(lambda checked=False, u=url: self._play_template_video(u))
+            else:
+                btn = QLabel("—")
+                btn.setAlignment(Qt.AlignCenter)
+            self.list_templates.setCellWidget(current_row, 1, btn)
+            current_row += 1
+
+        if builtins:
+            _add_header("━━ 内置模板 ━━")
+            for t in builtins:
+                _add_template(t)
+        if customs:
+            _add_header("━━ 自定义模板 ━━")
+            for t in customs:
+                _add_template(t)
+
+        for row in range(self.list_templates.rowCount()):
+            item = self.list_templates.item(row, 0)
+            if item and item.flags() & Qt.ItemIsSelectable:
+                self.list_templates.setCurrentCell(row, 0)
+                break
+
+        if current_id:
+            for row in range(self.list_templates.rowCount()):
+                item = self.list_templates.item(row, 0)
+                if item:
+                    t = item.data(Qt.UserRole)
+                    if t and t.get("id") == current_id:
+                        self.list_templates.setCurrentCell(row, 0)
+                        break
     # -------------- 模板相关方法 --------------
     def _load_templates(self):
         """加载成片模板库（统一接口 /templates?type=video + 内置兜底）。"""
         self._templates = list(VIDEO_FALLBACK_TEMPLATES)
-        fill_template_list(self.list_templates, self._templates)
+        self._fill_template_list(self._templates)
         w = VideoTemplateLoadWorker()
         w.finished.connect(self._on_templates_loaded)
         w.phase.connect(self._log)
@@ -1581,107 +1628,281 @@ class CompileVideoPage(BasePage):
             self._log("⚠ 未从服务端加载到成片模板，使用内置模板")
         self._templates = merge_templates(server_templates, VIDEO_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
-        fill_template_list(self.list_templates, self._templates, current_id=current_id)
+        self._fill_template_list(self._templates, current_id=current_id)
 
-    def _on_template_selected(self, current, previous):
+    def _on_template_item_changed(self, current, previous):
         if current is None:
             return
-        template = current.data(Qt.UserRole)
+        item = self.list_templates.item(current.row(), 0)
+        if item is None:
+            return
+        template = item.data(Qt.UserRole)
         if not template:
             return
         self._current_template = template
         self._apply_template_to_editor(template)
 
     def _apply_template_to_editor(self, template):
-        self._build_template_form(template)
-        self.btn_template_defaults.setEnabled(True)
-        self.template_params_group.setVisible(True)
-        defaults = template.get("defaults") or {}
-        for key, val in defaults.items():
-            if key in self._template_form_widgets:
-                wtype, widget = self._template_form_widgets[key]
-                set_widget_value(widget, wtype, val)
-        # 自动化：选中模板后若已选产品，自动填 topic 参数
-        self._autofill_topic_from_selling()
+        # 更新右侧概述（不含分镜脚本信息）
+        self._update_template_overview(template)
+        # 把模板内脚本的素材/口播/音频同步到左侧模板参数
+        self._apply_script_to_params(template)
 
-    def _build_template_form(self, template):
-        while self.template_form_layout.count():
-            item = self.template_form_layout.takeAt(0)
+    def _add_overview_row(self, label, value, tooltip=None):
+        """在概述表单里添加一行标签+只读值。"""
+        lbl = QLabel(label)
+        lbl.setStyleSheet("color: #8b90a3; font-size: 12px;")
+        val = QLabel(value)
+        val.setWordWrap(True)
+        val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        val.setStyleSheet("color: #e2e4ea; font-size: 12px;")
+        if tooltip:
+            val.setToolTip(tooltip)
+        self.overview_form.addRow(lbl, val)
+
+    def _extract_script_summary(self, template):
+        """从模板的 storyboard/script 字段中提取素材/口播/音频/音效清单。"""
+        # 支持 storyboard/script/shots 等多种存放方式
+        script = None
+        for key in ("storyboard", "script", "storyboard_script",
+                    "storyboard_text", "storyboard_json", "template_script",
+                    "montage_script"):
+            v = template.get(key)
+            if v:
+                script = v
+                break
+        if not script and isinstance(template.get("shots"), list):
+            # 顶层直接是 shots 列表
+            script = template
+        if not script:
+            return None
+        if isinstance(script, str):
+            try:
+                script = json.loads(script)
+            except Exception:
+                return None
+        if isinstance(script, dict):
+            shots = script.get("shots") or []
+        elif isinstance(script, list):
+            shots = script
+        else:
+            return None
+        if not isinstance(shots, list):
+            return None
+
+        total_duration = 0.0
+        materials = []
+        narrations = []
+        audio_files = []
+        sfx_files = []
+
+        for sh in shots:
+            if not isinstance(sh, dict):
+                continue
+            total_duration += float(
+                sh.get("duration") or sh.get("duration_seconds") or 0
+            )
+            # 素材
+            for k in ("materials", "material_path", "visual", "image",
+                      "video", "media", "source", "clip", "file",
+                      "scene", "shot", "description"):
+                mv = sh.get(k)
+                if not mv:
+                    continue
+                if isinstance(mv, list):
+                    for m in mv:
+                        materials.append(self._material_name(m))
+                else:
+                    materials.append(self._material_name(mv))
+            # 口播
+            for k in ("audio", "narration", "subtitle", "text",
+                      "voiceover", "口播", "copy", "caption", "script"):
+                nv = sh.get(k)
+                if nv and isinstance(nv, str):
+                    narrations.append(nv.strip())
+                    break
+            # 配音
+            for k in ("audio", "voice", "audio_file", "bgm",
+                      "sound", "music", "voiceover"):
+                av = sh.get(k)
+                if av and isinstance(av, str):
+                    if (av.endswith((".mp3", ".wav", ".m4a", ".aac", ".ogg"))
+                            or "://" in av or os.path.splitext(av)[1]):
+                        audio_files.append(os.path.basename(av))
+                        break
+            # 音效
+            for k in ("sfx", "sound_effect", "effect", "sound"):
+                sv = sh.get(k)
+                if sv:
+                    if isinstance(sv, list):
+                        for s in sv:
+                            sfx_files.append(self._material_name(s))
+                    else:
+                        sfx_files.append(self._material_name(sv))
+
+        return {
+            "shot_count": len(shots),
+            "total_duration": total_duration,
+            "ratio": script.get("ratio") if isinstance(script, dict) else "",
+            "materials": materials,
+            "narrations": narrations,
+            "audio_files": audio_files,
+            "sfx_files": sfx_files,
+        }
+
+    def _material_name(self, m):
+        """把素材条目统一成可读名称。"""
+        if isinstance(m, dict):
+            return (m.get("name") or m.get("filename") or m.get("path")
+                    or m.get("url") or m.get("id") or str(m))
+        return str(m)
+
+    def _apply_script_to_params(self, template):
+        """把模板脚本中的素材、口播、音频同步到左侧模板参数。"""
+        summary = self._extract_script_summary(template)
+        if not summary:
+            return
+        # 素材
+        if summary.get("materials"):
+            mats = []
+            for m in summary["materials"]:
+                ext = os.path.splitext(str(m))[1].lower()
+                if ext in (".mp4", ".mov", ".avi", ".mkv", ".webm"):
+                    mtype = "video"
+                elif ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"):
+                    mtype = "image"
+                else:
+                    mtype = "video"
+                mats.append({
+                    "material_id": str(m),
+                    "media_type": mtype,
+                    "filename": os.path.basename(str(m)) or str(m),
+                    "path": str(m),
+                })
+            self.import_materials(mats)
+        # 文案
+        if summary.get("narrations"):
+            self.in_subtitle.setPlainText("\n".join(summary["narrations"]))
+        # 配音音频
+        if summary.get("audio_files"):
+            self.in_audio.setText(summary["audio_files"][0])
+
+    def _update_template_overview(self, template):
+        """在右侧面板展示模板关键信息（模板不可编辑）。"""
+        while self.overview_form.count():
+            item = self.overview_form.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self._template_form_widgets.clear()
+        if not template:
+            self._add_overview_row("提示", "请选择一个成片模板以查看概述。")
+            return
+
+        self._add_overview_row("名称", "{name}  ({tid})".format(
+            name=template.get("name", "-"), tid=template.get("id", "-")))
+        self._add_overview_row("类型/分类",
+            "{tp} / {cat}".format(tp=template.get("type", "-"),
+                                  cat=template.get("category", "-")))
+        if template.get("description"):
+            self._add_overview_row("描述", template["description"])
+        self._add_overview_row("内置", "是" if template.get("is_builtin") else "否")
+
+        # 服务端 API 定义的模板字段
+        canvas = template.get("canvas") or {}
+        if canvas:
+            self._add_overview_row(
+                "画布",
+                "{w}×{h} @ {fps}".format(
+                    w=canvas.get("width", "-"), h=canvas.get("height", "-"),
+                    fps=canvas.get("fps", "-")))
+        if template.get("duration"):
+            self._add_overview_row("时长", f"{template['duration']} 秒")
+
         params = template.get("params") or []
-        for param in params:
-            key, wtype, label, default = _param_meta(param)
-            if not key:
-                continue
-            if wtype == "scenes":
-                continue
-            widget = create_value_widget(wtype, default)
-            self._template_form_widgets[key] = (wtype, widget)
-            if wtype == "color":
-                self.template_form_layout.addRow(label, color_row(widget))
-            else:
-                self.template_form_layout.addRow(label, widget)
+        if params:
+            param_lines = []
+            for p in params:
+                key = p.get("name") or p.get("key") or "-"
+                label = p.get("label") or key
+                ptype = p.get("type") or "-"
+                default = p.get("default")
+                default_txt = (json.dumps(default, ensure_ascii=False)
+                               if default is not None else "-")
+                param_lines.append(
+                    "• {label}（{key}）类型 {ptype}，默认 {default}".format(
+                        label=label, key=key, ptype=ptype,
+                        default=default_txt))
+            self._add_overview_row("参数", "\n".join(param_lines))
 
+        effects = template.get("effects")
+        if effects:
+            self._add_overview_row(
+                "效果", json.dumps(effects, ensure_ascii=False))
+
+        # 兼容自定义模板携带的分镜脚本数据
+        summary = self._extract_script_summary(template)
+        if summary:
+            self._add_overview_row(
+                "脚本摘要",
+                "{shots} 镜 / {dur:.1f}s / {ratio}".format(
+                    shots=summary["shot_count"],
+                    dur=summary["total_duration"],
+                    ratio=summary.get("ratio") or "-"))
+            if summary.get("materials"):
+                mat_text = "、".join(summary["materials"][:10])
+                if len(summary["materials"]) > 10:
+                    mat_text += " 等 {n} 个".format(n=len(summary["materials"]))
+                self._add_overview_row(
+                    "素材 ({n})".format(n=len(summary["materials"])),
+                    mat_text, "\n".join(summary["materials"]))
+            if summary.get("narrations"):
+                nar_text = "\n".join(summary["narrations"])
+                if len(nar_text) > 300:
+                    nar_text = nar_text[:300] + "…"
+                self._add_overview_row(
+                    "口播 ({n} 句)".format(n=len(summary["narrations"])),
+                    nar_text)
+            if summary.get("audio_files"):
+                self._add_overview_row(
+                    "配音 ({n})".format(n=len(summary["audio_files"])),
+                    "、".join(summary["audio_files"]))
+            if summary.get("sfx_files"):
+                self._add_overview_row(
+                    "音效 ({n})".format(n=len(summary["sfx_files"])),
+                    "、".join(summary["sfx_files"]))
+        else:
+            self._add_overview_row(
+                "脚本数据",
+                "当前模板未携带分镜脚本字段；素材/文案/音频/开场封面请在左侧「模板参数」中手动填写。")
+
+        # 其余字段
+        excluded = {
+            "name", "id", "type", "category", "description", "is_builtin",
+            "params", "effects", "canvas", "duration",
+            "storyboard", "scenes", "script", "shots", "分镜脚本",
+            "storyboard_script", "storyboard_text", "storyboard_json",
+        }
+        for key, val in sorted(template.items()):
+            if key in excluded or val is None or val == {} or val == []:
+                continue
+            if isinstance(val, (dict, list)):
+                val = json.dumps(val, ensure_ascii=False)
+            self._add_overview_row(key, str(val))
     def _collect_template_params(self):
-        values = {}
-        for key, (wtype, widget) in self._template_form_widgets.items():
-            values[key] = widget_value(widget, wtype)
-        return values
-
-    def _set_template_defaults(self):
+        """使用模板默认参数；topic 为空时从产品卖点自动填入。"""
         if not self._current_template:
-            return
-        defaults = self._current_template.get("defaults") or {}
-        for key, val in defaults.items():
-            if key in self._template_form_widgets:
-                wtype, widget = self._template_form_widgets[key]
-                set_widget_value(widget, wtype, val)
-        # also fill template-defined params default
-        for param in self._current_template.get("params") or []:
-            key, wtype, label, default = _param_meta(param)
-            if key and key in self._template_form_widgets:
-                wtype, widget = self._template_form_widgets[key]
-                set_widget_value(widget, wtype, default)
-
-    def _preview_template(self):
-        """预览播放：渲染当前成片模板（/templates/render）→ 轮询 → 下载 → 本地播放。"""
-        if not self._current_template:
-            self.show_warning("请先选择成片模板。")
-            return
-        template_id = self._current_template.get("id")
-        params = dict(self._collect_template_params())
+            return {}
+        # 服务端 TemplateIn 的 params 数组里每个 ParamDef 带 default
+        params = {}
+        for p in (self._current_template.get("params") or []):
+            key = p.get("name") or p.get("key")
+            if key and p.get("default") is not None:
+                params[key] = p["default"]
         if not params.get("topic"):
             product = self._current_product() or {}
             selling = (product.get("selling_points") or "").strip().splitlines()
             if selling:
                 params["topic"] = selling[0][:60]
-        ratio = self.combo_ratio.currentText()
-        self.btn_preview_play.setEnabled(False)
-        self.progress_bar.setVisible(True); self.progress_bar.setValue(0)
-        self.stage_label.setText("正在渲染成片模板（预览）…")
-        self._log(f"🎬 预览渲染：template={template_id} ratio={ratio} params={params}")
-        w = TemplatePreviewWorker(template_id, params, ratio)
-        w.progress.connect(self.progress_bar.setValue)
-        w.phase.connect(self.stage_label.setText)
-
-        def _done(out):
-            self.btn_preview_play.setEnabled(True)
-            self.progress_bar.setVisible(False)
-            self.stage_label.setText(f"✅ 预览已生成：{os.path.basename(out)}")
-            self._log(f"✅ 成片模板预览：{out}")
-            self._play_preview(out)
-
-        def _err(e):
-            self.btn_preview_play.setEnabled(True)
-            self.progress_bar.setVisible(False)
-            self.stage_label.setText("⚠ 预览渲染失败")
-            self.show_error(str(e), "预览渲染失败")
-
-        w.finished.connect(_done)
-        w.error.connect(_err)
-        self.track_worker(w); w.start()
+        return params
 
     def _play_preview(self, path):
         """用统一播放器预览成片（等比显示 + 播放/暂停/停止 + 进度条 + 时间）；失败回退系统播放器。"""

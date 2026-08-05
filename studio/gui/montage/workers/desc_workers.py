@@ -26,10 +26,11 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
             import json
             import re
 
-            log.info(f"BatchGenerateDescriptionsWorker - 启动整体镜头描述分析。模型: {self.model}, 视频分段数: {len(self.scenes)}")
+            log.info(f"BatchGenerateDescriptionsWorker - 启动整体镜头描述分析。视频分段数: {len(self.scenes)}")
             
             desc_dict = {}
-            is_vision = any(kw in self.model.lower() for kw in ["vision", "gpt-4o", "gpt-4-turbo", "claude-3", "gemini", "vl", "qwen-vl"])
+            # 有字幕时走文本模型（默认），无字幕时走服务端自选的视觉模型
+            is_vision = not self.srt_text.strip()
             
             # 1. Prepare scenes info
             scenes_info = []
@@ -112,8 +113,8 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                 "temperature": 0.2
             }
             
-            log.info(f"BatchGenerateDescriptionsWorker - 正在请求大模型 API: {self.model}，以整体方式生成镜头描述。")
-            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=60)
+            log.info("BatchGenerateDescriptionsWorker - 正在请求大模型 API，以整体方式生成镜头描述。")
+            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=(None if is_vision else ""), timeout=60)
             class _R:
                 status_code = 200
             res = _R()
@@ -160,7 +161,7 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
 
 class LocalVisionDescWorker(BaseWorker):
-    """调用服务端 /llm/chat/completions 视觉模型（模型名由 llm_vision_model 配置）分析每个分割镜头的画面内容，生成画面描述文案；客户端本地仅抽帧。
+    """调用服务端 /llm/chat/completions 视觉模型（模型名由服务端自动选择）分析每个分割镜头的画面内容，生成画面描述文案；客户端本地仅抽帧。
 
     有字幕时：结合字幕文案 + 画面截图，生成带营销感的描述。
     无字幕时：纯画面视觉分析。
@@ -168,10 +169,9 @@ class LocalVisionDescWorker(BaseWorker):
 
     finished = Signal(str)  # JSON string: {"1": "desc1", "2": "desc2", ...}
 
-    def __init__(self, vision_model, split_video_paths, scenes,
+    def __init__(self, split_video_paths, scenes,
                  srt_text="", srt_segments=None):
         super().__init__()
-        self.vision_model = vision_model
         self.split_video_paths = split_video_paths
         self.scenes = scenes
         self.srt_text = srt_text
@@ -264,7 +264,7 @@ class LocalVisionDescWorker(BaseWorker):
                              {"type": "text", "text": user_text},
                              {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}},
                          ]}],
-                        model=self.vision_model, temperature=0.2, max_tokens=60, timeout=60)
+                        model=None, temperature=0.2, max_tokens=60, timeout=60)
                     content = text.strip().strip("'\"\"'").split("\n")[0].strip()
                     if content:
                         desc_dict[idx] = content[:30]

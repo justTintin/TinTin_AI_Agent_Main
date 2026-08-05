@@ -77,5 +77,5 @@ class OllamaManager:
         return []
 
     def get_configured_model(self) -> str:
-        """从 ai_config.json 读取当前配置的视觉模型名；读不到返回空串。"""
-        return str(_read_ai_config().get("llm_vision_model", "") or "").strip()
+        """视觉模型由服务端选择，客户端不再配置模型名。"""
+        return ""

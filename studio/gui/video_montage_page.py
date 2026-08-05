@@ -2368,12 +2368,6 @@ class VideoMontagePage(BasePage):
 
         供批量分割、批量挑精华等批量路径复用。
         """
-        vision_model = self.main_window.ai_config.get("llm_vision_model", "")
-
-        if not vision_model:
-            log.info(f"[{source_label}] 未配置视觉模型，跳过画面描述生成")
-            return
-
         if not os.path.exists(splits_dir):
             return
 
@@ -2422,7 +2416,6 @@ class VideoMontagePage(BasePage):
         self._trigger_splits_dir = splits_dir
 
         self.vision_desc_worker = LocalVisionDescWorker(
-            vision_model=vision_model,
             split_video_paths=split_video_paths,
             scenes=scenes if scenes else [],
             srt_text=raw_srt,
@@ -5651,10 +5644,9 @@ class VideoMontagePage(BasePage):
                     missing_clips.append(os.path.abspath(src_path))
 
         if missing_clips:
-            vision_model = cfg.get("llm_vision_model", "").strip() or model
             self.stage_label.setText(f"正在为 {len(missing_clips)} 个缺失描述的镜头生成画面描述...")
             self._batch_gen_missing_descriptions(
-                missing_clips, "", "", vision_model,
+                missing_clips, "", "", None,
                 lambda: self._do_gen_copy_for_assembled(path, cfg, "", "", model))
         else:
             self._do_gen_copy_for_assembled(path, cfg, "", "", model)
@@ -5770,9 +5762,8 @@ class VideoMontagePage(BasePage):
 
         if missing_desc_clips:
             # 有镜头缺少画面描述，用视觉 LLM 自动生成
-            vision_model = cfg.get("llm_vision_model", "").strip() or model
             self._batch_gen_missing_descriptions(
-                list(missing_desc_clips), "", "", vision_model,
+                list(missing_desc_clips), "", "", None,
                 lambda: self._start_batch_copy("", "", model, info, targets))
         else:
             self._start_batch_copy("", "", model, info, targets)

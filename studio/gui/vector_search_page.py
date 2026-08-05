@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QListWidget, QListWidgetItem, QAbstractItemView, QToolButton, QMenu,
     QSpinBox, QDialog, QFrame, QSplitter, QWidget, QSlider, QTextEdit,
+    QSizePolicy,
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect, QObject, QEvent
 from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor, QAction
@@ -202,11 +203,26 @@ class _GridRowsFilter(QObject):
             return
         # 每行固定 cols 个：列宽 = 视口宽 / cols；图标撑满列宽（留少量边距），
         # 不再 clamp 到 160——否则列宽大时格子左右留白，素材看起来没撑满
-        col_w = max(80, w // self.cols)
-        icon = max(70, col_w - 6)
-        row_h = icon + 52   # 图标 + 文件名行高
+        # account for inter-cell spacing so exactly `cols` columns fit
+        spacing = self.grid.spacing()
+        total_gap = spacing * (self.cols - 1)
+        col_w = max(90, (w - total_gap) // self.cols)
+        icon = max(80, col_w - 2)
+        row_h = icon + 24   # 鍥炬爣 + 鏂囦欢鍚嶈楂?
         self.grid.setGridSize(QSize(col_w, row_h))
         self.grid.setIconSize(QSize(icon, icon))
+        # 布局诊断：帮助确认侧边栏/网格实际占用宽度
+        try:
+            from utils.logger_utils import log as _log
+            splitter = self.grid.parentWidget()
+            while splitter is not None and not isinstance(splitter, QSplitter):
+                splitter = splitter.parentWidget()
+            if splitter is not None:
+                sidebar = splitter.widget(0)
+                if sidebar is not None:
+                    _log.debug("[素材检索] 侧边栏宽=%s 网格视口宽=%s 列宽=%s 图标=%s", sidebar.width(), w, col_w, icon)
+        except Exception:
+            pass
 
 
 class _BrandCountLoader(BaseWorker):
@@ -437,7 +453,7 @@ class PromptReversePanel(QFrame):
 class VectorSearchPage(BasePage):
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
-        root.setContentsMargins(20, 20, 20, 20)
+        root.setContentsMargins(0, 10, 0, 0)
         root.setSpacing(10)
 
         # ── 顶部：标题 + 搜索栏 ──
@@ -495,10 +511,11 @@ class VectorSearchPage(BasePage):
 
         sidebar = QFrame()
         sidebar.setObjectName("card")
-        sidebar.setMinimumWidth(120)
-        sidebar.setMaximumWidth(160)  # 侧边栏更窄，右侧网格能完整显示每行 10 个素材
+        sidebar.setStyleSheet("QFrame#card { background-color: #151722; border: 1px solid #252938; border-right: none; border-top-left-radius: 12px; border-bottom-left-radius: 12px; border-top-right-radius: 0px; border-bottom-right-radius: 0px; }")
+        sidebar.setFixedWidth(160)  # 固定宽度，避免 QSplitter 初始/用户拖拽后变宽
+        sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         sb_lay = QVBoxLayout(sidebar)
-        sb_lay.setContentsMargins(12, 12, 12, 12)
+        sb_lay.setContentsMargins(12, 12, 0, 12)
         sb_lay.setSpacing(6)
 
         # 库统计已移到顶部标题后；类型已移到顶部搜索栏（含白底图）
@@ -511,6 +528,7 @@ class VectorSearchPage(BasePage):
         sb_lay.addWidget(self.brand_filter_input)
         self.brand_list = QListWidget()
         self.brand_list.setObjectName("side_list")
+        self.brand_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.brand_list.currentRowChanged.connect(self._on_side_filter_changed)
         sb_lay.addWidget(self.brand_list, 1)
 
@@ -526,6 +544,7 @@ class VectorSearchPage(BasePage):
         sb_lay.addWidget(self._side_header("分类"))
         self.category_list = QListWidget()
         self.category_list.setObjectName("side_list")
+        self.category_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.category_list.currentRowChanged.connect(self._on_side_filter_changed)
         sb_lay.addWidget(self.category_list, 1)
 
@@ -533,26 +552,32 @@ class VectorSearchPage(BasePage):
 
         # 结果缩略图网格
         right = QWidget()
+        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(6)
 
         self.grid = QListWidget()
+        self.grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.grid.setViewMode(QListWidget.IconMode)
+        self.grid.setFlow(QListWidget.LeftToRight)
         self.grid.setIconSize(_THUMB_ICON_SIZE)
         self.grid.setGridSize(QSize(185, 215))   # 图标 160 + 文件名行高
         self.grid.setResizeMode(QListWidget.Adjust)
         self.grid.setMovement(QListWidget.Static)  # 不允许拖动重排
-        self.grid.setSpacing(8)
+        self.grid.setSpacing(2)
         self.grid.setSelectionMode(QAbstractItemView.NoSelection)
+        self.grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.grid.setFrameShape(QFrame.NoFrame)
+        self.grid.setLineWidth(0)
         self.grid.setUniformItemSizes(True)
         # 每列固定显示 10 个素材：动态调整 gridSize/iconSize
         self._grid_rows_filter = _GridRowsFilter(self.grid, cols=10)
         self.grid.installEventFilter(self._grid_rows_filter)
         self.grid.viewport().installEventFilter(self._grid_rows_filter)
         self._grid_rows_filter.apply()
-        self.grid.setStyleSheet("QListWidget { background: #16161f; border: 1px solid #333; border-radius: 4px; }"
-                                " QListWidget::item { background: #1c1c24; border-radius: 6px; }"
+        self.grid.setStyleSheet("QListWidget { background: #16161f; border: none; border-radius: 0px; padding: 0; margin: 0; }"
+                                " QListWidget::item { background: #1c1c24; border-radius: 6px; padding: 0; margin: 0; }"
                                 " QListWidget::item:selected { background: #2a3340; border: 1px solid #2ecc71; }")
         self.grid.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.grid.itemClicked.connect(self._on_item_clicked)
@@ -617,6 +642,9 @@ class VectorSearchPage(BasePage):
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
+        splitter.setHandleWidth(0)
+        splitter.setFrameShape(QFrame.NoFrame)
+        splitter.setLineWidth(0)
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter, 1)
 
@@ -895,14 +923,14 @@ class VectorSearchPage(BasePage):
     def _go_prev_page(self):
         if self._offset <= 0 or not self._last_params:
             return
-        self._page_size = self.spin_limit.value()
+        self._page_size = int(self.combo_limit.currentData() or 50)
         self._offset = max(0, self._offset - self._page_size)
         self._run_search()
 
     def _go_next_page(self):
         if not self._last_params:
             return
-        self._page_size = self.spin_limit.value()
+        self._page_size = int(self.combo_limit.currentData() or 50)
         if self._offset + self._page_size >= self._total:
             return
         self._offset += self._page_size

@@ -9,20 +9,17 @@
 - 浏览：GET /material/list?media_type=audio（无关键词）
 - 语义检索：POST /material/search（有关键词，带 media_type=audio）
 - 试听：GET /material/serve?material_id=xx（服务端 Range 流式播放）
-
-分类说明：优先使用服务端 audio_kind/kind/category 字段；
-服务端尚未支持音频分类字段时，按文件名/描述关键词做本地兜底过滤。
 """
 import os
-import requests
 from utils.http_client import http_get, http_post
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QComboBox, QListWidget, QListWidgetItem, QAbstractItemView,
-    QSpinBox, QFrame, QWidget,
+    QComboBox, QTableWidget, QTableWidgetItem, QAbstractItemView,
+    QSpinBox, QSlider, QFrame, QWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl
+from PySide6.QtWidgets import QHeaderView
 from PySide6.QtGui import QPixmap, QPainter, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
@@ -106,13 +103,19 @@ def _ext_from_content_type(ct):
     return ".mp3"
 
 
-class _AudioPreviewWorker(BaseWorker):
-    """后台下载音频到本地临时文件，再交给 QMediaPlayer 播放。
+def _fmt_sec(seconds):
+    """秒 -> M:SS"""
+    s = int(seconds or 0)
+    return f"{s // 60}:{s % 60:02d}"
 
-    原因：直接 setSource(服务端 HTTP 流) 时，服务端异常/网络卡顿会
-    让播放器后端在主线程无超时等待，导致整个界面卡死。
-    先下载（带超时）到本地再播放，服务端异常只会提示失败，不阻塞 GUI。
-    """
+
+def _fmt_ms(ms):
+    """毫秒 -> M:SS"""
+    return _fmt_sec(int(ms / 1000))
+
+
+class _AudioPreviewWorker(BaseWorker):
+    """后台下载音频到本地临时文件，再交给 QMediaPlayer 播放。"""
     finished = Signal(str)  # 本地临时文件路径
 
     def __init__(self, url, mid):
@@ -166,7 +169,9 @@ class _AudioListWorker(BaseWorker):
                 results = data.get("results") or data.get("data") or []
                 total = data.get("total") or len(results)
             else:
-                params = {"media_type": "audio", "limit": self.limit, "offset": self.offset}
+                # 服务端 /material/list 使用 page/size 分页（limit/offset 无效）
+                params = {"media_type": "audio", "size": self.limit,
+                          "page": (self.offset // self.limit) + 1 if self.limit else 1}
                 if self.tag:
                     params["tag"] = self.tag
                 resp = http_get(f"{base}/material/list", params=params, timeout=20)
@@ -193,18 +198,24 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self._preview_worker = None
+        self._pending_play = False
+        self._seeking = False
+        self._beat_worker = None
+        self._beat_pending = []
 
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(10)
 
-        # ── 第一行：仅标题（右侧无控件）──
+        # ── 标题 ──
         title = QLabel("🎵 音频素材")
         title.setObjectName("heading")
-        root.addWidget(title)
+        title.setFixedHeight(28)
+        title.setStyleSheet("font-size: 15px; font-weight: bold; background: transparent;")
+        root.addWidget(title, 0, Qt.AlignLeft)
 
-        # ── 第二行：搜索（独立换行显示）──
+        # ── 搜索 ──
         search_row = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索音频（语义检索，如：激昂的背景音乐）")
@@ -217,7 +228,7 @@ class AudioMaterialPage(BasePage):
         search_row.addWidget(self.btn_search)
         root.addLayout(search_row)
 
-        # ── 分类 + 状态 ──
+        # ── 分类 + 标签 + 状态 ──
         row = QHBoxLayout()
         row.addWidget(QLabel("分类:"))
         self.kind_combo = QComboBox()
@@ -239,30 +250,93 @@ class AudioMaterialPage(BasePage):
         row.addWidget(self.lbl_stat)
         root.addLayout(row)
 
-        # ── 音频列表（双击试听）──
-        self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.list_widget.itemDoubleClicked.connect(self._play_item)
-        self.list_widget.itemClicked.connect(self._on_item_clicked)
-        self.list_widget.setStyleSheet(
-            "QListWidget { background: #1a1a24; border: 1px solid #2e2e38; border-radius: 8px; font-size: 13px; }"
-            "QListWidget::item { padding: 6px 8px; border-bottom: 1px solid #26262e; }"
-            "QListWidget::item:selected { background: #2b3a63; }")
-        root.addWidget(self.list_widget, 1)
-        self.lbl_hint = QLabel("💡 双击条目试听；再次双击同一条目停止。")
-        self.lbl_hint.setObjectName("muted_text")
-        root.addWidget(self.lbl_hint)
+        # ── 音频列表（表格分列，带勾选框，双击试听）──
+        self._COL_HEADERS = ["", "文件名", "分类", "时长", "大小", "用途", "描述", "标签"]
+        self._COL_CHECK = 0
+        self._COL_FNAME = 1
+        self._COL_KIND = 2
+        self._COL_DUR = 3
+        self._COL_SIZE = 4
+        self._COL_USE = 5
+        self._COL_DESC = 6
+        self._COL_TAGS = 7
+        self._col_widths = [38, 240, 70, 60, 70, 80, 180, 120]
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(self._COL_HEADERS))
+        self.table.setHorizontalHeaderLabels(self._COL_HEADERS)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        self.table.setMinimumHeight(300)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self.table.setStyleSheet(
+            "QTableWidget { background: #1a1a24; border: 1px solid #2e2e38; border-radius: 8px; font-size: 13px; }"
+            "QTableWidget::item { padding: 4px 6px; border-bottom: 1px solid #26262e; }"
+            "QTableWidget::item:selected { background: #2b3a63; color: #ffffff; }"
+            "QHeaderView::section { background: #222230; color: #8b90a3; border: none; "
+            "border-bottom: 1px solid #2e2e38; padding: 5px 6px; font-size: 12px; }")
+        hdr = self.table.horizontalHeader()
+        for ci, w in enumerate(self._col_widths):
+            self.table.setColumnWidth(ci, w)
+        hdr.setStretchLastSection(False)
+        hdr.setSectionResizeMode(self._COL_FNAME, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(self._COL_DESC, QHeaderView.ResizeMode.Stretch)
+        root.addWidget(self.table, 1)
 
-        # ── 播放控制 ──
+        # ── 全选 / 取消全选 ──
+        sel_row = QHBoxLayout()
+        self.btn_select_all = QPushButton("☑ 全选")
+        self.btn_select_all.setObjectName("secondary_button")
+        self.btn_select_all.clicked.connect(self._select_all)
+        sel_row.addWidget(self.btn_select_all)
+        self.btn_deselect_all = QPushButton("☐ 取消全选")
+        self.btn_deselect_all.setObjectName("secondary_button")
+        self.btn_deselect_all.clicked.connect(self._deselect_all)
+        sel_row.addWidget(self.btn_deselect_all)
+        sel_row.addStretch(1)
+        self.lbl_hint = QLabel("💡 双击试听 · 勾选后可发送到卡点成片")
+        self.lbl_hint.setObjectName("muted_text")
+        sel_row.addWidget(self.lbl_hint)
+        root.addLayout(sel_row)
+
+        # ── 播放控制条 ──
         play_row = QHBoxLayout()
+        play_row.setSpacing(6)
+        self.btn_play_pause = QPushButton("▶")
+        self.btn_play_pause.setObjectName("secondary_button")
+        self.btn_play_pause.setFixedWidth(40)
+        self.btn_play_pause.setEnabled(False)
+        self.btn_play_pause.setToolTip("播放 / 暂停")
+        self.btn_play_pause.clicked.connect(self._toggle_play_pause)
+        play_row.addWidget(self.btn_play_pause)
+        self.btn_stop = QPushButton("⏹")
+        self.btn_stop.setObjectName("secondary_button")
+        self.btn_stop.setFixedWidth(40)
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.setToolTip("停止")
+        self.btn_stop.clicked.connect(self._stop_preview)
+        play_row.addWidget(self.btn_stop)
+        self.slider_progress = QSlider(Qt.Horizontal)
+        self.slider_progress.setRange(0, 0)
+        self.slider_progress.setEnabled(False)
+        self.slider_progress.sliderMoved.connect(self._on_seek)
+        play_row.addWidget(self.slider_progress, 1)
+        self.lbl_time = QLabel("0:00 / 0:00")
+        self.lbl_time.setObjectName("muted_text")
+        self.lbl_time.setMinimumWidth(84)
+        play_row.addWidget(self.lbl_time)
+        self.btn_beat = QPushButton("🎵 卡点成片")
+        self.btn_beat.setObjectName("primary_button")
+        self.btn_beat.clicked.connect(self._send_to_beat_montage)
+        play_row.addWidget(self.btn_beat)
+        root.addLayout(play_row)
+
+        # ── 正在播放 ──
         self.lbl_now_playing = QLabel("未在播放")
         self.lbl_now_playing.setObjectName("muted_text")
-        play_row.addWidget(self.lbl_now_playing, 1)
-        btn_stop = QPushButton("⏹ 停止")
-        btn_stop.setObjectName("secondary_button")
-        btn_stop.clicked.connect(self._stop_preview)
-        play_row.addWidget(btn_stop)
-        root.addLayout(play_row)
+        root.addWidget(self.lbl_now_playing)
 
         # ── 分页 ──
         page_row = QHBoxLayout()
@@ -336,16 +410,18 @@ class AudioMaterialPage(BasePage):
         if "Connection" in msg or "timed out" in msg or "Max retries" in msg:
             friendly = "无法连接服务端，请检查服务端是否在线"
         self.lbl_stat.setText(f"❌ {friendly}")
-        self.list_widget.clear()
+        self.table.setRowCount(0)
         self._results = []
         self._total = 0
         self._update_page_label()
 
     # ── 列表 ──
+    # --- list ---
     def _fill_list(self, rows):
-        self.list_widget.clear()
+        self.table.setRowCount(0)
         kind = (self._last_params or {}).get("kind", "")
-        shown = 0
+        _KIND_TEXT = {"sfx": "音效", "voice": "配音", "music": "音乐"}
+        display_rows = []
         for item in rows:
             if kind and classify_audio(item) != kind:
                 continue
@@ -353,57 +429,134 @@ class AudioMaterialPage(BasePage):
             fname = item.get("filename", "") or "未命名"
             fsize = item.get("file_size", 0)
             size_str = f"{fsize / 1048576:.1f}MB" if fsize else "—"
-            kind_name = {"sfx": "音效", "voice": "配音", "music": "音乐"}.get(
-                classify_audio(item), "未分类")
-            tip = (f"🎵 {fname}\n分类: {kind_name}\n大小: {size_str}")
-            score = item.get("score")
-            if score is not None:
-                tip += f"\n相关度: {float(score):.3f}"
+            dur = item.get("duration_s")
+            dur_str = _fmt_sec(dur) if dur else "—"
+            kind_code = classify_audio(item)
+            kind_name = _KIND_TEXT.get(kind_code, "未分类")
+            use_case = item.get("use_case") or ""
+            brand = item.get("brand") or ""
             scene = item.get("scene_desc_primary") or ""
+            tags = item.get("tags") or []
+            tags_str = ", ".join(str(t) for t in tags[:3]) if tags else ""
+            score = item.get("score")
+            tip_parts = [f"🎵 {fname}", f"分类: {kind_name}",
+                         f"时长: {dur_str}", f"大小: {size_str}"]
+            if use_case:
+                tip_parts.append(f"用途: {use_case}")
+            if brand:
+                tip_parts.append(f"品牌: {brand}")
             if scene:
-                tip += f"\n描述: {str(scene)[:100]}"
-            lw = QListWidgetItem()
-            lw.setText(f"[{kind_name}] {fname[:44]}")
-            lw.setToolTip(tip)
-            lw.setIcon(self._pm_audio)
-            lw.setData(Qt.UserRole, {"mid": mid, "filename": fname})
-            self.list_widget.addItem(lw)
-            shown += 1
+                tip_parts.append(f"描述: {scene}")
+            if tags_str:
+                tip_parts.append(f"标签: {tags_str}")
+            if score is not None:
+                tip_parts.append(f"相关度: {float(score):.3f}")
+            tooltip = "\n".join(tip_parts)
+            display_rows.append({
+                "mid": mid, "fname": fname, "kind_name": kind_name,
+                "dur_str": dur_str, "size_str": size_str,
+                "use_case": use_case, "scene": scene, "tags_str": tags_str,
+                "tooltip": tooltip, "raw": item,
+            })
+        self.table.setRowCount(len(display_rows))
+        for ri, d in enumerate(display_rows):
+            ck = QTableWidgetItem()
+            ck.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            ck.setCheckState(Qt.Unchecked)
+            ck.setData(Qt.UserRole, {"mid": d["mid"], "filename": d["fname"], "raw": d["raw"]})
+            self.table.setItem(ri, self._COL_CHECK, ck)
+            it_name = QTableWidgetItem(d["fname"])
+            it_name.setIcon(self._pm_audio)
+            it_name.setToolTip(d["tooltip"])
+            self.table.setItem(ri, self._COL_FNAME, it_name)
+            self.table.setItem(ri, self._COL_KIND, QTableWidgetItem(d["kind_name"]))
+            self.table.setItem(ri, self._COL_DUR, QTableWidgetItem(d["dur_str"]))
+            self.table.setItem(ri, self._COL_SIZE, QTableWidgetItem(d["size_str"]))
+            self.table.setItem(ri, self._COL_USE, QTableWidgetItem(d["use_case"] or "—"))
+            self.table.setItem(ri, self._COL_DESC, QTableWidgetItem(d["scene"] or "—"))
+            self.table.setItem(ri, self._COL_TAGS, QTableWidgetItem(d["tags_str"] or "—"))
+            self.table.setRowHeight(ri, 28)
         self.lbl_stat.setText(
-            f"共 {self._total} 条音频（本页显示 {shown} 条）")
+            f"共 {self._total} 条音频（本页显示 {len(display_rows)} 条）")
 
-    # ── 试听 ──
+    def _select_all(self):
+        for i in range(self.table.rowCount()):
+            it = self.table.item(i, self._COL_CHECK)
+            if it:
+                it.setCheckState(Qt.Checked)
+
+    def _deselect_all(self):
+        for i in range(self.table.rowCount()):
+            it = self.table.item(i, self._COL_CHECK)
+            if it:
+                it.setCheckState(Qt.Unchecked)
+
     def _ensure_player(self):
-        if self._player is None:
-            self._audio_output = QAudioOutput()
-            self._player = QMediaPlayer()
-            self._player.setAudioOutput(self._audio_output)
-            self._player.mediaStatusChanged.connect(self._on_media_status)
+        """创建新的 QMediaPlayer，避免切换源时后端状态污染导致卡死。"""
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+            self._player.deleteLater()
+        self._audio_output = QAudioOutput()
+        self._player = QMediaPlayer()
+        self._player.setAudioOutput(self._audio_output)
+        self._player.mediaStatusChanged.connect(self._on_media_status)
+        self._player.errorOccurred.connect(self._on_player_error)
+        self._player.positionChanged.connect(self._on_position_changed)
+        self._player.durationChanged.connect(self._on_duration_changed)
+        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
         return self._player
 
-    def _on_item_clicked(self, item):
-        self._play_item(item)
-
-    def _play_item(self, item):
-        data = item.data(Qt.UserRole) or {}
+    def _on_cell_double_clicked(self, row, col):
+        """Double-click row: same track toggles pause/play, different track switches."""
+        ck = self.table.item(row, self._COL_CHECK)
+        if ck is None:
+            return
+        data = ck.data(Qt.UserRole) or {}
         mid = str(data.get("mid") or "")
         if not mid:
             return
-        player = self._ensure_player()
-        if (self._playing_mid == mid
-                and player.playbackState() == QMediaPlayer.PlaybackState.PlayingState):
-            self._stop_preview()
+        if self._playing_mid == mid and self._player is not None:
+            state = self._player.playbackState()
+            if state == QMediaPlayer.PlaybackState.PlayingState:
+                self._player.pause()
+            else:
+                self._player.play()
             return
-        # 防重入：同一音频的下载任务已在跑则跳过（双击会先触发单击）
+        self._play_by_mid(mid, data)
+
+    def _toggle_play_pause(self):
+        if self._player is None or self._playing_mid is None:
+            row = self.table.currentRow()
+            if row >= 0:
+                ck = self.table.item(row, self._COL_CHECK)
+                if ck:
+                    self._play_by_mid(str((ck.data(Qt.UserRole) or {}).get("mid", "")),
+                                       ck.data(Qt.UserRole) or {})
+            return
+        player = self._player
+        state = player.playbackState()
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            player.pause()
+        else:
+            player.play()
+
+    def _play_by_mid(self, mid, data):
+        if not mid:
+            return
+        if self._playing_mid is not None:
+            self._stop_preview()
         if (getattr(self, "_preview_worker", None)
                 and self._preview_worker.isRunning()
                 and getattr(self, "_preview_mid", "") == mid):
             return
-        # 先后台下载到本地再播放：避免服务端异常时 QMediaPlayer 主线程卡死
         self._playing_mid = mid
         self._playing_name = data.get("filename", mid)
         self._preview_mid = mid
         self.lbl_now_playing.setText(f"⏳ 加载中: {self._playing_name}…")
+        self._update_play_button()
         self._preview_worker = _AudioPreviewWorker(_serve_url(mid), mid)
         self._preview_worker.finished.connect(self._on_preview_ready)
         self._preview_worker.error.connect(self._on_preview_error)
@@ -413,32 +566,177 @@ class AudioMaterialPage(BasePage):
         if self._playing_mid is None:
             return
         player = self._ensure_player()
-        # 先清空旧源再设置，避免 QMediaPlayer 切换源时卡死
-        player.stop()
-        player.setSource(QUrl())
+        self._pending_play = True
         player.setSource(QUrl.fromLocalFile(path))
-        player.play()
-        self.lbl_now_playing.setText(f"▶ 播放中: {self._playing_name or ''}")
+        if player.mediaStatus() == QMediaPlayer.MediaStatus.LoadedMedia:
+            self._pending_play = False
+            player.play()
+            self.lbl_now_playing.setText(
+                f"▶ 播放中: {self._playing_name or ''}")
+        self.btn_stop.setEnabled(True)
+        self.slider_progress.setEnabled(True)
 
     def _on_preview_error(self, msg):
+        self._preview_mid = None
         self._playing_mid = None
         self._playing_name = ""
-        self.lbl_now_playing.setText(f"❌ 播放失败（服务端不可达？）：{msg}")
+        self.lbl_now_playing.setText(
+            f"❌ 播放失败（服务端不可达？）：{msg}")
+        self._update_play_button()
 
     def _stop_preview(self):
+        self._pending_play = False
         if self._player is not None:
             self._player.stop()
         self._playing_mid = None
         self._playing_name = ""
         self.lbl_now_playing.setText("未在播放")
+        self.slider_progress.setRange(0, 0)
+        self.slider_progress.setValue(0)
+        self.slider_progress.setEnabled(False)
+        self.lbl_time.setText("0:00 / 0:00")
+        self.btn_stop.setEnabled(False)
+        self._update_play_button()
+
+    def _on_position_changed(self, pos):
+        if not self._seeking:
+            self.slider_progress.blockSignals(True)
+            self.slider_progress.setValue(pos)
+            self.slider_progress.blockSignals(False)
+        dur = self.slider_progress.maximum()
+        self.lbl_time.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")
+
+    def _on_duration_changed(self, dur):
+        self.slider_progress.setRange(0, dur)
+        self.lbl_time.setText(f"0:00 / {_fmt_ms(dur)}")
+
+    def _on_seek(self, pos):
+        if self._player is not None:
+            self._seeking = True
+            self._player.setPosition(pos)
+            self._seeking = False
+            dur = self.slider_progress.maximum()
+            self.lbl_time.setText(f"{_fmt_ms(pos)} / {_fmt_ms(dur)}")
+
+    def _on_playback_state_changed(self, _state):
+        self._update_play_button()
+
+    def _update_play_button(self):
+        if self._player is None or self._playing_mid is None:
+            self.btn_play_pause.setText("▶")
+            self.btn_play_pause.setEnabled(False)
+            return
+        self.btn_play_pause.setEnabled(True)
+        state = self._player.playbackState()
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.btn_play_pause.setText("⏸")
+            name = self._playing_name or ''
+            self.lbl_now_playing.setText(f"▶ 播放中: {name}")
+        else:
+            self.btn_play_pause.setText("▶")
+            name = self._playing_name or ''
+            if self._pending_play:
+                self.lbl_now_playing.setText(f"⏳ 加载中: {name}…")
+            else:
+                self.lbl_now_playing.setText(f"⏸ 已暂停: {name}")
 
     def _on_media_status(self, status):
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self._playing_mid = None
-            self.lbl_now_playing.setText("播放完成")
+        if (status == QMediaPlayer.MediaStatus.LoadedMedia
+                and getattr(self, "_pending_play", False)):
+            self._pending_play = False
+            if self._player is not None:
+                self._player.play()
+                self.lbl_now_playing.setText(
+                    f"▶ 播放中: {self._playing_name or ''}")
+        elif status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self._pending_play = False
+            self.slider_progress.setValue(0)
+            name = self._playing_name or ''
+            self.lbl_now_playing.setText(f"⏹ 播放结束: {name}")
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self._playing_mid = None
-            self.lbl_now_playing.setText("❌ 无法播放该音频（格式不支持或文件损坏）")
+            self._playing_name = ""
+            self._pending_play = False
+            self.lbl_now_playing.setText(
+                "❌ 无法播放该音频（格式不支持或文件损坏）")
+            self._update_play_button()
+
+    def _on_player_error(self, error, error_string):
+        """QMediaPlayer 报错时清理状态，避免卡住播放状态。"""
+        self._playing_mid = None
+        self._playing_name = ""
+        self._pending_play = False
+        self.lbl_now_playing.setText(f"❌ 播放失败：{error_string}")
+        self._update_play_button()
+
+    # ── 卡点成片 ──
+    def _send_to_beat_montage(self):
+        """Send checked audios to beat montage (download first, then switch page)."""
+        checked = []
+        for i in range(self.table.rowCount()):
+            ck = self.table.item(i, self._COL_CHECK)
+            if ck and ck.checkState() == Qt.Checked:
+                data = ck.data(Qt.UserRole) or {}
+                mid = str(data.get("mid") or "")
+                if mid:
+                    checked.append(data)
+        if not checked:
+            QMessageBox.information(
+                self.parent_widget, "提示",
+                "请先勾选至少一条音频。")
+            return
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            QMessageBox.warning(self.parent_widget, "错误",
+                                "无法访问主窗口。")
+            return
+        first = checked[0]
+        mid = first["mid"]
+        fname = first.get("filename", mid)
+        self._beat_pending = checked
+        self.lbl_now_playing.setText(f"⏳ 正在下载 {fname} 以用于卡点成片…")
+        self._beat_worker = _AudioPreviewWorker(_serve_url(mid), mid)
+        self._beat_worker.finished.connect(self._on_beat_download_done)
+        self._beat_worker.error.connect(self._on_beat_download_error)
+        self._beat_worker.start()
+
+    def _on_beat_download_done(self, path):
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            return
+        try:
+            mw.switch_page(34)
+            tool = getattr(mw, "compile_video_tool", None)
+            if tool is None:
+                mw.switch_page(45)
+                self.lbl_now_playing.setText("❌ 一键成片页未加载")
+                return
+            bc = getattr(tool, "beat_controller", None)
+            if bc is not None:
+                tabs = getattr(tool, "tabs", None)
+                if tabs is not None:
+                    for i in range(tabs.count()):
+                        if "卡点" in tabs.tabText(i):
+                            tabs.setCurrentIndex(i)
+                            break
+                bc.beat_music_path.setText(path)
+                if hasattr(bc, "btn_beat_detect"):
+                    bc.btn_beat_detect.setEnabled(True)
+                if hasattr(bc, "beat_status_lbl"):
+                    extra = ""
+                    if len(self._beat_pending) > 1:
+                        extra = f"（另有 {len(self._beat_pending) - 1} 首已选）"
+                    bc.beat_status_lbl.setText(
+                        f"已从音频素材带入: {os.path.basename(path)}{extra}")
+                if hasattr(bc, "step_beat"):
+                    bc.step_beat.load_music(path)
+            self.lbl_now_playing.setText(
+                f"✅ 已跳转到卡点成片: {os.path.basename(path)}")
+        except Exception as e:
+            self.lbl_now_playing.setText(f"❌ 跳转失败: {e}")
+
+    def _on_beat_download_error(self, msg):
+        self.lbl_now_playing.setText(f"❌ 下载音频失败: {msg}")
 
     # ── 分页 ──
     def _update_page_label(self):

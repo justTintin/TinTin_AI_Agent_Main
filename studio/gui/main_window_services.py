@@ -99,17 +99,6 @@ class ServicesMixin:
                 if running:
                     self.ollama_status_lbl.setText("● 已连接（远程）")
                     self._set_ollama_status_state("green")
-                    self.ollama_models_lbl.setText(
-                        "远程模型: " + ("、".join(models) if models else "（无）")
-                    )
-                    cur = self.llm_vision_model_input.currentText().strip()
-                    self.llm_vision_model_input.blockSignals(True)
-                    self.llm_vision_model_input.clear()
-                    for m in models:
-                        self.llm_vision_model_input.addItem(m)
-                    if cur:
-                        self.llm_vision_model_input.setCurrentText(cur)
-                    self.llm_vision_model_input.blockSignals(False)
                 else:
                     self.ollama_status_lbl.setText("● 连接失败")
                     self._set_ollama_status_state("red")

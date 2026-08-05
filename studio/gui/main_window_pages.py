@@ -576,11 +576,8 @@ class PageSetupMixin:
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl),
             setattr(self,'btn_ollama_refresh',mdi_button("刷新", "refresh")), self.btn_ollama_refresh.setObjectName("secondary_button"), self.btn_ollama_refresh.setFixedWidth(70), self.btn_ollama_refresh.clicked.connect(self._ollama_refresh_status),
             r.addWidget(self.btn_ollama_refresh))))
-        # 地址 + 模型选择
+        # 地址（模型由服务端选择）
         _inp(lg4, "视觉模型地址:", "llm_vision_api_url_input", "http://127.0.0.1:11434")
-        _rl(lg4, "视觉模型:", lambda r: (setattr(self,'llm_vision_model_input',QComboBox()), self.llm_vision_model_input.setEditable(True),
-            self.llm_vision_model_input.setInsertPolicy(QComboBox.NoInsert),
-            self.llm_vision_model_input.lineEdit().setPlaceholderText("刷新后自动列出已下载模型"), r.addWidget(self.llm_vision_model_input)))
         rr_vm = QHBoxLayout(); rr_vm.addStretch()
         b_vm_test = mdi_button("测试连接", "search"); b_vm_test.setObjectName("secondary_button"); b_vm_test.setFixedWidth(110); b_vm_test.clicked.connect(self._test_vision_connection); rr_vm.addWidget(b_vm_test)
         b_vm_save = mdi_button("保存", "save"); b_vm_save.setObjectName("primary_button"); b_vm_save.setFixedWidth(90); b_vm_save.clicked.connect(self.save_llm_config); rr_vm.addWidget(b_vm_save)
@@ -634,7 +631,6 @@ class PageSetupMixin:
         self.llm_api_key_input.setText(self.ai_config.get("llm_api_key",""))
         self.llm_model_input.setText(self.ai_config.get("llm_model","deepseek-v4-flash"))
         self.llm_vision_api_url_input.setText(self.ai_config.get("llm_vision_api_url","http://127.0.0.1:11434"))
-        self.llm_vision_model_input.setCurrentText(self.ai_config.get("llm_vision_model",""))
         self.load_voxcpm_config()
         # 统一服务端地址初始化（会联动同步 Whisper/CLIP/PaddleOCR 的地址）
         self.compute_server_input.setText(self.ai_config.get("compute_server_url", ""))

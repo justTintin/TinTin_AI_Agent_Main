@@ -126,9 +126,8 @@ class CoverTextAIWorker(BaseWorker):
 
     def do_work(self):
         from utils.llm_proxy import llm_chat, llm_chat_messages
-        use_vision = bool(self.ref_image and os.path.isfile(self.ref_image)
-                          and self.cfg.get("llm_vision_model"))
-        model = self.cfg.get("llm_vision_model") if use_vision else self.cfg.get("llm_model", "deepseek-v4-flash")
+        use_vision = bool(self.ref_image and os.path.isfile(self.ref_image))
+        model = None if use_vision else self.cfg.get("llm_model", "deepseek-v4-flash")
 
         sys_prompt = ("你是短视频封面文案专家。根据提供的文案（以及参考封面/视频帧）"
                       "提炼封面用的【标题】与【副标题】：标题≤10字、强冲击；副标题≤16字、补充信息。"
@@ -172,7 +171,7 @@ class CoverLayoutAIWorker(BaseWorker):
 
     def do_work(self):
         from utils.llm_proxy import llm_chat_messages
-        model = self.cfg.get("llm_vision_model", "")
+        model = None
         if not model:
             raise RuntimeError("构图复刻需要『视觉模型』。请到『大模型配置』填写视觉模型名称。")
         if not (self.template_path and os.path.isfile(self.template_path)):

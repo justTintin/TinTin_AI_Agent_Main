@@ -83,8 +83,6 @@ class AIConfigMixin:
         # 视觉模型
         if getattr(self, "llm_vision_api_url_input", None) is not None:
             self.ai_config["llm_vision_api_url"] = self.llm_vision_api_url_input.text().strip()
-        if getattr(self, "llm_vision_model_input", None) is not None:
-            self.ai_config["llm_vision_model"] = self.llm_vision_model_input.currentText().strip()
         # 统一服务端地址
         server_url = getattr(self, "compute_server_input", None)
         if server_url is not None:
@@ -201,7 +199,6 @@ class AIConfigMixin:
             "llm_api_url": "https://api.deepseek.com",
             "llm_model": "deepseek-v4-flash",
             "llm_vision_api_url": "",
-            "llm_vision_model": "",
             "compute_server_url": "",
             "whisper_api_url": "",
             "clip_api_url": "",
@@ -353,40 +350,28 @@ class AIConfigMixin:
         return w
 
     def _test_vision_connection(self):
+        """测试视觉模型连接：模型由服务端选择，客户端只测试服务端是否可达。"""
         sender = self.sender()
         if sender:
             sender.setEnabled(False)
         self.vision_status_lbl.setText("正在测试...")
         self.vision_status_lbl.setStyleSheet("color: #f39c12;")
 
-        model = self.llm_vision_model_input.currentText().strip()
-
-        if not model:
-            self.vision_status_lbl.setText("⚠️ 请选择视觉模型")
-            self.vision_status_lbl.setStyleSheet("color: #f39c12;")
-            if sender:
-                sender.setEnabled(True)
-            return
-
-        # 测试远程连接放到后台线程，避免卡死 UI。
+        # 视觉模型由服务端选择，客户端不再指定 model
         class _TestWorker(QThread):
-            done = Signal(bool, str, str)  # (ok, status_text, color)
-
-            def __init__(self, mdl):
-                super().__init__()
-                self.mdl = mdl
+            done = Signal(bool, str, str)
 
             def run(self):
                 from utils.llm_proxy import llm_chat
                 try:
-                    llm_chat("", "Hi", model=self.mdl, max_tokens=5, timeout=120)
-                    self.done.emit(True, f"✅ 连接成功 ({self.mdl})", "#2ecc71")
+                    llm_chat("", "Hi", model=None, max_tokens=5, timeout=120)
+                    self.done.emit(True, "✅ 连接成功（视觉模型由服务端选择）", "#2ecc71")
                 except RuntimeError as e:
                     err = str(e)[:80]
                     if "Read timed out" in err or "ReadTimeout" in err or "超时" in err:
                         self.done.emit(False, "⏳ 模型可能正在加载，请稍后重试", "#f39c12")
                     elif "404" in err or "not found" in err.lower():
-                        self.done.emit(False, "❌ 模型名错误 (404)", "#e74c3c")
+                        self.done.emit(False, "❌ 服务端接口不存在 (404)", "#e74c3c")
                     elif "未配置服务端" in err:
                         self.done.emit(False, "❌ 未配置服务端地址", "#e74c3c")
                     else:
@@ -400,7 +385,7 @@ class AIConfigMixin:
             if sender:
                 sender.setEnabled(True)
 
-        self._vision_test_worker = _TestWorker(model)
+        self._vision_test_worker = _TestWorker()
         self._vision_test_worker.done.connect(_on_done)
         self._vision_test_worker.start()
 

@@ -324,11 +324,10 @@ class VideoAnalyzeWorker(BaseWorker):
 
     def __init__(self, video_files: list,
                  model: str, num_frames: int = 4,
-                 folder_path: str = "", vision_model: str = ""):
+                 folder_path: str = ""):
         super().__init__()
         self.video_files     = video_files
         self.model           = model or ""
-        self.vision_model    = (vision_model or "").strip()
         self.num_frames      = num_frames
         self._folder_path    = folder_path or ""
         self._abort          = False
@@ -344,7 +343,7 @@ class VideoAnalyzeWorker(BaseWorker):
     def run(self):
         total = len(self.video_files)
         self._cur_row = -1
-        self.log_sig.emit(f"开始分析，共 {total} 个视频  |  视觉模型: {self.vision_model or '无'}")
+        self.log_sig.emit(f"开始分析，共 {total} 个视频")
 
         for idx, fpath in enumerate(self.video_files):
             if self._abort:
@@ -390,10 +389,10 @@ class VideoAnalyzeWorker(BaseWorker):
         conf_info = {'brand_conf': 0.0, 'category_conf': 0.0, 'model_conf': 0.0,
                      'frame_count': 0, 'brand_votes': {}, 'category_votes': {}, 'model_votes': {}}
         self._emit_log(
-            f"  视觉模型: {self.vision_model or '(未选择)'}"
+            "  视觉模型: 由服务端自动选择"
         )
 
-        if self.vision_model:
+        if True:
             import requests as req
             vision_ok = False
             try:
@@ -445,8 +444,6 @@ class VideoAnalyzeWorker(BaseWorker):
 
             if not vision_ok:
                 self._emit_log("  视觉未识别，结果为 unknown")
-        else:
-            self._emit_log("  ✗ 未配置视觉模型，跳过分析")
 
         # 5. 生成新文件名
         new_name = _build_new_filename(ai_info, meta, parsed, fpath)
@@ -524,7 +521,7 @@ class VideoAnalyzeWorker(BaseWorker):
             "  \"model\": \"最可能的型号（G502/MX Master 3/iPhone 15 Pro等；无法判断填 unknown）\"\n"
             "}"
         )
-        self._emit_log(f"    → 帧{frame_num}  POST /llm/chat model={self.vision_model}")
+        self._emit_log(f"    → 帧{frame_num}  POST /llm/chat model=(服务端自动选择)")
         text = llm_chat_messages(
             [{"role": "system", "content": system_prompt},
              {"role": "user", "content": [
@@ -533,7 +530,7 @@ class VideoAnalyzeWorker(BaseWorker):
                  {"type": "image_url",
                   "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}},
              ]}],
-            model=self.vision_model, temperature=0.1, max_tokens=200, timeout=60)
+            model=None, temperature=0.1, max_tokens=200, timeout=60)
         self._emit_log(f"    ← 响应 {len(text)} 字符")
         self._emit_log(f"    原始: {text[:100]}")
         raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
@@ -558,19 +555,19 @@ class VideoAnalyzeWorker(BaseWorker):
 # ─────────────────────────────────────────────
 #  单帧分析线程
 # ─────────────────────────────────────────────
-class OllamaModelsWorker(BaseWorker):
-    """后台获取 Ollama 已下载模型列表，避免首次进入页面时阻塞界面。"""
-    finished = Signal(list)
 
-    def do_work(self):
-        try:
-            from utils.ollama_manager import OllamaManager
-            mgr = OllamaManager.get()
-            if not mgr.is_running():
-                return
-            self.finished.emit(list(mgr.list_local_models()))
-        except Exception:
-            pass
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class FrameAnalysisThread(BaseWorker):
@@ -578,12 +575,10 @@ class FrameAnalysisThread(BaseWorker):
     result_ready = Signal(dict)   # {'brand':..., 'category':..., 'model':...} or {'error':...}
     log_ready    = Signal(str)
 
-    def __init__(self, fpath: str, pos_ms: int,
-                 vision_model: str):
+    def __init__(self, fpath: str, pos_ms: int):
         super().__init__()
         self.fpath          = fpath
         self.pos_ms         = pos_ms
-        self.vision_model   = vision_model
 
     def run(self):
         import cv2
@@ -629,7 +624,7 @@ class FrameAnalysisThread(BaseWorker):
                  {"type": "text", "text": "请识别这一帧中的产品品牌、品类和型号："},
                  {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}}
              ]}],
-            model=self.vision_model, temperature=0.1, max_tokens=300, timeout=60)
+            model=None, temperature=0.1, max_tokens=300, timeout=60)
         raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
@@ -701,12 +696,10 @@ class VideoPlayerDialog(QDialog):
     """
 
     def __init__(self, fpath: str, row_idx: int,
-                 vision_model: str,
                  page_ref, parent=None):
         super().__init__(parent)
         self.fpath           = fpath
         self.row_idx         = row_idx
-        self.vision_model    = vision_model
         self.page_ref        = page_ref
         self._duration       = 0
         self._slider_dragging = False
@@ -775,11 +768,8 @@ class VideoPlayerDialog(QDialog):
         hint.setObjectName("videoPlayerHint")
         right_v.addWidget(hint)
 
-        can_analyze = bool(self.vision_model)
         self.btn_analyze_frame = QPushButton("🔍 分析这一帧")
-        self.btn_analyze_frame.setEnabled(can_analyze)
-        if not can_analyze:
-            self.btn_analyze_frame.setToolTip("请先在设置中配置视觉模型")
+        self.btn_analyze_frame.setEnabled(True)
         self.btn_analyze_frame.clicked.connect(self._analyze_current_frame)
         right_v.addWidget(self.btn_analyze_frame)
 
@@ -910,7 +900,7 @@ class VideoPlayerDialog(QDialog):
         self.lbl_frame_status.setText("抽帧中…")
 
         self._analysis_thread = FrameAnalysisThread(
-            self.fpath, pos_ms, self.vision_model
+            self.fpath, pos_ms
         )
         self._analysis_thread.result_ready.connect(self._on_frame_analyzed)
         self._analysis_thread.log_ready.connect(self.lbl_frame_status.setText)
@@ -1045,18 +1035,10 @@ class VideoAiRenamePage(BasePage):
         self.lbl_model_info.setObjectName("aiRenameModelInfo")
         row_config.addWidget(self.lbl_model_info)
 
-        # 视觉模型选择下拉框（纯选择，不可手动输入）
-        row_config.addWidget(QLabel("视觉:"))
-        self.combo_vision_model = SearchableComboBox(placeholder="输入模型名称搜索…")
-        self.combo_vision_model.setMinimumWidth(180)
-        self.combo_vision_model.setToolTip("选择已下载的 Ollama 视觉模型，留空则仅用文本分析")
-        self.combo_vision_model.currentIndexChanged.connect(self._on_vision_model_changed)
-        row_config.addWidget(self.combo_vision_model)
-
-        # 刷新按钮：重新读配置并刷新 Ollama 模型列表
+        # 刷新按钮：重新读配置
         btn_reload_cfg = QPushButton("↺")
         btn_reload_cfg.setFixedWidth(28)
-        btn_reload_cfg.setToolTip("刷新配置和 Ollama 已下载模型列表")
+        btn_reload_cfg.setToolTip("刷新 AI 配置")
         btn_reload_cfg.setObjectName("secondary_button")
         btn_reload_cfg.clicked.connect(self._load_llm_config)
         row_config.addWidget(btn_reload_cfg)
@@ -1210,13 +1192,12 @@ class VideoAiRenamePage(BasePage):
 
     # ──────────────────────── 配置加载 ────────────────────────
     def _load_llm_config(self):
-        """从主窗口 ai_config 加载 LLM 配置，并刷新 Ollama 模型列表。"""
+        """从主窗口 ai_config 加载 LLM 配置。"""
         self._model           = ""
-        self._vision_model    = ""
+
         try:
             cfg = self.main_win.ai_config
             self._model          = cfg.get("llm_model",          "").strip()
-            self._vision_model   = cfg.get("llm_vision_model",  "").strip()
             self.lbl_model_info.setText(f"🤖 文本: {self._model}" if self._model else "⚠ 未配置文本模型")
             self.lbl_model_info.setProperty("status", "" if self._model else "error")
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
@@ -1227,37 +1208,37 @@ class VideoAiRenamePage(BasePage):
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
             self.lbl_model_info.style().polish(self.lbl_model_info)
 
-        # 刷新视觉模型下拉框：后台从 Ollama 获取已下载列表，避免阻塞界面
-        cur = self._vision_model
-        self.combo_vision_model.blockSignals(True)
-        self.combo_vision_model.clear()
-        self.combo_vision_model.addItem("无（仅文本分析）", userData="")
-        self.combo_vision_model.blockSignals(False)
-        self._vision_model = cur
 
-        def _apply_ollama_models(models):
-            if self.combo_vision_model is None:
-                return
-            self.combo_vision_model.blockSignals(True)
-            self.combo_vision_model.clear()
-            self.combo_vision_model.addItem("无（仅文本分析）", userData="")
-            for m in models:
-                self.combo_vision_model.addItem(m, userData=m)
-            # 如果配置里有视觉模型但 Ollama 没列出，手动加一条
-            if cur and self.combo_vision_model.findData(cur) < 0:
-                self.combo_vision_model.addItem(cur, userData=cur)
-            self.combo_vision_model.setCurrentIndex(
-                self.combo_vision_model.findData(cur) if cur else 0)
-            self.combo_vision_model.blockSignals(False)
-            self._vision_model = cur
 
-        w = self.track_worker(OllamaModelsWorker())
-        w.finished.connect(_apply_ollama_models)
-        w.start()
 
-    def _on_vision_model_changed(self, index: int):
-        """用户切换视觉模型时，用 userData 更新 self._vision_model（避免显示文字污染）。"""
-        self._vision_model = self.combo_vision_model.currentData() or ""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     # ──────────────────────── 文件夹选择 ────────────────────────
     def _select_folder(self):
@@ -1412,7 +1393,6 @@ class VideoAiRenamePage(BasePage):
             return
 
         model        = self._model
-        vision_model = self._vision_model
         num_frames   = self.spin_frames.value()
 
         if not model:
@@ -1448,7 +1428,7 @@ class VideoAiRenamePage(BasePage):
 
         self.worker = VideoAnalyzeWorker(
             self.video_files, model, num_frames,
-            folder_path=self._folder_path, vision_model=vision_model
+            folder_path=self._folder_path
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.video_analyzed.connect(self._on_video_analyzed)
@@ -1492,8 +1472,7 @@ class VideoAiRenamePage(BasePage):
                         'new_name':'','resolution':'','orientation':'','date':'','model_name':'unknown'})
 
         temp_worker = VideoAnalyzeWorker([fpath], self._model,
-                                         self.spin_frames.value(), folder_path=self._folder_path,
-                                         vision_model=self._vision_model)
+                                         self.spin_frames.value(), folder_path=self._folder_path)
         temp_worker.log_sig.connect(self._append_log)
         temp_worker.log_row_sig.connect(
             lambda ridx, line, ri=row_idx: self._on_row_log(ri, line)
@@ -1613,7 +1592,6 @@ class VideoAiRenamePage(BasePage):
         dlg = VideoPlayerDialog(
             fpath          = fpath,
             row_idx        = row,
-            vision_model   = self._vision_model,
             page_ref       = self,
             parent         = self.parent_widget,
         )
@@ -1869,3 +1847,4 @@ class VideoAiRenamePage(BasePage):
 
         # 重新扫描文件夹刷新列表
         self._scan_folder(self._folder_path)
+        """从主窗口 ai_config 加载 LLM 配置。"""

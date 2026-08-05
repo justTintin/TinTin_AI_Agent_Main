@@ -77,22 +77,23 @@ def llm_chat(
     if not base:
         raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
 
-    if not model:
+    # model=None means server selects; empty string means use default text model
+    if model == "":
         model = _get_default_model()
-
     url = f"{base}/llm/chat/completions"
     payload = {
-        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "temperature": temperature,
     }
+    if model is not None:
+        payload["model"] = model
     if max_tokens > 0:
         payload["max_tokens"] = max_tokens
 
-    log.info(f"[LLM代理] POST {url} model={model}")
+    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'}")
     resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
@@ -141,19 +142,20 @@ def llm_chat_messages(
     if not base:
         raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
 
-    if not model:
+    # model=None means server selects; empty string means use default text model
+    if model == "":
         model = _get_default_model()
-
     url = f"{base}/llm/chat/completions"
     payload = {
-        "model": model,
         "messages": messages,
         "temperature": temperature,
     }
+    if model is not None:
+        payload["model"] = model
     if max_tokens > 0:
         payload["max_tokens"] = max_tokens
 
-    log.info(f"[LLM代理] POST {url} model={model} 消息数={len(messages)}")
+    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'} 消息数={len(messages)}")
     resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""

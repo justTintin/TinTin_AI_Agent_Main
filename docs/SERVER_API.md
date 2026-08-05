@@ -436,7 +436,10 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 
 ### `POST /llm/chat/completions`
 
-统一 LLM 多模态接口，根据 model 自动路由到对应提供商。
+统一 LLM 多模态接口，根据 `model` 自动路由到对应提供商。
+
+**文本对话**：`model` 必填，服务端根据模型名路由到 DeepSeek / OpenAI 等供应商。
+**视觉 / Ollama 多模态**：`model` 可省略，由服务端根据当前已加载的视觉模型自动选择；客户端不再自行指定 Ollama 视觉模型。
 
 ```json
 {
@@ -448,6 +451,7 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 }
 ```
 
+> ℹ️ 当请求包含图片（`image_url`）且 `model` 为空或省略时，服务端负责选择可用的视觉模型；客户端无需再维护 `llm_vision_model` 配置。
 ### 其他 LLM 接口
 
 | 端点 | Method | 说明 |

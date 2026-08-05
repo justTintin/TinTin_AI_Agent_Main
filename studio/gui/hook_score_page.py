@@ -164,9 +164,8 @@ class HookScoreWorker(BaseWorker):
 
     def do_work(self):
         from utils.llm_proxy import llm_chat_messages
-        model = self.cfg.get("llm_vision_model", "")
-        if not model:
-            raise RuntimeError("需要『视觉模型』。请到『大模型配置』填写视觉模型名称。")
+        # 视觉模型由服务端选择，客户端不再指定 model
+        model = None
 
         dur = _probe_duration(self.video) or 10.0
         times = _sample_times(dur)
@@ -215,7 +214,7 @@ class HookScoreWorker(BaseWorker):
                  {"role": "user", "content": content}],
                 model=model, temperature=0.4, timeout=180)
         except RuntimeError as e:
-            raise RuntimeError(f"无法连接视觉模型：{e}\n请检查『大模型配置』里的服务端地址和视觉模型名称。")
+            raise RuntimeError(f"无法连接视觉模型：{e}\n请检查『大模型配置』里的服务端地址。")
         if not text:
             raise RuntimeError("视觉模型返回空内容（请确认所选模型支持图片/视觉输入）。")
         body = text
@@ -358,26 +357,23 @@ class HookScorePage(BasePage):
     # ---------- 视觉模型 ----------
     def update_vision_model_display(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        model = ai.get("llm_vision_model", "")
-        if model:
-            self.lbl_model_info.setText(f"视频大模型：{model}")
+        server_url = ai.get("compute_server_url", "")
+        if server_url:
+            self.lbl_model_info.setText("视频大模型：由服务端自动选择")
             self.lbl_model_status.setText("🟢 已配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#2ecc71;")
             self.btn_test_model.setEnabled(True)
         else:
-            self.lbl_model_info.setText("视频大模型：未配置（请先在“AI设置 / 大模型配置”中填写视觉模型）")
+            self.lbl_model_info.setText("视频大模型：未配置服务端地址")
             self.lbl_model_status.setText("🔴 未配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#e74c3c;")
             self.btn_test_model.setEnabled(False)
 
     def _test_vision_model(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        model = ai.get("llm_vision_model", "")
-        if not model:
-            return
         self.btn_test_model.setEnabled(False)
         self.lbl_model_status.setText("🟡 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
-        self.test_worker = VisionModelTestWorker(model)
+        self.test_worker = VisionModelTestWorker(None)
 
         def on_finished(success, message):
             self.btn_test_model.setEnabled(True)

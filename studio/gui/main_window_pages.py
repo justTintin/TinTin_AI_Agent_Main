@@ -920,26 +920,31 @@ class PageSetupMixin:
             rh_img_group_layout.addLayout(rh_img_row)
             rh_input_layout.addWidget(self.rh_img_input_group)
 
-            # 音频输入组
+            # 音频输入组（表单：每行一个音频，右侧删除；顶部添加/全部清空）
             self.rh_audio_input_group = QWidget()
             rh_audio_group_layout = QVBoxLayout(self.rh_audio_input_group)
             rh_audio_group_layout.setContentsMargins(0, 0, 0, 0)
-            rh_audio_group_layout.addWidget(QLabel("驱动语音（批量，每个音频生成一个任务，所有勾选的音频节点共用）:"))
-            rh_audio_row = QHBoxLayout()
-            self.rh_audio_list = QListWidget()
-            self.rh_audio_list.setMinimumHeight(80)
-            self.rh_audio_list.setMaximumHeight(140)
-            rh_audio_row.addWidget(self.rh_audio_list, 1)
-            rh_audio_btn_col = QVBoxLayout()
+            rh_audio_group_layout.addWidget(QLabel("驱动语音（每个音频生成一个任务）:"))
+            rh_audio_toolbar = QHBoxLayout()
             btn_add_rh_aud = mdi_button("添加", "plus")
             btn_add_rh_aud.clicked.connect(self.add_rh_audio)
-            rh_audio_btn_col.addWidget(btn_add_rh_aud)
-            btn_del_rh_aud = mdi_button("移除", "minus")
-            btn_del_rh_aud.clicked.connect(self.remove_rh_audio)
-            rh_audio_btn_col.addWidget(btn_del_rh_aud)
-            rh_audio_btn_col.addStretch()
-            rh_audio_row.addLayout(rh_audio_btn_col)
-            rh_audio_group_layout.addLayout(rh_audio_row)
+            rh_audio_toolbar.addWidget(btn_add_rh_aud)
+            btn_clear_rh_aud = mdi_button("全部清空", "delete")
+            btn_clear_rh_aud.clicked.connect(self.clear_rh_audio)
+            rh_audio_toolbar.addWidget(btn_clear_rh_aud)
+            rh_audio_toolbar.addStretch()
+            rh_audio_group_layout.addLayout(rh_audio_toolbar)
+            self.rh_audio_list = QTableWidget(0, 3)
+            self.rh_audio_list.setHorizontalHeaderLabels(["音频文件", "大小", "操作"])
+            self.rh_audio_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.rh_audio_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.rh_audio_list.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            self.rh_audio_list.verticalHeader().setVisible(False)
+            self.rh_audio_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.rh_audio_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.rh_audio_list.setMinimumHeight(100)
+            self.rh_audio_list.setMaximumHeight(180)
+            rh_audio_group_layout.addWidget(self.rh_audio_list)
             rh_input_layout.addWidget(self.rh_audio_input_group)
 
             rh_layout.addWidget(self.rh_input_panel)
@@ -993,18 +998,65 @@ class PageSetupMixin:
             self.rh_img_path_input.setText(file)
 
     def add_rh_audio(self):
-        """数字人 RunningHub：批量添加驱动音频。"""
+        """数字人 RunningHub：表单方式批量添加驱动音频。"""
         files, _ = QFileDialog.getOpenFileNames(self, "选择音频", "", "Audio (*.mp3 *.wav *.flac *.aac *.m4a)")
+        existing = set()
+        for row in range(self.rh_audio_list.rowCount()):
+            item = self.rh_audio_list.item(row, 0)
+            if item:
+                existing.add(item.data(Qt.UserRole))
         for f in files:
-            if f and not self.rh_audio_list.findItems(f, Qt.MatchExactly):
-                self.rh_audio_list.addItem(f)
+            if not f or f in existing:
+                continue
+            self._append_rh_audio_row(f)
+            existing.add(f)
+        if self.backend_selector.currentIndex() == 1:
+            self._on_dh_backend_changed(1)
+
+    def _append_rh_audio_row(self, file_path):
+        row = self.rh_audio_list.rowCount()
+        self.rh_audio_list.insertRow(row)
+        name_item = QTableWidgetItem(os.path.basename(file_path))
+        name_item.setData(Qt.UserRole, file_path)
+        try:
+            size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            size_text = f"{size_mb:.2f} MB"
+        except Exception:
+            size_text = "-"
+        size_item = QTableWidgetItem(size_text)
+        for it in (name_item, size_item):
+            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+        self.rh_audio_list.setItem(row, 0, name_item)
+        self.rh_audio_list.setItem(row, 1, size_item)
+        btn_del = mdi_button("", "delete")
+        btn_del.setToolTip("删除该音频")
+        btn_del.setFixedSize(30, 24)
+        btn_del.clicked.connect(lambda checked=False, r=row: self._remove_rh_audio_row(r))
+        cell = QWidget()
+        lay = QHBoxLayout(cell)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.addStretch()
+        lay.addWidget(btn_del)
+        lay.addStretch()
+        self.rh_audio_list.setCellWidget(row, 2, cell)
+
+    def _remove_rh_audio_row(self, row):
+        if 0 <= row < self.rh_audio_list.rowCount():
+            self.rh_audio_list.removeRow(row)
         if self.backend_selector.currentIndex() == 1:
             self._on_dh_backend_changed(1)
 
     def remove_rh_audio(self):
-        """数字人 RunningHub：移除选中的驱动音频。"""
-        for item in self.rh_audio_list.selectedItems():
-            self.rh_audio_list.takeItem(self.rh_audio_list.row(item))
+        """数字人 RunningHub：移除选中的驱动音频（兼容旧调用）。"""
+        rows = sorted({i.row() for i in self.rh_audio_list.selectedItems()}, reverse=True)
+        for r in rows:
+            self.rh_audio_list.removeRow(r)
+        if self.backend_selector.currentIndex() == 1:
+            self._on_dh_backend_changed(1)
+
+    def clear_rh_audio(self):
+        """数字人 RunningHub：清空全部驱动音频。"""
+        self.rh_audio_list.setRowCount(0)
         if self.backend_selector.currentIndex() == 1:
             self._on_dh_backend_changed(1)
 

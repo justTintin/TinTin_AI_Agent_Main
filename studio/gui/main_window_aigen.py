@@ -270,7 +270,7 @@ class AIGenMixin:
             summary = f"图片节点 {len(self.rh_image_nodes)} 个，音频节点 {len(self.rh_audio_nodes)} 个；默认全部勾选。"
             self.rh_workflow_info.setText(f"✅ 已获取 {len(self.rh_image_nodes) + len(self.rh_audio_nodes)} 个输入节点，{summary}")
             if self.backend_selector.currentIndex() == 1:
-                self.btn_run_workflow.setEnabled(self.rh_audio_list.count() > 0)
+                self.btn_run_workflow.setEnabled(self.rh_audio_list.rowCount() > 0)
 
         self.start_worker(fetch, on_done)
 
@@ -323,7 +323,11 @@ class AIGenMixin:
             self.rh_workflow_info.setText("请选择人物图片")
             return
 
-        audio_files = [self.rh_audio_list.item(i).text() for i in range(self.rh_audio_list.count())]
+        audio_files = []
+        for _row in range(self.rh_audio_list.rowCount()):
+            _item = self.rh_audio_list.item(_row, 0)
+            if _item and _item.data(Qt.UserRole):
+                audio_files.append(_item.data(Qt.UserRole))
         if not audio_files:
             self.rh_workflow_info.setText("请至少添加一个驱动音频")
             return
@@ -509,7 +513,7 @@ class AIGenMixin:
             wf_id = self.rh_workflow_id_input.text().strip()
             if wf_id and hasattr(self, "rh_node_list") and self.rh_node_list.count() == 0:
                 QTimer.singleShot(300, self.view_rh_api_detail)
-            self.btn_run_workflow.setEnabled(bool(wf_id) and self.rh_audio_list.count() > 0)
+            self.btn_run_workflow.setEnabled(bool(wf_id) and self.rh_audio_list.rowCount() > 0)
 
     def _test_runninghub_config(self):
         """在 AI 设置页测试 RunningHub API Key 是否可用。"""

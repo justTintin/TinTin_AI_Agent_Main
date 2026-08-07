@@ -303,13 +303,15 @@ studio\run_gui_integrated.bat
 - 即梦 / 飞书：二进制路径与 App ID/Secret 配置
 
 ### 模型配置
-- 大语言模型：API 地址 / Key / 模型名
-- 视觉模型：远程 Ollama 列表、下载/删除
-- 语音转写：远程 Whisper 连通性测试
-- 声音克隆：远程 VoxCPM 连通性测试
-- 向量模型：远程 CLIP 连通性测试
-- OCR 文本识别：服务端 `/material/ocr` 连通性测试（本地 PaddleOCR 模型已移除）
-- rembg：本地抠图模型可用性检测
+> 客户端不持有任何第三方 API Key；所有能力均通过配置的服务端地址转发，Key 与模型由服务端管理。连通性测试 = 探测服务端健康/能力接口。
+
+- 大语言模型：只配置模型名；测试通过服务端代理 `POST /llm/chat/completions` 发一条极短消息，真实 Key 在服务端
+- 视觉模型：只测试服务端是否可达，模型由服务端选择；Ollama 列表/下载/删除走服务端 `/ollama/...`
+- 语音转写：探测服务端 `GET /whisper/health`
+- 声音克隆：探测服务端 `GET /voxcpm/health`
+- 向量模型：探测服务端 `GET /clip/health`
+- OCR 文本识别：探测服务端 `GET /material/status`（本地 PaddleOCR 模型已移除）
+- rembg：本地抠图模型可用性检测（唯一本地模型检测）
 
 ### 扩展插件
 - 检测本机 Chromium 系浏览器（Chrome / Edge / 360 / QQ 等）

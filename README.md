@@ -54,6 +54,31 @@
 
 ---
 
+## 目录结构
+
+```text
+.
+├── apps/                  # 本地第三方工具（不入库）
+│   ├── asset-browser/     # Electron 素材浏览器
+│   ├── browser-extension/ # 「螺丝钉素材采集」浏览器扩展源码
+│   ├── clip-models-hf/    # 本地 CLIP 模型占位
+│   ├── modelscope/        # 模型工具
+│   ├── pw-browsers/       # Playwright 内嵌 Chromium
+│   ├── rembg/             # AI 图像抠图
+│   ├── vsr-v1.4.0/        # 视频去字幕/修复旧版本地包
+│   └── whisper-models/    # 本地 Whisper 模型占位
+├── docs/                  # 设计/部署/接口文档
+├── python_embeded/        # 内嵌 Python 运行时（不入库）
+├── studio/                # 客户端源码与资源（入库）
+│   ├── assets/            # 图标/工作流/声音样本等资源
+│   ├── config/            # 配置模板（真实配置不入库）
+│   ├── core/              # 核心业务/爬虫逻辑
+│   ├── gui/               # PySide6 界面（页面/mixin）
+│   ├── utils/             # 通用工具/客户端封装
+│   └── requirements*.txt  # Python 依赖清单
+└── README.md
+```
+
 ## 快速开始
 
 ### 生产环境（分发包）
@@ -82,7 +107,7 @@ studio\run_gui_integrated.bat
 
 ## 侧边栏导航
 
-> 侧边栏顺序已按当前 `studio/gui/main_window_sidebar.py` 重新扫描。
+> 侧边栏顺序以 `studio/gui/main_window_sidebar.py` 为准（已按当前代码重新扫描）。
 
 ### 当前可用（按显示顺序）
 
@@ -98,23 +123,16 @@ studio\run_gui_integrated.bat
 🗄️ 媒体库
   ├── 🎨 素材生成
   ├── 🔍 素材检索
-  └── 📋 任务队列
+  ├── 🎵 音频素材
+  ├── 🖼️ 即梦素材
+  ├── 📋 任务队列
+  └── 🧰 媒体工具
 
 ✂️ 成片制作
   ├── 🕒 成片任务
   ├── 🚀 一键成片
   ├── ✂️ 智能混剪
   └── 📡 直播切片
-
-🖼️ 图形处理
-  ├── 👤 图像抠图
-  └── 👁️ 图片框选 OCR
-
-🎬 视频处理
-  ├── 💬 视频转文字
-  ├── 🎙️ 声音克隆
-  ├── 🎞️ 视频去字幕
-  └── 🔎 视频框选 OCR
 
 📈 视频运营
   ├── 📈 视频评价预测
@@ -123,41 +141,36 @@ studio\run_gui_integrated.bat
 ⚙️ 系统设置
   ├── ⚙️ 模型配置
   ├── 🔌 平台接入
-  ├── 📦 资源配置
-  ├── 🖥️ 运行环境
+  ├── 📦 本地配置
+  ├── 🖥️ 环境与维护
   ├── 🧩 扩展插件
-  └── ❓ 帮助
+  └── ❓ 关于
 ```
 
-> 素材浏览器为独立 Electron 应用，从侧边栏顶部直接唤起；「扩展插件」管理浏览器扩展安装与本地桥接服务。
+> 「媒体工具」聚合图片处理、视频处理与提示词反推工具；素材浏览器为独立 Electron 应用，从侧边栏顶部直接唤起。
 
 ### 已隐藏（代码仍在，菜单未开放）
 
 | 功能 | 说明 | 对应文件/索引 |
 |------|------|--------------|
-| 数字人 | 数字人对口型（已接入 RunningHub 云端工作流）；菜单入口未开放，可在侧边栏启用 | `setup_digital_human_page` / index 3 |
-| 即梦素材 | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
-| MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
-| 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
-| 视频修复 | VSR 超分/去噪/补帧 v14 | `subtitle_removal_page_v14.py` / index 11 |
-| 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
-| 封面制作 | 批量电商封面生成 | `cover_maker_page.py` / index 33 |
+| 数字人 | 数字人对口型（已接入 RunningHub 云端工作流）；菜单入口未开放 | `setup_digital_human_page` / index 3 |
 | 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
+| 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
+| 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
+| MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
 | 本地视频去字幕（旧版） | 基于本地 VSR 的旧版页面 | `subtitle_removal_page.py` / index 14 |
 
 ### 已移除（代码/文件已删除）
 
 | 功能 | 说明 |
 |------|------|
-| 批量 LUT 调色 | 本地 LUT 调色功能已删除 |
-| 热点追踪 | 页面已彻底移除，功能并入素材浏览器；`studio/gui/hotspot_page.py` 已删除 |
+| 热点追踪 | 页面已移除，功能并入素材浏览器；`studio/gui/hotspot_page.py` 已删除 |
 | AI 技能模块 | `ai_skills/` 目录已删除（无代码依赖） |
 | 旧版爬虫 | `legacy_crawler/` 目录已删除，被 `studio/core/` 取代 |
 
-> 菜单显隐以 `studio/gui/main_window_sidebar.py` 注释为准；页面索引以 `studio/gui_main.py` 的 `setup_pages` 顺序为准。
+> 菜单显隐以 `studio/gui/main_window_sidebar.py` 为准；页面索引以 `studio/gui_main.py` 的 `setup_pages` 顺序为准。
 
 ---
-
 ## 功能模块
 
 ### 成片制作
@@ -175,29 +188,40 @@ studio\run_gui_integrated.bat
 |------|:----:|------|
 | 素材生成 | 可用 | 调用即梦/ComfyUI 等生成图像并管理入库 |
 | 素材检索 | 可用 | 向量/关键词检索界面，请求远程 CLIP 服务 |
+| 音频素材 | 可用 | 音频素材管理与情感/风格分析 |
+| 即梦素材 | 可用 | 即梦生成素材管理 |
 | 任务队列 | 可用 | 展示服务端定时任务/生成队列状态 |
+| 媒体工具 | 可用 | 聚合图片处理、视频处理、提示词反推工具 |
 
 ### 视频处理
 
 | 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
-| 视频转文字 | 可用 | 上传/选择视频 → 请求远程 Whisper 服务 → 展示时间戳文本 |
-| 声音克隆 | 可用 | 样本管理、TTS 请求远程 VoxCPM 服务 |
-| 视频去字幕 | 可用 | 上传视频+选区 → 服务端 `/vsr/remove` 处理 → 下载结果 |
-| 视频框选 OCR | 可用 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
-| 视频修复 | 隐藏 | 本地 VSR 处理（v14） |
+| 视频转文字 | 媒体工具 | 上传/选择视频 → 请求远程 Whisper 服务 → 展示时间戳文本 |
+| 声音克隆 | 媒体工具 | 样本管理、TTS 请求远程 VoxCPM 服务 |
+| 视频去字幕 | 媒体工具 | 上传视频+选区 → 服务端 `/vsr/remove` 处理 → 下载结果 |
+| 视频框选 OCR | 媒体工具 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
+| 视频修复 | 媒体工具 | VSR 超分/去噪/补帧（并入媒体工具） |
 | 视频智能重命名 | 隐藏 | 抽帧 → 请求远程视觉模型 → 智能命名 |
-| 批量 LUT 调色 | 已移除 | 本地 LUT 调色功能已删除 |
+| 批量 LUT 调色 | 媒体工具 | 批量应用 LUT 调色 |
 | 本地视频去字幕（旧版） | 隐藏 | 旧版本地 VSR 页面 |
 
 ### 图形处理
 
 | 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
-| 图像抠图 | 可用 | 本地 rembg 批量去背景 |
-| 图片框选 OCR | 可用 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
+| 图像抠图 | 媒体工具 | 本地 rembg 批量去背景 |
+| 图片框选 OCR | 媒体工具 | 框选区域 → 裁剪后上传 → 服务端 `/material/ocr` 识别 |
 | 智能分层 | 隐藏 | AI 图像分层分解 |
-| 封面制作 | 隐藏 | 批量电商封面生成 |
+| 封面制作 | 媒体工具 | 批量电商封面生成 |
+
+### 媒体工具（聚合）
+
+| 分组 | 工具 |
+|------|------|
+| 图片 | 封面制作 / 图像抠图 / 图片框选 OCR |
+| 视频 | 视频修复 / 视频转文字 / 声音克隆 / 视频去字幕 / 视频框选 OCR / 批量 LUT 调色 |
+| 提示词 | 图片反推提示词 / 视频反推提示词 |
 
 ### 方案脚本
 
@@ -214,6 +238,12 @@ studio\run_gui_integrated.bat
 |------|:----:|------|
 | 视频评价预测 | 可用 | 钩子评分界面 |
 | 视频营销检测 | 可用 | 识别营销/违禁内容界面 |
+
+### 数字人（RunningHub 云端）
+
+| 功能 | 状态 | 客户端实现 |
+|------|:----:|------|
+| 数字人对口型 | 已接入（侧边栏入口隐藏） | 上传人物图片 + 驱动音频 → RunningHub 工作流 API → 轮询 → 自动下载 |
 
 ### 扩展与采集
 
@@ -253,9 +283,14 @@ studio\run_gui_integrated.bat
 
 ## 系统配置
 
-> v2.1.0 将原「环境配置」拆分为 5 个独立菜单，合并/迁移了冗余菜单：AI 设置→平台接入、大模型配置→模型配置、系统日志/帮助/备份还原/Python 终端→运行环境/资源配置等。
+> 系统设置按当前侧边栏拆分为：模型配置 / 平台接入 / 本地配置 / 环境与维护 / 扩展插件 / 关于。
 
-### 运行环境
+### 本地配置
+- 声音样本管理
+- 素材目录：支持多目录，NAS 入库
+- 本地数据与业务配置管理
+
+### 环境与维护
 - Python 版本/路径、GPU 型号/显存、CUDA/PyTorch 状态实时检测
 - 根据显存自动优化并发参数
 - 一键修复：重装 CUDA 版 PyTorch + WhisperX 依赖
@@ -277,10 +312,6 @@ studio\run_gui_integrated.bat
 - 向量模型：远程 CLIP 连通性测试
 - OCR 文本识别：服务端 `/material/ocr` 连通性测试（本地 PaddleOCR 模型已移除）
 - rembg：本地抠图模型可用性检测
-
-### 资源配置
-- 声音样本管理
-- 素材目录：支持多目录，NAS 入库
 
 ### 扩展插件
 - 检测本机 Chromium 系浏览器（Chrome / Edge / 360 / QQ 等）

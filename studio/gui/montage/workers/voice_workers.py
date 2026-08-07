@@ -7,6 +7,7 @@ import subprocess
 import traceback
 import requests
 from utils.http_client import http_get, http_post
+from utils.voxcpm_client import repair_wav_bytes
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -285,7 +286,7 @@ class VoiceCloneWorker(BaseWorker):
                 cursor = 0.0
                 for si, seg in enumerate(segs):
                     self.stage.emit(f"第 {row_idx + 1} 个声音逐句合成 {si + 1}/{len(segs)}...")
-                    wb = self._post_tts(seg, ref_audio_b64, row_idx, label="逐句")
+                    wb = repair_wav_bytes(self._post_tts(seg, ref_audio_b64, row_idx, label="逐句"))
                     dur = self._wav_bytes_duration(wb)
                     timing.append({"text": seg, "start": round(cursor, 3), "end": round(cursor + dur, 3)})
                     cursor += dur + gap
@@ -304,7 +305,7 @@ class VoiceCloneWorker(BaseWorker):
         if "\n" in merged_text:
             lines = [l.strip() for l in merged_text.split("\n") if l.strip()]
             merged_text = "。".join(lines) + "。"
-        content = self._post_tts(merged_text, ref_audio_b64, row_idx)
+        content = repair_wav_bytes(self._post_tts(merged_text, ref_audio_b64, row_idx))
         with open(out_wav_path, "wb") as f:
             f.write(content)
         try:

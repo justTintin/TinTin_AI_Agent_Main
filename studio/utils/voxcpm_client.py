@@ -15,6 +15,35 @@ from utils.logger_utils import log
 from utils.api_error import ApiError
 
 
+def repair_wav_bytes(wav_bytes: bytes) -> bytes:
+    """修复 WAV RIFF/data 头：若声明的 data 长度小于实际音频字节，播放器会提前停止（尾部裁断）。
+    仅在头部错误时重写 data 大小与 RIFF 大小；正常时原样返回。
+    """
+    try:
+        if not wav_bytes or len(wav_bytes) < 12:
+            return wav_bytes
+        if wav_bytes[:4] != b"RIFF" or wav_bytes[8:12] != b"WAVE":
+            return wav_bytes
+        pos = 12
+        while pos + 8 <= len(wav_bytes):
+            cid = wav_bytes[pos:pos + 4]
+            size = int.from_bytes(wav_bytes[pos + 4:pos + 8], "little")
+            if cid == b"data":
+                declared = size
+                actual = len(wav_bytes) - (pos + 8)
+                if actual > declared:
+                    out = bytearray(wav_bytes)
+                    out[pos + 4:pos + 8] = actual.to_bytes(4, "little")
+                    out[4:8] = (len(out) - 8).to_bytes(4, "little")
+                    log.info(f"[VoxCPM] WAV data 头修复 {declared} -> {actual}")
+                    return bytes(out)
+                return wav_bytes
+            pos += 8 + size + (size & 1)
+    except Exception as e:
+        log.warning(f"WAV 头修复异常: {e}")
+    return wav_bytes
+
+
 def _read_vox_url() -> str:
     """从 ai_config 读 vox_api_url。优先 vox_api_url，否则从 compute_server_url + /voxcpm/tts 派生。"""
     try:
@@ -87,8 +116,9 @@ def synthesize_tts(text: str, ref_wav: str = "", out_path: str = "",
                        status_code=r.status_code,
                        response_text=msg or r.text, service="voxcpm")
 
+    data = repair_wav_bytes(r.content)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "wb") as f:
-        f.write(r.content)
-    log.info(f"[VoxCPM] TTS 合成完成: {out_path} ({len(r.content) // 1024}KB)")
+        f.write(data)
+    log.info(f"[VoxCPM] TTS 合成完成: {out_path} ({len(data) // 1024}KB)")
     return out_path

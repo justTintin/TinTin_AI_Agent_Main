@@ -16,11 +16,11 @@ COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 COMFYUI_MAIN = os.path.join(COMFYUI_DIR, "main.py")
 COMFYUI_RUNNER = os.path.join(COMFYUI_DIR, "_run_local.py")
 
-LOCAL_HOST = "127.0.0.1"
+LOCAL_HOST = "X.X.X.X"
 LOCAL_PORT = 8188
 LOCAL_ADDR = f"http://{LOCAL_HOST}:{LOCAL_PORT}"
 
-DEFAULT_EXTERNAL_ADDR = "http://192.168.111.36:8188"
+DEFAULT_EXTERNAL_ADDR = "http://X.X.X.X:8188"
 
 _CREATE_NO_WINDOW = create_no_window_flag()
 

@@ -1,7 +1,7 @@
 # 服务端接口文档（客户端对接用）
 
-> 服务端地址：`http://X:8000`（2026-08-02 实测，原 .19 已迁移）
-> OpenAPI 规范：`http://X:8000/openapi.json`
+> 服务端地址：`http://X.X.X.X.X.X.X:8000`（2026-08-02 实测，原 .19 已迁移）
+> OpenAPI 规范：`http://X.X.X.X.X.X.X:8000/openapi.json`
 > 框架：FastAPI (Python)，实测共 241 个路径
 > 最后同步：2026-08-03
 

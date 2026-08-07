@@ -211,8 +211,8 @@ class AIConfigMixin:
 
     def load_ai_config(self):
         default_config = {
-            "comfyui_addr": "http://192.168.111.36:8188",
-            "voice_clone_addr": "http://192.168.111.36:7860",
+            "comfyui_addr": "http://X.X.X.X:8188",
+            "voice_clone_addr": "http://X.X.X.X:7860",
             "llm_provider": "deepseek",
             "llm_api_key": "",
             "llm_api_url": "https://api.deepseek.com",

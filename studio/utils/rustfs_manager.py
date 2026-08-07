@@ -46,7 +46,7 @@ def _save_ai_config(data):
 def get_rustfs_config():
     cfg = _load_ai_config()
     return {
-        "endpoint":   cfg.get("rustfs_endpoint",   "http://192.168.111.17:9000"),
+        "endpoint":   cfg.get("rustfs_endpoint",   "http://X.X.X.X:9000"),
         "access_key": cfg.get("rustfs_access_key", "rustfsadmin"),
         "secret_key": cfg.get("rustfs_secret_key", "rustfssecret"),
         "bucket":     cfg.get("rustfs_bucket",     "materials"),

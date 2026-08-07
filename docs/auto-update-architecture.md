@@ -835,7 +835,7 @@ def _check_response_for_update(headers: dict):
 
 ```json
 {
-  "update_url": "http://X:8000",
+  "update_url": "http://X.X.X.X.X.X.X:8000",
   "channel": "stable",
   "check_on_startup": true,
   "last_check": "2026-07-17T19:30:00.000000"

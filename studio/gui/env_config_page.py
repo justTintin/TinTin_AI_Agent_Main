@@ -250,7 +250,7 @@ class EnvConfigPage(BasePage):
         row_rustfs1 = QHBoxLayout()
         row_rustfs1.addWidget(QLabel("服务地址："))
         self.edit_rustfs_endpoint = QLineEdit()
-        self.edit_rustfs_endpoint.setPlaceholderText("http://192.168.111.17:9000")
+        self.edit_rustfs_endpoint.setPlaceholderText("http://X.X.X.X:9000")
         row_rustfs1.addWidget(self.edit_rustfs_endpoint, 2)
         row_rustfs1.addWidget(QLabel("默认存储桶："))
         self.edit_rustfs_bucket = QLineEdit()

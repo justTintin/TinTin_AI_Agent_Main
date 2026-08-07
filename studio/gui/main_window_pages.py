@@ -22,7 +22,6 @@ from version import __app_name__, get_version
 from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.subtitle_removal_page import SubtitleRemovalPage
 from gui.live_clip_page import LiveClipPage
 from gui.voice_clone_page import VoiceClonePage
 from gui.voice_samples_page import VoiceSamplesPage
@@ -80,10 +79,6 @@ class PageSetupMixin:
     def setup_env_config_page(self):
         self.env_config_tool = EnvConfigPage(self.page_env_config, self)
         self.env_config_tool.setup()
-
-    def setup_subtitle_removal_page(self):
-        self.subtitle_removal_tool = SubtitleRemovalPage(self.page_subtitle_removal, self)
-        self.subtitle_removal_tool.setup()
 
     def setup_video_montage_page(self):
         from gui.video_montage_page import VideoMontagePage

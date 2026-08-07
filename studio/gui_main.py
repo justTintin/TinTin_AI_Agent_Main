@@ -177,7 +177,6 @@ class LogHighlighter(QSyntaxHighlighter):
 
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.subtitle_removal_page import SubtitleRemovalPage
 from gui.live_clip_page import LiveClipPage
 from gui.voice_clone_page import VoiceClonePage
 from gui.voice_samples_page import VoiceSamplesPage
@@ -787,10 +786,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 13: Environment Configuration
         self.page_env_config = QWidget()
         self.content_stack.addWidget(self.page_env_config)
-
-        # 14: Subtitle Removal Page
-        self.page_subtitle_removal = QWidget()
-        self.content_stack.addWidget(self.page_subtitle_removal)
 
         # 15: Video Montage Tool (Smart Cut & Assemble)
         self.page_video_montage = QWidget()

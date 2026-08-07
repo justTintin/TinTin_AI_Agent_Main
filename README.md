@@ -153,12 +153,11 @@ studio\run_gui_integrated.bat
 
 | 功能 | 说明 | 对应文件/索引 |
 |------|------|--------------|
-| 数字人 | 数字人对口型（已接入 RunningHub 云端工作流）；菜单入口未开放 | `setup_digital_human_page` / index 3 |
+| 数字人 | 开发中（已接入 RunningHub 云端工作流）；菜单入口未开放 | `setup_digital_human_page` / index 3 |
 | 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
 | 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
 | 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
-| MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
-| 本地视频去字幕（旧版） | 基于本地 VSR 的旧版页面 | `subtitle_removal_page.py` / index 14 |
+| MG 动画 | 开发中：Remotion 动态图形 | `mg_animation_page.py` / index 36 |
 
 ### 已移除（代码/文件已删除）
 
@@ -204,7 +203,6 @@ studio\run_gui_integrated.bat
 | 视频修复 | 媒体工具 | VSR 超分/去噪/补帧（并入媒体工具） |
 | 视频智能重命名 | 隐藏 | 抽帧 → 请求远程视觉模型 → 智能命名 |
 | 批量 LUT 调色 | 媒体工具 | 批量应用 LUT 调色 |
-| 本地视频去字幕（旧版） | 隐藏 | 旧版本地 VSR 页面 |
 
 ### 图形处理
 
@@ -243,7 +241,7 @@ studio\run_gui_integrated.bat
 
 | 功能 | 状态 | 客户端实现 |
 |------|:----:|------|
-| 数字人对口型 | 已接入（侧边栏入口隐藏） | 上传人物图片 + 驱动音频 → RunningHub 工作流 API → 轮询 → 自动下载 |
+| 数字人对口型 | 开发中（已接入，侧边栏入口隐藏） | 上传人物图片 + 驱动音频 → RunningHub 工作流 API → 轮询 → 自动下载 |
 
 ### 扩展与采集
 

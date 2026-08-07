@@ -17,7 +17,6 @@ from utils.platform_utils import create_no_window_flag
 from ui import gui_styles
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.subtitle_removal_page import SubtitleRemovalPage
 from gui.live_clip_page import LiveClipPage
 from gui.voice_clone_page import VoiceClonePage
 from gui.voice_samples_page import VoiceSamplesPage

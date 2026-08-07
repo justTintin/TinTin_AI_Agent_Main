@@ -117,20 +117,20 @@ port = 7861
 | `llm_api_url` | LLM API 地址 | `https://api.deepseek.com` |
 | `llm_api_key` | LLM API 密钥 | `sk-xxx` |
 | `llm_model` | 文本模型名 | `deepseek-v4-flash` |
-| `compute_server_url` | **统一计算节点地址**（ASR/VoxCPM/Ollama/CLIP 共用） | `http://X.X.X.X.X.X.X:8000` |
-| `whisper_api_url` | 语音转写地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X.X.X.X:8000` |
-| `llm_vision_api_url` | 视觉分析（Ollama）地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X.X.X.X:8000` |
+| `compute_server_url` | **统一计算节点地址**（ASR/VoxCPM/Ollama/CLIP 共用） | `http://X.X.X.X:8000` |
+| `whisper_api_url` | 语音转写地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X:8000` |
+| `llm_vision_api_url` | 视觉分析（Ollama）地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X:8000` |
 | `llm_vision_model` | 视觉模型名 | `qwen2.5vl:7b-16k` |
-| `vox_api_url` | VoxCPM TTS API 地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X.X.X.X:8000/voxcpm/tts` |
-| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X.X.X.X:8000` |
-| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X.X.X.X:8000` |
-| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://X.X.X.X.X.X.X:8188` |
+| `vox_api_url` | VoxCPM TTS API 地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X:8000/voxcpm/tts` |
+| `clip_api_url` | 向量嵌入服务地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X:8000` |
+| `material_api_url` | 素材管理服务地址（不填则从 `compute_server_url` 派生） | `http://X.X.X.X:8000` |
+| `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://X.X.X.X:8188` |
 | `runninghub_api_key` | RunningHub API Key | |
 | `runninghub_base_url` | RunningHub 基址 | `https://www.runninghub.cn` |
 | `vox_mode` | VoxCPM 模式 | `api` |
 | `vox_timesteps` | VoxCPM 时间步数 | `20` |
 | `vox_cfg` | VoxCPM CFG 强度 | `2.0` |
-| `rustfs_endpoint` | RustFS/S3 对象存储地址 | `http://X.X.X.X.X.X.X:9000` |
+| `rustfs_endpoint` | RustFS/S3 对象存储地址 | `http://X.X.X.X:9000` |
 | `rustfs_access_key` | S3 Access Key | `xxx` |
 | `rustfs_secret_key` | S3 Secret Key | `xxx` |
 | `rustfs_bucket` | S3 Bucket 名 | `photos` |

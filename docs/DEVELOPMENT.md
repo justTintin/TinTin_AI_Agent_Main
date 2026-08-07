@@ -204,7 +204,7 @@ make clean          # 清理构建产物
 ## 命名规范
 
 
-> 来源：服务端在线文档中心 `http://X.X.X.X.X.X.X:8000/guide/docs/NAMING-CONVENTIONS.md`
+> 来源：服务端在线文档中心 `http://X.X.X.X:8000/guide/docs/NAMING-CONVENTIONS.md`
 > 同步时间：2026-08-03
 > 本规则是**整个工程（服务端 server/ + 客户端 studio/）的唯一命名约定**。新代码必须遵守；既有代码不一致处逐步收敛（见附录B）。
 > 核心原则：可读性 > 简短，一致性 > 个人偏好。

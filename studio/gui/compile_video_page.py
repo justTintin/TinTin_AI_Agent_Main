@@ -1067,7 +1067,7 @@ class CompileVideoPage(BasePage):
             except Exception:
                 pass
         if hasattr(mw, "switch_page"):
-            QTimer.singleShot(500, lambda: mw.switch_page(43))
+            QTimer.singleShot(500, lambda: mw.switch_page(42))
 
     def _current_product(self):
         """返回当前选中产品 dict（无则 None）。"""
@@ -1412,7 +1412,7 @@ class CompileVideoPage(BasePage):
     def _open_detail(self):
         tool = getattr(self.main_window, "hook_score_tool", None)
         try:
-            self.main_window.switch_page(35)  # 开头黄金3秒评分
+            self.main_window.switch_page(34)  # 开头黄金3秒评分
             if tool and hasattr(tool, "show_result") and self._last_results:
                 tool.show_result(self._last_results[0], self._self_check_data)
         except Exception as e:

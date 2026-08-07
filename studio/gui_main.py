@@ -790,7 +790,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 15: Video Montage Tool (Smart Cut & Assemble)
         self.page_video_montage = QWidget()
         self.content_stack.addWidget(self.page_video_montage)
-        self._register_lazy_page(15, self.setup_video_montage_page)
+        self._register_lazy_page(14, self.setup_video_montage_page)
 
         # 16: Image Matting Page (Alpha Matting Cutout)
         self.page_image_matting = QWidget()
@@ -845,7 +845,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 26: Video AI Rename Page
         self.page_video_ai_rename = QWidget()
         self.content_stack.addWidget(self.page_video_ai_rename)
-        self._register_lazy_page(26, self.setup_video_ai_rename_page)
+        self._register_lazy_page(25, self.setup_video_ai_rename_page)
 
         # 27: Video LUT Batch Conversion Page
         self.page_video_lut = QWidget()
@@ -874,7 +874,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 32: Material Generation (素材生成) Page
         self.page_dreamina = QWidget()
         self.content_stack.addWidget(self.page_dreamina)
-        self._register_lazy_page(32, self.setup_dreamina_page)
+        self._register_lazy_page(31, self.setup_dreamina_page)
 
         # 33: Cover Maker (封面制作) Page
         self.page_cover_maker = QWidget()
@@ -884,7 +884,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 34: One-click Compile Video (一键成片) Page
         self.page_compile_video = QWidget()
         self.content_stack.addWidget(self.page_compile_video)
-        self._register_lazy_page(34, self.setup_compile_video_page)
+        self._register_lazy_page(33, self.setup_compile_video_page)
 
         # 35: Hook Score (开头黄金3秒评分) Page
         self.page_hook_score = QWidget()
@@ -938,12 +938,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 45: 音频素材（媒体库独立菜单，懒加载）
         self.page_audio_material = QWidget()
         self.content_stack.addWidget(self.page_audio_material)
-        self._register_lazy_page(45, self.setup_audio_material_page)
+        self._register_lazy_page(44, self.setup_audio_material_page)
 
         # 46: 媒体工具（图片处理 + 视频处理 聚合标签页，懒加载）
         self.page_media_tools = QWidget()
         self.content_stack.addWidget(self.page_media_tools)
-        self._register_lazy_page(46, self.setup_media_tools_page)
+        self._register_lazy_page(45, self.setup_media_tools_page)
 
         # 浏览器扩展桥接服务：按配置随客户端自动启动
         try:
@@ -956,7 +956,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 进入定时任务页时刷新（拉取最新服务端状态）
         def _on_page_change(idx):
-            if idx == 43 and hasattr(self, "scheduled_tasks_tool"):
+            if idx == 42 and hasattr(self, "scheduled_tasks_tool"):
                 self.scheduled_tasks_tool.refresh()
         self.content_stack.currentChanged.connect(_on_page_change)
 
@@ -982,44 +982,44 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.refresh_accounts_list()
         elif index == 12: # Transcription
             pass
-        elif index == 37:  # 环境与维护（含系统日志 Tab）
+        elif index == 36:  # 环境与维护（含系统日志 Tab）
             if hasattr(self, "env_config_tool"):
                 self.env_config_tool.refresh_status()
             self.refresh_logs()
         elif index == 7: # System Config
             if hasattr(self, "refresh_llm_page_status"):
                 self.refresh_llm_page_status()
-        elif index == 21: # Voice Clone
+        elif index == 20: # Voice Clone
             if hasattr(self, "voice_clone_tool"):
                 self.voice_clone_tool._populate_ref_audio_samples()
-        elif index == 35: # Hook Score
+        elif index == 34: # Hook Score
             if hasattr(self, "hook_score_tool"):
                 self.hook_score_tool.update_vision_model_display()
-        elif index == 41: # Marketing Video Detection
+        elif index == 40: # Marketing Video Detection
             if hasattr(self, "marketing_detect_tool"):
                 self.marketing_detect_tool.update_vision_model_display()
-        elif index == 43: # 即梦素材
+        elif index == 41: # 即梦素材
             if hasattr(self, "dreamina_assets_tool"):
                 try:
                     self.dreamina_assets_tool._scan_local_files()
                 except Exception as e:
                     log.error(f"刷新即梦素材列表失败: {e}")
-        elif index == 44: # 扩展插件
+        elif index == 43: # 扩展插件
             if hasattr(self, "extension_tool"):
                 self.extension_tool.refresh()
-        elif index == 45:  # 音频素材
+        elif index == 44:  # 音频素材
             if hasattr(self, "audio_material_tool"):
                 self.audio_material_tool.refresh()
-        elif index == 39:  # 素材检索（进入页面时若上次加载失败自动重试）
+        elif index == 38:  # 素材检索（进入页面时若上次加载失败自动重试）
             if hasattr(self, "vector_search_tool"):
                 try:
                     self.vector_search_tool.refresh()
                 except Exception as e:
                     log.error(f"刷新素材检索失败: {e}")
-        elif index == 38: # Storyboard
+        elif index == 37: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()
-        elif index == 22: # 本地配置
+        elif index == 21: # 本地配置
             if hasattr(self, "voice_samples_tool"):
                 self.voice_samples_tool._load_table_data()
             if hasattr(self, "_load_lut_config"):

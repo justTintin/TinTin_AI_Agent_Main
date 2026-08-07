@@ -1103,11 +1103,11 @@ class VectorSearchPage(BasePage):
             return
         # 切换到一键成片页（第 34 页）并填充素材列表
         try:
-            mw.switch_page(34)
+            mw.switch_page(33)
             tool = getattr(mw, "compile_video_tool", None)
             if tool is None:
                 # 恢复当前页面
-                mw.switch_page(39)
+                mw.switch_page(38)
                 self.lbl_stat.setText("❌ 一键成片页未加载")
                 return
             tool.import_materials(materials)
@@ -1124,10 +1124,10 @@ class VectorSearchPage(BasePage):
             self.lbl_stat.setText("❌ 无法访问主窗口")
             return
         try:
-            mw.switch_page(15)
+            mw.switch_page(14)
             tool = getattr(mw, "video_montage_tool", None)
             if tool is None:
-                mw.switch_page(39)
+                mw.switch_page(38)
                 self.lbl_stat.setText("❌ 智能混剪页未加载")
                 return
             tool.set_external_materials(materials)

@@ -705,7 +705,7 @@ class AudioMaterialPage(BasePage):
         if mw is None:
             return
         try:
-            mw.switch_page(34)
+            mw.switch_page(33)
             tool = getattr(mw, "compile_video_tool", None)
             if tool is None:
                 mw.switch_page(45)

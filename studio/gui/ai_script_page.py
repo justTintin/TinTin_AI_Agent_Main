@@ -586,7 +586,7 @@ class AIScriptPage(BasePage):
             )
         
         # Switch to storyboard page (index 38)
-        self.main_window.switch_page(38)
+        self.main_window.switch_page(37)
 
     def _check_extreme_words(self):
         text = self.edit_copywriting.toPlainText()

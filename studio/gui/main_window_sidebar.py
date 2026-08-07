@@ -107,10 +107,11 @@ class SidebarMixin:
         script_layout.addWidget(script_header)
         
         script_menus = [
-            ("我的知识库", 29, "book"),
-            ("产品资料", 28, "database"),
-            ("产品文案创作", 30, "text"),
-            ("分镜脚本创作", 38, "movie-open"),
+            ("我的知识库", 28, "book"),
+            ("产品资料", 27, "database"),
+            ("产品文案创作", 29, "text"),
+            ("飞书脚本创作", 19, "clipboard-text"),
+            ("分镜脚本创作", 37, "movie-open"),
         ]
         for text, index, icon_name in script_menus:
             if icon_name:
@@ -137,12 +138,12 @@ class SidebarMixin:
         media_layout.addWidget(media_header)
 
         media_menus = [
-            ("素材生成", 32, "palette"),
-            ("素材检索", 39, "text-box-search"),
-            ("音频素材", 45, "music"),
-            ("即梦素材", 42, "image-multiple"),
+            ("素材生成", 31, "palette"),
+            ("素材检索", 38, "text-box-search"),
+            ("音频素材", 44, "music"),
+            ("即梦素材", 41, "image-multiple"),
             ("任务队列", 9, "format-list-checks"),
-            ("媒体工具", 46, "tools"),
+            ("媒体工具", 45, "tools"),
         ]
         for text, index, icon_name in media_menus:
             if icon_name:
@@ -169,10 +170,10 @@ class SidebarMixin:
         compose_layout.addWidget(compose_header)
 
         compose_menus = [
-            ("成片任务", 43, "clock-outline"),
-            ("一键成片", 34, "rocket"),
-            ("智能混剪", 15, "content-cut"),
-            ("直播切片", 19, "broadcast"),
+            ("成片任务", 42, "clock-outline"),
+            ("一键成片", 33, "rocket"),
+            ("智能混剪", 14, "content-cut"),
+            ("直播切片", 18, "broadcast"),
         ]
         for text, index, icon_name in compose_menus:
             if icon_name:
@@ -199,8 +200,8 @@ class SidebarMixin:
         ops_layout.addWidget(ops_header)
 
         ops_menus = [
-            ("视频评价预测", 35, "chart-line"),
-            ("视频营销检测", 41, "bullhorn"),
+            ("视频评价预测", 34, "chart-line"),
+            ("视频营销检测", 40, "bullhorn"),
         ]
         for text, index, icon_name in ops_menus:
             btn = mdi_button(text, icon_name)
@@ -225,10 +226,10 @@ class SidebarMixin:
         
         other_menus = [
             ("模型配置", 7, "cog"),
-            ("平台接入", 23, "link"),
-            ("本地配置", 22, "download"),
-            ("环境与维护", 37, "server"),
-            ("扩展插件", 44, "puzzle"),
+            ("平台接入", 22, "link"),
+            ("本地配置", 21, "download"),
+            ("环境与维护", 36, "server"),
+            ("扩展插件", 43, "puzzle"),
             ("关于", 6, "information"),
         ]
         for text, index, icon_name in other_menus:

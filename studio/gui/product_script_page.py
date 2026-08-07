@@ -266,7 +266,7 @@ class ProductScriptPage(BasePage):
             style_id = self._selected_stylization.get("id") if self._selected_stylization else None
             self.main_window.storyboard_tool.set_copywriting(
                 copy_text, stylization_id=style_id, product=prod)
-        self.main_window.switch_page(38)
+        self.main_window.switch_page(37)
 
     # ──────────────────────── 数据载入 ────────────────────────
     def reload_sources(self):

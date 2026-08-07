@@ -605,7 +605,7 @@ class ShotMaterialDialog(QDialog):
     def _open_mg(self):
         try:
             if self._main_window:
-                self._main_window.switch_page(36)
+                self._main_window.switch_page(35)
         except Exception:
             pass
         self.reject()
@@ -1765,7 +1765,7 @@ class StoryboardPage(BasePage):
 
     def _open_mg(self):
         try:
-            self.main_window.switch_page(36)
+            self.main_window.switch_page(35)
             tool = getattr(self.main_window, "mg_animation_tool", None)
             if tool and self.shot_cards and hasattr(tool, "set_default_text"):
                 tool.set_default_text(self.shot_cards[0]["desc"].toPlainText().strip()[:20])

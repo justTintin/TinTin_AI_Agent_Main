@@ -118,6 +118,7 @@ studio\run_gui_integrated.bat
   ├── 📚 我的知识库
   ├── 📦 产品资料
   ├── 🛒 产品文案创作
+  ├── 📋 飞书脚本创作
   └── 📝 分镜脚本创作
 
 🗄️ 媒体库
@@ -155,9 +156,9 @@ studio\run_gui_integrated.bat
 |------|------|--------------|
 | 数字人 | 开发中（已接入 RunningHub 云端工作流）；菜单入口未开放 | `setup_digital_human_page` / index 3 |
 | 账户平台 | 抖音账户管理（整段 Section 注释） | `main_window_accounts.py` / index 8 |
-| 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
-| 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 26 |
-| MG 动画 | 开发中：Remotion 动态图形 | `mg_animation_page.py` / index 36 |
+| 智能分层 | AI 图像分层 | `image_layered_page.py` / index 16 |
+| 视频智能重命名 | 视觉模型智能命名 | `video_ai_rename_page.py` / index 25 |
+| MG 动画 | 开发中：Remotion 动态图形 | `mg_animation_page.py` / index 35 |
 
 ### 已移除（代码/文件已删除）
 

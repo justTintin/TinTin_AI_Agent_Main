@@ -18,9 +18,10 @@
 - 本地素材浏览、管理与轻量预处理
 - 向配置的远程服务端发起任务请求并轮询结果
 - 调用已集成的本地工具（ffmpeg、rembg 等）及浏览器扩展桥接服务
+- 调用 RunningHub 云端 ComfyUI 工作流（数字人对口型等）：上传图片/音频 → 提交工作流 → 轮询状态 → 自动下载结果
 - 浏览器扩展「螺丝钉素材采集」的本地桥接（`utils/extension_bridge.py`），随客户端自动启动
 
-> 远程服务地址统一在 `studio/config/ai_config.json` 中配置，具体服务端实现由独立部署的 `compute_server` / `comfyui_server` 等提供。本仓库不维护服务端代码。
+> 远程服务地址统一在 `studio/config/ai_config.json` 中配置，具体服务端实现由独立部署的 `compute_server` / `comfyui_server` 等提供；数字人也可走 RunningHub 云端工作流 API。本仓库不维护服务端代码。
 
 ---
 
@@ -134,7 +135,7 @@ studio\run_gui_integrated.bat
 
 | 功能 | 说明 | 对应文件/索引 |
 |------|------|--------------|
-| 数字人 | 数字人形象生成 | `setup_digital_human_page` / index 3 |
+| 数字人 | 数字人对口型（已接入 RunningHub 云端工作流）；菜单入口未开放，可在侧边栏启用 | `setup_digital_human_page` / index 3 |
 | 即梦素材 | 即梦生成素材管理 | `dreamina_assets_page.py` / index 43 |
 | MG 动画 | Remotion 动态图形 | `mg_animation_page.py` / index 36 |
 | 智能分层 | AI 图像分层 | `image_layered_page.py` / index 17 |
@@ -223,6 +224,33 @@ studio\run_gui_integrated.bat
 
 ---
 
+
+## RunningHub 数字人工作流
+
+数字人页面支持两种后端：
+
+| 后端 | 说明 |
+|------|------|
+| ComfyUI（本地/局域网） | 本地或私有 GPU 上的 ComfyUI，上传图片/音频后 patch 工作流并提交 |
+| RunningHub（云端工作流 API） | 走 RunningHub 官方工作流接口 `POST /openapi/v2/run/workflow/{workflowId}` |
+
+### RunningHub 配置要点
+
+- 在“平台接入 → RunningHub”配置 `runninghub_api_key` 与 `runninghub_base_url`。
+- 工作流 ID 使用 API 详情页地址 `call-api/api-detail/{workflowId}?apiType=5` 中的那个 ID，不是编辑器 `/workflow/{id}` 页面的 ID（当两者一致时可同时使用）。
+- 实例类型：48G 显存工作流必须配 `instanceType=plus`。
+- 企业级-独占 Key 建议开启“个人独占队列”（`usePersonalQueue=true`），任务才会分配到你租用的独占机器。
+- 节点映射：只映射真实文件输入节点 `LoadImage [180]`、`LoadAudio [6]`；连线节点不提交。
+
+### 客户端队列与下载
+
+- 队列由客户端管理，同时只提交一个任务；415 资源不足时 30 秒后自动重试，任务完成后等待 30 秒再提交下一个。
+- 页面实时显示队列统计：总数、已提交、成功下载、失败、进度。
+- 结果自动下载，命名规则：以音频文件名为基础，单个结果为 `音频名.mp4`，多个结果为 `音频名_序号.mp4`。
+
+> 可选：若要直接按 ComfyUI 协议提交（`POST /prompt`），需填写浏览器登录态 `Rh-Comfy-Auth` / `Rh-Identify` / `Rh-Accesstoken`；默认不填，使用官方工作流 API 即可。
+
+
 ## 系统配置
 
 > v2.1.0 将原「环境配置」拆分为 5 个独立菜单，合并/迁移了冗余菜单：AI 设置→平台接入、大模型配置→模型配置、系统日志/帮助/备份还原/Python 终端→运行环境/资源配置等。
@@ -238,7 +266,7 @@ studio\run_gui_integrated.bat
 ### 平台接入
 - 统一计算节点：远程服务端地址配置、连通性测试
 - ComfyUI：远程地址配置、连接测试
-- RunningHub：API Key 配置、用户信息验证
+- RunningHub：API Key 配置、工作流管理（名称/类型/ID/实例类型）、个人独占队列选项、可选 ComfyUI 协议会话凭证、连接测试
 - 即梦 / 飞书：二进制路径与 App ID/Secret 配置
 
 ### 模型配置
@@ -280,6 +308,13 @@ studio\run_gui_integrated.bat
 | `material_api_url` | 素材管理 / OCR 服务地址（不填则从 `compute_server_url` 派生） | `http://<server>:8000` |
 | `comfyui_addr` | ComfyUI 图像生成地址（独立服务节点） | `http://<server>:8188` |
 | `llm_api_url` | 文案生成 LLM API（云端） | `https://api.deepseek.com` |
+| `runninghub_api_key` | RunningHub 工作流 API Key | `rh_xxx` |
+| `runninghub_base_url` | RunningHub 基础地址 | `https://www.runninghub.cn` |
+| `runninghub_use_personal_queue` | 企业级-独占 Key 是否使用个人独占队列 | `true` |
+| `runninghub_workflows` | 已配置的 RunningHub 工作流列表（id/name/type/instanceType） | `[]` |
+| `runninghub_comfy_auth` | 可选：ComfyUI 协议会话凭证 Rh-Comfy-Auth | 空 |
+| `runninghub_comfy_identify` | 可选：Rh-Identify | 空 |
+| `runninghub_access_token` | 可选：Rh-Accesstoken | 空 |
 
 > 服务端接口路径以运行时服务端 `/guide` 或 OpenAPI 文档为准，客户端按文档对接。
 
@@ -332,6 +367,7 @@ make clean             # 清理构建产物
 - `studio/requirements_gui.txt` — GUI 主程序依赖
 - `studio/requirements.txt` — 爬虫/数据库/Flask 依赖
 - `studio/requirements_dev.txt` — 开发工具
+- 运行前需准备 Python 环境（`python_embeded/` 或系统 Python）并安装上述依赖；`python_embeded/` 不入库。
 
 详细指南见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
@@ -344,6 +380,7 @@ make clean             # 清理构建产物
 | 客户端 GUI | PySide6 (Qt 6) |
 | 内嵌 Python | `python_embeded/` 独立 Python 环境 |
 | 图像生成 | 即梦 / ComfyUI（远程） |
+| 数字人对口型 | RunningHub 云端 ComfyUI 工作流 API（可选 ComfyUI 协议） |
 | 文案生成 | DeepSeek API（云端） |
 | 本地媒体处理 | ffmpeg · rembg |
 | OCR / 去字幕 | 服务端 `/material/ocr` / `/vsr/remove` |

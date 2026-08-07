@@ -13,8 +13,8 @@
 import os
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame, QWidget,
-    QComboBox, QSplitter, QMessageBox,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame, QWidget,
+    QComboBox, QSplitter, QMessageBox, QCheckBox,
     QProgressBar, QScrollArea,
 )
 from PySide6.QtCore import Qt
@@ -187,6 +187,31 @@ class ProductScriptPage(BasePage):
         cp = QVBoxLayout(card_copy)
         cp.setContentsMargins(20, 16, 20, 16)
         cp.setSpacing(10)
+
+        # 生成设置：平台 / 语气 / 结构 / 话题标签 / 违禁词（放在生成文案按钮前面）
+        gen_settings = QGridLayout()
+        gen_settings.setHorizontalSpacing(10)
+        gen_settings.setVerticalSpacing(8)
+        gen_settings.addWidget(QLabel("平台"), 0, 0)
+        self.combo_platform = QComboBox()
+        self.combo_platform.addItems(["通用", "抖音", "快手", "小红书"])
+        gen_settings.addWidget(self.combo_platform, 0, 1)
+        gen_settings.addWidget(QLabel("语气"), 0, 2)
+        self.combo_tone = QComboBox()
+        self.combo_tone.addItems(["热情种草", "专业测评", "幽默搞笑", "悬念钩子", "温情故事", "酷飒高级"])
+        gen_settings.addWidget(self.combo_tone, 0, 3)
+        gen_settings.addWidget(QLabel("结构"), 1, 0)
+        self.combo_structure = QComboBox()
+        self.combo_structure.addItems(["黄金3秒开场", "痛点切入", "故事化", "清单式", "对比式", "倒叙悬念"])
+        gen_settings.addWidget(self.combo_structure, 1, 1)
+        gen_settings.addWidget(QLabel("话题标签"), 1, 2)
+        self.combo_tags = QComboBox()
+        self.combo_tags.addItems(["不生成", "5 个", "10 个"])
+        gen_settings.addWidget(self.combo_tags, 1, 3)
+        self.check_avoid_banned = QCheckBox("规避平台违禁词 / 极限词")
+        self.check_avoid_banned.setChecked(True)
+        gen_settings.addWidget(self.check_avoid_banned, 2, 0, 1, 4)
+        cp.addLayout(gen_settings)
 
         cp_row = QHBoxLayout()
         cp_row.addWidget(QLabel("📝 视频文案（可编辑）"))
@@ -405,6 +430,31 @@ class ProductScriptPage(BasePage):
         if style_text:
             user_parts.append(f"【风格指引】\n{style_text[:1000]}")
 
+        # 生成设置映射：平台 / 语气 / 结构 / 话题标签 / 违禁词
+        platform_text = {
+            "通用": "通用（不指定平台）",
+            "抖音": "抖音：口语化、节奏快、黄金3秒抓人、适合口播，可带轻量互动引导",
+            "快手": "快手：接地气、老铁口吻、真实感强、简单直接",
+            "小红书": "小红书：种草笔记体、真诚分享、分段清晰、可带适量 emoji",
+        }.get(self.combo_platform.currentText(), "通用（不指定平台）")
+        tone_text = {
+            "热情种草": "热情种草：兴奋、真诚、强烈推荐感",
+            "专业测评": "专业测评：客观、数据化、权威感",
+            "幽默搞笑": "幽默搞笑：轻松、有梗、口语化",
+            "悬念钩子": "悬念钩子：先抛疑问/反差，再揭晓卖点",
+            "温情故事": "温情故事：从生活场景切入，强调情感共鸣",
+            "酷飒高级": "酷飒高级：简洁、利落、高级感",
+        }.get(self.combo_tone.currentText(), "热情种草")
+        structure_text = {
+            "黄金3秒开场": "黄金3秒开场：开头抓人，中间卖点支撑，结尾引导下单/互动",
+            "痛点切入": "痛点切入：先讲用户痛点，再给产品方案，最后行动引导",
+            "故事化": "故事化：用场景/故事带入，自然引出产品卖点",
+            "清单式": "清单式：分点列出卖点/优势，清晰易读",
+            "对比式": "对比式：与同类产品或旧方案对比，突出优势",
+            "倒叙悬念": "倒叙悬念：先给结果/反差，再回溯原因",
+        }.get(self.combo_structure.currentText(), "黄金3秒开场")
+        tag_count = {"不生成": 0, "5 个": 5, "10 个": 10}.get(self.combo_tags.currentText(), 0)
+
         reqs = [
             "请根据以上信息，创作一篇 200-400 字的带货短视频文案。要求：",
             "① 开头黄金 3 秒抓人；中间用卖点支撑；结尾引导下单/互动。",
@@ -412,6 +462,13 @@ class ProductScriptPage(BasePage):
         ]
         if style_text:
             reqs.append("③ 严格遵守「风格指引」中定义的钩子/口吻/节奏/句式/收尾风格。")
+        reqs.append(f"平台要求：{platform_text}。")
+        reqs.append(f"语气要求：{tone_text}。")
+        reqs.append(f"结构要求：{structure_text}。")
+        if tag_count:
+            reqs.append(f"文末另起一行生成 {tag_count} 个话题标签（# 开头，贴合所选平台与产品）。")
+        if self.check_avoid_banned.isChecked():
+            reqs.append("违禁词要求：全程规避平台广告极限词/违禁词（绝对化用语、虚假宣传、夸大功效、无法验证的承诺等），必要时用中性表达替代。")
         reqs.append("只输出文案正文，不要任何前言或总结说明。")
         if extra_prompt:
             reqs.append(f"\n【附加要求】\n{extra_prompt}")

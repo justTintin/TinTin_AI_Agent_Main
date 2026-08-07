@@ -147,6 +147,13 @@ class Step4FinalView(BaseStepView):
         self.main_page.btn_export_jianying.setEnabled(False)
         self.main_page.btn_export_jianying.clicked.connect(self.main_page._export_to_jianying_draft)
         btn_layout.addWidget(self.main_page.btn_export_jianying, 1)
+        # 新增按钮：导出全部到时间轴（带转场）
+        self.main_page.btn_export_jianying_all = mdi_button("导出全部到时间轴(带转场)", "film")
+        self.main_page.btn_export_jianying_all.setObjectName("secondary_button")
+        self.main_page.btn_export_jianying_all.setEnabled(False)
+        self.main_page.btn_export_jianying_all.setToolTip("将合成列表中的所有视频按顺序导出为一条剪映时间轴，片段之间自动添加所选转场，每个片段携带各自字幕")
+        self.main_page.btn_export_jianying_all.clicked.connect(self.main_page._export_all_to_jianying_draft)
+        btn_layout.addWidget(self.main_page.btn_export_jianying_all, 1)
 
         left_vbox.addLayout(btn_layout)
 

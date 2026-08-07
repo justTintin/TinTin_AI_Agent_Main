@@ -4003,6 +4003,7 @@ class VideoMontagePage(BasePage):
         self.btn_final_assemble.setEnabled(True)
         self.btn_open_final_dir.setEnabled(True)
         self.btn_export_jianying.setEnabled(True)
+        self.btn_export_jianying_all.setEnabled(True)
         self.progress_bar.setValue(100)
         self.stage_label.setText("✅ 最终合成视频完成！")
         
@@ -4032,43 +4033,25 @@ class VideoMontagePage(BasePage):
                     QMessageBox.warning(self.parent_widget, "打开失败", str(e))
     # [5·拼接合成]  _export_to_jianying_draft
     def _export_to_jianying_draft(self):
-        """一键导出为剪映工程草稿"""
+        """一键导出为剪映工程草稿（导出当前选中的单个视频）"""
         selected_item = self.final_video_list.currentItem()
         if not selected_item:
             # 默认取第一个
             if self.final_video_list.count() > 0:
                 selected_item = self.final_video_list.item(0)
-        
+
         if not selected_item:
             QMessageBox.warning(self.parent_widget, "未选中视频", "请先在合成列表中选择一个视频！")
             return
-            
+
         video_path = selected_item.data(Qt.UserRole)
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.parent_widget, "文件不存在", f"无法定位该视频的物理文件：\n{video_path}")
             return
 
-        # 查找字幕：通常配音视频会在同级目录下生成同名 .srt 文件
-        video_dir = os.path.dirname(video_path)
         video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        srt_path = os.path.join(video_dir, f"{video_basename}.srt")
-        
-        # 兼容处理：有些视频名为 dubbed_xxx.mp4，但是字幕名为 dubbed_xxx.srt，也可能叫 xxx.srt
-        if not os.path.exists(srt_path):
-            clean_name = video_basename
-            if clean_name.startswith("dubbed_"):
-                clean_name = clean_name[len("dubbed_"):]
-            elif clean_name.startswith("final_"):
-                clean_name = clean_name[len("final_"):]
-            
-            for folder in [video_dir, os.path.dirname(video_dir)]:
-                tmp_srt = os.path.join(folder, f"{clean_name}.srt")
-                if os.path.exists(tmp_srt):
-                    srt_path = tmp_srt
-                    break
-        
-        if not os.path.exists(srt_path):
-            srt_path = None
+        srt_path = self._find_srt_for_video(video_path)
+        if not srt_path:
             log.warning(f"[Jianying] 未找到视频 {video_basename} 的配套 .srt 字幕文件，导出将不含字幕轨道。")
 
         # 获取 BGM 路径和音量
@@ -4077,7 +4060,7 @@ class VideoMontagePage(BasePage):
 
         # 调用工具类进行导出
         from utils.jianying_exporter import JianyingExporter
-        
+
         draft_name = f"螺丝钉剪辑_{video_basename}"
         success, result_path = JianyingExporter.export_to_draft(
             video_path=video_path,
@@ -4092,6 +4075,88 @@ class VideoMontagePage(BasePage):
                 self.parent_widget,
                 "草稿导出成功",
                 f"一键导出至剪映专业版成功！\n\n项目名称：{draft_name}\n\n请直接打开您的电脑「剪映专业版」客户端进行精修编辑。\n系统已为您在资源管理器中定位到该草稿文件夹。"
+            )
+            # 打开对应的草稿文件夹
+            try:
+                os.startfile(result_path)
+            except Exception:
+                pass
+        else:
+            self._show_long_error(
+                "导出失败",
+                f"导出剪映草稿时发生错误：\n{result_path}")
+
+    # [7·混音导出]  _find_srt_for_video
+    def _find_srt_for_video(self, video_path):
+        """查找视频同目录下配套的 .srt 字幕文件（兼容 dubbed_/final_ 前缀）"""
+        video_dir = os.path.dirname(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        srt_path = os.path.join(video_dir, f"{video_basename}.srt")
+
+        # 兼容处理：有些视频名为 dubbed_xxx.mp4，但是字幕名为 dubbed_xxx.srt，也可能叫 xxx.srt
+        if not os.path.exists(srt_path):
+            clean_name = video_basename
+            if clean_name.startswith("dubbed_"):
+                clean_name = clean_name[len("dubbed_"):]
+            elif clean_name.startswith("final_"):
+                clean_name = clean_name[len("final_"):]
+
+            for folder in [video_dir, os.path.dirname(video_dir)]:
+                tmp_srt = os.path.join(folder, f"{clean_name}.srt")
+                if os.path.exists(tmp_srt):
+                    srt_path = tmp_srt
+                    break
+
+        if not os.path.exists(srt_path):
+            return None
+        return srt_path
+
+    # [7·混音导出]  _export_all_to_jianying_draft
+    def _export_all_to_jianying_draft(self):
+        """将合成列表中的所有视频按顺序导出为一条剪映时间轴（带转场 + 各自字幕）"""
+        video_paths = []
+        srt_paths = []
+        for i in range(self.final_video_list.count()):
+            it = self.final_video_list.item(i)
+            p = it.data(Qt.UserRole) if it else None
+            if p and os.path.exists(p):
+                video_paths.append(p)
+                srt_paths.append(self._find_srt_for_video(p))
+
+        if not video_paths:
+            QMessageBox.warning(self.parent_widget, "未选中视频", "合成列表为空，请先生成视频！")
+            return
+
+        # 转场类型沿用第 2 步「转场动画」下拉框的选择
+        trans_combo = getattr(self, "transition_combo", None)
+        transition = trans_combo.currentData() if trans_combo is not None else None
+        if not transition:
+            transition = "fade"
+
+        # 获取 BGM 路径和音量
+        bgm_path = self.bgm_input.text().strip()
+        bgm_vol = self.bgm_volume_slider.value()
+
+        from utils.jianying_exporter import JianyingExporter
+
+        draft_name = f"螺丝钉剪辑_多片段时间轴({len(video_paths)}段)"
+        success, result_path = JianyingExporter.export_multi_to_draft(
+            video_paths=video_paths,
+            transitions=transition,
+            bgm_path=bgm_path,
+            bgm_volume=bgm_vol,
+            srt_paths=srt_paths,
+            draft_name=draft_name
+        )
+
+        if success:
+            QMessageBox.information(
+                self.parent_widget,
+                "草稿导出成功",
+                f"已将 {len(video_paths)} 个片段导出为剪映时间轴（转场：{transition}）！\n\n"
+                f"项目名称：{draft_name}\n\n"
+                f"请直接打开您的电脑「剪映专业版」客户端进行精修编辑。\n"
+                f"系统已为您在资源管理器中定位到该草稿文件夹。"
             )
             # 打开对应的草稿文件夹
             try:

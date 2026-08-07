@@ -162,3 +162,9 @@ ai_skills/
 *.exe
 video_config.json
 studio/config/local_config.json
+
+# Scratch / debug scripts and temp reports (not part of the product)
+/_*.py
+/_*.txt
+/pythonw_test.txt
+/studio/ingestion_diagnose_report.txt

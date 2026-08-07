@@ -1331,15 +1331,15 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             btn_resume.clicked.connect(lambda: self.resume_rh_task(prompt_id))
             registry["resume_btn"] = btn_resume
 
-            btn_cancel = mdi_button("", "close")
-            btn_cancel.setToolTip("取消")
-            btn_cancel.setFixedSize(30, 24)
-            btn_cancel.clicked.connect(lambda: self.cancel_rh_task_row(prompt_id))
-            registry["cancel_btn"] = btn_cancel
-
             actions_layout.addWidget(btn_pause)
             actions_layout.addWidget(btn_resume)
-            actions_layout.addWidget(btn_cancel)
+
+        btn_delete = mdi_button("", "delete")
+        btn_delete.setToolTip("删除")
+        btn_delete.setFixedSize(30, 24)
+        btn_delete.clicked.connect(lambda: self.delete_task_row(prompt_id))
+        registry["delete_btn"] = btn_delete
+        actions_layout.addWidget(btn_delete)
 
         self.task_table.setCellWidget(row, 6, actions_widget)
         self._task_registry[prompt_id] = registry
@@ -1733,3 +1733,22 @@ if __name__ == "__main__":
     def cancel_rh_task_row(self, task_id):
         """从任务表中取消/移除一个 RunningHub 任务行（委托给 AIGenMixin 的 cancel_rh_task）。"""
         self.cancel_rh_task(task_id)
+
+    def delete_task_row(self, task_id):
+        """删除任意任务行（RunningHub 同时清队列，其它类型只移除列表）。"""
+        registry = self._task_registry.get(task_id) or {}
+        if registry.get("task_type") == "RunningHub":
+            self.cancel_rh_task(task_id)
+            return
+        for row in range(self.task_table.rowCount() - 1, -1, -1):
+            item = self.task_table.item(row, 0)
+            if not item:
+                continue
+            t = item.data(0x0100) or {}
+            if t.get("task_id") == task_id or item.text() == task_id[:12]:
+                self.task_table.removeRow(row)
+                break
+        self._task_registry.pop(task_id, None)
+        self.task_outputs.pop(task_id, None)
+        self.task_status_items.pop(task_id, None)
+        self.task_progress_bars.pop(task_id, None)

@@ -1030,9 +1030,14 @@ class PageSetupMixin:
             btn_sync.setFixedWidth(100)
             btn_sync.clicked.connect(self._sync_server_tasks_async)
             header.addWidget(btn_sync)
-            btn_clear = mdi_button("清除已完成", "close")
-            btn_clear.setFixedWidth(100)
-            btn_clear.clicked.connect(self._clear_done_tasks)
+            btn_add_task = mdi_button("添加任务", "plus")
+            btn_add_task.setFixedWidth(110)
+            btn_add_task.setToolTip("通过表单添加一个 RunningHub 数字人任务")
+            btn_add_task.clicked.connect(self._add_task_from_toolbar)
+            header.addWidget(btn_add_task)
+            btn_clear = mdi_button("全部清空", "close")
+            btn_clear.setFixedWidth(110)
+            btn_clear.clicked.connect(self._clear_all_tasks)
             header.addWidget(btn_clear)
             btn_export_rh = mdi_button("导出 RunningHub 结果", "download")
             btn_export_rh.setFixedWidth(150)
@@ -1054,7 +1059,7 @@ class PageSetupMixin:
             self.task_table.setColumnWidth(1, 120)
             self.task_table.setColumnWidth(3, 120)
             self.task_table.setColumnWidth(5, 140)
-            self.task_table.setColumnWidth(6, 160)
+            self.task_table.setColumnWidth(6, 210)
             self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.task_table.cellClicked.connect(self._on_task_row_clicked)
             task_layout.addWidget(self.task_table)
@@ -1194,6 +1199,43 @@ class PageSetupMixin:
             status_text = self.task_table.item(row, 3).text() if self.task_table.item(row, 3) else ""
             if "完成" in status_text or "失败" in status_text or "错误" in status_text:
                 self.task_table.removeRow(row)
+
+    def _add_task_from_toolbar(self):
+        """表单方式添加一个 RunningHub 数字人任务：选图片 + 选音频，加入队列并开始。"""
+        from utils.file_dialog_utils import pick_file
+        img_file = pick_file(self, "选择人物图片", "", "Images (*.png *.jpg *.jpeg)")
+        if not img_file:
+            return
+        aud_file = pick_file(self, "选择驱动音频", "", "Audio (*.mp3 *.wav *.flac *.aac *.m4a)")
+        if not aud_file:
+            return
+        self.add_single_rh_task(img_file, aud_file)
+
+    def _clear_all_tasks(self):
+        """清空整个任务列表与 RunningHub 队列。"""
+        ret = QMessageBox.question(self, "全部清空", "确定清空全部任务吗？", QMessageBox.Yes | QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        self.task_table.setRowCount(0)
+        if hasattr(self, "_task_registry"):
+            self._task_registry.clear()
+        if hasattr(self, "task_outputs"):
+            self.task_outputs.clear()
+        if hasattr(self, "task_status_items"):
+            self.task_status_items.clear()
+        if hasattr(self, "task_progress_bars"):
+            self.task_progress_bars.clear()
+        if hasattr(self, "rh_pending_tasks"):
+            self.rh_pending_tasks = []
+        if hasattr(self, "rh_submitted_tasks"):
+            self.rh_submitted_tasks = {}
+        if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
+            self.rh_poll_timer.stop()
+        if hasattr(self, "btn_run_workflow"):
+            self.btn_run_workflow.setEnabled(True)
+        self._update_rh_queue_stats()
+        if hasattr(self, "log_area"):
+            self.log_area.append("任务列表已全部清空。")
 
     def setup_accounts_page(self):
             layout = QVBoxLayout(self.page_accounts)

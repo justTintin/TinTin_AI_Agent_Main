@@ -357,6 +357,47 @@ class AIGenMixin:
         self._update_rh_queue_stats()
         self._process_rh_queue()
 
+    def add_single_rh_task(self, img_file, aud_file):
+        """表单方式添加单个 RunningHub 数字人任务并开始执行。"""
+        if not self.runninghub:
+            QMessageBox.warning(self, "未初始化", "RunningHub 模块未初始化")
+            return
+        wf_id = self.rh_workflow_id_input.text().strip()
+        if not wf_id:
+            QMessageBox.warning(self, "未配置工作流", "请先在平台接入中配置数字人工作流")
+            return
+        if not os.path.isfile(img_file) or not os.path.isfile(aud_file):
+            QMessageBox.warning(self, "文件不存在", "请选择存在的图片和音频文件")
+            return
+        image_nodes, audio_nodes = self._get_checked_rh_nodes()
+        if not image_nodes or not audio_nodes:
+            image_nodes = [("180", "LoadImage", "image")]
+            audio_nodes = [("6", "LoadAudio", "audio")]
+        wf_cfg = self._rh_find_workflow_config(wf_id) or {}
+        self.rh_queue_paused = False
+        self.rh_pending_tasks = [{
+            "idx": 0,
+            "wf_id": wf_id,
+            "img_file": img_file,
+            "aud_file": aud_file,
+            "image_nodes": image_nodes,
+            "audio_nodes": audio_nodes,
+            "instance_type": wf_cfg.get("instanceType") or "default",
+            "state": "pending",
+            "task_id": None,
+            "error": None,
+            "retry_count": 0,
+            "next_attempt_at": 0,
+            "submit_count": 0,
+            "downloaded": False,
+        }]
+        self.rh_submitted_tasks = {}
+        self.log_area.setText("已添加 1 个任务到 RunningHub 队列，开始执行...")
+        self.btn_run_workflow.setEnabled(False)
+        self._start_rh_poll_timer()
+        self._update_rh_queue_stats()
+        self._process_rh_queue()
+
     def _get_checked_rh_nodes(self):
         """从节点列表中返回当前勾选的 (image_nodes, audio_nodes)。"""
         image_nodes = []

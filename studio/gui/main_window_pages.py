@@ -684,6 +684,87 @@ class PageSetupMixin:
         b_save_comfy = mdi_button("保存 ComfyUI 配置", "save"); b_save_comfy.setObjectName("primary_button"); b_save_comfy.clicked.connect(self.save_ai_config); r1.addWidget(b_save_comfy)
         l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
+        # ── Tab 2: RunningHub ──
+        p2 = QWidget(); l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30)
+        l2.addWidget(QLabel("RunningHub API Key（在 RunningHub 个人中心获取）:"))
+        self.runninghub_api_key_input = QLineEdit(); self.runninghub_api_key_input.setPlaceholderText("rh_xxxxxxxx..."); self.runninghub_api_key_input.setEchoMode(QLineEdit.Password); self.runninghub_api_key_input.setText(self.ai_config.get("runninghub_api_key", "")); l2.addWidget(self.runninghub_api_key_input)
+        l2.addWidget(QLabel("RunningHub 基础地址（一般保持默认）:"))
+        self.runninghub_base_url_input = QLineEdit(); self.runninghub_base_url_input.setPlaceholderText("https://www.runninghub.cn"); self.runninghub_base_url_input.setText(self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")); l2.addWidget(self.runninghub_base_url_input)
+        l2.addWidget(QLabel("在线工作流 ComfyUI 协议会话凭证（登录浏览器控制台 localStorage 获取）:"))
+        self.runninghub_comfy_auth_input = QLineEdit(); self.runninghub_comfy_auth_input.setPlaceholderText("Rh-Comfy-Auth"); self.runninghub_comfy_auth_input.setToolTip("localStorage.getItem('Rh-Comfy-Auth')"); self.runninghub_comfy_auth_input.setText(self.ai_config.get("runninghub_comfy_auth", "")); l2.addWidget(self.runninghub_comfy_auth_input)
+        self.runninghub_comfy_identify_input = QLineEdit(); self.runninghub_comfy_identify_input.setPlaceholderText("Rh-Identify"); self.runninghub_comfy_identify_input.setToolTip("localStorage.getItem('Rh-Identify')"); self.runninghub_comfy_identify_input.setText(self.ai_config.get("runninghub_comfy_identify", "")); l2.addWidget(self.runninghub_comfy_identify_input)
+        self.runninghub_access_token_input = QLineEdit(); self.runninghub_access_token_input.setPlaceholderText("Rh-Accesstoken"); self.runninghub_access_token_input.setToolTip("localStorage.getItem('Rh-Accesstoken')"); self.runninghub_access_token_input.setText(self.ai_config.get("runninghub_access_token", "")); l2.addWidget(self.runninghub_access_token_input)
+        self.runninghub_use_personal_queue_check = QCheckBox("使用个人独占队列（企业级-独占 Key 建议开启）"); self.runninghub_use_personal_queue_check.setToolTip("usePersonalQueue；独占机器请保持勾选，否则任务可能不会被分配到你租的机器"); self.runninghub_use_personal_queue_check.setChecked(bool(self.ai_config.get("runninghub_use_personal_queue", True))); l2.addWidget(self.runninghub_use_personal_queue_check)
+        r2 = QHBoxLayout(); r2.addStretch()
+        b_save_rh = mdi_button("保存 RunningHub 配置", "save"); b_save_rh.setObjectName("primary_button"); b_save_rh.clicked.connect(self.save_ai_config); r2.addWidget(b_save_rh)
+        b_test_rh = mdi_button("测试连接", "link"); b_test_rh.setObjectName("secondary_button"); b_test_rh.clicked.connect(self._test_runninghub_config); r2.addWidget(b_test_rh)
+        b_test_comfy = mdi_button("测试 ComfyUI 协议", "link"); b_test_comfy.setObjectName("secondary_button"); b_test_comfy.clicked.connect(self._test_runninghub_comfy_protocol); r2.addWidget(b_test_comfy)
+        l2.addLayout(r2)
+        self.rh_config_status = QLabel(""); self.rh_config_status.setObjectName("muted_text"); l2.addWidget(self.rh_config_status)
+        self.rh_comfy_status = QLabel(""); self.rh_comfy_status.setObjectName("muted_text"); l2.addWidget(self.rh_comfy_status)
+
+        # ── RunningHub 工作流管理 ──
+        l2.addSpacing(20)
+        wf_group = QGroupBox("☁️ 工作流管理"); wf_group.setObjectName("model_groupbox")
+        wf_layout = QVBoxLayout(wf_group); wf_layout.setSpacing(10)
+
+        wf_layout.addWidget(QLabel("工作流列表（带类型，可编辑。点击「刷新」尝试从 RunningHub 读取）："))
+        self.rh_workflow_table = QTableWidget(0, 4)
+        self.rh_workflow_table.setHorizontalHeaderLabels(["名称", "类型", "工作流 ID", "实例类型"])
+        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.rh_workflow_table.verticalHeader().setVisible(False)
+        self.rh_workflow_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rh_workflow_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.rh_workflow_table.setMinimumHeight(120)
+        self.rh_workflow_table.setMaximumHeight(180)
+        self.rh_workflow_table.itemSelectionChanged.connect(self._rh_on_workflow_selection_changed)
+        wf_layout.addWidget(self.rh_workflow_table)
+
+        wf_btn_row = QHBoxLayout()
+        btn_refresh_wf = mdi_button("刷新工作流列表", "refresh")
+        btn_refresh_wf.setToolTip("尝试从 RunningHub API 拉取该账号下的工作流列表")
+        btn_refresh_wf.clicked.connect(self._rh_refresh_workflow_list)
+        wf_btn_row.addWidget(btn_refresh_wf)
+        btn_add_wf = mdi_button("添加", "plus")
+        btn_add_wf.setToolTip("添加一个新的工作流（可设置名称、类型、ID）")
+        btn_add_wf.clicked.connect(self._rh_show_add_workflow_dialog)
+        wf_btn_row.addWidget(btn_add_wf)
+        btn_edit_wf = mdi_button("编辑", "pencil")
+        btn_edit_wf.setToolTip("编辑选中工作流的名称、类型、ID")
+        btn_edit_wf.clicked.connect(self._rh_show_edit_workflow_dialog)
+        wf_btn_row.addWidget(btn_edit_wf)
+        btn_view_wf = mdi_button("显示节点", "eye")
+        btn_view_wf.setToolTip("在下方显示选中工作流的所有节点、输入、输出连接")
+        btn_view_wf.clicked.connect(self._rh_view_workflow_nodes)
+        wf_btn_row.addWidget(btn_view_wf)
+        btn_del_wf = mdi_button("删除", "delete")
+        btn_del_wf.setToolTip("从本地保存的工作流列表中移除")
+        btn_del_wf.clicked.connect(self._rh_remove_workflow)
+        wf_btn_row.addWidget(btn_del_wf)
+        wf_btn_row.addStretch()
+        wf_layout.addLayout(wf_btn_row)
+
+        # 选中工作流后在此区域显示其节点（不弹窗）
+        wf_layout.addWidget(QLabel("工作流节点详情（选择工作流后自动显示）："))
+        self.rh_workflow_node_display = QTextBrowser()
+        self.rh_workflow_node_display.setText("选择上方工作流后，节点信息会显示在这里。")
+        self.rh_workflow_node_display.setMinimumHeight(120)
+        self.rh_workflow_node_display.setMaximumHeight(200)
+        wf_layout.addWidget(self.rh_workflow_node_display)
+
+        self.rh_workflow_list_status = QLabel("")
+        self.rh_workflow_list_status.setObjectName("muted_text")
+        wf_layout.addWidget(self.rh_workflow_list_status)
+
+        l2.addWidget(wf_group)
+        # 加载已保存的工作流列表
+        if hasattr(self, "_rh_load_workflow_list"):
+            self._rh_load_workflow_list()
+        l2.addStretch(); tabs.addTab(p2, "☁️ RunningHub")
+
 
         # ── Tab 2: 飞书（已隐藏，代码保留）──
         p3 = QWidget(); l3 = QVBoxLayout(p3); l3.setContentsMargins(30,30,30,30)
@@ -737,11 +818,12 @@ class PageSetupMixin:
             config_layout = QVBoxLayout(card)
             config_layout.setContentsMargins(30, 30, 30, 30)
         
-	        # Backend Selection
+            # Backend Selection
             config_layout.addWidget(QLabel("生成后端:"))
-            self.backend_label = QLabel("ComfyUI (本地/局域网)")
-            self.backend_label.setObjectName("muted_text")
-            config_layout.addWidget(self.backend_label)
+            self.backend_selector = QComboBox()
+            self.backend_selector.addItems(["ComfyUI (本地/局域网)", "RunningHub (云端)"])
+            self.backend_selector.currentIndexChanged.connect(self._on_dh_backend_changed)
+            config_layout.addWidget(self.backend_selector)
         
             config_layout.addSpacing(15)
 
@@ -755,7 +837,6 @@ class PageSetupMixin:
         
             comfy_layout.addSpacing(15)
         
-            # Image Input (Only for ComfyUI)
             comfy_layout.addWidget(QLabel("人物图片:"))
             img_row = QHBoxLayout()
             self.img_path_input = QLineEdit()
@@ -766,7 +847,6 @@ class PageSetupMixin:
             img_row.addWidget(btn_sel_img)
             comfy_layout.addLayout(img_row)
         
-            # Audio Input (Only for ComfyUI)
             comfy_layout.addWidget(QLabel("驱动语音:"))
             aud_row = QHBoxLayout()
             self.aud_path_input = QLineEdit()
@@ -777,15 +857,120 @@ class PageSetupMixin:
             aud_row.addWidget(btn_sel_aud)
             comfy_layout.addLayout(aud_row)
         
-            self.btn_run_local = mdi_button("提交本地生成任务", "rocket")
-            self.btn_run_local.setObjectName("action_button")
-            self.btn_run_local.setEnabled(False)
-            self.btn_run_local.setFixedHeight(50)
-            self.btn_run_local.clicked.connect(self.run_comfyui_task)
-            comfy_layout.addSpacing(20)
-            comfy_layout.addWidget(self.btn_run_local)
-        
             config_layout.addWidget(self.comfy_section)
+
+            # --- RunningHub Section ---
+            self.rh_section = QWidget()
+            rh_layout = QVBoxLayout(self.rh_section)
+            rh_layout.setContentsMargins(0, 0, 0, 0)
+
+            rh_layout.addWidget(QLabel("RunningHub 数字人工作流:"))
+            rh_id_row = QHBoxLayout()
+            self.rh_workflow_selector = QComboBox()
+            self.rh_workflow_selector.setView(QListView())
+            self.rh_workflow_selector.currentIndexChanged.connect(self._on_rh_dh_workflow_changed)
+            rh_id_row.addWidget(self.rh_workflow_selector, 1)
+
+            # 保留隐藏的 ID 输入框，供现有逻辑读取
+            self.rh_workflow_id_input = QLineEdit()
+            self.rh_workflow_id_input.setVisible(False)
+            rh_id_row.addWidget(self.rh_workflow_id_input)
+
+            btn_refresh_dh_wf = mdi_button("刷新", "refresh")
+            btn_refresh_dh_wf.setToolTip("刷新数字人工作流列表")
+            btn_refresh_dh_wf.clicked.connect(self._rh_refresh_dh_workflow_selector)
+            rh_id_row.addWidget(btn_refresh_dh_wf)
+            btn_fetch_rh = mdi_button("获取工作流节点", "refresh")
+            btn_fetch_rh.setToolTip("重新获取当前选中工作流的节点")
+            btn_fetch_rh.clicked.connect(self.view_rh_api_detail)
+            rh_id_row.addWidget(btn_fetch_rh)
+            btn_open_rh_web = mdi_button("打开网页", "open-in-new")
+            btn_open_rh_web.setToolTip("在浏览器打开 RunningHub 该工作流 API 页面")
+            btn_open_rh_web.clicked.connect(self.open_rh_web_interface)
+            rh_id_row.addWidget(btn_open_rh_web)
+            rh_id_row.addStretch()
+            rh_layout.addLayout(rh_id_row)
+
+            self.rh_workflow_info = QLabel("填写工作流 ID 后点击「获取工作流节点」")
+            self.rh_workflow_info.setObjectName("muted_text")
+            self.rh_workflow_info.setWordWrap(True)
+            rh_layout.addWidget(self.rh_workflow_info)
+
+            # 工作流节点列表（带复选框，勾选需要映射的节点）
+            rh_layout.addWidget(QLabel("工作流输入节点（勾选需要映射的节点）:"))
+            self.rh_node_list = QListWidget()
+            self.rh_node_list.setMinimumHeight(120)
+            self.rh_node_list.setMaximumHeight(180)
+            self.rh_node_list.itemChanged.connect(self._on_rh_node_checked)
+            rh_layout.addWidget(self.rh_node_list)
+
+            # 动态输入面板：根据勾选的节点类型显示对应输入组件
+            self.rh_input_panel = QWidget()
+            rh_input_layout = QVBoxLayout(self.rh_input_panel)
+            rh_input_layout.setContentsMargins(0, 0, 0, 0)
+            rh_input_layout.setSpacing(12)
+
+            # 图片输入组
+            self.rh_img_input_group = QWidget()
+            rh_img_group_layout = QVBoxLayout(self.rh_img_input_group)
+            rh_img_group_layout.setContentsMargins(0, 0, 0, 0)
+            rh_img_group_layout.addWidget(QLabel("人物图片（所有勾选的图片节点共用）:"))
+            rh_img_row = QHBoxLayout()
+            self.rh_img_path_input = QLineEdit()
+            self.rh_img_path_input.setPlaceholderText("请选择一张图片...")
+            rh_img_row.addWidget(self.rh_img_path_input)
+            btn_sel_rh_img = mdi_button("浏览", "folder")
+            btn_sel_rh_img.clicked.connect(self.select_rh_image)
+            rh_img_row.addWidget(btn_sel_rh_img)
+            rh_img_group_layout.addLayout(rh_img_row)
+            rh_input_layout.addWidget(self.rh_img_input_group)
+
+            # 音频输入组
+            self.rh_audio_input_group = QWidget()
+            rh_audio_group_layout = QVBoxLayout(self.rh_audio_input_group)
+            rh_audio_group_layout.setContentsMargins(0, 0, 0, 0)
+            rh_audio_group_layout.addWidget(QLabel("驱动语音（批量，每个音频生成一个任务，所有勾选的音频节点共用）:"))
+            rh_audio_row = QHBoxLayout()
+            self.rh_audio_list = QListWidget()
+            self.rh_audio_list.setMinimumHeight(80)
+            self.rh_audio_list.setMaximumHeight(140)
+            rh_audio_row.addWidget(self.rh_audio_list, 1)
+            rh_audio_btn_col = QVBoxLayout()
+            btn_add_rh_aud = mdi_button("添加", "plus")
+            btn_add_rh_aud.clicked.connect(self.add_rh_audio)
+            rh_audio_btn_col.addWidget(btn_add_rh_aud)
+            btn_del_rh_aud = mdi_button("移除", "minus")
+            btn_del_rh_aud.clicked.connect(self.remove_rh_audio)
+            rh_audio_btn_col.addWidget(btn_del_rh_aud)
+            rh_audio_btn_col.addStretch()
+            rh_audio_row.addLayout(rh_audio_btn_col)
+            rh_audio_group_layout.addLayout(rh_audio_row)
+            rh_input_layout.addWidget(self.rh_audio_input_group)
+
+            rh_layout.addWidget(self.rh_input_panel)
+            self.rh_queue_stats_label = QLabel("任务队列: 共 0 | 成功 0 | 失败 0 | 运行中 0 | 待处理 0 | 进度 0%")
+            self.rh_queue_stats_label.setObjectName("muted_text")
+            rh_layout.addWidget(self.rh_queue_stats_label)
+            rh_layout.addStretch()
+
+            config_layout.addWidget(self.rh_section)
+            self.rh_section.hide()
+
+            # --- Shared Submit Button ---
+            self.btn_run_workflow = mdi_button("提交生成任务", "rocket")
+            self.btn_run_workflow.setObjectName("action_button")
+            self.btn_run_workflow.setEnabled(False)
+            self.btn_run_workflow.setFixedHeight(50)
+            self.btn_run_workflow.clicked.connect(self.run_digital_human_task)
+            config_layout.addSpacing(20)
+            config_layout.addWidget(self.btn_run_workflow)
+
+            # --- Log Output ---
+            self.log_area = QTextEdit()
+            self.log_area.setReadOnly(True)
+            self.log_area.setPlaceholderText("任务日志...")
+            self.log_area.setMinimumHeight(80)
+            config_layout.addWidget(self.log_area)
 
             layout.addWidget(card)
             layout.addStretch()
@@ -793,7 +978,7 @@ class PageSetupMixin:
             self.current_workflow_data = None
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
-
+            QTimer.singleShot(600, lambda: self._on_dh_backend_changed(self.backend_selector.currentIndex()))
     def select_image(self):
         """数字人 ComfyUI：选择人物图片。"""
         file, _ = pick_file(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
@@ -805,6 +990,28 @@ class PageSetupMixin:
         file, _ = pick_file(self, "选择音频", "", "Audio (*.mp3 *.wav)")
         if file:
             self.aud_path_input.setText(file)
+
+    def select_rh_image(self):
+        """数字人 RunningHub：选择人物图片。"""
+        file, _ = pick_file(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
+        if file:
+            self.rh_img_path_input.setText(file)
+
+    def add_rh_audio(self):
+        """数字人 RunningHub：批量添加驱动音频。"""
+        files, _ = QFileDialog.getOpenFileNames(self, "选择音频", "", "Audio (*.mp3 *.wav *.flac *.aac *.m4a)")
+        for f in files:
+            if f and not self.rh_audio_list.findItems(f, Qt.MatchExactly):
+                self.rh_audio_list.addItem(f)
+        if self.backend_selector.currentIndex() == 1:
+            self._on_dh_backend_changed(1)
+
+    def remove_rh_audio(self):
+        """数字人 RunningHub：移除选中的驱动音频。"""
+        for item in self.rh_audio_list.selectedItems():
+            self.rh_audio_list.takeItem(self.rh_audio_list.row(item))
+        if self.backend_selector.currentIndex() == 1:
+            self._on_dh_backend_changed(1)
 
     def setup_task_list_page(self):
             layout = QVBoxLayout(self.page_task_list)
@@ -832,6 +1039,10 @@ class PageSetupMixin:
             btn_clear.setFixedWidth(100)
             btn_clear.clicked.connect(self._clear_done_tasks)
             header.addWidget(btn_clear)
+            btn_export_rh = mdi_button("导出 RunningHub 结果", "download")
+            btn_export_rh.setFixedWidth(150)
+            btn_export_rh.clicked.connect(self.export_all_rh_results)
+            header.addWidget(btn_export_rh)
             header.addStretch()
             task_layout.addLayout(header)
         
@@ -848,7 +1059,7 @@ class PageSetupMixin:
             self.task_table.setColumnWidth(1, 120)
             self.task_table.setColumnWidth(3, 120)
             self.task_table.setColumnWidth(5, 140)
-            self.task_table.setColumnWidth(6, 100)
+            self.task_table.setColumnWidth(6, 160)
             self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.task_table.cellClicked.connect(self._on_task_row_clicked)
             task_layout.addWidget(self.task_table)

@@ -197,6 +197,7 @@ from utils.thread_worker import TaskWorker as Worker
 
 
 from gui.threads import SystemMonitorThread, ComfyWSThread, AIStatusCheckThread
+from utils.runninghub_manager import RunningHubManager
 
 
 class _StatsCollector(QThread):
@@ -443,6 +444,18 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.load_ai_config()
 
         self._update_splash("正在配置独立浏览器 Profile...", 45)
+        
+        # 初始化 RunningHub 管理器（API key 在 ai_config 中维护）
+        self.runninghub = RunningHubManager(
+            api_key=self.ai_config.get("runninghub_api_key", ""),
+            base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")
+        )
+        self.rh_pending_tasks = []
+        self.rh_submitted_tasks = {}
+        self.rh_queue_paused = False
+        self.rh_poll_timer = None
+        self.rh_image_nodes = []
+        self.rh_audio_nodes = []
         self.playwright_profile_path = os.path.join(PROJECT_ROOT, "playwright_profile")
         os.makedirs(self.playwright_profile_path, exist_ok=True)
 
@@ -465,6 +478,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         
         self.task_progress_bars = {}
         self.task_status_items = {}
+        self.task_outputs = {}
+        self._task_registry = {}
         self.download_tasks = []
         
         self._update_splash("正在构建主界面 UI 元素 (组件较多，可能耗时数秒)...", 65)
@@ -1234,10 +1249,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存 Cookie 失败: {e}")
 
-    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端"):
+    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端", extra=None):
         row = self.task_table.rowCount()
         self.task_table.insertRow(row)
-        self.task_table.setItem(row, 0, QTableWidgetItem(prompt_id[:12]))
+        item_id = QTableWidgetItem(prompt_id[:12])
+        self.task_table.setItem(row, 0, item_id)
         self.task_table.setItem(row, 1, QTableWidgetItem(task_type))
         source_item = QTableWidgetItem(source)
         if source == "本地":
@@ -1245,11 +1261,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         else:
             source_item.setForeground(QColor("#60a5fa"))
         self.task_table.setItem(row, 2, source_item)
-        
+
         status_item = QTableWidgetItem(status)
         self.task_table.setItem(row, 3, status_item)
         self.task_status_items[prompt_id] = status_item
-        
+
         p_bar = QProgressBar()
         p_bar.setValue(0)
         p_bar.setTextVisible(True)
@@ -1261,27 +1277,77 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         time_str = datetime.now().strftime("%m-%d %H:%M")
         self.task_table.setItem(row, 5, QTableWidgetItem(time_str))
 
-        # Action column
+        # 任务元数据
+        task_data = {
+            "id": prompt_id,
+            "task_id": prompt_id,
+            "type": task_type,
+            "source": source,
+            "status": status,
+            "progress": 0,
+            "params": extra or {},
+            "result": None,
+            "results": None,
+            "error": None,
+        }
+        if extra:
+            task_data.update(extra)
+        item_id.setData(0x0100, task_data)
+
+        # 操作列
         actions_widget = QWidget()
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(5, 2, 5, 2)
         actions_layout.setSpacing(5)
+
+        registry = {"row": row, "task_id": prompt_id, "task_type": task_type, "extra": extra}
 
         btn_preview = mdi_button("", "eye")
         btn_preview.setToolTip("预览")
         btn_preview.setFixedSize(30, 24)
         btn_preview.setEnabled(False)
         btn_preview.clicked.connect(lambda: self.preview_result(prompt_id))
+        registry["preview_btn"] = btn_preview
 
         btn_download = mdi_button("", "save")
         btn_download.setToolTip("下载")
         btn_download.setFixedSize(30, 24)
         btn_download.setEnabled(False)
-        btn_download.clicked.connect(lambda: self.download_result(prompt_id))
+        if task_type == "RunningHub":
+            btn_download.clicked.connect(lambda: self.download_rh_result(prompt_id))
+        else:
+            btn_download.clicked.connect(lambda: self.download_result(prompt_id))
+        registry["download_btn"] = btn_download
 
         actions_layout.addWidget(btn_preview)
         actions_layout.addWidget(btn_download)
+
+        if task_type == "RunningHub":
+            btn_pause = mdi_button("", "pause")
+            btn_pause.setToolTip("暂停")
+            btn_pause.setFixedSize(30, 24)
+            btn_pause.clicked.connect(lambda: self.pause_rh_task(prompt_id))
+            registry["pause_btn"] = btn_pause
+
+            btn_resume = mdi_button("", "play")
+            btn_resume.setToolTip("恢复")
+            btn_resume.setFixedSize(30, 24)
+            btn_resume.setEnabled(False)
+            btn_resume.clicked.connect(lambda: self.resume_rh_task(prompt_id))
+            registry["resume_btn"] = btn_resume
+
+            btn_cancel = mdi_button("", "close")
+            btn_cancel.setToolTip("取消")
+            btn_cancel.setFixedSize(30, 24)
+            btn_cancel.clicked.connect(lambda: self.cancel_rh_task_row(prompt_id))
+            registry["cancel_btn"] = btn_cancel
+
+            actions_layout.addWidget(btn_pause)
+            actions_layout.addWidget(btn_resume)
+            actions_layout.addWidget(btn_cancel)
+
         self.task_table.setCellWidget(row, 6, actions_widget)
+        self._task_registry[prompt_id] = registry
 
     def update_task_actions(self, prompt_id):
         for row in range(self.task_table.rowCount()):
@@ -1619,3 +1685,56 @@ if __name__ == "__main__":
         log.critical(f"FATAL ERROR during startup: {e}")
         print(f"FATAL ERROR: {e}")
         sys.exit(1)
+
+    def download_rh_result(self, task_id):
+        """下载单个 RunningHub 任务结果。"""
+        from utils import config_manager as cm
+        default_dir = cm.get_setting("local_config", "cache_dir", "") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "materials")
+        os.makedirs(default_dir, exist_ok=True)
+        save_dir = pick_directory(self, "选择保存目录", default_dir)
+        if not save_dir:
+            return
+
+        # 从任务表详情中提取 results
+        results = []
+        for row in range(self.task_table.rowCount()):
+            item = self.task_table.item(row, 0)
+            if not item:
+                continue
+            t = item.data(0x0100) or {}
+            if t.get("task_id") == task_id or item.text() == task_id[:12]:
+                results = t.get("results") or []
+                break
+
+        if not results:
+            QMessageBox.information(self, "提示", "未找到可下载的结果。")
+            return
+
+        import requests
+        from datetime import datetime
+        downloaded = 0
+        for res in results:
+            if not isinstance(res, dict):
+                continue
+            url = res.get("url")
+            if not url:
+                continue
+            ext = res.get("outputType", "bin")
+            name = f"{task_id}_{datetime.now().strftime('%H%M%S')}.{ext}"
+            path = os.path.join(save_dir, name)
+            try:
+                r = requests.get(url, timeout=120)
+                if r.status_code == 200:
+                    with open(path, "wb") as f:
+                        f.write(r.content)
+                    downloaded += 1
+                else:
+                    QMessageBox.warning(self, "下载失败", f"HTTP {r.status_code}: {url}")
+            except Exception as e:
+                QMessageBox.warning(self, "下载失败", f"{url}\n{e}")
+        if downloaded:
+            QMessageBox.information(self, "下载完成", f"成功下载 {downloaded} 个文件到\n{save_dir}")
+
+    def cancel_rh_task_row(self, task_id):
+        """从任务表中取消/移除一个 RunningHub 任务行（委托给 AIGenMixin 的 cancel_rh_task）。"""
+        self.cancel_rh_task(task_id)

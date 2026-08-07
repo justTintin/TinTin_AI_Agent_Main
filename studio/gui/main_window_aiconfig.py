@@ -110,6 +110,25 @@ class AIConfigMixin:
             self.ai_config["vox_cfg"] = vox_cfg.value()
         self.ai_config["vox_source"] = "remote"
         self.ai_config["vox_mode"] = "api"
+        # RunningHub
+        rh_key = getattr(self, "runninghub_api_key_input", None)
+        if rh_key is not None:
+            self.ai_config["runninghub_api_key"] = rh_key.text().strip()
+        rh_url = getattr(self, "runninghub_base_url_input", None)
+        if rh_url is not None:
+            self.ai_config["runninghub_base_url"] = rh_url.text().strip().rstrip("/")
+        rh_comfy_auth = getattr(self, "runninghub_comfy_auth_input", None)
+        if rh_comfy_auth is not None:
+            self.ai_config["runninghub_comfy_auth"] = rh_comfy_auth.text().strip()
+        rh_comfy_identify = getattr(self, "runninghub_comfy_identify_input", None)
+        if rh_comfy_identify is not None:
+            self.ai_config["runninghub_comfy_identify"] = rh_comfy_identify.text().strip()
+        rh_access_token = getattr(self, "runninghub_access_token_input", None)
+        if rh_access_token is not None:
+            self.ai_config["runninghub_access_token"] = rh_access_token.text().strip()
+        rh_personal_queue = getattr(self, "runninghub_use_personal_queue_check", None)
+        if rh_personal_queue is not None:
+            self.ai_config["runninghub_use_personal_queue"] = rh_personal_queue.isChecked()
 
     def _save_all_ai_config(self):
         """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
@@ -207,7 +226,13 @@ class AIConfigMixin:
             "vox_source": "remote",
             "vox_mode": "api",
             "vox_timesteps": 20,
-            "vox_cfg": 2.0
+            "vox_cfg": 2.0,
+            "runninghub_api_key": "",
+            "runninghub_base_url": "https://www.runninghub.cn",
+            "runninghub_comfy_auth": "",
+            "runninghub_comfy_identify": "",
+            "runninghub_access_token": "",
+            "runninghub_use_personal_queue": True
         }
         loaded = cm.load_config("ai_config")
         if loaded:

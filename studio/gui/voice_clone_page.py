@@ -788,8 +788,7 @@ class VoiceClonePage(BasePage):
             QMessageBox.warning(self.parent_widget, "提示", "请先在“待克隆整体文案”输入内容！")
             return
 
-        prefix_str = self._get_file_prefix()
-        whole_filename = f"{prefix_str}voice_whole.wav"
+        whole_filename = self._get_named_filename(text, "whole")
         out_voice_dir = self.voice_video_dir_input.text().strip()
         whole_audio_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
 
@@ -1292,8 +1291,8 @@ class VoiceClonePage(BasePage):
 
             if len(valid_wav_paths) > 1:
                 self.stage_label.setText("⏳ 正在合并所有音频文件...")
-                prefix_str = self._get_file_prefix()
-                merged_filename = f"{prefix_str}voice_merged.wav"
+                text = self.clone_text_input.toPlainText().strip()
+                merged_filename = self._get_named_filename(text, "merged")
                 out_voice_dir = self.voice_video_dir_input.text().strip()
                 merged_wav_path = os.path.abspath(os.path.join(out_voice_dir, merged_filename))
 
@@ -1362,43 +1361,40 @@ class VoiceClonePage(BasePage):
         name, _ = os.path.splitext(text)
         return name
 
-    def _get_first_short_sentence(self, text):
+    @staticmethod
+    def _get_first_n_chars(text, n):
+        """取文案前 n 个字用于文件名：去除空白/换行与 Windows 非法字符。"""
         if not text:
             return ""
-        delimiters = ["，", "；", " ", "　", ",", ";", "。", "！", "？", ".", "!", "?", "\n", "\t"]
-        temp_text = text
-        for d in delimiters:
-            temp_text = temp_text.replace(d, "\n")
-        parts = temp_text.split("\n")
-        short_text = ""
-        for p in parts:
-            p = p.strip()
-            if p:
-                short_text = p
-                break
-        if short_text:
-            invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
-            for c in invalid_chars:
-                short_text = short_text.replace(c, '')
-            short_text = short_text[:30].strip()
-        return short_text
+        compact = "".join(text.split())
+        for c in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
+            compact = compact.replace(c, "")
+        compact = compact.strip(" .")
+        return compact[:n]
 
-    def _get_file_prefix(self) -> str:
-        """返回统一的文件名前缀：YYYYMMDD_声音样本名_（或仅 YYYYMMDD_）。"""
+    def _get_named_filename(self, text, kind="whole", idx=None):
+        """克隆声音文件名：样本_文案前10字_日期[后缀].wav，避免同名覆盖。
+
+        kind: whole=整体克隆 / merged=合并整体 / row=分句
+        """
         from datetime import date
         date_str = date.today().strftime("%Y%m%d")
         sample = self._get_selected_sample_prefix()
-        return f"{date_str}_{sample}_" if sample else f"{date_str}_"
+        text10 = self._get_first_n_chars(text, 10)
+        if not text10:
+            text10 = "未命名" if kind != "row" else f"voice{idx or 1}"
+        parts = [p for p in (sample, text10, date_str) if p]
+        base = "_".join(parts)
+        if kind == "merged":
+            return f"{base}_merged.wav"
+        if kind == "row" and idx:
+            return f"{base}_row{idx}.wav"
+        return f"{base}.wav"
 
     def _get_row_filename(self, idx):
-        prefix_str = self._get_file_prefix()
         edit = self.row_edits.get(idx)
         text = edit.text().strip() if edit else ""
-        short_text = self._get_first_short_sentence(text)
-        if short_text:
-            return f"{prefix_str}voice_{idx + 1}_{short_text}.wav"
-        else:
-            return f"{prefix_str}voice_{idx + 1}.wav"
+        return self._get_named_filename(text, "row", idx + 1)
 
     def _update_row_filename(self, idx):
         item_file = self.voice_table.item(idx, 1)
@@ -1505,8 +1501,7 @@ class VoiceClonePage(BasePage):
         timesteps = cfg.get("vox_timesteps", 20)
         cfg_val = cfg.get("vox_cfg", 2.0)
 
-        prefix_str = self._get_file_prefix()
-        whole_filename = f"{prefix_str}voice_whole.wav"
+        whole_filename = self._get_named_filename(text, "whole")
         out_wav_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
 
         tasks = [(-1, text, "whole", out_wav_path)]
@@ -1888,16 +1883,19 @@ class VoiceClonePage(BasePage):
         if not out_voice_dir:
             self.btn_play_whole.setEnabled(False)
             return
-        prefix_str = self._get_file_prefix()
-        whole_filename = f"{prefix_str}voice_whole.wav"
+        text = self.clone_text_input.toPlainText().strip()
+        if not text:
+            self.btn_play_whole.setEnabled(False)
+            return
+        whole_filename = self._get_named_filename(text, "whole")
         whole_audio_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
         has_file = os.path.exists(whole_audio_path)
         self.btn_play_whole.setEnabled(has_file)
 
     def _play_whole_audio(self):
         out_voice_dir = self.voice_video_dir_input.text().strip()
-        prefix_str = self._get_file_prefix()
-        whole_filename = f"{prefix_str}voice_whole.wav"
+        text = self.clone_text_input.toPlainText().strip()
+        whole_filename = self._get_named_filename(text, "whole")
         whole_audio_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
         
         if os.path.exists(whole_audio_path):

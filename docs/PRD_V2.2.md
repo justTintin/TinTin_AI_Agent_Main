@@ -678,3 +678,95 @@ MG动画：提交渲染 / 查询进度
 - 结果中心可查看任务进度、预览、下载，并可一键送入剪辑精修；
 - 剪辑模式保留全部现有功能，专业页面行为不变；
 - 切换角色不产生重复数据/任务，底层素材库、产出目录、任务队列完全共享。
+---
+
+## 十三、多智能体编排（服务端智能体化）
+
+> 服务端接口需求单：[多智能体编排服务端接口需求.md](多智能体编排服务端接口需求.md)（S1~S6，提交 /interfaces/request 用）
+
+> **决策（2026-08-08）**：工作台「一句话需求」要真正"拆解任务→分配给不同智能体→统一管理任务"，需要两层前提：
+> ① **能力注册表**（编排器必须知道服务端/客户端/外部各有多少智能体、各自输入输出）；
+> ② **编排器本身是一个元智能体（Orchestrator Agent）**，由 LLM 驱动规划/路由/监督。
+> **方向：服务端先行「智能体化」**——先由服务端提供能力注册表与编排执行能力，客户端编排器骨架随后对接。
+
+### 13.1 目标
+
+- 一句话需求 → 智能体拆解 → 分配给不同子智能体 → 统一任务管理（进度/暂停/取消/重试/人工确认）。
+- 服务端成为"智能体工厂"：能力可注册、可编排、可被多端共享调度。
+
+### 13.2 现状盘点：智能体/能力分层（客户端视角，权威以服务端 /guide 为准）
+
+| 层 | 能力单元（示例） | 同步/异步 |
+|---|---|---|
+| 服务端接口 | `/llm/chat/completions`、`/voxcpm/tts`、`/whisper/transcribe`、`/material/search|list|scan|serve|thumbnail|distinct`、`/material/ocr`、`/material/score_clip`、`/montage/split|concat|beat`、`/vsr/remove`、`/scheduled/tasks`、`/tasks/unified/{id}`、`/comfyui/*`、`/health` | 同步 + 异步两类 |
+| 客户端本地工具 | ffmpeg（切/拼/混音/转码）、剪映草稿导出、封面（ffmpeg+rembg+Dreamina）、直播切片 | 同步/本地任务 |
+| 外部工作流 | 数字人（RunningHub/ComfyUI）、即梦（本地 CLI） | 异步/第三方 |
+
+> 说明：**"智能体"≠ 仅服务端接口**。编排器必须把三层统一注册成一张能力目录。
+
+### 13.3 能力注册表（Agent Registry）
+
+每个能力单元的结构（schema）：
+
+```json
+{
+  "id": "tts_voice_clone",
+  "name": "声音克隆/TTS",
+  "description": "输入文案+参考音频，返回克隆语音",
+  "executor": "server",            // server | client_tool | external
+  "api": "POST /voxcpm/tts",
+  "input_schema": {"text": "string", "prompt_audio": "base64", "speaker": "string"},
+  "output": {"audio": "file_ref"},
+  "sync": true,                     // 同步返回 or 提交后轮询
+  "needs_user_input": false,        // 是否需要人工确认/选素材
+  "dependencies": []
+}
+```
+
+- 权威来源：服务端 `/guide` 提供接口级能力；客户端补充本地工具 + 外部工作流，两边合并成一张注册表。
+- 客户端启动拉取服务端注册表，本地 JSON 兜底（离线可用）。
+
+### 13.4 编排器 = 元智能体（Orchestrator Agent）
+
+由 LLM 驱动五个阶段：
+
+```
+用户一句话 → Orchestrator Agent：
+  1. Plan    拆解为步骤 DAG（能力A → 能力B → 能力C，含依赖/参数）
+  2. Route   按能力注册表匹配并分配给对应子智能体
+  3. Execute 同步调用 / 提交异步任务
+  4. Monitor 轮询 /tasks/unified、失败重试、状态聚合
+  5. Confirm 遇需人工确认节点（选素材/确认文案/试听）暂停，等用户确认后继续
+```
+
+### 13.5 驱动策略与演进
+
+| 阶段 | 执行地 | 说明 |
+|---|---|---|
+| Step 1（客户端先行） | 客户端 Orchestrator 调服务端单能力接口 | 快速验证；plan 用可序列化 JSON |
+| Step 2（plan 标准化） | 同一份 plan 由服务端执行引擎读取 | 客户端执行器换成"提交 plan + 轮询" |
+| Step 3（服务端终态） | 服务端 Agent 编排 | 客户端只做：提交/轮询/人工确认/展示 |
+
+> **plan 是纯 JSON（步骤/参数/依赖/中间产物引用）**，Step 1 写的拆解逻辑在 Step 3 不重写，只换执行地。
+
+### 13.6 服务端智能体化工作项（接口需求，按 POST /interfaces/request 提交）
+
+| # | 需求 | 说明 |
+|---|---|---|
+| S1 | `GET /agent/registry` | 能力注册表：返回全部可编排能力（schema 见 13.3） |
+| S2 | `POST /agent/tasks` | 提交 plan（或自然语言，服务端拆解），返回 `task_id` |
+| S3 | 子任务模型 | 父任务 + 子任务树（`parent_task_id`），`/tasks/unified` 返回树状状态 |
+| S4 | 人工确认节点 | 任务状态 `waiting_user_input`；`POST /agent/tasks/{id}/confirm` 继续 |
+| S5 | 中间产物登记 | 子任务产物（音频/视频/图片）路径登记，供下游步骤引用 |
+| S6 | 编排任务管理 | 列表/暂停/取消/重试；支持断点续跑（不依赖客户端在线） |
+
+### 13.7 优先级与验收
+
+| 里程碑 | 内容 | 依赖 | 验收 |
+|---|---|---|---|
+| S0 | 服务端能力注册表（S1）+ 子任务模型（S3） | /guide 扩展 | 客户端能拉到统一能力清单并展示"服务端有多少智能体" |
+| S1 | 服务端编排执行（S2/S4/S5/S6） | S0 | 服务端可执行一份 plan，多端共享、断点续跑 |
+| C1（客户端） | Orchestrator Agent 骨架 + 注册表合并 + plan 生成 | S0 可用或本地兜底 | 一句话"数字人口播带货视频"→ 自动拆解并逐个执行/轮询 |
+| C2（客户端） | 编排任务管理页（进度/暂停/取消/人工确认） | S1 | 与工作台结果中心统一 |
+
+> 状态：⏳ 规划中。用户已确认**服务端先行智能体化**；S0/S1 接口需求整理后走 `POST /interfaces/request` 提交服务端。

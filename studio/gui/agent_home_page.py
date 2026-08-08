@@ -16,7 +16,7 @@ import re
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QPoint
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QFrame, QGridLayout, QWidget,
+                               QFrame, QGridLayout, QWidget, QCheckBox,
                                QTabWidget, QComboBox, QTextEdit,
                                QTextBrowser, QScrollArea, QDialog, QFileDialog,
                                QListWidget, QListWidgetItem, QMessageBox)
@@ -134,7 +134,7 @@ class _ChatInput(QTextEdit):
         m = re.search(r"/([^\s/]*)$", seg)
         if m:
             popup.show_for(m.group(1))
-        else:
+        elif popup.isVisible():
             popup.hide()
 
     def keyPressEvent(self, event):
@@ -185,6 +185,7 @@ class _SlashPopup(QListWidget):
         self._agents = []
         self._match = []
         self._input = None
+        self._last_kw = None   # 最近一次过滤关键字（未变化时不重建列表）
         self.itemClicked.connect(self._on_item_clicked)
 
     @property
@@ -198,10 +199,19 @@ class _SlashPopup(QListWidget):
         self._input = w
 
     def show_for(self, kw):
-        """按关键字过滤智能体并弹出菜单（定位在输入框上方）。"""
+        """按关键字过滤智能体并弹出菜单（定位在输入框上方）。
+
+        菜单已显示时只刷新列表内容，不重复 show()/raise_()：
+        Popup 窗口每次重新激活都会抢走输入框焦点（Windows），
+        导致 Backspace 删除字符时输入框失焦"卡住"。
+        """
+        k = (kw or "").strip().lower()
+        if self.isVisible() and k == self._last_kw:
+            return   # 菜单已显示且过滤词未变：无需重建
+        self._last_kw = k
+        was_visible = self.isVisible()
         self.clear()
         self._match = []
-        k = (kw or "").strip().lower()
         for a in self._agents:
             name = a.get("name") or a.get("id") or ""
             desc = a.get("desc") or ""
@@ -223,8 +233,9 @@ class _SlashPopup(QListWidget):
             self.setFixedHeight(h)
             pos = self._input.mapToGlobal(QPoint(0, 0)) - QPoint(0, h + 8)
             self.move(pos)
-        self.show()
-        self.raise_()
+        if not was_visible:
+            self.show()
+            self.raise_()
 
     def next_row(self):
         if self._match and self.currentRow() < len(self._match) - 1:
@@ -410,16 +421,19 @@ class _ChatWorker(QThread):
 
     message：本轮增强消息（唤醒词 + 用户输入 + 附件/产品上下文）；
     history：对话历史（用户输入原文，不含增强部分）。
+    plan_mode：开启后智能体对话以 mode=plan 提交（先拆解为编排任务自动执行，
+    回复返回任务 ID，可在「编排任务」页跟踪）。
     """
     done = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, mode, history, model, message=None, parent=None):
+    def __init__(self, mode, history, model, message=None, plan_mode=False, parent=None):
         super().__init__(parent)
         self._mode = mode
         self._history = history
         self._model = model
         self._message = message
+        self._plan_mode = plan_mode
 
     def run(self):
         try:
@@ -428,7 +442,8 @@ class _ChatWorker(QThread):
                 msgs = list(self._history or [])
                 message = self._message or (msgs[-1]["content"] if msgs else "")
                 reply = agent_chat(message, history=msgs[:-1] or None,
-                                   model=self._model or None, max_rounds=3)
+                                   model=self._model or None, max_rounds=3,
+                                   mode="plan" if self._plan_mode else None)
             else:
                 from utils.llm_proxy import llm_chat_messages
                 msgs = [dict(m) for m in (self._history or [])]
@@ -855,6 +870,11 @@ class _ChatPanel(QWidget):
         self.btn_script.setToolTip("从服务端分镜脚本库选择脚本加入对话上下文（不删除则每次对话都携带）")
         self.btn_script.clicked.connect(self._pick_script)
         tool_row.addWidget(self.btn_script)
+        self.chk_plan = QCheckBox("🧭 转编排任务")
+        self.chk_plan.setCursor(Qt.PointingHandCursor)
+        self.chk_plan.setToolTip("开启后：智能体对话以编排任务方式提交（mode=plan），"
+                                 "服务端先拆解为 plan 再自动执行，回复返回任务 ID")
+        tool_row.addWidget(self.chk_plan)
         tool_row.addStretch()
         v.addLayout(tool_row)
 
@@ -911,7 +931,8 @@ class _ChatPanel(QWidget):
             "你好，我是 TinTin 智能体助手 🤖\n\n"
             "可以问我电商短视频运营的问题，也可以直接说需求，我会拆解并帮你执行；\n"
             "选择 📎附件 / 📦产品 / 📁素材 / 📜脚本会加入对话上下文（显示在输入框上方，"
-            "不删除则每次对话都携带），点「发送」交给智能体执行；输入 / 可快速唤起智能体。")
+            "不删除则每次对话都携带），点「发送」交给智能体执行；输入 / 可快速唤起智能体；\n"
+            "勾选 🧭转编排任务 后，对话会先转为编排任务提交服务端自动执行（回复返回任务 ID）。")
 
     # ── 消息渲染 ─────────────────────────────────────────
     def append_bubble(self, role, text):
@@ -955,7 +976,9 @@ class _ChatPanel(QWidget):
         self._trim_history()
         self._set_busy(True)
         self._pending = self.append_bubble("assistant", "⏳ 思考中…")
-        self._worker = _ChatWorker(self._mode, self._history, self._model, message=message)
+        self._worker = _ChatWorker(self._mode, self._history, self._model,
+                                   message=message,
+                                   plan_mode=self.chk_plan.isChecked())
         self._worker.done.connect(self._on_reply_ok)
         self._worker.failed.connect(self._on_reply_failed)
         self._worker.start()

@@ -209,10 +209,12 @@ def register_artifact(task_id, kind, file_ref, meta=None, timeout=10):
 
 
 def agent_chat(message, history=None, agent_id=None, model=None,
-               max_rounds=3, timeout=180):
+               max_rounds=3, mode=None, timeout=180):
     """POST /agent/chat → 智能体对话：自然语言 → 服务端智能体循环 → 回复文本。
 
     响应 {"reply": str, "tool_calls": [...], "rounds": n, "usage": {...}}。
+    mode="plan"（31 服务端新增）：先把对话拆解为 plan 提交编排执行（S2），
+    响应无 reply 而含 task_id 时返回提示文本；
     history 为 OpenAI 风格消息列表（不含本轮 message）；失败返回 None。
     """
     body = {"message": message, "max_rounds": max_rounds, "stream": False}
@@ -222,11 +224,18 @@ def agent_chat(message, history=None, agent_id=None, model=None,
         body["agent_id"] = agent_id
     if model:
         body["model"] = model
+    if mode:
+        body["mode"] = mode
     try:
         r = http_post(f"{_server_url()}/agent/chat", json=body, timeout=timeout)
         if r.status_code == 200:
             data = r.json()
-            return data.get("reply") or ""
+            reply = data.get("reply") or ""
+            if not reply and mode == "plan":
+                tid = str(data.get("task_id") or "")
+                if tid:
+                    return f"✅ 已创建编排任务：`{tid}`，服务端将自动执行。\n可在「编排任务」页查看进度与产物。"
+            return reply
         log.warning(f"[智能体] agent_chat HTTP {r.status_code}: {r.text[:150]}")
     except Exception as e:
         log.warning(f"[智能体] agent_chat 失败: {e}")

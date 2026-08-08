@@ -1,28 +1,29 @@
 # 开发指南
 
-## 环境搭建
+> **本指南面向开发者**（改代码、加页面、命名规范、构建）。
+> **部署与配置请见 [SETUP.md](SETUP.md)**（新电脑安装、连接服务端、配置文件）。
+> 两文档分工：**SETUP.md = 部署与配置**；**DEVELOPMENT.md = 开发规范**。
 
-```bash
-# 克隆后首次
-make install-dev
+## 环境搭建（开发）
 
-# 验证
-make check       # 所有 .py 语法检查通过
-make run         # 启动 GUI
-```
+- 无需本地 GPU / 大模型：AI 推理统一由服务端计算节点执行，模型类子应用在服务端部署。
+- 依赖安装（按需，使用内置 Python）：
+  ```bat
+  python_embeded\python.exe -m pip install -r studio\requirements_gui.txt
+  python_embeded\python.exe -m pip install -r studio\requirements_dev.txt
+  ```
+- 启动（源码调试）：`studio\run_gui_integrated.bat`
+- 语法检查：`python_embeded\python.exe -m compileall -q studio`
 
 ### 依赖说明
 
 | 文件 | 用途 |
 |------|------|
-| `studio/requirements_gui.txt` | GUI 主程序依赖（PySide6 / Pillow / numpy / opencv / av / cryptography / watchdog 等，含可选功能注释） |
+| `studio/requirements_gui.txt` | GUI 主程序依赖（PySide6 / Pillow / numpy / opencv / av / cryptography / watchdog 等） |
 | `studio/requirements.txt` | 后端依赖（Flask / 爬虫 / 数据库） |
 | `studio/requirements_dev.txt` | 开发工具（PyInstaller / Playwright） |
 
-`make install` 安装全部三项，`make install-dev` 额外加 pyinstaller。
-
-> 重型依赖（torch / paddleocr / onnxruntime 等）随各子应用 venv 自带，不在 requirements 中声明。
-
+> 重型依赖（torch / paddleocr / onnxruntime / VoxCPM / CLIP / Whisper 等）随**服务端**模型服务部署，开发本地一般不需要。
 ## 项目结构
 
 ```
@@ -44,7 +45,7 @@ studio/
 │   ├── thread_worker.py      QThread 基类
 │   ├── comfyui_client.py     ComfyUI API
 │   ├── voxcpm_client.py      VoxCPM TTS API
-│   ├── ollama_manager.py     Ollama 本地模型
+│   ├── ollama_manager.py     Ollama（服务端节点）
 │   └── ...
 └── ui/
     └── gui_styles.py         暗色主题 QSS
@@ -124,12 +125,9 @@ logger.info("...")
 
 ## Building
 
-```bash
-make build          # 当前平台
-make build-win      # Windows .exe (交叉编译需 Wine)
-make clean          # 清理构建产物
-```
-
+- 无本地模型构建（模型服务在服务端）。
+- 打包：根目录 `build.py`（PyInstaller 配置）。
+- 源码调试直接运行 `studio\run_gui_integrated.bat`。
 ---
 
 ## 图标系统设计规范

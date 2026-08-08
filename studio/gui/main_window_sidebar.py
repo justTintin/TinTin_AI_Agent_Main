@@ -84,19 +84,14 @@ class SidebarMixin:
         self._nav_full_lay.addWidget(btn_home)
         self.nav_buttons.append(btn_home)
 
-        # 定时任务（工作台下方，打开独立管理窗口，非页面切换）
+        # 定时任务（工作台下方，与工作台同级的主界面页面）
         btn_tasks = mdi_button("定时任务", "clock")
         btn_tasks.setObjectName("nav_button")
+        btn_tasks.setProperty("target_index", 47)
         btn_tasks.setCursor(Qt.PointingHandCursor)
-        btn_tasks.clicked.connect(lambda checked=False: self.open_scheduled_tasks())
+        btn_tasks.clicked.connect(lambda checked=False: self.switch_page(47))
         self._nav_full_lay.addWidget(btn_tasks)
-
-        # 智能体编排（多能力组合任务：提交 plan 由服务端 Orchestrator 自动执行）
-        btn_orch = mdi_button("智能体编排", "robot")
-        btn_orch.setObjectName("nav_button")
-        btn_orch.setCursor(Qt.PointingHandCursor)
-        btn_orch.clicked.connect(lambda checked=False: self.open_agent_orchestration())
-        self._nav_full_lay.addWidget(btn_orch)
+        self.nav_buttons.append(btn_tasks)
 
         # 素材浏览器（菜单最顶部，直接打开外部 Electron 应用，非页面切换）
         btn_browser = mdi_button("素材浏览器", "web")
@@ -367,30 +362,6 @@ class SidebarMixin:
                 dlg.attach_pages(self)
             except Exception as e:
                 log.exception(f"[系统设置] 页面挂载失败: {e}")
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-
-    def open_scheduled_tasks(self):
-        """打开「定时任务」管理窗口（懒创建；常驻复用，关闭仅隐藏）。"""
-        from gui.scheduled_tasks_dialog import ScheduledTasksDialog
-        dlg = getattr(self, "_scheduled_tasks_dlg", None)
-        if dlg is None:
-            dlg = ScheduledTasksDialog(self, self)
-            self._scheduled_tasks_dlg = dlg
-        dlg.refresh()
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
-
-    def open_agent_orchestration(self):
-        """打开「智能体编排」窗口（懒创建；常驻复用，关闭仅隐藏）。"""
-        from gui.agent_orchestration_dialog import AgentOrchestrationDialog
-        dlg = getattr(self, "_agent_orch_dlg", None)
-        if dlg is None:
-            dlg = AgentOrchestrationDialog(self, self)
-            self._agent_orch_dlg = dlg
-        dlg.refresh()
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()

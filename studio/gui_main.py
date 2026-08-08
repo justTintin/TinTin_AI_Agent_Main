@@ -952,6 +952,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.content_stack.addWidget(self.page_agent_home)
         self._register_lazy_page(46, self.setup_agent_home_page)
 
+        # 47: 定时任务管理（本地 schtasks + 智能体编排任务，懒加载）
+        self.page_scheduled_tasks_mgmt = QWidget()
+        self.content_stack.addWidget(self.page_scheduled_tasks_mgmt)
+        self._register_lazy_page(47, self.setup_scheduled_tasks_mgmt_page)
+
         # 浏览器扩展桥接服务：按配置随客户端自动启动
         try:
             from utils.extension_bridge import get_bridge
@@ -965,6 +970,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         def _on_page_change(idx):
             if idx == 42 and hasattr(self, "scheduled_tasks_tool"):
                 self.scheduled_tasks_tool.refresh()
+            if idx == 47 and hasattr(self, "scheduled_tasks_mgmt_tool"):
+                self.scheduled_tasks_mgmt_tool.refresh()
         self.content_stack.currentChanged.connect(_on_page_change)
 
 

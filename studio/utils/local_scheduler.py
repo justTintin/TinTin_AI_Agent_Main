@@ -6,7 +6,10 @@
 studio/data/local_scheduled_tasks.json，「定时任务」对话框直接调用。
 
 任务类型：
-- hotspot：每日热点采集（调用 asset_browser_client.launch_hotspot_capture(auto_quit=True)）
+- hotspot：本地定时任务（不依赖服务端智能体，当前为每日热点采集，调用
+  asset_browser_client.launch_hotspot_capture(auto_quit=True)）
+- agent：云端智能体（到点读取任务描述 → LLM 拆解 plan → 提交服务端 /agent/tasks 执行；
+  服务端 Orchestrator 按注册的智能体能力自动分解执行）
 
 注意：任务命令内联 Python 代码并注入 studio 绝对路径（sys.path.insert），
 不依赖任务计划程序的「起始于」目录，因此无需 bat 包装脚本。
@@ -23,12 +26,25 @@ from utils.logger_utils import log
 TASK_PREFIX = "TinTinAI_"
 TASKS_FILE = os.path.join(DATA_DIR, "local_scheduled_tasks.json")
 
-# 任务类型 → 执行代码模板（{root} 注入 studio 绝对路径）
+# 任务类型 → 执行代码模板（{root} 注入 studio 绝对路径；{task_name} 注入任务名）
 _EXEC_CODE = {
     "hotspot": (
         "import sys;sys.path.insert(0,{root!r});"
         "from utils import asset_browser_client as a;"
         "a.launch_hotspot_capture(auto_quit=True)"
+    ),
+    # 到点后：从本地任务清单读取本任务（注册时已 LLM 拆解的 plan 优先；
+    # 旧任务无 plan 时回退按 goal 重新拆解）→ 提交服务端编排执行
+    # 注意：单行内联代码不能用 if 复合语句（Python 不允许分号后跟复合语句），用 and 短路
+    "agent": (
+        "import sys,json,os;sys.path.insert(0,{root!r});"
+        "from config.paths import DATA_DIR;"
+        "from utils.agent_router import build_plan;"
+        "from utils import agent_client as ac;"
+        "tasks=json.load(open(os.path.join(DATA_DIR,'local_scheduled_tasks.json'),encoding='utf-8'));"
+        "me=next((t for t in tasks if t.get('task_name')=={task_name!r}),{{}});"
+        "plan=me.get('plan') or (build_plan(me.get('goal') or '') if (me.get('goal') or '').strip() else None);"
+        "plan and ac.create_task(goal=plan.get('goal'),plan=plan,mode='execute')"
     ),
 }
 
@@ -115,10 +131,12 @@ def _schedule_text(schedule):
     return f"每天 {time_str}"
 
 
-def create_task(name, task_type="hotspot", schedule=None):
+def create_task(name, task_type="hotspot", schedule=None, goal=None, plan=None):
     """注册一个本地定时任务。
 
     schedule: {"mode": "daily"|"weekly", "time": "HH:MM", "weekdays": [0-6]}
+    goal: 云端智能体类型（agent）的任务描述。
+    plan: 云端智能体类型注册时 LLM 拆解出的执行步骤（dict），随任务保存，到点直接提交服务端。
     返回 (True, 任务名) 或 (False, 错误信息)。
     """
     schedule = schedule or {}
@@ -127,6 +145,8 @@ def create_task(name, task_type="hotspot", schedule=None):
         return False, f"不支持的调度方式: {mode}"
     if task_type not in _EXEC_CODE:
         return False, f"不支持的本地任务类型: {task_type}"
+    if task_type == "agent" and not (goal or "").strip():
+        return False, "云端智能体任务需要任务描述（goal）"
     time_str = schedule.get("time") or "09:00"
     if not re.match(r"^\d{2}:\d{2}$", time_str):
         return False, f"时间格式应为 HH:MM：{time_str}"
@@ -141,7 +161,7 @@ def create_task(name, task_type="hotspot", schedule=None):
     python_exe = os.path.join(PYTHON_EMBEDED_DIR, "python.exe")
     if not os.path.isfile(python_exe):
         return False, f"未找到 python.exe：{python_exe}"
-    code = _EXEC_CODE[task_type].format(root=PROJECT_ROOT)
+    code = _EXEC_CODE[task_type].format(root=PROJECT_ROOT, task_name=task_name)
     tr = f'"{python_exe}" -c "{code}"'
 
     args = ["/create", "/f", "/tn", task_name, "/tr", tr,
@@ -162,6 +182,8 @@ def create_task(name, task_type="hotspot", schedule=None):
         "type": task_type,
         "schedule": {"mode": mode, "time": time_str,
                      "weekdays": schedule.get("weekdays", []) if mode == "weekly" else []},
+        "goal": (goal or "").strip() if task_type == "agent" else "",
+        "plan": plan if task_type == "agent" else None,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
     _save(tasks)

@@ -271,6 +271,18 @@ class PageSetupMixin:
         from gui.agent_home_page import AgentHomePage
         self.agent_home_tool = AgentHomePage(self.page_agent_home, self)
 
+    def setup_scheduled_tasks_mgmt_page(self):
+        """构建「定时任务」管理页（侧边栏定时任务菜单，与工作台同级）。"""
+        from gui.scheduled_tasks_mgmt_page import ScheduledTasksMgmtPage
+        page = self.page_scheduled_tasks_mgmt
+        if page.layout() is None:
+            # 页面容器需挂布局并拉伸子页，否则页面按 sizeHint 显示、只占部分界面
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(0, 0, 0, 0)
+        self.scheduled_tasks_mgmt_tool = ScheduledTasksMgmtPage(page, self)
+        page.layout().addWidget(self.scheduled_tasks_mgmt_tool)
+        self.scheduled_tasks_mgmt_tool.refresh()
+
 
     def setup_video_tools_page(self, container=None):
         """构建「视频修复」UI。container 缺省为目标页面容器；媒体工具标签页可传入标签容器。"""

@@ -74,8 +74,8 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 │   │   ├── backup_page.py                 #     数据备份/还原
 │   │   ├── terminal_page.py               #     内嵌 Python 终端
 │   │   ├── system_settings_dialog.py      #     系统设置二级菜单窗口
-│   │   ├── scheduled_tasks_dialog.py      #     定时任务管理窗口
-│   │   └── agent_orchestration_dialog.py  #     智能体编排窗口
+│   │   ├── scheduled_tasks_mgmt_page.py   #     定时任务管理页（与工作台同级菜单）
+│   │   └── agent_home_page.py             #     智能体工作台（一句话需求/编排入口）
 │   │
 │   ├── utils/                             #   工具库/客户端（30+ 模块）
 │   │   ├── logger_utils.py                #     日志工具
@@ -343,6 +343,8 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 | `agent_router.py` | 意图路由 | 关键词规则 + LLM 拆解 plan |
 | `local_scheduler.py` | 本地定时任务调度 | Windows schtasks 命令注册/查询/注销 |
 | `scheduled_task_client.py` | 服务端成片任务调度 | HTTP → `/tasks/unified` |
+| `agent_home_page.py` | 智能体工作台 | 高频任务 + 一句话需求（关键词/编排入口） |
+| `scheduled_tasks_mgmt_page.py` | 定时任务管理页 | 本地 schtasks + 服务端任务 + 编排任务概览 |
 
 ### 3.4 核心引擎层 — `studio/core/`
 

@@ -295,6 +295,8 @@ class VideoMontagePage(BasePage):
             self.final_preview_player.stop()
         if hasattr(self, "_media_player") and self._media_player:
             self._media_player.stop()
+            from utils.wav_player import stop_wav
+            stop_wav()
 
         self.stacked_widget.setCurrentIndex(index)
         self.update_step_indicator(index)
@@ -1682,6 +1684,12 @@ class VideoMontagePage(BasePage):
     # [6·配音]  _play_audio
     def _play_audio(self, wav_path):
         try:
+            if wav_path.lower().endswith(".wav"):
+                # Qt 的 QMediaPlayer / QSoundEffect 在部分 Windows 上会把 WAV 尾部截断
+                # （例如克隆声音“特”被吞成“ti”）。winsound 走系统原生播放，可完整播完。
+                from utils.wav_player import play_wav
+                play_wav(wav_path)
+                return
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             from PySide6.QtCore import QUrl
             
@@ -3847,6 +3855,8 @@ class VideoMontagePage(BasePage):
             # Stop general voice playback to prevent overlapping sounds
             if hasattr(self, "_media_player") and self._media_player:
                 self._media_player.stop()
+                from utils.wav_player import stop_wav
+                stop_wav()
 
             # Set source if it's different or empty
             current_src = self._bgm_player.source().toLocalFile()

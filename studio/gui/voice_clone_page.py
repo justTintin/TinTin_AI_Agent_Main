@@ -990,20 +990,12 @@ class VoiceClonePage(BasePage):
 
     def _play_audio(self, wav_path):
         try:
-            from PySide6.QtCore import QUrl
-            from PySide6.QtMultimedia import QSoundEffect
             if wav_path.lower().endswith(".wav"):
-                # QMediaPlayer 在部分 Windows 上会提前结束 WAV，尾部截断；
-                # QSoundEffect 按文件完整播放，不依赖时长元数据。
-                if not getattr(self, "_sound_effect", None):
-                    self._sound_effect = QSoundEffect()
-                    self._sound_effect.setVolume(1.0)
-                effect = self._sound_effect
-                effect.stop()
-                effect.setSource(QUrl.fromLocalFile(wav_path))
-                effect.play()
+                # Qt 的 QMediaPlayer / QSoundEffect 在部分 Windows 上会把 WAV 尾部截断
+                # （例如克隆声音“特”被吞成“ti”）。winsound 走系统原生播放，可完整播完。
+                from utils.wav_player import play_wav
+                play_wav(wav_path)
                 return
-
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             if not self._media_player:
                 self._media_player = QMediaPlayer()

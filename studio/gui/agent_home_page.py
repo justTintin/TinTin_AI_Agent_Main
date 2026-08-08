@@ -13,11 +13,11 @@ AI 对话（参考 Cherry Studio 对话体验，服务端暂不支持流式 → 
 import os
 import re
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QPoint
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QPoint, QEvent
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QFrame, QGridLayout, QWidget, QCheckBox,
-                               QTabWidget, QComboBox, QTextEdit,
+                               QTabWidget, QComboBox, QTextEdit, QApplication,
                                QTextBrowser, QScrollArea, QDialog, QFileDialog,
                                QListWidget, QListWidgetItem, QMessageBox)
 from gui.searchable_combo import SearchableComboBox
@@ -122,7 +122,11 @@ class _ChatInput(QTextEdit):
         self._slash_popup = popup
 
     def _on_text_changed(self):
-        """光标前文本以 /开头（无空格）时弹出智能体候选，否则关闭。"""
+        """光标前以 /开头且是智能体名前缀时弹出候选，否则关闭。
+
+        只认智能体名匹配：智能体插入文本（如 negative/style_tags）或 URL 里的
+        斜杠不会触发菜单，否则菜单（模态浮层）反复弹出抢焦点导致无法发送。
+        """
         popup = self._slash_popup
         if popup is None:
             return
@@ -132,7 +136,7 @@ class _ChatInput(QTextEdit):
         cur = self.textCursor()
         seg = cur.block().text()[:cur.positionInBlock()]
         m = re.search(r"/([^\s/]*)$", seg)
-        if m:
+        if m and popup.is_agent_prefix(m.group(1)):
             popup.show_for(m.group(1))
         elif popup.isVisible():
             popup.hide()
@@ -172,7 +176,10 @@ class _SlashPopup(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        # 非模态不激活浮层：Qt.Popup 是应用级模态，显示时主窗口无法聚焦/发送；
+        # 改 Tool + WA_ShowWithoutActivating 后菜单显示不影响输入框焦点，点击外部由 eventFilter 关闭。
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.NoFocus)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMinimumWidth(420)
@@ -187,6 +194,25 @@ class _SlashPopup(QListWidget):
         self._input = None
         self._last_kw = None   # 最近一次过滤关键字（未变化时不重建列表）
         self.itemClicked.connect(self._on_item_clicked)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def is_agent_prefix(self, kw):
+        """斜杠关键字是否可作为智能体名唤起（空关键字=显示全部候选）。"""
+        kw = (kw or "").strip().lower()
+        if not kw:
+            return True
+        return any(kw in (a.get("name") or "").lower() for a in self._agents)
+
+    def eventFilter(self, obj, ev):
+        """点击菜单外部任意位置 → 关闭菜单（事件继续传递，不吞点击）。"""
+        if self.isVisible() and ev.type() == QEvent.MouseButtonPress:
+            pos = (ev.globalPosition().toPoint()
+                   if hasattr(ev, "globalPosition") else ev.globalPos())
+            if not self.geometry().contains(pos):
+                self.hide()
+        return super().eventFilter(obj, ev)
 
     @property
     def agents(self):
@@ -202,8 +228,8 @@ class _SlashPopup(QListWidget):
         """按关键字过滤智能体并弹出菜单（定位在输入框上方）。
 
         菜单已显示时只刷新列表内容，不重复 show()/raise_()：
-        Popup 窗口每次重新激活都会抢走输入框焦点（Windows），
-        导致 Backspace 删除字符时输入框失焦"卡住"。
+        本菜单是不激活浮层（WA_ShowWithoutActivating），显示时输入框焦点不受影响；
+        点击外部由 eventFilter 关闭。
         """
         k = (kw or "").strip().lower()
         if self.isVisible() and k == self._last_kw:
@@ -276,6 +302,7 @@ class _SlashPopup(QListWidget):
         cur.insertText(prefix)
         w.setTextCursor(cur)
         w.setFocus()
+        QTimer.singleShot(0, w.setFocus)   # 兜底：菜单刚关闭时确保焦点回输入框
 
 
 class _MdBrowser(QTextBrowser):
@@ -789,6 +816,7 @@ class _ChatPanel(QWidget):
         self._agent_loader = None
         self._pending = None     # 等待回复的占位气泡
         self._agents = []        # 服务端智能体列表缓存（斜杠菜单与快捷条共用）
+        self._busy_timer = None  # 发送后 120s 超时自动恢复输入（防 worker 卡住）
         # 对话上下文（选择区显示，不删除则每次发送都携带）
         self._ctx_attachments = []   # [{"name", "path"}]
         self._ctx_product = None     # dict 或 None（产品单选覆盖）
@@ -908,8 +936,8 @@ class _ChatPanel(QWidget):
         self.input_edit.setFixedHeight(64)
         self.input_edit.setPlaceholderText("输入消息，回车发送（Shift+回车换行）；输入 / 快速唤起智能体…")
         self.input_edit.sendRequested.connect(self._on_send)
-        # 斜杠快捷菜单（/ 唤起智能体，参考 Cherry Studio 命令菜单）
-        self._slash_popup = _SlashPopup()
+        # 斜杠快捷菜单（/ 唤起智能体，参考 Cherry Studio 命令菜单；父级挂面板便于跟随主窗口）
+        self._slash_popup = _SlashPopup(self)
         self._slash_popup.set_input(self.input_edit)
         self.input_edit.set_slash_popup(self._slash_popup)
         in_row.addWidget(self.input_edit, 1)
@@ -975,6 +1003,12 @@ class _ChatPanel(QWidget):
         self._history.append({"role": "user", "content": text})
         self._trim_history()
         self._set_busy(True)
+        if self._busy_timer is not None:
+            self._busy_timer.stop()
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setSingleShot(True)
+        self._busy_timer.timeout.connect(self._on_busy_timeout)
+        self._busy_timer.start(120000)
         self._pending = self.append_bubble("assistant", "⏳ 思考中…")
         self._worker = _ChatWorker(self._mode, self._history, self._model,
                                    message=message,
@@ -1032,6 +1066,9 @@ class _ChatPanel(QWidget):
         return "\n".join(lines)
 
     def _on_reply_ok(self, reply):
+        if self._busy_timer is not None:
+            self._busy_timer.stop()
+            self._busy_timer = None
         self._set_busy(False)
         self._history.append({"role": "assistant", "content": reply})
         self._trim_history()
@@ -1084,10 +1121,22 @@ class _ChatPanel(QWidget):
             return ""
 
     def _on_reply_failed(self, err):
+        if self._busy_timer is not None:
+            self._busy_timer.stop()
+            self._busy_timer = None
         self._set_busy(False)
         if self._pending is not None:
             self._pending.set_text(f"⚠️ 出错了：{err}")
             self._pending = None
+
+    def _on_busy_timeout(self):
+        """请求超过 120 秒未返回：自动恢复输入，避免服务端无响应时界面卡死。"""
+        self._busy_timer = None
+        if self._worker is not None and self._worker.isRunning():
+            self._set_busy(False)
+            if self._pending is not None:
+                self._pending.set_text(
+                    "⏳ 请求超过 120 秒未返回，已恢复输入；回复稍后到达会直接显示。")
 
     def _set_busy(self, busy):
         self.send_btn.setEnabled(not busy)

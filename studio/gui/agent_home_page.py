@@ -1,26 +1,21 @@
 # -*- coding: utf-8 -*-
-"""运营工作台首页：高频任务卡片 + 一句话需求（LLM 意图路由）+ AI 对话面板。
-
-一句话需求 → utils.agent_router.route_text()：
-  1. 优先 LLM 意图识别（服务端 /llm/chat/completions）；
-  2. 超时/失败回退本地关键词匹配；
-  3. 返回 (页面 index, tab index) 或标记「多智能体组合任务」。
+"""运营工作台首页：高频任务卡片 + AI 对话面板（服务端智能体总结为 Skill 供对话调用）。
 
 AI 对话（参考 Cherry Studio 对话体验，服务端暂不支持流式 → 整段返回）：
   - 智能体对话：POST /agent/chat，服务端智能体循环执行，可调用注册能力；
   - 通用对话：POST /llm/chat/completions，DeepSeek 代理多轮问答；
   模型下拉来自 GET /llm/models，上下文自动截断防超长。
+
+Skill 区：把服务端 /agent/registry 提供的智能体能力总结为常用技能按钮，
+放在对话框下方，点击后自动切到智能体对话并发送唤醒消息，由对话执行该技能。
 """
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QLineEdit, QFrame, QGridLayout, QWidget,
-                               QMessageBox, QTabWidget, QComboBox, QTextEdit,
+                               QFrame, QGridLayout, QWidget,
+                               QTabWidget, QComboBox, QTextEdit,
                                QTextBrowser, QScrollArea)
 from utils.gui_icons import mdi_icon, mdi_button
 from utils.logger_utils import log
-
-# (示例文案, 直达目标页 index)
-_ASK_CHIPS = [("带货 15 秒竖屏", 33), ("直播切片", 18), ("声音克隆", 20), ("封面制作", 32)]
 
 # (标题, 图标, 描述, 目标页 index, 强调色)
 _TASK_CARDS = [
@@ -39,23 +34,6 @@ _SYSTEM_PROMPT = (
     "你是「螺丝钉电商智能体」的运营助手，帮助用户完成电商短视频的内容创作、素材管理、"
     "视频处理等任务。回答简洁实用，需要执行具体任务时给出可操作的步骤建议。"
 )
-
-
-class _IntentThread(QThread):
-    """后台执行一句话意图路由（LLM + 关键词兜底），不阻塞 UI。"""
-    done = Signal(object)
-
-    def __init__(self, text, parent=None):
-        super().__init__(parent)
-        self._text = text
-
-    def run(self):
-        try:
-            from utils.agent_router import route_text
-            self.done.emit(route_text(self._text))
-        except Exception as e:
-            log.warning(f"意图路由失败: {e}")
-            self.done.emit(None)
 
 
 class _TaskCard(QPushButton):
@@ -230,8 +208,79 @@ class _ModelLoader(QThread):
             self.done.emit([])
 
 
+class _SkillLoader(QThread):
+    """后台加载服务端智能体能力（GET /agent/registry），过滤基础设施类 → 技能列表。"""
+    done = Signal(list)
+
+    def run(self):
+        try:
+            from utils.agent_client import get_registry
+            data = get_registry(include_external=False, timeout=8) or {}
+            skills = []
+            for c in (data.get("capabilities") or []):
+                tags = c.get("tags") or []
+                if any(t in ("infra", "external") for t in tags):
+                    continue  # 注册表/任务登记/任务树等基础设施不当作对话技能
+                skills.append({
+                    "id": c.get("id") or "",
+                    "name": c.get("name") or c.get("id") or "",
+                    "desc": c.get("description") or "",
+                })
+            self.done.emit(skills)
+        except Exception as e:
+            log.warning(f"[工作台对话] 加载技能列表失败: {e}")
+            self.done.emit([])
+
+
+class _SkillBar(QWidget):
+    """技能快捷条：横向滚动的 Skill 按钮（悬停显示唤醒提示词，点击经对话调用）。"""
+    skillClicked = Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(36)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        lbl = QLabel("🛠️ 技能")
+        lbl.setStyleSheet("color:#8b93a3; font-size:12px; font-weight:600;")
+        row.addWidget(lbl)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setFixedHeight(34)
+        content = QWidget()
+        self._lay = QHBoxLayout(content)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(6)
+        self._lay.addStretch()
+        self._scroll.setWidget(content)
+        row.addWidget(self._scroll, 1)
+
+    def set_skills(self, skills):
+        while self._lay.count() > 1:
+            item = self._lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for s in skills:
+            btn = QPushButton(s.get("name") or s.get("id") or "?")
+            btn.setFixedHeight(26)
+            btn.setCursor(Qt.PointingHandCursor)
+            desc = s.get("desc") or ""
+            btn.setToolTip(f"{desc}\n点击后通过对话调用该技能")
+            btn.setStyleSheet(
+                "QPushButton { background:#1d212b; border:1px solid #262b36; "
+                "border-radius:13px; color:#c9d1de; padding:0 12px; font-size:12px; } "
+                "QPushButton:hover { border-color:#34d399; color:#34d399; }")
+            btn.clicked.connect(lambda checked=False, sk=s: self.skillClicked.emit(sk))
+            self._lay.insertWidget(self._lay.count() - 1, btn)
+
+
 class _ChatPanel(QWidget):
-    """AI 对话面板：模式/模型切换 + 多轮气泡 + 输入发送（参考 Cherry Studio 对话体验）。"""
+    """AI 对话面板：模式/模型切换 + 多轮气泡 + 输入发送 + 技能快捷条。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -240,9 +289,11 @@ class _ChatPanel(QWidget):
         self._model = ""
         self._worker = None
         self._model_loader = None
+        self._skill_loader = None
         self._pending = None     # 等待回复的占位气泡
         self._setup_ui()
         self._load_models()
+        self._load_skills()
 
     def _setup_ui(self):
         v = QVBoxLayout(self)
@@ -300,10 +351,16 @@ class _ChatPanel(QWidget):
         in_row.addWidget(self.send_btn)
         v.addLayout(in_row)
 
+        # 技能快捷条（对话框下方：服务端智能体能力 → 点击经对话实现）
+        self._skill_bar = _SkillBar()
+        self._skill_bar.skillClicked.connect(self._on_skill_clicked)
+        v.addWidget(self._skill_bar)
+
         self.append_bubble(
             "assistant",
             "你好，我是 TinTin 智能体助手 🤖\n\n"
-            "可以问我电商短视频运营的问题，也可以直接说需求，我会拆解并帮你执行。")
+            "可以问我电商短视频运营的问题，也可以直接说需求，我会拆解并帮你执行；\n"
+            "下方技能栏是服务端智能体提供的能力，点击即可通过对话调用。")
 
     # ── 消息渲染 ─────────────────────────────────────────
     def append_bubble(self, role, text):
@@ -407,15 +464,34 @@ class _ChatPanel(QWidget):
     def _on_model_changed(self, idx):
         self._model = self.model_combo.itemData(idx) or ""
 
+    # ── 技能快捷调用 ─────────────────────────────────────────
+    def _load_skills(self):
+        self._skill_loader = _SkillLoader()
+        self._skill_loader.done.connect(self._on_skills_loaded)
+        self._skill_loader.start()
+
+    def _on_skills_loaded(self, skills):
+        self._skill_bar.set_skills(skills)
+
+    def _on_skill_clicked(self, skill):
+        """点击技能：切到智能体对话模式，发送技能唤醒消息，由对话执行。"""
+        if self._mode != "agent":
+            idx = self.mode_combo.findData("agent")
+            if idx >= 0:
+                self.mode_combo.setCurrentIndex(idx)
+        name = skill.get("name") or skill.get("id") or "该技能"
+        desc = (skill.get("desc") or "").strip()
+        text = f"请调用【{name}】技能执行：{desc}" if desc else f"请调用【{name}】技能执行"
+        self.input_edit.setPlainText(text)
+        self._on_send()
+
 
 class AgentHomePage:
-    """运营工作台首页（高频任务卡片 + 一句话需求 + AI 对话面板）。"""
+    """运营工作台首页（高频任务卡片 + AI 对话面板）。"""
 
     def __init__(self, parent_widget, main_window):
         self.parent_widget = parent_widget
         self.main_window = main_window
-        self._intent_thread = None
-        self._ask_go_btn = None
         self.setup()
 
     def setup(self):
@@ -426,7 +502,7 @@ class AgentHomePage:
         heading = QLabel("✨ 螺丝钉智能体工作台")
         heading.setStyleSheet("font-size: 22px; font-weight: 700;")
         layout.addWidget(heading)
-        sub = QLabel("说一句话，或点一个任务卡片——剩下的交给智能体。")
+        sub = QLabel("输入需求或点一个任务卡片——剩下的交给智能体。")
         sub.setStyleSheet("color:#8b93a3; font-size:13px;")
         layout.addWidget(sub)
 
@@ -442,129 +518,9 @@ class AgentHomePage:
             grid.addWidget(card, i // 4, i % 4)
         layout.addLayout(grid)
 
-        # 一句话需求
-        ask_row = QHBoxLayout()
-        ask_row.setSpacing(8)
-        self.ask_input = QLineEdit()
-        self.ask_input.setPlaceholderText("例如：帮我把这段文案做成带货视频；或：生成一个数字人视频")
-        self.ask_input.setFixedHeight(40)
-        self.ask_input.returnPressed.connect(self._on_ask_go)
-        ask_row.addWidget(self.ask_input, 1)
-        btn_go = mdi_button("开始", "rocket")
-        btn_go.setObjectName("primary_button")
-        btn_go.setFixedHeight(40)
-        btn_go.clicked.connect(self._on_ask_go)
-        self._ask_go_btn = btn_go
-        ask_row.addWidget(btn_go)
-        layout.addLayout(ask_row)
-
-        # 示例 chips（点击直达对应功能）
-        chips = QHBoxLayout()
-        chips.setSpacing(8)
-        for text, target in _ASK_CHIPS:
-            c = QPushButton(text)
-            c.setFixedHeight(28)
-            c.setCursor(Qt.PointingHandCursor)
-            c.setStyleSheet(
-                "QPushButton { background:#1d212b; border:1px solid #262b36; "
-                "border-radius:14px; color:#8b93a3; padding:2px 12px; font-size:12px; } "
-                "QPushButton:hover { border-color:#60a5fa; color:#60a5fa; }")
-            c.clicked.connect(lambda checked=False, t=target: self._goto(t))
-            chips.addWidget(c)
-        chips.addStretch()
-        layout.addLayout(chips)
-
         # AI 对话面板（占剩余空间）
         self._chat_panel = _ChatPanel()
         layout.addWidget(self._chat_panel, 1)
-
-    # ── 一句话需求路由 ─────────────────────────────────────
-    def _on_ask_go(self):
-        text = self.ask_input.text().strip()
-        if not text:
-            return
-        self._ask_text = text  # 供多智能体编排提交使用
-        if self._intent_thread and self._intent_thread.isRunning():
-            return
-        self._intent_thread = _IntentThread(text)
-        self._intent_thread.done.connect(self._on_intent_ready)
-        self._intent_thread.start()
-        if self._ask_go_btn is not None:
-            self._ask_go_btn.setEnabled(False)
-            self._ask_go_btn.setText("⏳ 识别中...")
-
-    def _on_intent_ready(self, result):
-        if self._ask_go_btn is not None:
-            self._ask_go_btn.setEnabled(True)
-            self._ask_go_btn.setText("开始")
-        if not result:
-            return
-        if result.get("multi_agent"):
-            self._submit_orchestration(
-                getattr(self, "_ask_text", "") or "",
-                fallback_page=result.get("page", 33))
-            return
-        self._goto(result.get("page", 33), result.get("tab"))
-
-    # ── 多智能体编排：LLM 拆 plan → 提交服务端 ───────────────────────────
-    def _submit_orchestration(self, text, fallback_page=33):
-        """多智能体需求：拆解 plan → POST /agent/tasks(mode=execute) → 跳定时任务页查看。
-
-        拆解失败/服务端不可用时兑底：提示并带用户去最相关的功能入口。
-        """
-        if not text:
-            return
-        from utils.thread_worker import TaskWorker as Worker
-        self._ask_go_btn_set_busy(True, "⏳ 拆解编排中...")
-
-        def _do():
-            from utils.agent_router import build_plan
-            from utils import agent_client as ac
-            plan = build_plan(text)
-            if not plan:
-                return None, None
-            t = ac.create_task(goal=plan.get("goal"), plan=plan, mode="execute")
-            return plan, t
-
-        def _ok(result):
-            self._ask_go_btn_set_busy(False, "开始")
-            plan, t = result
-            if not plan:
-                QMessageBox.information(
-                    self.parent_widget, "云端智能体",
-                    "这条需求需要组合多个能力，但拆解失败（服务端 LLM 或注册表不可用），\n"
-                    "先带你去最相关的功能入口。")
-                self._goto(fallback_page)
-                return
-            if not t:
-                QMessageBox.warning(
-                    self.parent_widget, "提交失败",
-                    "编排任务提交服务端失败，请确认服务端在线后重试。")
-                return
-            log.info(f"[工作台] 编排任务已提交 task_id={t.get('id')}")
-            mw = self.main_window
-            if mw is not None and hasattr(mw, "switch_page"):
-                mw.switch_page(47)  # 定时任务页：服务端任务 Tab 可查看/确认编排任务
-            QMessageBox.information(
-                self.parent_widget, "已提交",
-                "任务已拆解并提交服务端，按注册的智能体自动分解执行。\n"
-                f"task_id: {t.get('id')}（可在「定时任务 → 最近编排任务」查看进度与人工确认）")
-
-        def _err(e):
-            self._ask_go_btn_set_busy(False, "开始")
-            QMessageBox.warning(self.parent_widget, "云端智能体异常", f"云端智能体异常：{e}")
-
-        w = Worker(_do)
-        w.finished.connect(_ok)
-        w.error.connect(_err)
-        self._intent_thread = w  # 持有引用：QThread 被 GC 回收会触发 Qt fatal 崩溃
-        w.start()
-
-    def _ask_go_btn_set_busy(self, busy, text):
-        """开始按钮忙碌态切换。"""
-        if self._ask_go_btn is not None:
-            self._ask_go_btn.setEnabled(not busy)
-            self._ask_go_btn.setText(text)
 
     def _goto(self, page, tab=None):
         """跳转到指定页面，若目标页有 Tab 则自动切到对应 Tab。"""

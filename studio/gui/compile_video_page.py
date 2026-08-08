@@ -1624,9 +1624,14 @@ class CompileVideoPage(BasePage):
         w.start()
 
     def _on_templates_loaded(self, server_templates):
-        if not server_templates:
+        # 模板以服务端 /templates 返回为准；本地内置仅在服务端不可用时回退，
+        # 避免“内置模板(本地兜底) + 自定义模板(服务端)”来源混杂同时显示。
+        if server_templates:
+            self._templates = list(server_templates)
+            self._log(f"✅ 已加载服务端成片模板 {len(server_templates)} 个")
+        else:
             self._log("⚠ 未从服务端加载到成片模板，使用内置模板")
-        self._templates = merge_templates(server_templates, VIDEO_FALLBACK_TEMPLATES)
+            self._templates = list(VIDEO_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
         self._fill_template_list(self._templates, current_id=current_id)
 

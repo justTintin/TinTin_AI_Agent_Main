@@ -304,6 +304,7 @@ class AgentHomePage:
         text = self.ask_input.text().strip()
         if not text:
             return
+        self._ask_text = text  # 供多智能体编排提交使用
         if self._intent_thread and self._intent_thread.isRunning():
             return
         self._intent_thread = _IntentThread(text)
@@ -320,13 +321,74 @@ class AgentHomePage:
         if not result:
             return
         if result.get("multi_agent"):
-            QMessageBox.information(
-                self.parent_widget,
-                "智能体编排",
-                "这条需求需要组合多个能力（例如：数字人 + 配音 + 成片 + 封面）。\n"
-                "多智能体编排正在规划中（P2），先带你去最相关的入口。",
-            )
+            self._submit_orchestration(
+                getattr(self, "_ask_text", "") or "",
+                fallback_page=result.get("page", 33))
+            return
         self._goto(result.get("page", 33), result.get("tab"))
+
+    # ── 多智能体编排：LLM 拆 plan → 提交服务端 ───────────────────────────
+    def _submit_orchestration(self, text, fallback_page=33):
+        """多智能体需求：拆解 plan → POST /agent/tasks(mode=execute) → 打开编排窗口。
+
+        拆解失败/服务端不可用时兑底：提示并带用户去最相关的功能入口。
+        """
+        if not text:
+            return
+        from utils.thread_worker import TaskWorker as Worker
+        self._ask_go_btn_set_busy(True, "⏳ 拆解编排中...")
+
+        def _do():
+            from utils.agent_router import build_plan
+            from utils import agent_client as ac
+            plan = build_plan(text)
+            if not plan:
+                return None, None
+            t = ac.create_task(goal=plan.get("goal"), plan=plan, mode="execute")
+            return plan, t
+
+        def _ok(result):
+            self._ask_go_btn_set_busy(False, "开始")
+            plan, t = result
+            if not plan:
+                QMessageBox.information(
+                    self.parent_widget, "智能体编排",
+                    "这条需求需要组合多个能力，但编排拆解失败（服务端 LLM 或注册表不可用），\n"
+                    "先带你去最相关的功能入口。")
+                self._goto(fallback_page)
+                return
+            if not t:
+                QMessageBox.warning(
+                    self.parent_widget, "提交失败",
+                    "编排任务提交服务端失败，请确认服务端在线后重试。")
+                return
+            log.info(f"[工作台] 编排任务已提交 task_id={t.get('id')}")
+            mw = self.main_window
+            if mw is not None and hasattr(mw, "open_agent_orchestration"):
+                mw.open_agent_orchestration()
+                dlg = getattr(mw, "_agent_orch_dlg", None)
+                if dlg is not None and hasattr(dlg, "_load_detail"):
+                    QTimer.singleShot(300, lambda: dlg._load_detail(t.get("id")))
+            else:
+                QMessageBox.information(
+                    self.parent_widget, "已提交",
+                    f"编排任务已提交（task_id: {t.get('id')}），可在侧边栏「智能体编排」查看。")
+
+        def _err(e):
+            self._ask_go_btn_set_busy(False, "开始")
+            QMessageBox.warning(self.parent_widget, "编排异常", f"智能体编排异常：{e}")
+
+        w = Worker(_do)
+        w.finished.connect(_ok)
+        w.error.connect(_err)
+        self._intent_thread = w  # 持有引用：QThread 被 GC 回收会触发 Qt fatal 崩溃
+        w.start()
+
+    def _ask_go_btn_set_busy(self, busy, text):
+        """开始按钮忙碌态切换。"""
+        if self._ask_go_btn is not None:
+            self._ask_go_btn.setEnabled(not busy)
+            self._ask_go_btn.setText(text)
 
     def _goto(self, page, tab=None):
         """跳转到指定页面，若目标页有 Tab 则自动切到对应 Tab。"""

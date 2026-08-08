@@ -6,6 +6,8 @@ LLM 不可用/超时/解析失败时回退本地关键词匹配，保证路由�
 """
 import re
 
+from utils.logger_utils import log
+
 # 意图名 -> (页面 index, tab index | None)
 INTENT_MAP = {
     "一键成片": (33, None),
@@ -97,3 +99,51 @@ def _keyword_route(text):
                 page, tab = target
                 return {"page": page, "tab": tab, "intent": keys[0], "multi_agent": False}
     return {"page": 33, "tab": None, "intent": "一键成片", "multi_agent": False}
+
+
+def build_plan(text, registry=None, timeout=20):
+    """LLM 拆解一句话需求 → 服务端可执行 plan（POST /agent/tasks mode=execute 契约）。
+
+    plan 格式：{goal, steps:[{id, capability, params, depends_on, needs_user_input}]}
+    capability 必须是注册表已登记能力（executor=server）；拆解/校验失败返回 None。
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    if registry is None:
+        from utils import agent_client as ac
+        registry = ac.get_registry(timeout=8)
+    caps = (registry or {}).get("capabilities") or []
+    server_caps = [c for c in caps if c.get("executor") == "server"]
+    if not server_caps:
+        log.warning("[智能体编排] 注册表为空，无法拆解 plan")
+        return None
+    cap_lines = [
+        f"- {c.get('id')}: {c.get('name')}｜{str(c.get('description') or '')[:60]}"
+        for c in server_caps[:40]
+    ]
+    prompt = (
+        "你是多智能体编排器。把用户的一句话目标拆解为可执行 plan（严格 JSON，无其他文字）。\n"
+        "可用能力（capability id）：\n" + "\n".join(cap_lines) + "\n"
+        "plan 格式：{\"goal\": \"目标\", \"steps\": [{\"id\": \"s1\", \"capability\": \"能力id\", "
+        "\"params\": {能力输入字段}, \"depends_on\": [], \"needs_user_input\": false}]}\n"
+        "规则：\n"
+        "1. 只使用上面列出的能力 id，能力不够就拆到最接近的一步，params 按能力输入给合理值；\n"
+        "2. 有依赖的步骤用 depends_on 引用前置步骤 id；\n"
+        "3. 需要用户提供素材/确认的步骤 needs_user_input 置 true；\n"
+        "4. 步骤 2-8 个，输出必须是合法 JSON。"
+    )
+    try:
+        from utils.llm_proxy import llm_chat_json
+        data = llm_chat_json(prompt, text, temperature=0.0, timeout=timeout)
+        if not isinstance(data, dict) or not data.get("steps"):
+            return None
+        ids = {c.get("id") for c in server_caps}
+        for s in data["steps"]:
+            if not isinstance(s, dict) or s.get("capability") not in ids:
+                log.warning(f"[智能体编排] plan 含未登记能力，拒绝: {s}")
+                return None
+        return data
+    except Exception as e:
+        log.warning(f"[智能体编排] plan 拆解失败: {e}")
+        return None

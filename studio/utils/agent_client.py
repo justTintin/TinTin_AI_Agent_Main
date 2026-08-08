@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+"""智能体编排客户端：封装 /agent 接口族（能力注册表 + 编排任务树 + 中间产物）。
+
+服务端「智能体化」契约（权威：服务端 /guide 智能体化章节，客户端 PRD_V2.2 §13）：
+- GET  /agent/registry                 能力注册表（31 能力，只读；include_external 附加客户端侧能力）
+- POST /agent/tasks                    登记编排任务；mode=execute 提交 plan 由服务端 Orchestrator 自动执行
+- GET  /agent/tasks                    列表（默认只列根任务；root_only=false 全部）
+- GET  /agent/tasks/{id}               详情 + children 嵌套子任务树（derived_status 聚合推导）
+- PATCH /agent/tasks/{id}              更新状态/进度/结果（执行器与客户端共用）
+- POST /agent/tasks/{id}/confirm       S4 人工确认：waiting_user_input → queued 继续推进
+- POST /agent/tasks/{id}/pause|resume|retry|cancel   S6 任务管理（断点续跑）
+- POST /agent/artifacts                手动登记中间产物
+- GET  /agent/tasks/{id}/artifacts     任务产物列表（自动 + 手动）
+
+任务 id 前缀 a_；/tasks/unified/{id} 已打通（返回完整子任务树）。
+"""
+from utils.http_client import http_get, http_post, logged_request
+from utils.logger_utils import log
+from utils.scheduled_task_client import _server_url
+
+# 编排任务状态取值（服务端 agent_tasks 表）
+TASK_STATUSES = ("queued", "running", "waiting_user_input",
+                 "completed", "failed", "paused", "cancelled")
+
+
+# ── 同步 API（供 Worker 调用，全部带超时）──────────────────────────────────
+def get_registry(include_external=False, timeout=10):
+    """GET /agent/registry → {registry_version, count, capabilities:[...]}。
+
+    失败返回 None。include_external=True 附加客户端本地工具/外部工作流登记项。
+    """
+    try:
+        url = f"{_server_url()}/agent/registry"
+        if include_external:
+            url += "?include_external=1"
+        r = http_get(url, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        log.warning(f"[智能体] get_registry HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[智能体] get_registry 失败: {e}")
+    return None
+
+
+def get_capability(capability_id, timeout=10):
+    """GET /agent/registry/{capability_id} → 单个能力 dict；不存在/失败返回 None。"""
+    try:
+        r = http_get(f"{_server_url()}/agent/registry/{capability_id}", timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        log.warning(f"[智能体] get_capability({capability_id}) 失败: {e}")
+    return None
+
+
+def create_task(goal=None, plan=None, capability=None, params=None,
+                parent_task_id=None, mode=None, timeout=15):
+    """POST /agent/tasks → 登记/提交编排任务，返回新任务 dict（失败返回 None）。
+
+    - mode="execute"：提交 plan（{goal, steps:[{id, capability, params, depends_on,
+      needs_user_input}]}），服务端校验后创建父任务 + 每步一个子任务并自动执行，
+      响应含 execution="started"。
+    - 不带 mode：手动登记单个任务（goal/capability+params/parent_task_id）。
+    """
+    body = {}
+    if goal:
+        body["goal"] = goal
+    if plan:
+        body["plan"] = plan
+    if capability:
+        body["capability"] = capability
+    if params:
+        body["params"] = params
+    if parent_task_id:
+        body["parent_task_id"] = parent_task_id
+    if mode:
+        body["mode"] = mode
+    try:
+        r = http_post(f"{_server_url()}/agent/tasks", json=body, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        log.warning(f"[智能体] create_task HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        log.warning(f"[智能体] create_task 失败: {e}")
+    return None
+
+
+def list_tasks(root_only=True, status=None, parent_task_id=None, timeout=10):
+    """GET /agent/tasks → 编排任务列表 dict {count, tasks}。失败返回 {}。
+
+    root_only=True 只列根任务；status/parent_task_id 可过滤。
+    """
+    try:
+        params = {}
+        if not root_only:
+            params["root_only"] = "false"
+        if status:
+            params["status"] = status
+        if parent_task_id:
+            params["parent_task_id"] = parent_task_id
+        r = http_get(f"{_server_url()}/agent/tasks", params=params, timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        log.warning(f"[智能体] list_tasks HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[智能体] list_tasks 失败: {e}")
+    return {}
+
+
+def get_task(task_id, timeout=10):
+    """GET /agent/tasks/{id} → 编排任务详情（children 嵌套树）。失败返回 None。"""
+    try:
+        r = http_get(f"{_server_url()}/agent/tasks/{task_id}", timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        log.warning(f"[智能体] get_task({task_id}) HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[智能体] get_task({task_id}) 失败: {e}")
+    return None
+
+
+def update_task(task_id, status=None, progress=None, result=None,
+                error_msg=None, params=None, timeout=10):
+    """PATCH /agent/tasks/{id} → 更新状态/进度/结果/参数，成功返回 True。"""
+    body = {}
+    if status is not None:
+        body["status"] = status
+    if progress is not None:
+        body["progress"] = progress
+    if result is not None:
+        body["result"] = result
+    if error_msg is not None:
+        body["error_msg"] = error_msg
+    if params is not None:
+        body["params"] = params
+    if not body:
+        return False
+    try:
+        r = logged_request("PATCH", f"{_server_url()}/agent/tasks/{task_id}",
+                           json=body, timeout=timeout)
+        return r.status_code == 200
+    except Exception as e:
+        log.warning(f"[智能体] update_task({task_id}) 失败: {e}")
+        return False
+
+
+def _action(task_id, action, timeout=10):
+    """POST /agent/tasks/{id}/{action} 通用操作（cancel/confirm/pause/resume/retry）。"""
+    try:
+        r = http_post(f"{_server_url()}/agent/tasks/{task_id}/{action}", timeout=timeout)
+        if r.status_code == 200:
+            return r.json()
+        log.warning(f"[智能体] {action}({task_id}) HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        log.warning(f"[智能体] {action}({task_id}) 失败: {e}")
+    return None
+
+
+def confirm_task(task_id, timeout=10):
+    """S4 人工确认：把 waiting_user_input 的子任务恢复为 queued，执行器继续推进。"""
+    return _action(task_id, "confirm", timeout)
+
+
+def pause_task(task_id, timeout=10):
+    """S6 暂停 plan：父任务 running → paused，执行器在当前层收尾后停住。"""
+    return _action(task_id, "pause", timeout)
+
+
+def resume_task(task_id, timeout=10):
+    """S6 恢复 plan：paused → running（响应含 executor_respawned 是否重拉执行器）。"""
+    return _action(task_id, "resume", timeout)
+
+
+def retry_task(task_id, timeout=10):
+    """S6 重试：仅 failed/cancelled 父任务；failed/cancelled 子任务重置为 queued，
+    completed 子任务保留为断点（结果直接复用），父任务回 running 续跑。"""
+    return _action(task_id, "retry", timeout)
+
+
+def cancel_task(task_id, timeout=10):
+    """取消编排任务：自身置 cancelled，未终态后代级联取消（执行器同步停止）。"""
+    return _action(task_id, "cancel", timeout)
+
+
+def list_artifacts(task_id, timeout=10):
+    """GET /agent/tasks/{id}/artifacts → 任务中间产物列表（自动 + 手动）。失败返回 []。"""
+    try:
+        r = http_get(f"{_server_url()}/agent/tasks/{task_id}/artifacts", timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("artifacts") or data.get("items") or []
+        log.warning(f"[智能体] list_artifacts({task_id}) HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[智能体] list_artifacts({task_id}) 失败: {e}")
+    return []
+
+
+def register_artifact(task_id, kind, file_ref, meta=None, timeout=10):
+    """POST /agent/artifacts → 手动登记子任务产物。成功返回 True。"""
+    try:
+        r = http_post(f"{_server_url()}/agent/artifacts", timeout=timeout, json={
+            "task_id": task_id, "kind": kind, "file_ref": file_ref,
+            "meta": meta or {},
+        })
+        return r.status_code == 200
+    except Exception as e:
+        log.warning(f"[智能体] register_artifact({task_id}) 失败: {e}")
+        return False

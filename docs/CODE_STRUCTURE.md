@@ -72,7 +72,10 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 │   │   ├── product_library_page.py        #     产品资料库
 │   │   ├── product_script_page.py         #     产品文案创作
 │   │   ├── backup_page.py                 #     数据备份/还原
-│   │   └── terminal_page.py               #     内嵌 Python 终端
+│   │   ├── terminal_page.py               #     内嵌 Python 终端
+│   │   ├── system_settings_dialog.py      #     系统设置二级菜单窗口
+│   │   ├── scheduled_tasks_dialog.py      #     定时任务管理窗口
+│   │   └── agent_orchestration_dialog.py  #     智能体编排窗口
 │   │
 │   ├── utils/                             #   工具库/客户端（30+ 模块）
 │   │   ├── logger_utils.py                #     日志工具
@@ -111,7 +114,11 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 │   │   ├── update_checker.py              #    版本更新检查
 │   │   ├── backup_manager.py              #    备份管理器
 │   │   ├── base_worker.py                 #    工作器基类
-│   │   └── wdt_client.py                  #    WebDriver 工具客户端
+│   │   ├── wdt_client.py                  #    WebDriver 工具客户端
+│   │   ├── scheduled_task_client.py       #    服务端定时任务客户端
+│   │   ├── agent_router.py                #    意图路由（关键词 + LLM 拆 plan）
+│   │   ├── agent_client.py                #    智能体编排客户端（/agent 接口族）
+│   │   └── local_scheduler.py             #    本地定时任务调度（schtasks）
 │   │
 │   ├── core/                              #   本地核心引擎
 │   │   ├── creator_browser_controller.py  #     创作者浏览器控制器（Playwright）
@@ -218,7 +225,6 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 │   └── ui-prototype.html                  #   UI 原型
 │
 ├── build.py                               # 开发模式启动脚本
-├── export_configs.py                      # 配置导出工具
 ├── help.md                                # 使用说明书
 ├── config.ini.example                     # 服务配置模板
 ├── package.json                           # jsdom 依赖（用于 JS 运行时）
@@ -333,6 +339,10 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 | `data_registry.py` | 数据注册表 | 数据文件路径管理 |
 | `gui_icons.py` | GUI 图标工具 | SVG/MDI 图标渲染 |
 | `logger_utils.py` | 日志工具 | loguru 封装 |
+| `agent_client.py` | 智能体编排客户端 | HTTP → 服务端 `/agent/*`（注册表/任务树/产物） |
+| `agent_router.py` | 意图路由 | 关键词规则 + LLM 拆解 plan |
+| `local_scheduler.py` | 本地定时任务调度 | Windows schtasks 命令注册/查询/注销 |
+| `scheduled_task_client.py` | 服务端成片任务调度 | HTTP → `/tasks/unified` |
 
 ### 3.4 核心引擎层 — `studio/core/`
 

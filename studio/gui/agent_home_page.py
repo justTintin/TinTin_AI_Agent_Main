@@ -12,7 +12,19 @@ from utils.gui_icons import mdi_icon, mdi_button
 from utils.logger_utils import log
 
 # 示例需求（点击填入输入框）
-_ASK_CHIPS = ["带货 15 秒竖屏", "直播切片", "声音克隆", "封面制作"]
+# (示例文案, 直达目标页 index)
+_ASK_CHIPS = [("带货 15 秒竖屏", 33), ("直播切片", 18), ("声音克隆", 20), ("封面制作", 32)]
+
+# 一句话需求关键词 -> 目标页 index（简单意图路由）
+_INTENT_PAGE = [
+    (("直播", "切片"), 18),
+    (("声音", "克隆", "配音", "音色"), 20),
+    (("封面",), 32),
+    (("营销",), 40),
+    (("评价", "预测", "数据"), 34),
+    (("混剪", "拼接", "镜头"), 14),
+    (("任务", "进度", "队列"), 42),
+]
 
 # (标题, 图标, 描述, 目标页 index)
 _TASK_CARDS = [
@@ -120,7 +132,7 @@ class AgentHomePage:
         # 示例 chips
         chips = QHBoxLayout()
         chips.setSpacing(8)
-        for text in _ASK_CHIPS:
+        for text, target in _ASK_CHIPS:
             c = QPushButton(text)
             c.setFixedHeight(28)
             c.setCursor(Qt.PointingHandCursor)
@@ -128,7 +140,7 @@ class AgentHomePage:
                 "QPushButton { background:#1d212b; border:1px solid #262b36; "
                 "border-radius:14px; color:#8b93a3; padding:2px 12px; font-size:12px; } "
                 "QPushButton:hover { border-color:#60a5fa; color:#60a5fa; }")
-            c.clicked.connect(lambda checked=False, t=text: self.ask_input.setText(t))
+            c.clicked.connect(lambda checked=False, t=target: self.main_window.switch_page(t))
             chips.addWidget(c)
         chips.addStretch()
         layout.addLayout(chips)
@@ -195,5 +207,9 @@ class AgentHomePage:
         text = self.ask_input.text().strip()
         if not text:
             return
-        # P0：一句话需求先落到「一键成片」页，由用户在该页完成后续步骤（P1 再升级为自动编排）
+        # 简单意图路由：按关键词落到对应功能页；未命中默认一键成片
+        for keys, page in _INTENT_PAGE:
+            if any(k in text for k in keys):
+                self.main_window.switch_page(page)
+                return
         self.main_window.switch_page(33)

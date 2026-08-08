@@ -718,9 +718,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_pages()
         
         # Default Page
-        # Default page: ops mode -> agent home; pro mode -> keep original
-        _default_idx = getattr(self, "_agent_home_index", 46) if getattr(self, "_role_mode", "pro") == "ops" else 0
-        self.switch_page(_default_idx)
+        # Default page: workbench (agent home)
+        self.switch_page(46)
 
 
     def setup_pages(self):

@@ -4,6 +4,7 @@
 一句话 → (页面 index, tab index|None, 是否多智能体任务)。
 LLM 不可用/超时/解析失败时回退本地关键词匹配，保证路由始终可用。
 """
+import json
 import re
 
 from utils.logger_utils import log
@@ -50,6 +51,23 @@ KEYWORD_RULES = [
     (("转写", "字幕"), (12, None)),
     (("成片", "带货", "文案成片"), (33, None)),
 ]
+
+# 参数结构特殊的能力示例模板（params_schema 未声明时的兜底提示；
+# 字段以实测/服务端契约为准，仅约束 LLM 拆解输出格式）
+_PARAM_TEMPLATES = {
+    "llm_chat": {"prompt": "要生成/处理的文本内容或问题"},
+    "review_check": {"content": "待审查的文案或产物文本"},
+    "agent_script_eval": {
+        "shots": [{"index": 1, "shot_type": "镜头类型", "visual": "画面描述",
+                     "audio": "配音文案", "sfx": "音效", "duration": 3.0}],
+        "topic": "分镜主题",
+    },
+    "material_search": {"query": "检索关键词"},
+    "asr_transcribe": {"file_path": "音频文件路径"},
+    "tts_voice_clone": {"text": "待合成文本", "voice_sample": "音色样本路径"},
+    "task_status_unified": {"task_id": "任务id"},
+}
+
 
 _SYSTEM_PROMPT = (
     "你是客户端智能体路由。用户输入一句话需求，判断应交给哪个功能页，"
@@ -122,13 +140,20 @@ def build_plan(text, registry=None, timeout=20):
         f"- {c.get('id')}: {c.get('name')}｜{str(c.get('description') or '')[:60]}"
         for c in server_caps[:40]
     ]
+    tpl_lines = []
+    for c in server_caps:
+        tpl = _PARAM_TEMPLATES.get(c.get("id"))
+        if tpl:
+            tpl_lines.append(f"- {c.get('id')}: {json.dumps(tpl, ensure_ascii=False)}")
     prompt = (
         "你是多智能体编排器。把用户的一句话目标拆解为可执行 plan（严格 JSON，无其他文字）。\n"
         "可用能力（capability id）：\n" + "\n".join(cap_lines) + "\n"
+        "参数模板（无模板的能力按常见字段 prompt/content/text 给合理值）：\n"
+        + "\n".join(tpl_lines) + "\n"
         "plan 格式：{\"goal\": \"目标\", \"steps\": [{\"id\": \"s1\", \"capability\": \"能力id\", "
         "\"params\": {能力输入字段}, \"depends_on\": [], \"needs_user_input\": false}]}\n"
         "规则：\n"
-        "1. 只使用上面列出的能力 id，能力不够就拆到最接近的一步，params 按能力输入给合理值；\n"
+        "1. 只使用上面列出的能力 id，能力不够就拆到最接近的一步，params 严格按参数模板给；\n"
         "2. 有依赖的步骤用 depends_on 引用前置步骤 id；\n"
         "3. 需要用户提供素材/确认的步骤 needs_user_input 置 true；\n"
         "4. 步骤 2-8 个，输出必须是合法 JSON。"

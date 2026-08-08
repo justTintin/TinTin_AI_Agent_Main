@@ -15,14 +15,95 @@ import os
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDialog, QDialogButtonBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QTextBrowser, QWidget,
+    QTextBrowser, QWidget, QSlider, QFileDialog, QMessageBox,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from gui.base_page import BasePage
 from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
 from utils import scheduled_task_client as stc
+
+
+class _VideoPlayerDialog(QDialog):
+    """成片视频播放器：直接播放服务端 URL（FastAPI FileResponse 原生支持 Range，可拖动进度）。"""
+
+    def __init__(self, url, title="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"▶ 播放成片 - {title[:40]}")
+        self.resize(960, 600)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10); lay.setSpacing(8)
+
+        self._video = QVideoWidget()
+        lay.addWidget(self._video, 1)
+        self._audio = QAudioOutput()
+        self._player = QMediaPlayer()
+        self._player.setAudioOutput(self._audio)
+        self._player.setVideoOutput(self._video)
+
+        ctl = QHBoxLayout(); ctl.setSpacing(8)
+        self._btn_toggle = QPushButton("⏸ 暂停")
+        self._btn_toggle.setObjectName("secondary_button")
+        self._btn_toggle.setFixedWidth(90)
+        self._btn_toggle.clicked.connect(self._toggle_play)
+        ctl.addWidget(self._btn_toggle)
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setEnabled(False)
+        self._slider.sliderMoved.connect(self._player.setPosition)
+        ctl.addWidget(self._slider, 1)
+        self._time_lbl = QLabel("00:00 / 00:00")
+        self._time_lbl.setStyleSheet("color:#8b93a3;")
+        ctl.addWidget(self._time_lbl)
+        btn_close = QPushButton("关闭")
+        btn_close.setObjectName("secondary_button")
+        btn_close.clicked.connect(self.reject)
+        ctl.addWidget(btn_close)
+        lay.addLayout(ctl)
+
+        self._player.positionChanged.connect(self._on_position)
+        self._player.durationChanged.connect(self._on_duration)
+        self._player.playbackStateChanged.connect(self._on_state)
+        self._player.errorOccurred.connect(self._on_error)
+        self._player.setSource(QUrl(url))
+        self._player.play()
+
+    def _toggle_play(self):
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._player.pause()
+        else:
+            self._player.play()
+
+    def _on_state(self, state):
+        playing = state == QMediaPlayer.PlayingState
+        self._btn_toggle.setText("⏸ 暂停" if playing else "▶ 播放")
+
+    def _on_duration(self, ms):
+        if ms > 0:
+            self._slider.setRange(0, ms)
+            self._slider.setEnabled(True)
+            self._time_lbl.setText(f"00:00 / {_fmt_ms(ms)}")
+
+    def _on_position(self, ms):
+        self._slider.setValue(ms)
+        self._time_lbl.setText(f"{_fmt_ms(ms)} / {_fmt_ms(self._player.duration())}")
+
+    def _on_error(self, err, msg):
+        QMessageBox.warning(self, "播放失败",
+                            f"无法播放成片（{msg}）。\n可改用「下载成片」保存到本地播放。")
+        self._btn_toggle.setEnabled(False)
+
+    def closeEvent(self, event):
+        self._player.stop()
+        super().closeEvent(event)
+
+
+def _fmt_ms(ms):
+    """毫秒 -> M:SS"""
+    s = int(ms or 0) // 1000
+    return f"{s // 60}:{s % 60:02d}"
 
 
 class ScheduledTasksPage(BasePage):
@@ -95,6 +176,18 @@ class ScheduledTasksPage(BasePage):
 
         # 查看日志入口（服务端任务 logs 字段）
         log_row = QHBoxLayout()
+        self.btn_play = QPushButton("▶ 播放成片")
+        self.btn_play.setObjectName("secondary_button")
+        self.btn_play.setToolTip("在播放器窗口预览成片视频")
+        self.btn_play.clicked.connect(self._play_current)
+        self.btn_play.setVisible(False)
+        log_row.addWidget(self.btn_play)
+        self.btn_download = QPushButton("⬇ 下载成片")
+        self.btn_download.setObjectName("secondary_button")
+        self.btn_download.setToolTip("把成片视频保存到本地文件")
+        self.btn_download.clicked.connect(self._download_current)
+        self.btn_download.setVisible(False)
+        log_row.addWidget(self.btn_download)
         log_row.addStretch()
         self.btn_view_log = QPushButton("📜 查看日志")
         self.btn_view_log.setObjectName("secondary_button")
@@ -173,8 +266,10 @@ class ScheduledTasksPage(BasePage):
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
         self._current_task_full = None
-        if hasattr(self, "btn_view_log"):
-            self.btn_view_log.setVisible(False)
+        for _b in ("btn_view_log", "btn_play", "btn_download"):
+            b = getattr(self, _b, None)
+            if b is not None:
+                b.setVisible(False)
         # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
         if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
             self._poll_timer.start()
@@ -199,6 +294,10 @@ class ScheduledTasksPage(BasePage):
         if t:
             self._current_task_full = t
             self.btn_view_log.setVisible(True)
+            # 已完成且有视频结果 → 显示播放/下载按钮
+            has_video = t.get("status") == "completed" and bool(self._resolve_video_url(t))
+            self.btn_play.setVisible(has_video)
+            self.btn_download.setVisible(has_video)
             self.detail.setMarkdown(self._render_detail(t))
             self._populate_variants(t)   # 填充变体打分区
 
@@ -339,32 +438,118 @@ class ScheduledTasksPage(BasePage):
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(6)
         status = t.get("status", "")
-        result = t.get("result", {}) or {}
-        video_url = result.get("video_url") or result.get("url")
-        if status == "completed" and video_url:
-            btn_open = table_action_button("📂", "打开结果")
-            btn_open.clicked.connect(lambda _=False, u=video_url: self._open_result(u))
-            lay.addWidget(btn_open)
+        url = self._resolve_video_url(t)
+        if status == "completed" and url:
+            btn_play = table_action_button("▶", "播放成片")
+            btn_play.clicked.connect(lambda _=False, u=url: self._play_video(u))
+            lay.addWidget(btn_play)
+            btn_dl = table_action_button("⬇", "下载成片")
+            btn_dl.clicked.connect(lambda _=False, u=url: self._download_video(u))
+            lay.addWidget(btn_dl)
         btn_del = table_action_button("🗑", "删除")
         btn_del.clicked.connect(lambda _=False, tid=t.get("id"): self._delete(tid))
         lay.addWidget(btn_del)
         return w
-        return w
 
-    def _open_result(self, video_url):
-        """打开服务端返回的成片结果。video_url 是相对路径，拼到服务端地址。"""
-        from utils.scheduled_task_client import _server_url
-        full = video_url
-        if video_url.startswith("/"):
-            full = _server_url() + video_url
-        try:
-            if os.name == "nt":
-                os.startfile(full)  # noqa
-            else:
-                import webbrowser
-                webbrowser.open(full)
-        except Exception as e:
-            self.show_error(f"打开结果失败：{e}\n地址：{full}", "错误")
+    def _resolve_video_url(self, t):
+        """从任务 result 解析出可访问的成片 URL。
+
+        兼容 result.video_url / url / output_url / output_file 等相对路径
+        （如 '/editor/render/192/result/'），相对路径拼服务端地址；
+        绝对 http(s) 地址直接使用。
+        """
+        result = t.get("result", {}) or {}
+        raw = (result.get("video_url") or result.get("url")
+               or result.get("output_url") or result.get("output_file")
+               or result.get("file_url") or "")
+        raw = str(raw or "").strip()
+        if not raw:
+            return ""
+        if raw.startswith("http"):
+            return raw
+        base = stc._server_url()
+        if not base:
+            return ""
+        return base + raw if raw.startswith("/") else f"{base}/{raw}"
+
+    def _play_current(self):
+        t = getattr(self, "_current_task_full", None)
+        if not t:
+            return
+        url = self._resolve_video_url(t)
+        if not url:
+            self.show_warning("该任务没有视频结果，无法播放。")
+            return
+        self._play_video(url, t.get("title", ""))
+
+    def _play_video(self, url, title=""):
+        dlg = _VideoPlayerDialog(url, title, self.parent_widget)
+        self._player_dialog = dlg   # 持有引用防 GC
+        dlg.exec()
+
+    def _download_current(self):
+        t = getattr(self, "_current_task_full", None)
+        if not t:
+            return
+        url = self._resolve_video_url(t)
+        if not url:
+            self.show_warning("该任务没有视频结果，无法下载。")
+            return
+        self._download_video(url)
+
+    def _download_video(self, url):
+        """选择保存位置并后台下载成片。"""
+        default_name = f"render_{getattr(self, '_current_task_full', {}).get('id', '')}.mp4"
+        res = (getattr(self, '_current_task_full', {}) or {}).get("result", {}) or {}
+        op = (res.get("output_path") or "").strip("/").split("/")[-1]
+        if op:
+            default_name = op
+        path, _ = QFileDialog.getSaveFileName(
+            self.parent_widget, "保存成片",
+            os.path.join(os.path.expanduser("~"), "Desktop", default_name),
+            "视频文件 (*.mp4 *.mov *.webm);;所有文件 (*.*)")
+        if not path:
+            return
+        from utils.thread_worker import TaskWorker as Worker
+        self._dl_worker = Worker(lambda: self._do_download(url, path))
+        self._dl_worker.finished.connect(lambda p: self.show_info(f"✅ 成片已保存：{p}"))
+        self._dl_worker.error.connect(lambda e: self.show_error(f"下载失败：{e}", "错误"))
+        self.track_worker(self._dl_worker)
+        self._dl_worker.start()
+        self.show_info(f"开始下载成片到 {os.path.basename(path)}，请稍候…")
+
+    @staticmethod
+    def _do_download(url, path):
+        """后台下载：流式写文件；若端点返回 JSON（如 {url:...}）则取其地址重试一次。"""
+        return _download_to_file(url, path)
+
+
+def _download_to_file(url, path):
+    """下载服务端文件到本地（模块级，供成片任务页与对话气泡复用）。
+
+    流式写文件；若端点返回 JSON（如 {url:...}）则取其地址重试一次。
+    """
+    from utils.http_client import http_get
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with http_get(url, timeout=180, stream=True) as r:
+        if r.status_code != 200:
+            raise RuntimeError(f"服务端返回 HTTP {r.status_code}")
+        ct = (r.headers.get("Content-Type") or "").lower()
+        if "json" in ct:
+            data = r.json()
+            inner = (data.get("url") or data.get("video_url")
+                     or data.get("output_url") or data.get("file_url") or "")
+            if not inner:
+                raise RuntimeError("结果端点返回 JSON 但无视频地址字段")
+            base = stc._server_url()
+            if isinstance(inner, str) and inner.startswith("/") and base:
+                inner = base + inner
+            return _download_to_file(inner, path)
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    f.write(chunk)
+    return path
 
     def _delete(self, tid):
         if not self.confirm(f"确定删除任务 {tid}？"):

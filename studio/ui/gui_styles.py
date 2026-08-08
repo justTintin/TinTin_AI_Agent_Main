@@ -238,20 +238,23 @@ QPushButton#nav_button[active="true"] {
    ═══════════════════════════════════════════════════════════════ */
 
 #card {
-    background-color: #151722;
-    border: 1px solid #252938;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #191d2b, stop:1 #141722);
+    border: 1px solid #2a3040;
     border-radius: 12px;
 }
 
 #feature_card {
-    background-color: #151722;
-    border: 1px solid #252938;
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #1a1e2d, stop:1 #151827);
+    border: 1px solid #2c3344;
     border-radius: 14px;
 }
 
 #feature_card:hover {
-    border: 1px solid rgba(99, 102, 241, 0.45);
-    background-color: #181b28;
+    border: 1px solid rgba(99, 102, 241, 0.65);
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #1e2233, stop:1 #181b2a);
 }
 
 #feature_title {

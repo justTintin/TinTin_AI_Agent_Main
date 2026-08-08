@@ -18,16 +18,16 @@ from utils.logger_utils import log
 # (示例文案, 直达目标页 index)
 _ASK_CHIPS = [("带货 15 秒竖屏", 33), ("直播切片", 18), ("声音克隆", 20), ("封面制作", 32)]
 
-# (标题, 图标, 描述, 目标页 index)
+# (标题, 图标, 描述, 目标页 index, 强调色)
 _TASK_CARDS = [
-    ("一键成片", "rocket", "选产品或贴文案，自动配素材配音生成成片", 33),
-    ("智能混剪", "cut", "多镜头素材自动拼接成片，支持转场配音", 14),
-    ("声音克隆", "mic", "粘贴文案、选音色，克隆整段语音", 20),
-    ("直播切片", "video", "从直播回放自动切出精彩片段配字幕", 18),
-    ("封面制作", "camera", "输入标题卖点，自动生成视频封面", 32),
-    ("营销检测", "sparkles", "上传视频，检查营销卖点是否到位", 40),
-    ("视频评价", "film", "预测成片数据表现，给出优化建议", 34),
-    ("成片任务", "folder", "查看所有成片/混剪任务进度", 42),
+    ("一键成片", "rocket", "选产品或贴文案，自动配素材配音生成成片", 33, "#3b82f6"),
+    ("智能混剪", "cut", "多镜头素材自动拼接成片，支持转场配音", 14, "#8b5cf6"),
+    ("声音克隆", "mic", "粘贴文案、选音色，克隆整段语音", 20, "#d946ef"),
+    ("直播切片", "video", "从直播回放自动切出精彩片段配字幕", 18, "#f97316"),
+    ("封面制作", "camera", "输入标题卖点，自动生成视频封面", 32, "#06b6d4"),
+    ("营销检测", "sparkles", "上传视频，检查营销卖点是否到位", 40, "#10b981"),
+    ("视频评价", "film", "预测成片数据表现，给出优化建议", 34, "#f59e0b"),
+    ("成片任务", "folder", "查看所有成片/混剪任务进度", 42, "#64748b"),
 ]
 
 _STATUS_TEXT = {
@@ -69,36 +69,47 @@ class _IntentThread(QThread):
 
 
 class _TaskCard(QPushButton):
-    """任务卡片：图标 + 标题 + 描述，可点击。"""
+    """任务卡片：顶部强调色条 + 渐变图标块 + 标题 + 描述，可点击。"""
 
-    def __init__(self, title, icon, desc, parent=None):
+    def __init__(self, title, icon, desc, accent="#3b82f6", parent=None):
         super().__init__(parent)
         self.setFlat(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(96)
+        self.setMinimumHeight(104)
         self.setStyleSheet(
-            "QPushButton { background:#171a21; border:1px solid #262b36; "
-            "border-radius:12px; text-align:left; } "
-            "QPushButton:hover { border-color:#60a5fa; background:#1a1e28; }"
+            f"QPushButton {{"
+            f" background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            f"   stop:0 #1b1f2d, stop:1 #161924);"
+            f" border:1px solid #2c3344; border-top:3px solid {accent};"
+            f" border-radius:12px; text-align:left; }}"
+            f" QPushButton:hover {{"
+            f"  border:1px solid {accent}; border-top:3px solid {accent};"
+            f"  background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            f"    stop:0 #202536, stop:1 #1a1e2c); }}"
         )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(6)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(7)
 
         head = QHBoxLayout()
-        head.setSpacing(8)
+        head.setSpacing(9)
         ico = QLabel()
-        ico.setPixmap(mdi_icon(icon, "#60a5fa").pixmap(20, 20))
+        ico.setFixedSize(40, 40)
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setStyleSheet(
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+            f"  stop:0 {accent}, stop:1 #334155); border-radius:10px;")
+        ico.setPixmap(mdi_icon(icon, "#ffffff").pixmap(22, 22))
         head.addWidget(ico)
         t = QLabel(title)
-        t.setStyleSheet("background:transparent; border:none; font-size:14px; font-weight:700; color:#e6e9f0;")
+        t.setStyleSheet("background:transparent; border:none; font-size:15px; font-weight:700; color:#f0f1f7;")
         head.addWidget(t)
         head.addStretch()
         lay.addLayout(head)
 
         d = QLabel(desc)
         d.setWordWrap(True)
-        d.setStyleSheet("background:transparent; border:none; color:#8b93a3; font-size:12px;")
+        d.setStyleSheet("background:transparent; border:none; color:#9aa3b2; font-size:12px; line-height:1.5;")
         lay.addWidget(d)
 
 
@@ -162,9 +173,9 @@ class AgentHomePage:
         card_title.setStyleSheet("font-size:15px; font-weight:700;")
         layout.addWidget(card_title)
         grid = QGridLayout()
-        grid.setSpacing(12)
-        for i, (title, icon, desc, idx) in enumerate(_TASK_CARDS):
-            card = _TaskCard(title, icon, desc)
+        grid.setSpacing(14)
+        for i, (title, icon, desc, idx, accent) in enumerate(_TASK_CARDS):
+            card = _TaskCard(title, icon, desc, accent)
             card.clicked.connect(lambda checked=False, i=idx: self._goto(i))
             grid.addWidget(card, i // 4, i % 4)
         layout.addLayout(grid)

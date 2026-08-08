@@ -11,9 +11,11 @@ from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QLineEdit, QFrame, QTableWidget, QTableWidgetItem,
                                QHeaderView, QAbstractItemView, QGridLayout,
-                               QMessageBox, QTabWidget)
-from utils.gui_icons import mdi_icon, mdi_button
+                               QMessageBox, QTabWidget, QWidget)
+from utils.gui_icons import mdi_icon, mdi_button, table_action_button
 from utils.logger_utils import log
+from config.paths import OUTPUTS_DIR
+import os
 
 # (示例文案, 直达目标页 index)
 _ASK_CHIPS = [("带货 15 秒竖屏", 33), ("直播切片", 18), ("声音克隆", 20), ("封面制作", 32)]
@@ -184,16 +186,19 @@ class AgentHomePage:
         task_title = QLabel("最近任务")
         task_title.setStyleSheet("font-size:15px; font-weight:700;")
         layout.addWidget(task_title)
-        self.task_table = QTableWidget(0, 4)
-        self.task_table.setHorizontalHeaderLabels(["任务", "类型", "状态", "时间"])
+        self.task_table = QTableWidget(0, 5)
+        self.task_table.setHorizontalHeaderLabels(["任务", "类型", "状态", "时间", "操作"])
         self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.task_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.task_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.task_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.task_table.verticalHeader().setVisible(False)
         self.task_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.task_table.setMaximumHeight(230)
+        # 双击任务行 = 播放成片结果（与操作列播放按钮同逻辑，安全兜底）
+        self.task_table.cellDoubleClicked.connect(self._on_task_double_clicked)
         layout.addWidget(self.task_table, 1)
 
         foot = QHBoxLayout()
@@ -215,16 +220,84 @@ class AgentHomePage:
     def _on_tasks_loaded(self, items):
         self.task_table.setRowCount(0)
         for item in (items or [])[:10]:
+            if not isinstance(item, dict):
+                continue
             row = self.task_table.rowCount()
             self.task_table.insertRow(row)
             title = str(item.get("title") or item.get("task_id") or item.get("id") or "")
             ttype = str(item.get("task_type") or item.get("type") or "")
             status = str(item.get("status") or "")
-            ts = str(item.get("created_at") or item.get("tm_draft_create") or item.get("create_time") or "")
-            self.task_table.setItem(row, 0, QTableWidgetItem(title))
+            ts = str(item.get("created_at") or item.get("tm_draft_create") or item.get("create_time") or "")[:19]
+            # 任务名 item 携带完整任务数据（供双击播放/操作列使用）
+            name_item = QTableWidgetItem(title)
+            name_item.setData(Qt.UserRole, item)
+            self.task_table.setItem(row, 0, name_item)
             self.task_table.setItem(row, 1, QTableWidgetItem(ttype))
             self.task_table.setItem(row, 2, QTableWidgetItem(_STATUS_TEXT.get(status, status)))
             self.task_table.setItem(row, 3, QTableWidgetItem(ts))
+            self.task_table.setCellWidget(row, 4, self._make_play_widget(item))
+
+    # ── 最近任务：播放成片结果 ───────────────────────────────────────────
+    def _make_play_widget(self, task):
+        """操作列：已完成且有成片结果 → 播放按钮；否则显示占位文案。"""
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(4, 2, 4, 2)
+        lay.setSpacing(6)
+        status = str(task.get("status") or "")
+        result = task.get("result") or {}
+        video_url = result.get("video_url") or result.get("url") or ""
+        if status in ("done", "success", "completed") and video_url:
+            btn = table_action_button("▶", "播放成片结果")
+            btn.clicked.connect(lambda _=False, t=task: self._play_task(t))
+            lay.addWidget(btn)
+        else:
+            text = "未完成" if status not in ("done", "success", "completed", "failed", "error") else "无结果"
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color:#5b6472; font-size:12px;")
+            lay.addWidget(lbl)
+        return w
+
+    def _on_task_double_clicked(self, row, _col):
+        """双击任务行：尝试播放该任务成片结果。"""
+        name_item = self.task_table.item(row, 0)
+        if not name_item:
+            return
+        task = name_item.data(Qt.UserRole)
+        if isinstance(task, dict):
+            self._play_task(task)
+
+    def _play_task(self, task):
+        """播放任务成片结果：本地文件走默认播放器，服务端相对路径拼完整地址。
+
+        全流程 try/except 兜底，播放失败只提示不崩溃。
+        """
+        try:
+            result = task.get("result") or {}
+            video_url = result.get("video_url") or result.get("url") or ""
+            if not video_url:
+                QMessageBox.information(self.parent_widget, "提示", "该任务暂无成片结果，无法播放。")
+                return
+            if not isinstance(video_url, str):
+                video_url = str(video_url)
+            target = video_url
+            if video_url.startswith("/"):
+                # 服务端相对路径 → 拼服务端地址
+                from utils.scheduled_task_client import _server_url
+                target = _server_url() + video_url
+            elif not video_url.startswith(("http://", "https://")):
+                # 本地相对路径 → 优先按输出目录解析；不存在则保持原样交给系统
+                local = os.path.join(OUTPUTS_DIR, video_url)
+                target = local if os.path.isfile(local) else video_url
+            if os.name == "nt":
+                os.startfile(target)  # noqa: 本地文件→默认播放器，URL→默认浏览器
+            else:
+                import webbrowser
+                webbrowser.open(target)
+            log.info(f"[工作台] 播放任务结果: {target}")
+        except Exception as e:
+            log.warning(f"[工作台] 播放任务结果失败: {e}")
+            QMessageBox.warning(self.parent_widget, "播放失败", f"无法播放该任务结果：{e}")
 
     # ── 一句话需求路由 ─────────────────────────────────────
     def _on_ask_go(self):

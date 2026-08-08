@@ -191,6 +191,8 @@ class ScheduledTasksPage(BasePage):
         w = Worker(lambda: stc.get_task(tid))
         w.finished.connect(self._on_task_detail_loaded)
         w.error.connect(lambda e: log.warning(f"[成片任务] 加载详情失败: {e}"))
+        # 必须持有 Worker：QThread 运行中被 Python GC 回收会触发 Qt fatal 崩溃（0xc0000409）
+        self.track_worker(w)
         w.start()
 
     def _on_task_detail_loaded(self, t):

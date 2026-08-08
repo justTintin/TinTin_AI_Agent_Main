@@ -1411,6 +1411,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
             worker = Worker(do_download)
             worker.finished.connect(on_finished)
+            # 必须持有 Worker：QThread 运行中被 Python GC 回收会触发 Qt fatal 崩溃（0xc0000409）
+            self.active_workers.append(worker)
+            worker.finished.connect(
+                lambda: self.active_workers.remove(worker) if worker in self.active_workers else None)
             worker.start()
 
     def extract_and_save_cookies(self):

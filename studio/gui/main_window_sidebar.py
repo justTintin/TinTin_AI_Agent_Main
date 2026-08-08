@@ -229,44 +229,26 @@ class SidebarMixin:
             self.nav_buttons.append(btn)
         self._nav_full_lay.addWidget(ops_card)
 
-        # 5. 系统配置 Section
-        system_card = QFrame()
-        system_card.setProperty("section_type", "system")
-        system_layout = QVBoxLayout(system_card)
-        system_layout.setContentsMargins(6, 8, 6, 8)
-        system_layout.setSpacing(2)
-        
-        system_header = QLabel("系统设置")
-        system_header.setObjectName("section_header")
-        system_layout.addWidget(system_header)
-        
-        other_menus = [
-            ("模型配置", 7, "cog"),
-            ("平台接入", 22, "link"),
-            ("本地配置", 21, "download"),
-            ("环境与维护", 36, "server"),
-            ("扩展插件", 43, "puzzle"),
-            ("关于", 6, "information"),
-        ]
-        for text, index, icon_name in other_menus:
-            btn = mdi_button(text, icon_name)
-            btn.setObjectName("nav_button")
-            btn.setProperty("target_index", index)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
-            system_layout.addWidget(btn)
-            self.nav_buttons.append(btn)
-
-        self._nav_full_lay.addWidget(system_card)
+        # 5. 系统配置：已收纳到独立「系统设置」二级菜单窗口（底部 ⚙ 入口打开）
             
         self._nav_full_lay.addStretch()
 
         scroll.setWidget(scroll_content)
         self.sidebar_layout.addWidget(scroll)
         
+        # ── 底部：系统设置入口（打开独立二级菜单窗口）+ 版本号 ──
+        footer_box = QVBoxLayout()
+        footer_box.setContentsMargins(8, 4, 8, 6)
+        footer_box.setSpacing(2)
+        btn_settings = mdi_button("系统设置", "cog")
+        btn_settings.setObjectName("nav_button")
+        btn_settings.setCursor(Qt.PointingHandCursor)
+        btn_settings.clicked.connect(lambda checked=False: self.open_system_settings())
+        footer_box.addWidget(btn_settings)
         footer = QLabel(f"v{get_version()}")
         footer.setObjectName("sidebar_footer")
-        self.sidebar_layout.addWidget(footer)
+        footer_box.addWidget(footer)
+        self.sidebar_layout.addLayout(footer_box)
         self.main_layout.addWidget(self.sidebar)
 
 
@@ -359,3 +341,18 @@ class SidebarMixin:
                 btn.setProperty("active", new_val)
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
+
+    def open_system_settings(self):
+        """打开「系统设置」二级菜单窗口（懒创建；页面常驻复用，关闭仅隐藏）。"""
+        from gui.system_settings_dialog import SystemSettingsDialog
+        dlg = getattr(self, "_settings_dialog", None)
+        if dlg is None:
+            dlg = SystemSettingsDialog(self, self)
+            self._settings_dialog = dlg
+            try:
+                dlg.attach_pages(self)
+            except Exception as e:
+                log.exception(f"[系统设置] 页面挂载失败: {e}")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()

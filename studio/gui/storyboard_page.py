@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
     QSplitter, QDialog, QListWidget, QListWidgetItem, QTabWidget, QSpinBox,
     QRadioButton, QButtonGroup, QCheckBox, QDialogButtonBox,
 )
-from PySide6.QtGui import QPixmap, QDesktopServices, QPainter, QColor
-from PySide6.QtCore import Qt, Signal, QUrl, QSize
+from PySide6.QtGui import QPixmap, QDesktopServices, QPainter, QColor, QPen, QCursor
+from PySide6.QtCore import Qt, Signal, QUrl, QSize, QRect
 
 from utils.logger_utils import log
 from utils.base_worker import BaseWorker
@@ -240,7 +240,7 @@ class ShotMaterialDialog(QDialog):
     """每个镜头的「引用素材」弹窗，包含四个来源：本地素材/即梦生成/MG动画/联网素材。"""
 
     def __init__(self, shot_desc="", ratio="9:16", brand="", model="",
-                 category="", shot_type="", main_window=None, parent=None):
+                 category="", shot_type="", extra_ctx="", main_window=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("引用素材")
         self.resize(1300, 850)
@@ -253,6 +253,7 @@ class ShotMaterialDialog(QDialog):
         self._thumb_queue = []
         self._active_thumb = 0
         self._thumb_workers = []
+        self._selected_mids = set()      # 角标选中的素材 mid（相册式选择）
         self._local_placeholder = self._make_local_placeholder()
         self._ratio = ratio
         self._main_window = main_window
@@ -260,6 +261,7 @@ class ShotMaterialDialog(QDialog):
         self.model = (model or "").strip()
         self.category = (category or "").strip()
         self.shot_type = (shot_type or "").strip()
+        self._extra_ctx = (extra_ctx or "").strip()
         self._setup(shot_desc)
 
     def _setup(self, shot_desc):
@@ -268,9 +270,9 @@ class ShotMaterialDialog(QDialog):
 
         self.tabs = QTabWidget()
 
-        # 检索上下文：景别 + 品牌 + 型号 + 产品类型，帮助 CLIP 在素材库中命中产品相关素材
+        # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
         self._search_ctx = " ".join(
-            x for x in (self.shot_type, self.brand, self.model, self.category) if x)
+            x for x in (self.shot_type, self.brand, self.model, self.category, self._extra_ctx) if x)
 
         # ── Tab 1: 本地素材 ──────────────────────────────────────────
         local_tab = QWidget()
@@ -287,7 +289,7 @@ class ShotMaterialDialog(QDialog):
         btn_local.clicked.connect(self._search_local)
         row.addWidget(btn_local)
         lt.addLayout(row)
-        # 素材库结果：缩略图网格（勾选可多选，双击预览/播放，确认后绑定 Hash）
+        # 素材库结果：缩略图网格（右上角角标勾选可多选，双击预览/播放，确认后绑定 Hash）
         self.local_list = QListWidget()
         self.local_list.setViewMode(QListWidget.IconMode)
         self.local_list.setIconSize(QSize(160, 160))
@@ -297,7 +299,7 @@ class ShotMaterialDialog(QDialog):
         self.local_list.setSpacing(8)
         self.local_list.setUniformItemSizes(True)
         self.local_list.itemDoubleClicked.connect(self._preview_local_item)
-        self.local_list.itemChanged.connect(self._on_local_item_changed)
+        self.local_list.itemClicked.connect(self._on_item_clicked)
         lt.addWidget(self.local_list, 1)
         lt.addWidget(self._muted("勾选所需素材（可多选）；双击缩略图预览/播放；确认后素材 Hash 绑定到当前镜头。"))
         self.tabs.addTab(local_tab, "🗂️ 素材库")
@@ -366,7 +368,8 @@ class ShotMaterialDialog(QDialog):
         web_row = QHBoxLayout()
         self.web_input = QLineEdit()
         self.web_input.setPlaceholderText("输入搜索词，联网查找参考素材（DuckDuckGo）")
-        self.web_input.setText(shot_desc[:80] if shot_desc else "")
+        # 与本地素材一致：默认带入景别/品牌/型号/产品类型 + 镜头文案
+        self.web_input.setText((self._search_ctx + " " + shot_desc)[:80] if (self._search_ctx or shot_desc) else "")
         self.web_input.returnPressed.connect(self._search_web)
         web_row.addWidget(self.web_input, 1)
         self.btn_web = QPushButton("联网搜索")
@@ -448,9 +451,6 @@ class ShotMaterialDialog(QDialog):
             fname = f.get("filename", "") or "?"
             label = f"{fname}\n[{score*100:.0f}%] {info}".strip()
             item = QListWidgetItem(label)
-            item.setIcon(self._local_placeholder)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Unchecked)
             item.setData(Qt.UserRole, {
                 "path": f.get("path", ""),
                 "filename": fname,
@@ -461,6 +461,7 @@ class ShotMaterialDialog(QDialog):
                 "score": score,
                 "mid": mid,
             })
+            self._apply_icon(mid, item)
             item.setToolTip(
                 f"{f.get('path','')}\n相似度: {score*100:.1f}%\nHash: {f.get('file_hash','')}\n"
                 f"画面: {f.get('scene_desc_primary','') or '—'}"
@@ -472,23 +473,77 @@ class ShotMaterialDialog(QDialog):
         self._drain_thumbs()
         self._on_local_sel_changed()
 
+    # ── 相册式多选（右上角角标，与素材检索页一致）──────────────────────
+    @staticmethod
+    def _draw_corner_badge(base_pm, checked):
+        """在缩略图右上角绘制选择方框（未选=空框，选中=绿底白勾）。"""
+        pm = QPixmap(base_pm)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        box = 22
+        x = pm.width() - box - 6
+        y = 6
+        rect = QRect(x, y, box, box)
+        if checked:
+            p.setBrush(QColor("#2ecc71"))
+            p.setPen(QPen(QColor("white"), 1.6))
+            p.drawRoundedRect(rect, 4, 4)
+            pen = QPen(QColor("white"), 2.6)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            p.drawLine(x + 5, y + box * 0.55, x + box * 0.42, y + box * 0.82)
+            p.drawLine(x + box * 0.42, y + box * 0.82, x + box * 0.78, y + box * 0.22)
+        else:
+            p.setBrush(QColor(15, 15, 20, 190))
+            p.setPen(QPen(QColor("#c3c6d2"), 1.4))
+            p.drawRoundedRect(rect, 4, 4)
+        p.end()
+        return pm
+
+    def _apply_icon(self, mid, lw_item):
+        """按当前选择状态设置缩略图（右上角叠加选择角标）。"""
+        mid = str(mid or "")
+        if mid and mid in self._thumb_cache:
+            base = self._thumb_cache[mid]
+        else:
+            base = self._local_placeholder
+        if mid:
+            base = self._draw_corner_badge(base, mid in self._selected_mids)
+        lw_item.setIcon(base)
+
+    def _on_item_clicked(self, item):
+        """单击：仅点击图标右上角选择方框区域切换选中；其余位置仅记录（双击预览）。"""
+        d = item.data(Qt.UserRole) or {}
+        mid = str(d.get("mid") or "")
+        if not mid:
+            return
+        vp_pos = self.local_list.viewport().mapFromGlobal(QCursor.pos())
+        item_rect = self.local_list.visualItemRect(item)
+        badge_zone = QRect(item_rect.right() - 42, item_rect.top() + 2, 40, 40)
+        if not badge_zone.contains(vp_pos):
+            return
+        if mid in self._selected_mids:
+            self._selected_mids.discard(mid)
+        else:
+            self._selected_mids.add(mid)
+        self._apply_icon(mid, item)
+        self._on_local_sel_changed()
+
     def _on_local_sel_changed(self):
         if self.tabs.currentIndex() != 0:
             return
         self.btn_confirm.setEnabled(len(self._checked_local_items()) > 0)
 
     def _checked_local_items(self):
-        """返回当前已勾选的本地素材条目。"""
+        """返回当前角标选中的本地素材条目。"""
         out = []
         for i in range(self.local_list.count()):
             it = self.local_list.item(i)
-            if (it.flags() & Qt.ItemIsUserCheckable) and it.checkState() == Qt.Checked:
+            d = it.data(Qt.UserRole)
+            if d and str(d.get("mid") or "") in self._selected_mids:
                 out.append(it)
         return out
-
-    def _on_local_item_changed(self, _item):
-        if self.tabs.currentIndex() == 0:
-            self._on_local_sel_changed()
 
     # ── 缩略图异步加载（并发节流，与素材检索一致）──────────────────
     def _drain_thumbs(self):
@@ -499,7 +554,8 @@ class ShotMaterialDialog(QDialog):
             self._active_thumb += 1
             w = _ThumbWorker(mid)
             self._thumb_workers.append(w)
-            w.finished.connect(lambda _m, d=mid: self._on_thumb_ready(d))
+            # finished(str, bytes) 直接接 _on_thumb_ready；不可用 lambda 包裹，否则图片数据丢失
+            w.finished.connect(self._on_thumb_ready)
             w.error.connect(lambda _m: self._on_thumb_ready(mid))
             w.start()
 
@@ -513,7 +569,7 @@ class ShotMaterialDialog(QDialog):
                     it = self.local_list.item(i)
                     d = it.data(Qt.UserRole)
                     if d and str(d.get("mid") or "") == str(mid):
-                        it.setIcon(pm.scaled(160, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                        self._apply_icon(mid, it)
                         break
         self._drain_thumbs()
 
@@ -656,6 +712,7 @@ class ShotMaterialDialog(QDialog):
                         "path": d.get("path", ""),
                         "name": d.get("filename") or d.get("name", ""),
                         "hash": d.get("file_hash", ""),
+                        "mid": d.get("mid", ""),
                     })
                 if mats:
                     self.selected_materials = mats
@@ -1010,11 +1067,13 @@ class StoryboardPage(BasePage):
                 mat_type = mats[0].get("type", "")
                 mat_path = ",".join((m.get("path") or "") for m in mats)
                 mat_hash = ",".join((m.get("hash") or "") for m in mats)
+                mat_mid = next((m.get("mid") for m in mats if m.get("mid")), "")
             else:
                 mat = c.get("material") or {}
                 mat_type = mat.get("type", "")
                 mat_path = mat.get("path", "")
                 mat_hash = mat.get("hash", "")
+                mat_mid = mat.get("mid", "")
             shots.append({
                 "index": c["idx"],
                 "shot_type": c["combo_type"].currentText(),
@@ -1025,6 +1084,7 @@ class StoryboardPage(BasePage):
                 "material_type": mat_type,
                 "material_path": mat_path,
                 "material_hash": mat_hash,
+                "material_id": mat_mid,
             })
         return shots
 
@@ -1157,10 +1217,11 @@ class StoryboardPage(BasePage):
     def _upload_storyboard_to_server(self, topic, ratio, total_dur, shots):
         """把分镜脚本上传到服务端（POST /api/storyboard/scripts，异步）。
 
-        服务端契约（docs/分镜脚本服务端接口需求.json）：
-          保存字段 topic/ratio/total_duration/shot_count/shots/saved_at；
-          shots 元素 {index, shot_type, visual, audio, sfx, duration}——
-          客户端本地字段 narration → 服务端 audio，保留素材字段供未来扩展。
+        服务端契约（http://<server>:8000/openapi.json 的 ScriptIn/Shot）：
+          保存字段 topic/ratio/total_duration/shot_count/shots/saved_at/product/
+          brand/model/category/name；shots 元素 {index, shot_type, visual, audio,
+          sfx, duration, material_path, material_type, material_hash, material_id}；
+          客户端本地字段 narration → 服务端 audio。
         同 topic 重复保存视为更新（不新增）。
         返回 True 表示已发起且请求成功；失败仅记日志，不影响本地保存。
         """
@@ -1173,6 +1234,11 @@ class StoryboardPage(BasePage):
         # 字段对齐：narration → audio（服务端 storyboard_montage 契约）
         server_shots = []
         for sh in shots or []:
+            mid = sh.get("material_id") or ""
+            try:
+                mid = int(mid)
+            except (ValueError, TypeError):
+                mid = 0
             server_shots.append({
                 "index": sh.get("index", 0),
                 "shot_type": sh.get("shot_type", ""),
@@ -1183,7 +1249,9 @@ class StoryboardPage(BasePage):
                 "material_path": sh.get("material_path", ""),
                 "material_type": sh.get("material_type", ""),
                 "material_hash": sh.get("material_hash", ""),
+                "material_id": mid,
             })
+        prod = getattr(self, "current_product", {}) or {}
         payload = {
             "topic": topic or "未命名分镜脚本",
             "ratio": ratio,
@@ -1191,6 +1259,17 @@ class StoryboardPage(BasePage):
             "shot_count": len(server_shots),
             "shots": server_shots,
             "saved_at": datetime.now().isoformat(timespec="seconds"),
+            # 产品上下文（ScriptIn.product + 顶层品牌字段），供素材检索/一键成片使用
+            "product": {
+                "brand": str(prod.get("brand") or ""),
+                "model": str(prod.get("model") or ""),
+                "category": str(prod.get("category") or ""),
+                "name": str(prod.get("name") or ""),
+            },
+            "brand": str(prod.get("brand") or ""),
+            "model": str(prod.get("model") or ""),
+            "category": str(prod.get("category") or ""),
+            "name": str(prod.get("name") or ""),
         }
 
         def _do():
@@ -1390,6 +1469,17 @@ class StoryboardPage(BasePage):
             self.combo_shot_ratio.setCurrentText(ratio)
         # 分镜脚本
         self._render_shots(shots)
+        # 恢复产品上下文（ScriptIn.product 优先，顶层品牌字段兜底）——
+        # 引用素材检索 / 相似度自动绑定会自动带上品牌/型号/品类
+        prod = script.get("product") or {}
+        if not isinstance(prod, dict):
+            prod = {}
+        self.current_product = {
+            "brand": str(prod.get("brand") or script.get("brand") or ""),
+            "model": str(prod.get("model") or script.get("model") or ""),
+            "category": str(prod.get("category") or script.get("category") or ""),
+            "name": str(prod.get("name") or script.get("name") or ""),
+        }
         self._server_script_topic = (script.get("topic") or "").strip()
         self.lbl_status.setText(f"已载入脚本「{script.get('topic', '')}」（{len(shots)} 镜），可继续编辑并生成。")
 
@@ -1481,7 +1571,7 @@ class StoryboardPage(BasePage):
         hdr.addWidget(edit_sfx, 1)  # 音效输入框占据剩余空间，按钮紧随其后贴在右侧
         btn_mat = QPushButton("🔍 引用素材")
         btn_mat.setObjectName("secondary_button")
-        btn_mat.setFixedHeight(26)
+        # 不设固定高度：跟随全局 QSS（与底部「保存分镜脚本」等按钮等高）
         hdr.addWidget(btn_mat)
         v.addLayout(hdr)
 
@@ -1514,7 +1604,9 @@ class StoryboardPage(BasePage):
 
         thumb = QLabel("未出图")
         thumb.setObjectName("muted_text")
-        thumb.setFixedSize(120, 130)
+        # 只锁宽度，高度随行拉伸与左侧文本列对齐，避免预览区被截断
+        thumb.setFixedWidth(120)
+        thumb.setMinimumHeight(130)
         thumb.setAlignment(Qt.AlignCenter)
         thumb.setStyleSheet("border:1px solid #3a3a3a; border-radius:4px;")
         content_row.addWidget(thumb, 0)
@@ -1534,12 +1626,21 @@ class StoryboardPage(BasePage):
         shot_desc = card["desc"].toPlainText().strip()
         ratio = self.combo_shot_ratio.currentText()
         prod = getattr(self, "current_product", {}) or {}
+        # 产品上下文兜底：飞书选题 + 视频文案首句，保证检索带上产品信息
+        extra = []
+        topic = (getattr(self, "feishu_record", {}) or {}).get("topic", "")
+        if topic:
+            extra.append(str(topic)[:60])
+        copy = self.edit_copy.toPlainText().strip()
+        if copy:
+            extra.append(copy[:120])
         dlg = ShotMaterialDialog(
             shot_desc=shot_desc, ratio=ratio,
             brand=str(prod.get("brand") or ""),
             model=str(prod.get("model") or ""),
             category=str(prod.get("category") or ""),
             shot_type=card["combo_type"].currentText(),
+            extra_ctx="，".join(extra),
             main_window=self.main_window,
             parent=self.parent_widget,
         )
@@ -1549,18 +1650,46 @@ class StoryboardPage(BasePage):
             if mats:
                 self._bind_materials(card, mats)
 
+    def _set_shot_thumb(self, card, mat):
+        """把素材缩略图显示到镜头卡片的右侧区域（本地文件直读，服务端素材异步下载）。"""
+        thumb = card.get("thumb")
+        if thumb is None or not mat:
+            return
+        path = (mat.get("path") or "").strip()
+        tw, th = max(thumb.width(), 120), max(thumb.height(), 140)
+        # 1) 本地磁盘文件（即梦生成图 / 本地素材）：直接加载
+        if os.path.isfile(path):
+            pm = QPixmap(path)
+            if not pm.isNull():
+                thumb.setPixmap(pm.scaled(tw, th, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            return
+        # 2) 服务端素材（/material/serve?material_id=…）：异步拉取缩略图
+        mid = str(mat.get("material_id") or mat.get("mid") or "")
+        if not mid and "material_id=" in path:
+            mid = path.split("material_id=", 1)[1].split("&", 1)[0]
+        if not mid:
+            return
+
+        def on_thumb(_mid, data):
+            pm = QPixmap()
+            if data and pm.loadFromData(data) and not pm.isNull():
+                thumb.setPixmap(pm.scaled(tw, th, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        w = _ThumbWorker(mid)
+        w.finished.connect(on_thumb)
+        w.error.connect(lambda e: log.debug(f"[分镜] 镜头缩略图加载失败: {e}"))
+        self.track_worker(w)
+        w.start()
+
     def _bind_materials(self, card, mats):
         """把勾选的素材绑定到镜头：Hash 全部记录，卡片显示名称/数量。"""
         card["materials"] = list(mats)
         card["material"] = mats[0]
         for mat in mats:
             if mat.get("type") == "dreamina":
-                pm = QPixmap(mat.get("path", ""))
-                if not pm.isNull():
-                    card["thumb"].setPixmap(
-                        pm.scaled(120, 130, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                 card["file"] = mat.get("path", "")
                 break
+        self._set_shot_thumb(card, mats[0])
         names = "、".join((m.get("name") or "")[:10] for m in mats if m.get("name"))
         if len(mats) > 1:
             label = f"{names[:22]}{'…' if len(names) > 22 else ''}（{len(mats)}个）"
@@ -1630,6 +1759,7 @@ class StoryboardPage(BasePage):
             name = mat.get("name", "") or ""
             score = float(mat.get("score", 0) or 0)
             c["mat_lbl"].setText((name[:14] + ("…" if len(name) > 14 else "")) + f" {score*100:.0f}%")
+            self._set_shot_thumb(c, mat)
             c["mat_lbl"].setToolTip(
                 f"{mat.get('path','')}\n相似度: {score*100:.1f}%\nHash: {mat.get('hash','')}"
             )
@@ -1661,6 +1791,17 @@ class StoryboardPage(BasePage):
                 sfx=str(shot.get("sfx", "")),
                 duration=shot.get("duration", 5),
             )
+            # 恢复素材绑定（服务端 Shot 支持 material_path/material_id）：
+            # 只恢复第一个素材，缩略图与「引用素材」标签即可还原
+            mp = str(shot.get("material_path") or "").strip()
+            if mp:
+                self._bind_materials(card, [{
+                    "type": str(shot.get("material_type") or "local"),
+                    "path": mp.split(",", 1)[0].strip(),
+                    "name": "",
+                    "hash": str(shot.get("material_hash") or "").split(",", 1)[0],
+                    "mid": str(shot.get("material_id") or ""),
+                }])
             self.sb_col.addWidget(card["frame"])
             self.shot_cards.append(card)
         self.sb_col.addStretch()

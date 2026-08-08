@@ -1,30 +1,22 @@
 # -*- coding: utf-8 -*-
-"""运营模式首页：智能体工作台（一句话需求 + 高频任务卡片 + 最近任务概览）。
+"""运营工作台首页：一句话需求（LLM 意图路由）+ 高频任务卡片 + 最近任务概览。
 
-P0 落地（PRD 第十二章 12.3）：目标导向入口。运营用户无需理解专业概念，
-从首页任务卡片一键直达对应功能页；最近任务概览复用服务端成片任务接口。
+一句话需求 → utils.agent_router.route_text()：
+  1. 优先 LLM 意图识别（服务端 /llm/chat/completions）；
+  2. 超时/失败回退本地关键词匹配；
+  3. 返回 (页面 index, tab index) 或标记「多智能体组合任务」。
+支持跳页后自动切到目标 Tab（如 素材生成 → 数字人）。
 """
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QLineEdit, QFrame, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QAbstractItemView, QGridLayout)
+                               QHeaderView, QAbstractItemView, QGridLayout,
+                               QMessageBox, QTabWidget)
 from utils.gui_icons import mdi_icon, mdi_button
 from utils.logger_utils import log
 
-# 示例需求（点击填入输入框）
 # (示例文案, 直达目标页 index)
 _ASK_CHIPS = [("带货 15 秒竖屏", 33), ("直播切片", 18), ("声音克隆", 20), ("封面制作", 32)]
-
-# 一句话需求关键词 -> 目标页 index（简单意图路由）
-_INTENT_PAGE = [
-    (("直播", "切片"), 18),
-    (("声音", "克隆", "配音", "音色"), 20),
-    (("封面",), 32),
-    (("营销",), 40),
-    (("评价", "预测", "数据"), 34),
-    (("混剪", "拼接", "镜头"), 14),
-    (("任务", "进度", "队列"), 42),
-]
 
 # (标题, 图标, 描述, 目标页 index)
 _TASK_CARDS = [
@@ -57,6 +49,23 @@ class _TaskListThread(QThread):
         except Exception as e:
             log.warning(f"运营首页加载最近任务失败: {e}")
             self.done.emit([])
+
+
+class _IntentThread(QThread):
+    """后台执行一句话意图路由（LLM + 关键词兜底），不阻塞 UI。"""
+    done = Signal(object)
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self._text = text
+
+    def run(self):
+        try:
+            from utils.agent_router import route_text
+            self.done.emit(route_text(self._text))
+        except Exception as e:
+            log.warning(f"意图路由失败: {e}")
+            self.done.emit(None)
 
 
 class _TaskCard(QPushButton):
@@ -94,12 +103,14 @@ class _TaskCard(QPushButton):
 
 
 class AgentHomePage:
-    """运营模式智能体工作台首页（P0）。"""
+    """运营工作台首页（一句话需求 + 高频任务卡片 + 最近任务概览）。"""
 
     def __init__(self, parent_widget, main_window):
         self.parent_widget = parent_widget
         self.main_window = main_window
         self._task_thread = None
+        self._intent_thread = None
+        self._ask_go_btn = None
         self.setup()
 
     def setup(self):
@@ -118,7 +129,7 @@ class AgentHomePage:
         ask_row = QHBoxLayout()
         ask_row.setSpacing(8)
         self.ask_input = QLineEdit()
-        self.ask_input.setPlaceholderText("例如：帮我把这段文案做成带货视频，用老怀的声音，竖屏 15 秒")
+        self.ask_input.setPlaceholderText("例如：帮我把这段文案做成带货视频；或：生成一个数字人视频")
         self.ask_input.setFixedHeight(40)
         self.ask_input.returnPressed.connect(self._on_ask_go)
         ask_row.addWidget(self.ask_input, 1)
@@ -126,10 +137,11 @@ class AgentHomePage:
         btn_go.setObjectName("primary_button")
         btn_go.setFixedHeight(40)
         btn_go.clicked.connect(self._on_ask_go)
+        self._ask_go_btn = btn_go
         ask_row.addWidget(btn_go)
         layout.addLayout(ask_row)
 
-        # 示例 chips
+        # 示例 chips（点击直达对应功能）
         chips = QHBoxLayout()
         chips.setSpacing(8)
         for text, target in _ASK_CHIPS:
@@ -140,7 +152,7 @@ class AgentHomePage:
                 "QPushButton { background:#1d212b; border:1px solid #262b36; "
                 "border-radius:14px; color:#8b93a3; padding:2px 12px; font-size:12px; } "
                 "QPushButton:hover { border-color:#60a5fa; color:#60a5fa; }")
-            c.clicked.connect(lambda checked=False, t=target: self.main_window.switch_page(t))
+            c.clicked.connect(lambda checked=False, t=target: self._goto(t))
             chips.addWidget(c)
         chips.addStretch()
         layout.addLayout(chips)
@@ -153,7 +165,7 @@ class AgentHomePage:
         grid.setSpacing(12)
         for i, (title, icon, desc, idx) in enumerate(_TASK_CARDS):
             card = _TaskCard(title, icon, desc)
-            card.clicked.connect(lambda checked=False, i=idx: self.main_window.switch_page(i))
+            card.clicked.connect(lambda checked=False, i=idx: self._goto(i))
             grid.addWidget(card, i // 4, i % 4)
         layout.addLayout(grid)
 
@@ -177,7 +189,7 @@ class AgentHomePage:
         foot.addStretch()
         btn_tasks = mdi_button("打开成片任务", "folder")
         btn_tasks.setObjectName("secondary_button")
-        btn_tasks.clicked.connect(lambda: self.main_window.switch_page(42))
+        btn_tasks.clicked.connect(lambda: self._goto(42))
         foot.addWidget(btn_tasks)
         layout.addLayout(foot)
 
@@ -203,13 +215,48 @@ class AgentHomePage:
             self.task_table.setItem(row, 2, QTableWidgetItem(_STATUS_TEXT.get(status, status)))
             self.task_table.setItem(row, 3, QTableWidgetItem(ts))
 
+    # ── 一句话需求路由 ─────────────────────────────────────
     def _on_ask_go(self):
         text = self.ask_input.text().strip()
         if not text:
             return
-        # 简单意图路由：按关键词落到对应功能页；未命中默认一键成片
-        for keys, page in _INTENT_PAGE:
-            if any(k in text for k in keys):
-                self.main_window.switch_page(page)
+        if self._intent_thread and self._intent_thread.isRunning():
+            return
+        self._intent_thread = _IntentThread(text)
+        self._intent_thread.done.connect(self._on_intent_ready)
+        self._intent_thread.start()
+        if self._ask_go_btn is not None:
+            self._ask_go_btn.setEnabled(False)
+            self._ask_go_btn.setText("⏳ 识别中...")
+
+    def _on_intent_ready(self, result):
+        if self._ask_go_btn is not None:
+            self._ask_go_btn.setEnabled(True)
+            self._ask_go_btn.setText("开始")
+        if not result:
+            return
+        if result.get("multi_agent"):
+            QMessageBox.information(
+                self.parent_widget,
+                "智能体编排",
+                "这条需求需要组合多个能力（例如：数字人 + 配音 + 成片 + 封面）。\n"
+                "多智能体编排正在规划中（P2），先带你去最相关的入口。",
+            )
+        self._goto(result.get("page", 33), result.get("tab"))
+
+    def _goto(self, page, tab=None):
+        """跳转到指定页面，若目标页有 Tab 则自动切到对应 Tab。"""
+        self.main_window.switch_page(page)
+        if tab is not None:
+            QTimer.singleShot(0, lambda: self._activate_tab(page, tab))
+
+    def _activate_tab(self, page, tab):
+        try:
+            w = self.main_window.content_stack.widget(page)
+            if w is None:
                 return
-        self.main_window.switch_page(33)
+            tabs = w.findChild(QTabWidget)
+            if tabs is not None and 0 <= tab < tabs.count():
+                tabs.setCurrentIndex(tab)
+        except Exception as e:
+            log.warning(f"激活页面 Tab 失败: {e}")

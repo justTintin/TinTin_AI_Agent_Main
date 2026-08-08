@@ -67,13 +67,31 @@ class SidebarMixin:
         scroll_layout.setSpacing(12)
         
         self.nav_buttons = []
+        # Role-mode switch (ops / pro) at the top of the sidebar
+        self._build_role_switcher(scroll_layout)
+
+        # Full professional nav container (pro mode); hidden in ops mode
+        self._nav_full = QWidget()
+        self._nav_full_lay = QVBoxLayout(self._nav_full)
+        self._nav_full_lay.setContentsMargins(0, 0, 0, 0)
+        self._nav_full_lay.setSpacing(12)
+        scroll_layout.addWidget(self._nav_full)
+
+        # Ops workbench entry at the very top (available in both modes)
+        btn_home = mdi_button("运营工作台", "home")
+        btn_home.setObjectName("nav_button")
+        btn_home.setProperty("target_index", 46)
+        btn_home.setCursor(Qt.PointingHandCursor)
+        btn_home.clicked.connect(lambda checked=False: self.switch_page(46))
+        self._nav_full_lay.addWidget(btn_home)
+        self.nav_buttons.append(btn_home)
 
         # 素材浏览器（菜单最顶部，直接打开外部 Electron 应用，非页面切换）
         btn_browser = mdi_button("素材浏览器", "web")
         btn_browser.setObjectName("nav_button")
         btn_browser.setCursor(Qt.PointingHandCursor)
         btn_browser.clicked.connect(lambda checked=False: self.open_asset_browser())
-        scroll_layout.addWidget(btn_browser)
+        self._nav_full_lay.addWidget(btn_browser)
 
         # 3. 账户平台 Section (暂时隐藏)
         # account_card = QFrame()
@@ -124,7 +142,7 @@ class SidebarMixin:
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             script_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        scroll_layout.addWidget(script_card)
+        self._nav_full_lay.addWidget(script_card)
 
         # 媒体库 Section
         media_card = QFrame()
@@ -156,7 +174,7 @@ class SidebarMixin:
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             media_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        scroll_layout.addWidget(media_card)
+        self._nav_full_lay.addWidget(media_card)
 
         # 成片制作 Section
         compose_card = QFrame()
@@ -186,7 +204,7 @@ class SidebarMixin:
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             compose_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        scroll_layout.addWidget(compose_card)
+        self._nav_full_lay.addWidget(compose_card)
 
         # 7. 视频运营 Section
         ops_card = QFrame()
@@ -211,7 +229,7 @@ class SidebarMixin:
             btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
             ops_layout.addWidget(btn)
             self.nav_buttons.append(btn)
-        scroll_layout.addWidget(ops_card)
+        self._nav_full_lay.addWidget(ops_card)
 
         # 5. 系统配置 Section
         system_card = QFrame()
@@ -241,9 +259,38 @@ class SidebarMixin:
             system_layout.addWidget(btn)
             self.nav_buttons.append(btn)
 
-        scroll_layout.addWidget(system_card)
+        self._nav_full_lay.addWidget(system_card)
             
-        scroll_layout.addStretch()
+        self._nav_full_lay.addStretch()
+        # Ops compact nav (ops mode)
+        self._nav_ops = QWidget()
+        self._nav_ops_lay = QVBoxLayout(self._nav_ops)
+        self._nav_ops_lay.setContentsMargins(0, 0, 0, 0)
+        self._nav_ops_lay.setSpacing(2)
+        self._add_ops_section("高频任务", [
+            ("一键成片", 33, "rocket"),
+            ("智能混剪", 14, "cut"),
+            ("声音克隆", 20, "mic"),
+            ("直播切片", 18, "video"),
+            ("封面制作", 32, "camera"),
+            ("营销检测", 40, "sparkles"),
+            ("视频评价", 34, "film"),
+        ])
+        self._add_ops_section("任务", [
+            ("成片任务", 42, "folder"),
+        ])
+        self._add_ops_section("系统设置", [
+            ("模型配置", 7, "cog"),
+            ("平台接入", 22, "link"),
+            ("本地配置", 21, "download"),
+            ("环境与维护", 36, "server"),
+            ("关于", 6, "information"),
+        ])
+        self._nav_ops_lay.addStretch()
+        scroll_layout.addWidget(self._nav_ops)
+
+        # Apply persisted role mode (ops home / pro full nav)
+        self.set_role_mode(self._load_role_mode())
         scroll.setWidget(scroll_content)
         self.sidebar_layout.addWidget(scroll)
         
@@ -251,6 +298,86 @@ class SidebarMixin:
         footer.setObjectName("sidebar_footer")
         self.sidebar_layout.addWidget(footer)
         self.main_layout.addWidget(self.sidebar)
+
+    def _build_role_switcher(self, layout):
+        """顶部角色模式切换（运营 / 剪辑）。"""
+        box = QFrame()
+        box.setStyleSheet("QFrame { background:#1d212b; border:1px solid #262b36; border-radius:10px; }")
+        h = QHBoxLayout(box)
+        h.setContentsMargins(3, 3, 3, 3)
+        h.setSpacing(3)
+        self._role_ops_btn = QPushButton("运营模式")
+        self._role_pro_btn = QPushButton("剪辑模式")
+        for b in (self._role_ops_btn, self._role_pro_btn):
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet("QPushButton { border:0; border-radius:7px; padding:6px 8px; color:#8b93a3; font-size:12px; font-weight:600; background:transparent; } QPushButton:checked { background:#3b82f6; color:#fff; }")
+        self._role_ops_btn.clicked.connect(lambda: self.set_role_mode("ops"))
+        self._role_pro_btn.clicked.connect(lambda: self.set_role_mode("pro"))
+        h.addWidget(self._role_ops_btn)
+        h.addWidget(self._role_pro_btn)
+        layout.addWidget(box)
+
+    def _add_ops_section(self, title, items):
+        card = QFrame()
+        card.setProperty("section_type", "ai")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(6, 8, 6, 8)
+        lay.setSpacing(2)
+        header = QLabel(title)
+        header.setObjectName("section_header")
+        lay.addWidget(header)
+        for text, index, icon in items:
+            self._add_ops_nav_item(lay, text, index, icon)
+        self._nav_ops_lay.addWidget(card)
+
+    def _add_ops_nav_item(self, lay, text, index, icon_name):
+        btn = mdi_button(text, icon_name)
+        btn.setObjectName("nav_button")
+        btn.setProperty("target_index", index)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda checked=False, i=index: self.switch_page(i))
+        lay.addWidget(btn)
+        self.nav_buttons.append(btn)
+
+    def set_role_mode(self, mode):
+        """切换运营/剪辑模式：切换侧边栏形态并持久化到本地配置。"""
+        mode = mode if mode in ("ops", "pro") else "pro"
+        self._role_mode = mode
+        self._save_role_mode(mode)
+        if hasattr(self, "_nav_ops") and hasattr(self, "_nav_full"):
+            self._nav_ops.setVisible(mode == "ops")
+            self._nav_full.setVisible(mode == "pro")
+        if hasattr(self, "_role_ops_btn"):
+            self._role_ops_btn.setChecked(mode == "ops")
+            self._role_pro_btn.setChecked(mode == "pro")
+
+    def _role_cfg_file(self):
+        return os.path.join(PROJECT_ROOT, "config", "local_config.json")
+
+    def _load_role_mode(self):
+        try:
+            import json
+            if os.path.isfile(self._role_cfg_file()):
+                data = json.load(open(self._role_cfg_file(), "r", encoding="utf-8"))
+                mode = data.get("role_mode", "pro")
+                return mode if mode in ("ops", "pro") else "pro"
+        except Exception:
+            pass
+        return "pro"
+
+    def _save_role_mode(self, mode):
+        try:
+            import json
+            p = self._role_cfg_file()
+            data = {}
+            if os.path.isfile(p):
+                data = json.load(open(p, "r", encoding="utf-8"))
+            data["role_mode"] = mode
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log.warning(f"保存角色模式失败: {e}")
 
     def open_python_terminal(self):
         """
@@ -341,4 +468,3 @@ class SidebarMixin:
                 btn.setProperty("active", new_val)
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
-

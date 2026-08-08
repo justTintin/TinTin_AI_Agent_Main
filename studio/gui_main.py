@@ -718,7 +718,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_pages()
         
         # Default Page
-        self.switch_page(0)
+        # Default page: ops mode -> agent home; pro mode -> keep original
+        _default_idx = getattr(self, "_agent_home_index", 46) if getattr(self, "_role_mode", "pro") == "ops" else 0
+        self.switch_page(_default_idx)
 
 
     def setup_pages(self):
@@ -945,6 +947,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.content_stack.addWidget(self.page_media_tools)
         self._register_lazy_page(45, self.setup_media_tools_page)
 
+        # Agent home (ops workbench), appended at stack tail index 46
+        self._agent_home_index = 46
+        self.page_agent_home = QWidget()
+        self.content_stack.addWidget(self.page_agent_home)
+        self._register_lazy_page(46, self.setup_agent_home_page)
+
         # 浏览器扩展桥接服务：按配置随客户端自动启动
         try:
             from utils.extension_bridge import get_bridge
@@ -1010,6 +1018,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 44:  # 音频素材
             if hasattr(self, "audio_material_tool"):
                 self.audio_material_tool.refresh()
+        elif index == 46:  # Agent home (ops workbench)
+            if hasattr(self, "agent_home_tool"):
+                self.agent_home_tool.refresh_tasks()
         elif index == 38:  # 素材检索（进入页面时若上次加载失败自动重试）
             if hasattr(self, "vector_search_tool"):
                 try:

@@ -267,6 +267,11 @@ class PageSetupMixin:
         self.media_tools_tool = MediaToolsPage(self.page_media_tools, self)
         self.media_tools_tool.setup()
 
+    def setup_agent_home_page(self):
+        from gui.agent_home_page import AgentHomePage
+        self.agent_home_tool = AgentHomePage(self.page_agent_home, self)
+
+
     def setup_video_tools_page(self, container=None):
         """构建「视频修复」UI。container 缺省为目标页面容器；媒体工具标签页可传入标签容器。"""
         container = container or getattr(self, "page_video_tools", None)

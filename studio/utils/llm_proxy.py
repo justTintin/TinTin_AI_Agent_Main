@@ -20,7 +20,7 @@ import os
 import json
 
 from utils.logger_utils import log
-from utils.http_client import resilient_post
+from utils.http_client import resilient_post, resilient_get
 from utils.api_error import ApiError
 
 
@@ -198,3 +198,18 @@ def llm_chat_json(
             except Exception:
                 pass
     return None
+
+
+def list_llm_models(timeout: int = 10) -> list:
+    """GET /llm/models → 可用文本模型列表 [{"id","name","provider",...}]；失败返回 []。"""
+    base = _get_server_url()
+    if not base:
+        return []
+    try:
+        resp = resilient_get(f"{base}/llm/models", timeout=timeout, service="llm")
+        if resp.status_code == 200:
+            return resp.json().get("models") or []
+        log.warning(f"[LLM代理] list_llm_models HTTP {resp.status_code}")
+    except Exception as e:
+        log.warning(f"[LLM代理] list_llm_models 失败: {e}")
+    return []

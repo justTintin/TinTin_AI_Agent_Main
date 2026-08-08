@@ -206,3 +206,28 @@ def register_artifact(task_id, kind, file_ref, meta=None, timeout=10):
     except Exception as e:
         log.warning(f"[智能体] register_artifact({task_id}) 失败: {e}")
         return False
+
+
+def agent_chat(message, history=None, agent_id=None, model=None,
+               max_rounds=3, timeout=180):
+    """POST /agent/chat → 智能体对话：自然语言 → 服务端智能体循环 → 回复文本。
+
+    响应 {"reply": str, "tool_calls": [...], "rounds": n, "usage": {...}}。
+    history 为 OpenAI 风格消息列表（不含本轮 message）；失败返回 None。
+    """
+    body = {"message": message, "max_rounds": max_rounds, "stream": False}
+    if history:
+        body["history"] = history
+    if agent_id:
+        body["agent_id"] = agent_id
+    if model:
+        body["model"] = model
+    try:
+        r = http_post(f"{_server_url()}/agent/chat", json=body, timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("reply") or ""
+        log.warning(f"[智能体] agent_chat HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        log.warning(f"[智能体] agent_chat 失败: {e}")
+    return None

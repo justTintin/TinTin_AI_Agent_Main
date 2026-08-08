@@ -1024,9 +1024,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 44:  # 音频素材
             if hasattr(self, "audio_material_tool"):
                 self.audio_material_tool.refresh()
-        elif index == 46:  # Agent home (ops workbench)
-            if hasattr(self, "agent_home_tool"):
-                self.agent_home_tool.refresh_tasks()
         elif index == 38:  # 素材检索（进入页面时若上次加载失败自动重试）
             if hasattr(self, "vector_search_tool"):
                 try:

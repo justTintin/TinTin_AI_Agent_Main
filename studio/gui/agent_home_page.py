@@ -14,7 +14,7 @@ import os
 import re
 
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QPoint, QEvent
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QTextCursor, QColor, QTextCharFormat
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QFrame, QGridLayout, QWidget, QCheckBox,
                                QTabWidget, QComboBox, QTextEdit, QApplication,
@@ -316,6 +316,33 @@ class _MdBrowser(QTextBrowser):
         self.setMinimumWidth(200)
         self.document().contentsChanged.connect(self._adjust_height)
 
+    def setMarkdown(self, text):
+        """渲染 markdown 后把链接前景色改为亮蓝。
+
+        Qt 解析器把链接颜色写死为调色板 Link 色（#0000ff），QSS / 默认样式表 /
+        widget 调色板均无法覆盖；与用户气泡蓝底同色无法区分，故手动重着色。
+        """
+        super().setMarkdown(text)
+        self._recolor_links()
+
+    def _recolor_links(self):
+        doc = self.document()
+        blk = doc.begin()
+        while blk.isValid():
+            it = blk.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                fmt = frag.charFormat()
+                if fmt.isAnchor() and fmt.foreground().color().name() == "#0000ff":
+                    cur = QTextCursor(doc)
+                    cur.setPosition(frag.position())
+                    cur.setPosition(frag.position() + frag.length(), QTextCursor.KeepAnchor)
+                    f = QTextCharFormat()
+                    f.setForeground(QColor("#8ec2ff"))
+                    cur.mergeCharFormat(f)   # 只合并前景色，保留下划线等其它格式
+                it += 1
+            blk = blk.next()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.document().setTextWidth(self.viewport().width())
@@ -352,8 +379,9 @@ class _ChatBubble(QWidget):
 
         self._browser = _MdBrowser()
         if is_user:
+            # 深蓝灰底（原亮蓝 #2f6fed 与蓝色链接同色无法区分，改为深色后链接亮蓝可读）
             self._browser.setStyleSheet(
-                "QTextBrowser { background:#2f6fed; color:#ffffff;"
+                "QTextBrowser { background:#24405f; color:#ffffff;"
                 " border-radius:10px; padding:8px 12px; }")
         else:
             self._browser.setStyleSheet(
@@ -526,11 +554,14 @@ class _AgentLoader(QThread):
 
 
 class _AgentBar(QWidget):
-    """智能体快捷条：按钮按两行网格排列（一行放不下时自动换第二行），点击插入唤醒词。"""
+    """智能体快捷条：每行 10 个按钮，默认只显示第一行，多余折叠；点「展开」显示全部。"""
     agentClicked = Signal(dict)
+    _COLS = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._agents = []
+        self._expanded = False
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
@@ -546,18 +577,18 @@ class _AgentBar(QWidget):
         self.setFixedHeight(36)
 
     def set_agents(self, agents):
+        self._agents = agents or []
+        self._expanded = False
         while self._grid.count():
             item = self._grid.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
-        agents = agents or []
-        n = len(agents)
+        n = len(self._agents)
         if n == 0:
             self.setFixedHeight(36)
             return
-        cols = n if n <= 2 else (n + 1) // 2   # 两行均分：第一行略多
-        for i, a in enumerate(agents):
+        for i, a in enumerate(self._agents):
             btn = QPushButton(a.get("name") or a.get("id") or "?")
             btn.setFixedHeight(26)
             btn.setCursor(Qt.PointingHandCursor)
@@ -568,10 +599,40 @@ class _AgentBar(QWidget):
                 "border-radius:13px; color:#c9d1de; padding:0 12px; font-size:12px; } "
                 "QPushButton:hover { border-color:#34d399; color:#34d399; }")
             btn.clicked.connect(lambda checked=False, ag=a: self.agentClicked.emit(ag))
-            r, c = divmod(i, cols)
+            r, c = divmod(i, self._COLS)
             self._grid.addWidget(btn, r, c, Qt.AlignLeft)
-        self._grid.setColumnStretch(cols, 1)   # 末列占位吸收剩余宽度
-        self.setFixedHeight(36 if n <= cols else 62)
+        # 展开/收起按钮：固定第一行第 11 列，总数超过一行才显示
+        self.btn_toggle = QPushButton("▾ 展开")
+        self.btn_toggle.setFixedHeight(26)
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle.setStyleSheet(
+            "QPushButton { background:transparent; border:1px dashed #3a4152; "
+            "border-radius:13px; color:#8b93a3; padding:0 10px; font-size:12px; } "
+            "QPushButton:hover { border-color:#34d399; color:#34d399; }")
+        self.btn_toggle.clicked.connect(self._toggle_expand)
+        self._grid.addWidget(self.btn_toggle, 0, self._COLS, Qt.AlignLeft)
+        self._grid.setColumnStretch(self._COLS + 1, 1)
+        self._apply_state()
+
+    def _toggle_expand(self):
+        self._expanded = not self._expanded
+        self._apply_state()
+
+    def _apply_state(self):
+        n = len(self._agents)
+        if n <= self._COLS:
+            self.btn_toggle.setVisible(False)
+            self.setFixedHeight(36)
+            return
+        extra = n - self._COLS
+        self.btn_toggle.setText(
+            "▴ 收起" if self._expanded else f"▾ 展开 {extra} 个")
+        for i, a in enumerate(self._agents):
+            it = self._grid.itemAt(i)
+            if it is not None and it.widget() is not None:
+                it.widget().setVisible(self._expanded or i < self._COLS)
+        rows = (n + self._COLS - 1) // self._COLS if self._expanded else 1
+        self.setFixedHeight(36 if rows == 1 else 26 * rows + 6 * (rows - 1) + 4)
 
 
 class _ProductPickerDialog(QDialog):

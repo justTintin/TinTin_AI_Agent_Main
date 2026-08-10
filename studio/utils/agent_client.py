@@ -14,9 +14,29 @@
 
 任务 id 前缀 a_；/tasks/unified/{id} 已打通（返回完整子任务树）。
 """
+import os
+
 from utils.http_client import http_get, http_post, logged_request
 from utils.logger_utils import log
 from utils.scheduled_task_client import _server_url
+
+
+def _machine_id() -> str:
+    """当前机器码（会话多租户隔离用）。"""
+    try:
+        from utils.license import get_machine_id
+        return get_machine_id() or ""
+    except Exception:
+        return ""
+
+
+def _attach_machine(url, machine_id=None):
+    """给 URL 追加 machine_id query 参数（会话归属校验）。"""
+    mid = machine_id or _machine_id()
+    if not mid:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}machine_id={mid}"
 
 # 编排任务状态取值（服务端 agent_tasks 表）
 TASK_STATUSES = ("queued", "running", "waiting_user_input",
@@ -209,13 +229,15 @@ def register_artifact(task_id, kind, file_ref, meta=None, timeout=10):
 
 
 def agent_chat(message, history=None, agent_id=None, model=None,
-               max_rounds=3, mode=None, timeout=180):
-    """POST /agent/chat → 智能体对话：自然语言 → 服务端智能体循环 → 回复文本。
+               max_rounds=3, mode=None, session_id=None, machine_id=None,
+               timeout=180):
+    """POST /agent/chat → 智能体对话：自然语言 → 服务端智能体循环 → 回复。
 
-    响应 {"reply": str, "tool_calls": [...], "rounds": n, "usage": {...}}。
-    mode="plan"（31 服务端新增）：先把对话拆解为 plan 提交编排执行（S2），
-    响应无 reply 而含 task_id 时返回提示文本；
-    history 为 OpenAI 风格消息列表（不含本轮 message）；失败返回 None。
+    返回 dict：{"reply", "session_id", "attachments", "tool_calls"}；失败返回 None。
+    session_id：传则续接服务端持久化会话（素材池自动注入）；不传则服务端新建会话，
+    响应带回 session_id（客户端应保存以便后续轮次续接）。
+    mode="plan"：拆解为 plan 提交编排执行（S2），无 reply 而含 task_id 时返回提示文本；
+    history 为 OpenAI 风格消息列表（不含本轮 message）。
     """
     body = {"message": message, "max_rounds": max_rounds, "stream": False}
     if history:
@@ -226,6 +248,12 @@ def agent_chat(message, history=None, agent_id=None, model=None,
         body["model"] = model
     if mode:
         body["mode"] = mode
+    if session_id:
+        body["session_id"] = session_id
+    if machine_id is None:
+        machine_id = _machine_id()
+    if machine_id:
+        body["machine_id"] = machine_id
     try:
         r = http_post(f"{_server_url()}/agent/chat", json=body, timeout=timeout)
         if r.status_code == 200:
@@ -234,9 +262,124 @@ def agent_chat(message, history=None, agent_id=None, model=None,
             if not reply and mode == "plan":
                 tid = str(data.get("task_id") or "")
                 if tid:
-                    return f"✅ 已创建编排任务：`{tid}`，服务端将自动执行。\n可在「编排任务」页查看进度与产物。"
-            return reply
+                    reply = (f"✅ 已创建编排任务：`{tid}`，服务端将自动执行。\n"
+                             f"可在「编排任务」页查看进度与产物。")
+            return {
+                "reply": reply,
+                "session_id": str(data.get("session_id") or ""),
+                "attachments": data.get("attachments") or [],
+                "tool_calls": data.get("tool_calls") or [],
+            }
         log.warning(f"[智能体] agent_chat HTTP {r.status_code}: {r.text[:150]}")
     except Exception as e:
         log.warning(f"[智能体] agent_chat 失败: {e}")
     return None
+
+
+# ── 会话素材池（guide 契约：入池后贯穿会话所有后续消息，服务端自动注入；
+#    客户端只提交一次，明确不再使用时调 DELETE 移除）────────────────────
+
+def create_session(message="会话初始化", machine_id=None, timeout=60):
+    """无 POST 建会话接口 → 以一条轻量 chat 创建会话，返回 session_id（失败 ""）。"""
+    res = agent_chat(message, max_rounds=1, machine_id=machine_id, timeout=timeout)
+    if res:
+        return res.get("session_id") or ""
+    return ""
+
+
+def delete_session(session_id, machine_id=None, timeout=10):
+    """DELETE /agent/sessions/{id} → 删除会话（会话素材池一并清理）。成功返回 True。"""
+    if not session_id:
+        return False
+    try:
+        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}", machine_id)
+        r = logged_request("DELETE", url, timeout=timeout)
+        return r.status_code == 200
+    except Exception as e:
+        log.warning(f"[会话] delete_session({session_id}) 失败: {e}")
+        return False
+
+
+def session_attachments(session_id, machine_id=None, timeout=10):
+    """GET /agent/sessions/{id}/attachments → 会话素材池列表（失败 []）。
+
+    条目：{"name", "file_ref", "media_type", "source", "added_at"}。
+    """
+    if not session_id:
+        return []
+    try:
+        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}/attachments",
+                              machine_id)
+        r = http_get(url, timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            return data.get("attachments") or []
+        log.warning(f"[会话] session_attachments({session_id}) HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"[会话] session_attachments({session_id}) 失败: {e}")
+    return []
+
+
+def session_attachment_add(session_id, material_id=None, file_path=None,
+                           machine_id=None, timeout=300):
+    """素材入池（二选一）：material_id 引用素材库 或 file_path 上传附件（multipart）。
+
+    返回服务端确认的池条目 dict（含 name/file_ref/media_type）；失败返回 None。
+    入池后贯穿本会话所有后续消息（服务端自动注入），无需每轮重复提交。
+    """
+    if not session_id:
+        return None
+    url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}/attachments",
+                          machine_id)
+    try:
+        if material_id:
+            log.info(f"[会话] 素材入池 session={session_id} material_id={material_id}")
+            r = http_post(url, data={"material_id": str(material_id)}, timeout=30)
+        elif file_path and os.path.isfile(file_path):
+            log.info(f"[会话] 附件入池 session={session_id} file={os.path.basename(file_path)}")
+            with open(file_path, "rb") as f:
+                r = http_post(url, files={"file": (os.path.basename(file_path), f)},
+                              timeout=timeout)
+        else:
+            return None
+        if r.status_code == 200:
+            data = r.json()
+            att = (data.get("attachment") or data.get("item")
+                   or (data.get("attachments") or [None])[-1]) or {}
+            if not att.get("file_ref") and material_id:
+                att["file_ref"] = str(material_id)  # 素材库引用的删除 key = material_id
+            return att
+        log.warning(f"[会话] 素材入池 HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        log.warning(f"[会话] 素材入池失败: {e}")
+    return None
+
+
+def session_attachment_remove(session_id, key, machine_id=None, timeout=10):
+    """DELETE /agent/sessions/{id}/attachments/{key} → 从会话素材池移除。
+
+    key = file_ref（附件）或 material_id（素材库引用）；移除后后续消息不再注入，
+    本地上传的附件文件服务端同步删除。成功返回 True。
+    注意：服务端可能 HTTP 200 但 removed=0（未匹配到条目，如 material 类型
+    删除的服务端 bug），此时按失败返回 False，避免 UI 误报删除成功。
+    """
+    if not session_id or not key:
+        return False
+    try:
+        url = _attach_machine(
+            f"{_server_url()}/agent/sessions/{session_id}/attachments/{key}", machine_id)
+        r = logged_request("DELETE", url, timeout=timeout)
+        if r.status_code == 200:
+            try:
+                removed = r.json().get("removed")
+            except Exception:
+                removed = None
+            if removed == 0:  # 200 但没删到任何条目 → 视为失败
+                log.warning(f"[会话] 素材移除未生效 session={session_id} key={key}（服务端 removed=0）")
+                return False
+            log.info(f"[会话] 素材移除 session={session_id} key={key}")
+            return True
+        log.warning(f"[会话] 素材移除 HTTP {r.status_code}: {r.text[:150]}")
+    except Exception as e:
+        log.warning(f"[会话] 素材移除({key}) 失败: {e}")
+    return False

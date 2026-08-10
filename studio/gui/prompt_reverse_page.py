@@ -3,21 +3,21 @@
 
 两个子页面：
   - 图片反推提示词：拖入/上传图片 → POST /prompt/image → 结构化提示词
-  - 视频反推提示词：上传视频 → 波形时间轴框选(≤30s) → ffmpeg 裁切 → POST /prompt/video → 结构化提示词
+  - 视频反推提示词：上传视频 → 时间轴框选(≤30s) → POST /prompt/video（start_sec/end_sec 时间窗）→ 结构化提示词
 
 专用接口（非通用 /llm/chat/completions）：
   POST /prompt/image  multipart: file | material_id → Florence-2 PromptGen + qwen2.5vl
-  POST /prompt/video  multipart: file | material_id → 风格/运镜/光线/转场
+  POST /prompt/video  multipart: file + start_sec/end_sec → 风格/运镜/光线/转场
 """
 import os
 import json
+import glob
 import shutil
 import subprocess
 import tempfile
 
-import requests
 from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QMouseEvent, QPaintEvent
+from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QMouseEvent, QPaintEvent
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QTextEdit, QProgressBar, QWidget,
@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
 from utils.file_dialog_utils import pick_file
-from utils.http_client import http_get
+from utils.http_client import http_get, http_post
+from utils.logger_utils import log
 
 
 # ── 工具函数 ──
@@ -63,6 +64,31 @@ def _find_ffmpeg():
         return find_ffmpeg()
     except Exception:
         return ""
+
+
+def _extract_frames(video, duration, count=16):
+    """从视频中均匀抽取 count 张缩略帧（jpg），返回路径列表；失败返回 []。"""
+    ff = _find_ffmpeg()
+    if not ff or duration <= 0 or count <= 1:
+        return []
+    out_dir = os.path.join(tempfile.gettempdir(), "prompt_reverse_frames")
+    os.makedirs(out_dir, exist_ok=True)
+    for old in glob.glob(os.path.join(out_dir, "frame_*.jpg")):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    pattern = os.path.join(out_dir, "frame_%02d.jpg")
+    step = duration / count
+    flags = 0x08000000 if os.name == "nt" else 0
+    try:
+        subprocess.run(
+            [ff, "-y", "-i", video, "-vf", f"scale=320:-2,fps=1/{step:.4f}",
+             "-frames:v", str(count), "-q:v", "2", pattern],
+            capture_output=True, creationflags=flags, timeout=60)
+    except Exception:
+        return []
+    return sorted(glob.glob(os.path.join(out_dir, "frame_*.jpg")))
 
 
 def _fmt_sec(s):
@@ -129,18 +155,55 @@ class _DropZone(QFrame):
         super().mousePressEvent(event)
 
     def dragEnterEvent(self, event):
+        # 注意：endswith 返回 bool，不能再用 any() 包一层（会抛 TypeError 导致拖放失效）
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and any(urls[0].toLocalFile().lower().endswith(self._exts)):
+            if any(u.toLocalFile().lower().endswith(self._exts) for u in urls):
                 event.acceptProposedAction()
+                self._set_active(True)
+
+    def dragMoveEvent(self, event):
+        # 移动阶段需持续接受，否则松开时 dropEvent 不会触发
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._set_active(False)
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
+        for u in urls:
+            path = u.toLocalFile()
             if path.lower().endswith(self._exts):
                 self.file_dropped.emit(path)
                 event.acceptProposedAction()
+                break
+        self._set_active(False)
+
+    def _set_active(self, active):
+        """拖入时高亮边框提示可放置，离开/放下后恢复原样式。"""
+        if active:
+            self.setStyleSheet(
+                "#drop_zone { background: #1f2a24; border: 2px dashed #2ecc71;"
+                " border-radius: 10px; }")
+        else:
+            self.setStyleSheet(
+                "#drop_zone { background: #1c1c24; border: 2px dashed #3a3a48;"
+                " border-radius: 10px; }"
+                "#drop_zone:hover { border-color: #2ecc71; background: #1f1f2a; }")
+
+
+class _FrameExtractWorker(BaseWorker):
+    """后台抽取视频帧缩略图，供时间轴帧预览使用。"""
+    finished = Signal(str, list)  # (video_path, frame_paths)
+
+    def __init__(self, video, duration):
+        super().__init__()
+        self.video = video
+        self.duration = duration
+
+    def do_work(self):
+        self.finished.emit(self.video, _extract_frames(self.video, self.duration))
 
 
 # ── 视频波形时间轴 ──
@@ -156,6 +219,7 @@ class _VideoTimeline(QWidget):
         self._sel_start = 0.0
         self._sel_end = 0.0
         self._waveform = []
+        self._frames = []  # 视频帧缩略图（QImage），非空时优先绘制帧预览
         self._drag = None
         self.setMinimumHeight(90)
         self.setMaximumHeight(90)
@@ -166,7 +230,17 @@ class _VideoTimeline(QWidget):
         win = min(self.MAX_WINDOW, self._duration)
         self._sel_start = 0.0
         self._sel_end = win
+        self._frames = []
         self._gen_waveform(path)
+        self.update()
+
+    def set_frames(self, paths):
+        """设置视频帧缩略图（后台抽帧完成后调用）；空列表时保持波形回退。"""
+        self._frames = []
+        for p in paths:
+            img = QImage(p)
+            if not img.isNull():
+                self._frames.append(img)
         self.update()
 
     def _gen_waveform(self, path):
@@ -270,7 +344,10 @@ class _VideoTimeline(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), QColor("#16161e"))
-        if not self._waveform:
+        if not self._waveform and not self._frames:
+            return
+        if self._frames:
+            self._paint_frames(p)
             return
         inner_x, inner_w = 10, self.width() - 20
         mid_y = self.height() / 2
@@ -284,6 +361,46 @@ class _VideoTimeline(QWidget):
             in_sel = sx <= bx + bar_w / 2 <= ex
             color = QColor("#2ecc71") if in_sel else QColor("#3a3a48")
             p.fillRect(QRectF(bx, mid_y - bh, max(1, bar_w - 1), bh * 2), color)
+        p.setPen(QPen(QColor("#2ecc71"), 2))
+        p.drawLine(int(sx), 0, int(sx), self.height())
+        p.drawLine(int(ex), 0, int(ex), self.height())
+        p.setBrush(QColor("#2ecc71"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(int(sx) - 5, self.height() // 2 - 5, 10, 10)
+        p.drawEllipse(int(ex) - 5, self.height() // 2 - 5, 10, 10)
+        p.setPen(QColor("#8b90a3"))
+        f = p.font()
+        f.setPointSize(8)
+        p.setFont(f)
+        p.drawText(int(sx) + 3, 14, _fmt_sec(self._sel_start))
+        p.drawText(int(ex) + 3, 14, _fmt_sec(self._sel_end))
+        p.drawText(10, self.height() - 4, "0:00")
+        p.drawText(self.width() - 36, self.height() - 4, _fmt_sec(self._duration))
+
+    def _paint_frames(self, p):
+        """以视频帧缩略图平铺时间轴：选区内绿色高亮，选区外压暗。"""
+        inner_x, inner_w = 10, self.width() - 20
+        n = len(self._frames)
+        fw = inner_w / n
+        fh = self.height() - 34
+        y = 17
+        for i, img in enumerate(self._frames):
+            t0 = i * self._duration / n
+            t1 = (i + 1) * self._duration / n
+            in_sel = t1 > self._sel_start and t0 < self._sel_end
+            rect = QRectF(inner_x + i * fw, y, fw, fh)
+            p.fillRect(rect, QColor("#101018"))
+            scaled = img.scaled(int(fw), int(fh), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            ox = rect.x() + (rect.width() - scaled.width()) / 2
+            oy = rect.y() + (rect.height() - scaled.height()) / 2
+            p.drawImage(QRectF(ox, oy, scaled.width(), scaled.height()), scaled)
+            if in_sel:
+                p.fillRect(rect, QColor(46, 204, 113, 36))
+            else:
+                p.fillRect(rect, QColor(0, 0, 0, 150))
+        # 选区边界线 + 拖动手柄 + 时间标注（与波形版一致）
+        sx = self._time_to_x(self._sel_start)
+        ex = self._time_to_x(self._sel_end)
         p.setPen(QPen(QColor("#2ecc71"), 2))
         p.drawLine(int(sx), 0, int(sx), self.height())
         p.drawLine(int(ex), 0, int(ex), self.height())
@@ -318,8 +435,9 @@ class _ImagePromptWorker(BaseWorker):
             return
         try:
             self.phase.emit("正在上传图片并分析…")
+            log.info(f"[图片反推] 请求 {base}/prompt/image file={os.path.basename(self.image_path)}")
             with open(self.image_path, "rb") as f:
-                resp = requests.post(
+                resp = http_post(
                     f"{base}/prompt/image",
                     files={"file": (os.path.basename(self.image_path), f)},
                     timeout=180)
@@ -328,10 +446,11 @@ class _ImagePromptWorker(BaseWorker):
             data = resp.json()
             self.finished.emit(_format_result(data))
         except Exception as e:
+            log.error(f"[图片反推] 失败: {type(e).__name__}: {e}")
             self.error.emit(str(e))
 
 
-# ── 视频反推 worker（ffmpeg 裁切 + POST /prompt/video multipart）──
+# ── 视频反推 worker（POST /prompt/video multipart + start_sec/end_sec 时间窗）──
 
 class _VideoPromptWorker(BaseWorker):
     phase = Signal(str)
@@ -349,36 +468,24 @@ class _VideoPromptWorker(BaseWorker):
             self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
             return
         try:
-            seg_dur = max(1.0, self.end - self.start)
-
-            # 裁切选中片段到临时文件（服务端 /prompt/video 不接受时间参数，客户端裁切）
-            if seg_dur < _probe_duration(self.video):
-                self.phase.emit("正在裁切视频片段…")
-                ff = _find_ffmpeg()
-                if not ff:
-                    raise RuntimeError("未找到 ffmpeg，无法裁切视频。")
-                seg_path = os.path.join(
-                    tempfile.gettempdir(), "prompt_reverse_seg.mp4")
-                flags = 0x08000000 if os.name == "nt" else 0
-                subprocess.run(
-                    [ff, "-y", "-ss", f"{self.start:.2f}", "-i", self.video,
-                     "-t", f"{seg_dur:.2f}", "-c", "copy", seg_path],
-                    capture_output=True, creationflags=flags, timeout=30)
-                upload_path = seg_path if os.path.isfile(seg_path) else self.video
-            else:
-                upload_path = self.video
-
             self.phase.emit("正在上传视频并分析…")
-            with open(upload_path, "rb") as f:
-                resp = requests.post(
+            # 服务端 /prompt/video 支持 start_sec/end_sec 时间窗，直接传参，无需本地裁切
+            # 视觉模型推理耗时较长（30s 窗口实测约 2 分钟），timeout 取 600s 留足余量
+            log.info(f"[视频反推] 请求 {base}/prompt/video file={os.path.basename(self.video)} "
+                     f"start_sec={self.start:.2f} end_sec={self.end:.2f}")
+            with open(self.video, "rb") as f:
+                resp = http_post(
                     f"{base}/prompt/video",
-                    files={"file": (os.path.basename(upload_path), f)},
-                    timeout=300)
+                    files={"file": (os.path.basename(self.video), f)},
+                    data={"start_sec": f"{self.start:.2f}",
+                          "end_sec": f"{self.end:.2f}"},
+                    timeout=600)
             if resp.status_code != 200:
                 raise RuntimeError(f"服务端返回 {resp.status_code}: {resp.text[:300]}")
             data = resp.json()
             self.finished.emit(_format_result(data))
         except Exception as e:
+            log.error(f"[视频反推] 失败: {type(e).__name__}: {e}")
             self.error.emit(str(e))
 
 
@@ -559,6 +666,15 @@ class VideoPromptReversePage(BasePage):
         self._update_range_label()
         self.lbl_status.setText(
             f"已选择: {os.path.basename(path)} ({_fmt_sec(self._duration)})")
+        # 后台抽帧供时间轴帧预览（失败时回退显示波形）
+        self._frame_worker = self.track_worker(_FrameExtractWorker(path, self._duration))
+        self._frame_worker.finished.connect(self._on_frames_ready)
+        self._frame_worker.start()
+
+    def _on_frames_ready(self, video, paths):
+        """抽帧完成：仅当仍是当前视频时应用帧预览，避免旧任务覆盖新视频。"""
+        if video == self._video_path:
+            self.timeline.set_frames(paths)
 
     def _update_range_label(self):
         s, e = self.timeline.get_range()

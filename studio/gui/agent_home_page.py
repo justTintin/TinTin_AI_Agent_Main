@@ -102,9 +102,11 @@ class _ChatInput(QTextEdit):
     """对话输入框：回车发送，Shift+回车换行；输入 / 弹出智能体快捷菜单。
 
     复制粘贴由 QTextEdit 原生支持（Ctrl+C/V/X、右键菜单、拖放文本）；
-    粘贴统一转纯文本，丢弃图片/HTML 格式，保证发送给智能体的内容干净。
+    粘贴统一转纯文本，丢弃图片/HTML 格式，保证发送给智能体的内容干净；
+    从资源管理器拖入的文件不插入文本，改以 filesDropped 交给面板加入会话附件。
     """
     sendRequested = Signal()
+    filesDropped = Signal(list)  # [本地文件路径]（拖入文件时发出，不入输入框）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -113,7 +115,21 @@ class _ChatInput(QTextEdit):
         self.textChanged.connect(self._on_text_changed)
 
     def insertFromMimeData(self, source):
-        """粘贴/拖入只保留纯文本：图片、HTML 等格式一律丢弃。"""
+        """粘贴/拖入只保留纯文本：图片、HTML 等格式一律丢弃。
+
+        拖入的是文件（资源管理器拖放）时不插入 file:// 文本，
+        改发 filesDropped 由面板加入会话附件（入素材池后服务端才能读到）。
+        """
+        if source is not None and source.hasUrls():
+            paths = []
+            for u in source.urls():
+                if u.isLocalFile():
+                    p = u.toLocalFile()
+                    if p and os.path.isfile(p):
+                        paths.append(p)
+            if paths:
+                self.filesDropped.emit(paths)
+            return  # 文件拖放整体拦截：无效文件也不落为路径文本
         if source is not None and source.hasText():
             self.insertPlainText(source.text())
 
@@ -474,31 +490,54 @@ class _ChatBubble(QWidget):
 class _ChatWorker(QThread):
     """后台对话请求：智能体模式走 /agent/chat，通用模式走 /llm/chat/completions。
 
-    message：本轮增强消息（唤醒词 + 用户输入 + 附件/产品上下文）；
+    message：本轮增强消息（唤醒词 + 用户输入 + 产品/脚本上下文）；
     history：对话历史（用户输入原文，不含增强部分）。
-    plan_mode：开启后智能体对话以 mode=plan 提交（先拆解为编排任务自动执行，
-    回复返回任务 ID，可在「编排任务」页跟踪）。
+    plan_mode：开启后智能体对话以 mode=plan 提交（先拆解为编排任务自动执行）。
+    session_id：智能体模式多轮续接的服务端会话；素材/附件在会话素材池，服务端每轮自动注入。
+    ctx：首轮无会话时随本次发送一并入池的素材/附件项。
     """
-    done = Signal(str)
+    done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, mode, history, model, message=None, plan_mode=False, parent=None):
+    def __init__(self, mode, history, model, message=None, plan_mode=False,
+                 session_id=None, ctx=None, parent=None):
         super().__init__(parent)
         self._mode = mode
         self._history = history
         self._model = model
         self._message = message
         self._plan_mode = plan_mode
+        self._session_id = session_id
+        self._ctx = ctx or {}
 
     def run(self):
         try:
             if self._mode == "agent":
-                from utils.agent_client import agent_chat
+                from utils import agent_client as ac
                 msgs = list(self._history or [])
                 message = self._message or (msgs[-1]["content"] if msgs else "")
-                reply = agent_chat(message, history=msgs[:-1] or None,
-                                   model=self._model or None, max_rounds=3,
-                                   mode="plan" if self._plan_mode else None)
+                sid = self._session_id or ""
+                pool_items = (self._ctx.get("materials") or []) + (self._ctx.get("attachments") or [])
+                # 首次发送且有待入池素材 → 先建会话并把素材一次性入池（后续轮次自动注入）
+                if pool_items and not sid:
+                    sid = ac.create_session()
+                    if not sid:
+                        raise RuntimeError("创建服务端会话失败，素材无法入池，请稍后重试")
+                    for m in self._ctx.get("materials") or []:
+                        att = ac.session_attachment_add(sid, material_id=m.get("mid"))
+                        m["pool_key"] = (att or {}).get("file_ref") or str(m.get("mid") or "")
+                    for a in self._ctx.get("attachments") or []:
+                        att = ac.session_attachment_add(sid, file_path=a.get("path"))
+                        a["pool_key"] = (att or {}).get("file_ref") or ""
+                result = ac.agent_chat(message, history=msgs[:-1] or None,
+                                       model=self._model or None, max_rounds=3,
+                                       mode="plan" if self._plan_mode else None,
+                                       session_id=sid or None)
+                if not result:
+                    raise RuntimeError("服务端未返回内容，请稍后重试")
+                result["pool_materials"] = self._ctx.get("materials") or []
+                result["pool_attachments"] = self._ctx.get("attachments") or []
+                self.done.emit(result)
             else:
                 from utils.llm_proxy import llm_chat_messages
                 msgs = [dict(m) for m in (self._history or [])]
@@ -508,12 +547,39 @@ class _ChatWorker(QThread):
                     msgs[-1] = {"role": "user", "content": self._message}
                 reply = llm_chat_messages(msgs, model=self._model,
                                           temperature=0.4, timeout=180)
-            if not reply:
-                raise RuntimeError("服务端未返回内容，请稍后重试")
-            self.done.emit(reply)
+                if not reply:
+                    raise RuntimeError("服务端未返回内容，请稍后重试")
+                self.done.emit({"reply": reply})
         except Exception as e:
             log.warning(f"[工作台对话] 请求失败: {e}")
             self.failed.emit(str(e))
+
+
+class _PoolUploadWorker(QThread):
+    """会话素材池后台入池：上传附件 / 添加素材库引用（不阻塞 UI）。
+
+    入池后贯穿会话所有后续消息（服务端每轮自动注入），客户端只提交这一次。
+    """
+    done = Signal(list)  # [(item, att_dict|None)]
+
+    def __init__(self, session_id, materials=None, attachments=None, parent=None):
+        super().__init__(parent)
+        self._sid = session_id
+        self._mats = materials or []
+        self._atts = attachments or []
+
+    def run(self):
+        from utils import agent_client as ac
+        results = []
+        for m in self._mats:
+            att = ac.session_attachment_add(self._sid, material_id=m.get("mid"))
+            m["pool_key"] = (att or {}).get("file_ref") or str(m.get("mid") or "")
+            results.append((m, att))
+        for a in self._atts:
+            att = ac.session_attachment_add(self._sid, file_path=a.get("path"))
+            a["pool_key"] = (att or {}).get("file_ref") or ""
+            results.append((a, att))
+        self.done.emit(results)
 
 
 class _ModelLoader(QThread):
@@ -878,10 +944,12 @@ class _ChatPanel(QWidget):
         self._pending = None     # 等待回复的占位气泡
         self._agents = []        # 服务端智能体列表缓存（斜杠菜单与快捷条共用）
         self._busy_timer = None  # 发送后 120s 超时自动恢复输入（防 worker 卡住）
-        # 对话上下文（选择区显示，不删除则每次发送都携带）
-        self._ctx_attachments = []   # [{"name", "path"}]
+        self._session_id = ""    # 服务端会话（多轮续接 + 素材池归属）
+        self._pool_worker = None # 会话素材池后台入池线程
+        # 对话上下文（选择区显示；智能体模式素材/附件入服务端会话素材池，多轮自动注入）
+        self._ctx_attachments = []   # [{"name", "path", "pool_key"?, "pending"?}]
         self._ctx_product = None     # dict 或 None（产品单选覆盖）
-        self._ctx_materials = []     # [dict]（按 material_id 去重）
+        self._ctx_materials = []     # [dict]（按 material_id 去重；含 mid/pool_key/pending）
         self._ctx_scripts = []       # [dict]（按 id 去重）
         self._setup_ui()
         self._load_models()
@@ -935,7 +1003,7 @@ class _ChatPanel(QWidget):
         self.btn_attach.setObjectName("secondary_button")
         self.btn_attach.setFixedHeight(30)
         self.btn_attach.setCursor(Qt.PointingHandCursor)
-        self.btn_attach.setToolTip("选择本地文件加入对话上下文（不删除则每次对话都携带）")
+        self.btn_attach.setToolTip("选择本地文件加入会话素材池（上传后贯穿后续所有轮次，服务端自动注入；点胶囊 ✕ 删除）")
         self.btn_attach.clicked.connect(self._pick_attachments)
         tool_row.addWidget(self.btn_attach)
         self.btn_product = QPushButton("📦 产品")
@@ -949,7 +1017,7 @@ class _ChatPanel(QWidget):
         self.btn_material.setObjectName("secondary_button")
         self.btn_material.setFixedHeight(30)
         self.btn_material.setCursor(Qt.PointingHandCursor)
-        self.btn_material.setToolTip("从服务端素材库选择素材加入对话上下文（不删除则每次对话都携带）")
+        self.btn_material.setToolTip("从服务端素材库选择素材加入会话素材池（贯穿后续所有轮次，服务端自动注入；点胶囊 ✕ 删除）")
         self.btn_material.clicked.connect(self._pick_material)
         tool_row.addWidget(self.btn_material)
         self.btn_script = QPushButton("📜 脚本")
@@ -997,6 +1065,7 @@ class _ChatPanel(QWidget):
         self.input_edit.setFixedHeight(64)
         self.input_edit.setPlaceholderText("输入消息，回车发送（Shift+回车换行）；输入 / 快速唤起智能体…")
         self.input_edit.sendRequested.connect(self._on_send)
+        self.input_edit.filesDropped.connect(self._add_attachment_files)
         # 斜杠快捷菜单（/ 唤起智能体，参考 Cherry Studio 命令菜单；父级挂面板便于跟随主窗口）
         self._slash_popup = _SlashPopup(self)
         self._slash_popup.set_input(self.input_edit)
@@ -1038,10 +1107,7 @@ class _ChatPanel(QWidget):
             if w is not None:
                 w.deleteLater()
         self._history.clear()
-        self._ctx_attachments = []
-        self._ctx_product = None
-        self._ctx_materials = []
-        self._ctx_scripts = []
+        self._reset_session()   # 删除服务端会话（素材池一并清理）并重置本地上下文
         self._rebuild_ctx_bar()
         self.append_bubble("assistant", "对话已清空，有什么想聊的？")
 
@@ -1071,9 +1137,22 @@ class _ChatPanel(QWidget):
         self._busy_timer.timeout.connect(self._on_busy_timeout)
         self._busy_timer.start(120000)
         self._pending = self.append_bubble("assistant", "⏳ 思考中…")
+        # 智能体模式：素材/附件走服务端会话素材池（多轮自动注入）
+        #   - 已有会话 → 选择时已入池；无会话（未发送过）→ 随本次发送由 worker 建会话并入池
+        # 通用模式（无服务端会话）：保持文本拼接兼容路径
+        ctx_payload = None
+        if self._mode == "agent":
+            ctx_payload = {
+                "materials": [m for m in self._ctx_materials
+                              if not m.get("pool_key") and not m.get("pending")],
+                "attachments": [a for a in self._ctx_attachments
+                                if not a.get("pool_key") and not a.get("pending")],
+            }
         self._worker = _ChatWorker(self._mode, self._history, self._model,
                                    message=message,
-                                   plan_mode=self.chk_plan.isChecked())
+                                   plan_mode=self.chk_plan.isChecked(),
+                                   session_id=self._session_id or None,
+                                   ctx=ctx_payload)
         self._worker.done.connect(self._on_reply_ok)
         self._worker.failed.connect(self._on_reply_failed)
         self._worker.start()
@@ -1126,11 +1205,16 @@ class _ChatPanel(QWidget):
             lines.append(f"保存时间:{saved}")
         return "\n".join(lines)
 
-    def _on_reply_ok(self, reply):
+    def _on_reply_ok(self, result):
         if self._busy_timer is not None:
             self._busy_timer.stop()
             self._busy_timer = None
         self._set_busy(False)
+        reply = (result or {}).get("reply") or ""
+        # 会话续接：保存服务端返回的 session_id（多轮对话 + 素材池归属）
+        sid = (result or {}).get("session_id") or ""
+        if sid and not self._session_id:
+            self._session_id = sid
         self._history.append({"role": "assistant", "content": reply})
         self._trim_history()
         if self._pending is not None:
@@ -1214,11 +1298,8 @@ class _ChatPanel(QWidget):
     def _on_mode_changed(self, idx):
         self._mode = self.mode_combo.itemData(idx) or "agent"
         self._history.clear()
-        # 切换对话模式视为新会话：清空对话上下文
-        self._ctx_attachments = []
-        self._ctx_product = None
-        self._ctx_materials = []
-        self._ctx_scripts = []
+        # 切换对话模式视为新会话：删除服务端会话（素材池清理）并清空本地上下文
+        self._reset_session()
         self._rebuild_ctx_bar()
         mode_name = "智能体对话" if self._mode == "agent" else "通用对话"
         self.append_bubble("assistant", f"已切换到【{mode_name}】。")
@@ -1317,22 +1398,25 @@ class _ChatPanel(QWidget):
             mid = str(m.get("id") or m.get("material_id") or "")
             name = m.get("filename") or mid or "未命名"
             mtype = _MEDIA_TYPE_LABEL.get((m.get("media_type") or "").lower(), "素材")
-            add(f"📁 [{mtype}] {name}", ("material", i))
+            tag = " ⏳" if m.get("pending") else (" ❌入池失败" if m.get("pool_failed") else "")
+            add(f"📁 [{mtype}] {name}{tag}", ("material", i))
         for i, s in enumerate(self._ctx_scripts):
             add(f"📜 [{s.get('topic', '')}] {s.get('shot_count', 0)}镜", ("script", i))
         for i, a in enumerate(self._ctx_attachments):
-            add(f"📎 {a['name']}", ("attachment", i))
+            tag = " ⏳" if a.get("pending") else (" ❌入池失败" if a.get("pool_failed") else "")
+            add(f"📎 {a['name']}{tag}", ("attachment", i))
         self._ctx_row_widget.setVisible(self._ctx_lay.count() > 1)
 
     def _remove_ctx(self, key):
-        """移除一个上下文项（kind, index）。"""
+        """移除一个上下文项（kind, index）；智能体模式已入池项同步调服务端 DELETE。"""
         kind = key[0]
         if kind == "product":
             self._ctx_product = None
         elif kind == "material":
             i = key[1]
             if 0 <= i < len(self._ctx_materials):
-                self._ctx_materials.pop(i)
+                item = self._ctx_materials.pop(i)
+                self._pool_remove_item(item, kind)
         elif kind == "script":
             i = key[1]
             if 0 <= i < len(self._ctx_scripts):
@@ -1340,19 +1424,89 @@ class _ChatPanel(QWidget):
         elif kind == "attachment":
             i = key[1]
             if 0 <= i < len(self._ctx_attachments):
-                self._ctx_attachments.pop(i)
+                item = self._ctx_attachments.pop(i)
+                self._pool_remove_item(item, kind)
         self._rebuild_ctx_bar()
 
+    def _pool_remove_item(self, item, kind):
+        """已入池素材明确不再使用 → DELETE 从会话素材池移除（后续轮次不再注入）。
+
+        服务端移除未生效时放回胶囊并提示（素材仍会被注入，不能让用户误以为已删除）。
+        """
+        if self._mode != "agent":
+            return
+        pool_key = str(item.get("pool_key") or "")
+        if not (pool_key and self._session_id):
+            return
+        from utils.agent_client import session_attachment_remove
+        if session_attachment_remove(self._session_id, pool_key):
+            return
+        if kind == "material":
+            self._ctx_materials.append(item)
+        elif kind == "attachment":
+            self._ctx_attachments.append(item)
+        QMessageBox.warning(
+            self, "移除素材未生效",
+            "服务端未实际从会话素材池移除该素材（后续轮次仍会注入）。\n"
+            "可稍后重试，或「清空对话」重建会话彻底清理。")
+
+    def _reset_session(self):
+        """新会话：删除服务端旧会话（素材池一并清理），重置本地会话与上下文。"""
+        if self._session_id:
+            try:
+                from utils.agent_client import delete_session
+                delete_session(self._session_id)
+            except Exception:
+                pass
+        self._session_id = ""
+        self._ctx_attachments = []
+        self._ctx_product = None
+        self._ctx_materials = []
+        self._ctx_scripts = []
+
+    # ── 会话素材池后台入池（已有会话时选择即入池，上传不阻塞 UI）──────────
+    def _start_pool_upload(self, atts):
+        self._pool_worker = _PoolUploadWorker(self._session_id, attachments=atts)
+        self._pool_worker.done.connect(self._on_pool_done)
+        self._pool_worker.start()
+
+    def _start_pool_add(self, mats):
+        self._pool_worker = _PoolUploadWorker(self._session_id, materials=mats)
+        self._pool_worker.done.connect(self._on_pool_done)
+        self._pool_worker.start()
+
+    def _on_pool_done(self, results):
+        """入池完成：回写 pool_key（删除凭据）；失败项标记入池失败并提示。"""
+        failed = []
+        for item, att in results:
+            item["pending"] = False
+            if att:
+                item["pool_key"] = att.get("file_ref") or item.get("pool_key") or ""
+            else:
+                item["pool_failed"] = True
+                failed.append(item.get("name") or item.get("filename") or "素材")
+        self._rebuild_ctx_bar()
+        if failed:
+            QMessageBox.warning(
+                self, "素材入池失败",
+                "以下素材加入会话素材池失败（不影响发送，可重试）：\n" + "、".join(failed))
+
     def _build_context_text(self):
-        """当前选择上下文文本：每次发送都会拼接到消息里。"""
+        """当前选择上下文文本：每次发送都会拼接到消息里。
+
+        智能体模式：素材/附件在服务端会话素材池（每轮自动注入），不再拼文本；
+        产品/脚本无池化接口，仍以文本携带。通用模式：全部文本拼接。
+        """
+        pool_mode = self._mode == "agent"
         parts = []
         if self._ctx_product:
             parts.append("【产品】\n" + self._product_summary(self._ctx_product))
-        for m in self._ctx_materials:
-            parts.append("【素材】\n" + self._material_summary(m))
+        if not pool_mode:
+            for m in self._ctx_materials:
+                parts.append("【素材】\n" + self._material_summary(m))
         for s in self._ctx_scripts:
             parts.append("【脚本】\n" + self._script_summary(s))
-        if self._ctx_attachments:
+        if self._ctx_attachments and not pool_mode:
             lines = [f"- {a['name']}（{a['path']}）" for a in self._ctx_attachments]
             parts.append("【附件】\n" + "\n".join(lines))
         return "\n\n".join(parts)
@@ -1360,10 +1514,25 @@ class _ChatPanel(QWidget):
     def _pick_attachments(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "选择对话附件", "", "所有文件 (*.*)")
-        if not files:
-            return
-        for p in files:
-            if not any(a["path"] == p for a in self._ctx_attachments):
+        if files:
+            self._add_attachment_files(files)
+
+    def _add_attachment_files(self, paths):
+        """把本地文件加入会话附件（选择对话框与输入框拖放共用）。
+
+        智能体模式已有会话 → 立即后台入池；否则暂存，首次发送时建会话并入池。
+        """
+        for p in paths:
+            p = os.path.normpath(p)  # 拖放返回正斜杠路径，统一后再去重/上传
+            if any(a["path"] == p for a in self._ctx_attachments):
+                continue
+            if self._mode == "agent" and self._session_id:
+                # 已有会话 → 立即入池（贯穿后续所有轮次；入池中/失败有状态标记）
+                item = {"name": os.path.basename(p), "path": p, "pending": True}
+                self._ctx_attachments.append(item)
+                self._start_pool_upload([item])
+            else:
+                # 通用模式或尚未建会话：暂存，首次发送时由 worker 建会话并入池
                 self._ctx_attachments.append({"name": os.path.basename(p), "path": p})
         self._rebuild_ctx_bar()
 
@@ -1384,7 +1553,14 @@ class _ChatPanel(QWidget):
                 if mid and not any(
                         str(m.get("id") or m.get("material_id") or "") == mid
                         for m in self._ctx_materials):
-                    self._ctx_materials.append(item)
+                    item["mid"] = mid
+                    if self._mode == "agent" and self._session_id:
+                        # 已有会话 → 立即入池（素材库引用，多轮自动注入）
+                        item["pending"] = True
+                        self._ctx_materials.append(item)
+                        self._start_pool_add([item])
+                    else:
+                        self._ctx_materials.append(item)
                 self._rebuild_ctx_bar()
 
     def _pick_script(self):

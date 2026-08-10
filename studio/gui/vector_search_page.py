@@ -208,9 +208,16 @@ class _GridRowsFilter(QObject):
         total_gap = spacing * (self.cols - 1)
         col_w = max(90, (w - total_gap) // self.cols)
         icon = max(80, col_w - 2)
-        row_h = icon + 24   # 鍥炬爣 + 鏂囦欢鍚嶈楂?
-        self.grid.setGridSize(QSize(col_w, row_h))
+        row_h = icon + 24   # 图标 + 文件名行高
+        new_size = QSize(col_w, row_h)
+        changed = (self.grid.gridSize() != new_size
+                   or self.grid.iconSize() != QSize(icon, icon))
+        self.grid.setGridSize(new_size)
         self.grid.setIconSize(QSize(icon, icon))
+        # IconMode 下 setGridSize/setIconSize 不保证重排已摆放的项（滚动条出现
+        # 使视口变窄后，旧行保持旧列宽 → 首页行间距异常）；尺寸变化时强制重排
+        if changed and self.grid.count():
+            self.grid.doItemsLayout()
         # 布局诊断：帮助确认侧边栏/网格实际占用宽度
         try:
             from utils.logger_utils import log as _log
@@ -978,6 +985,10 @@ class VectorSearchPage(BasePage):
             self.grid.addItem(lw_item)
             if mid:
                 self._item_by_mid[mid] = lw_item
+
+        # 填充完成后按当前视口重算列宽并强制重排（首页滚动条出现后视口变窄，
+        # 避免首行用旧列宽导致间距与后续页不一致）
+        self._grid_rows_filter.apply()
 
         # 排队异步加载未命中的缩略图（并发节流）
         self._thumb_queue = list(to_load)

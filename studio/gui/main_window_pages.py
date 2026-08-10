@@ -701,7 +701,14 @@ class PageSetupMixin:
         l1.addLayout(r1)
         l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
         # ── Tab 2: RunningHub ──
-        p2 = QWidget(); l2 = QVBoxLayout(p2); l2.setContentsMargins(30,30,30,30)
+        # 配置项较多：外层包滚动容器，窗口偏矮时也能完整查看不截断
+        p2 = QWidget(); l2_outer = QVBoxLayout(p2); l2_outer.setContentsMargins(0, 0, 0, 0)
+        l2_scroll = QScrollArea()
+        l2_scroll.setWidgetResizable(True)
+        l2_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        l2_outer.addWidget(l2_scroll)
+        _p2_inner = QWidget(); l2 = QVBoxLayout(_p2_inner); l2.setContentsMargins(30,30,30,30)
+        l2_scroll.setWidget(_p2_inner)
         l2.addWidget(QLabel("RunningHub API Key（在 RunningHub 个人中心获取）:"))
         self.runninghub_api_key_input = QLineEdit(); self.runninghub_api_key_input.setPlaceholderText("rh_xxxxxxxx..."); self.runninghub_api_key_input.setEchoMode(QLineEdit.Password); self.runninghub_api_key_input.setText(self.ai_config.get("runninghub_api_key", "")); l2.addWidget(self.runninghub_api_key_input)
         l2.addWidget(QLabel("RunningHub 基础地址（一般保持默认）:"))
@@ -727,15 +734,17 @@ class PageSetupMixin:
         wf_layout.addWidget(QLabel("工作流列表（带类型，可编辑。点击「刷新」尝试从 RunningHub 读取）："))
         self.rh_workflow_table = QTableWidget(0, 4)
         self.rh_workflow_table.setHorizontalHeaderLabels(["名称", "类型", "工作流 ID", "实例类型"])
+        # 名称列自适应拉伸；ID/类型/实例按内容宽度，长 ID 不截断（超宽时出现横向滚动条）
         self.rh_workflow_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.rh_workflow_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.rh_workflow_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.rh_workflow_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.rh_workflow_table.verticalHeader().setVisible(False)
         self.rh_workflow_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.rh_workflow_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.rh_workflow_table.setMinimumHeight(120)
-        self.rh_workflow_table.setMaximumHeight(180)
+        self.rh_workflow_table.setMinimumHeight(150)
+        self.rh_workflow_table.setMaximumHeight(320)
+        self.rh_workflow_table.setWordWrap(False)  # 单行显示，避免长内容把行高撑破
         self.rh_workflow_table.itemSelectionChanged.connect(self._rh_on_workflow_selection_changed)
         wf_layout.addWidget(self.rh_workflow_table)
 
@@ -767,8 +776,8 @@ class PageSetupMixin:
         wf_layout.addWidget(QLabel("工作流节点详情（选择工作流后自动显示）："))
         self.rh_workflow_node_display = QTextBrowser()
         self.rh_workflow_node_display.setText("选择上方工作流后，节点信息会显示在这里。")
-        self.rh_workflow_node_display.setMinimumHeight(120)
-        self.rh_workflow_node_display.setMaximumHeight(200)
+        self.rh_workflow_node_display.setMinimumHeight(140)
+        self.rh_workflow_node_display.setMaximumHeight(320)
         wf_layout.addWidget(self.rh_workflow_node_display)
 
         self.rh_workflow_list_status = QLabel("")

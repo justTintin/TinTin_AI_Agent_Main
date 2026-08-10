@@ -151,13 +151,19 @@ def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
             "audio": "volume-high", "backward": "skip-backward",
             "balance-scale": "scale", "celebration": "party-popper",
             "cut": "content-cut", "edit": "pencil", "gear": "cog",
-            "left": "arrow-left", "mic": "microphone", "right": "arrow-right",
+            "left": "arrow-left", "mic": "microphone", "magic": "creation",
+            "right": "arrow-right",
             "save": "content-save", "search": "magnify", "trash": "trash-can",
             "voice": "account-voice", "volume": "volume-high",
         }
         normalized = _ALIAS.get(name, name).replace("_", "-")
         mdi_name = "mdi." + normalized
-        return qta.icon(mdi_name, color=color)
+        try:
+            return qta.icon(mdi_name, color=color)
+        except Exception:
+            # 图标名在当前字体版本不存在（如 magic 已被新版 MDI 移除）：
+            # 回退空图标，避免异常穿透导致页面构建崩溃（懒加载失败后页面永久空白）
+            pass
     # emoji fallback — 创建空图标（文字由按钮文本提供）
     return QIcon()
 
@@ -169,8 +175,14 @@ def mdi_button(text: str, icon_name: str = "", parent=None,
         if _HAS_QTA:
             # qtawesome 可用 → 用 MDI 图标，不加 emoji
             btn = QPushButton(text, parent)
-            btn.setIcon(mdi_icon(icon_name, color))
-            btn.setIconSize(QSize(size, size))
+            icon = mdi_icon(icon_name, color)
+            if icon.isNull() and icon_name in EMOJI:
+                # 图标名无效回退后，用 Emoji 补前缀保持图标可见性
+                text = EMOJI[icon_name] + " " + text
+                btn = QPushButton(text, parent)
+            else:
+                btn.setIcon(icon)
+                btn.setIconSize(QSize(size, size))
             return btn
         elif icon_name in EMOJI:
             # qtawesome 不可用 → Emoji 回退

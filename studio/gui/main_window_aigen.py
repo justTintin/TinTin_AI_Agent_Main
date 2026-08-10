@@ -231,6 +231,11 @@ class AIGenMixin:
         self._reset_rh_node_list()
 
         def fetch():
+            # 优先走服务端工作流 JSON 接口，失败回退直连 RunningHub
+            from utils import digital_human_client as dhc
+            wf = dhc.get_workflow_json(wf_id)
+            if wf is not None:
+                return wf
             return self.runninghub.get_workflow_json(wf_id)
 
         def on_done(wf):
@@ -751,6 +756,18 @@ class AIGenMixin:
                     meta = {"img_url": img_name, "aud_url": aud_name, "aud_file": aud_file, "img_file": img_file, "protocol": True}
                     return True, prompt_id, meta
 
+                # 优先走服务端统一接口（服务端已配置 RunningHub，客户端免 API Key）；
+                # 服务端地址未配置或提交失败时静默回退直连 RunningHub
+                from utils import digital_human_client as dhc
+                task_id, dh_err = dhc.submit_digital_human(
+                    img_file, aud_file, wf_id,
+                    instance_type=task.get("instance_type") or "default")
+                if task_id:
+                    meta = {"aud_file": aud_file, "img_file": img_file, "server": True}
+                    return True, task_id, meta
+                if dh_err:
+                    log.warning("数字人服务端提交失败，回退直连 RunningHub: %s", dh_err)
+
                 img_url = self.runninghub.upload_file(img_file)
                 if not img_url:
                     return False, "图片上传失败", None
@@ -872,6 +889,11 @@ class AIGenMixin:
     def _query_single_rh_task(self, task_id):
         """查询单个 RunningHub 任务状态并更新 UI。"""
         def run_task():
+            # 优先走服务端状态接口（服务端透传 RunningHub 响应），失败回退直连
+            from utils import digital_human_client as dhc
+            data = dhc.get_task_status(task_id)
+            if data is not None:
+                return data
             return self.runninghub.get_task_status(task_id)
 
         def on_done(resp):
@@ -1070,6 +1092,12 @@ class AIGenMixin:
                 if not isinstance(res, dict):
                     continue
                 url = res.get("url")
+                # 服务端透传的结果可能是相对路径，拼统一计算节点地址
+                if url and isinstance(url, str) and url.startswith("/"):
+                    from utils import digital_human_client as dhc
+                    base = dhc._get_server_url()
+                    if base:
+                        url = base + url
                 text_val = res.get("text")
                 filename = res.get("filename") or ""
                 protocol = bool(meta and meta.get("protocol"))
@@ -1396,24 +1424,32 @@ class AIGenMixin:
         return {"id": wf_id, "name": name or wf_id, "type": wf_type, "instanceType": instance_type}
 
     def _rh_refresh_workflow_list(self):
-        """尝试从 RunningHub API 拉取工作流列表并合并到本地表格。"""
+        """拉取 RunningHub 工作流列表并合并到本地表格。
+
+        优先走服务端订阅列表接口（无需 API Key）；服务端不可用时回退直连 RunningHub API。
+        """
         if not self.runninghub:
             self.rh_workflow_list_status.setText("RunningHub 模块未初始化")
             return
-        api_key = self.runninghub_api_key_input.text().strip()
-        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
-        if not api_key:
-            self.rh_workflow_list_status.setText("请先填写 API Key")
-            return
-        self.runninghub.update_config(api_key=api_key, base_url=base_url)
         self.rh_workflow_list_status.setText("正在获取工作流列表...")
 
         def run_task():
-            return self.runninghub.get_workflow_list()
+            from utils import digital_human_client as dhc
+            items = dhc.get_workflows()
+            if items is not None:
+                return items, True
+            api_key = self.runninghub_api_key_input.text().strip()
+            if not api_key:
+                return None, False
+            base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
+            self.runninghub.update_config(api_key=api_key, base_url=base_url)
+            return self.runninghub.get_workflow_list(), False
 
-        def on_done(items):
+        def on_done(result):
+            items, from_server = result
             if items is None:
-                self.rh_workflow_list_status.setText("无法从 API 读取工作流列表。RunningHub 未公开列表接口，请手动添加工作流 ID。")
+                self.rh_workflow_list_status.setText(
+                    "无法从服务端或 API 读取工作流列表。RunningHub 未公开列表接口，请手动添加工作流 ID。")
                 return
             if not items:
                 self.rh_workflow_list_status.setText("接口返回成功，但当前没有工作流。")
@@ -1429,11 +1465,19 @@ class AIGenMixin:
                 wf_id = item.get("id") or item.get("workflowId") or item.get("webappId")
                 name = item.get("name") or item.get("title") or wf_id
                 if wf_id and wf_id not in existing_ids:
-                    self._rh_add_workflow_row({"id": wf_id, "name": name, "type": "其他", "instanceType": "default"})
+                    # 服务端订阅条目用 instance_type（下划线），统一成 instanceType
+                    self._rh_add_workflow_row({
+                        "id": wf_id,
+                        "name": name,
+                        "type": item.get("type") or "其他",
+                        "instanceType": item.get("instance_type") or item.get("instanceType") or "default",
+                    })
                     existing_ids.add(wf_id)
                     added += 1
             self._rh_save_workflow_list()
-            self.rh_workflow_list_status.setText("已刷新，新增 " + str(added) + " 个工作流")
+            self._rh_maybe_refresh_dh_selector()
+            src = "服务端订阅列表" if from_server else "RunningHub API"
+            self.rh_workflow_list_status.setText(f"已从{src}刷新，新增 {added} 个工作流")
 
         self.start_worker(run_task, on_done)
 
@@ -1496,6 +1540,11 @@ class AIGenMixin:
         self.rh_workflow_list_status.setText("正在获取 " + wf_id + " 的节点...")
 
         def run_task():
+            # 优先走服务端工作流 JSON 接口，失败回退直连 RunningHub
+            from utils import digital_human_client as dhc
+            wf = dhc.get_workflow_json(wf_id)
+            if wf is not None:
+                return wf
             return self.runninghub.get_workflow_json(wf_id)
 
         def on_done(wf):
@@ -1609,6 +1658,49 @@ class AIGenMixin:
         self.rh_workflow_selector.setCurrentIndex(idx)
         self.rh_workflow_selector.blockSignals(False)
         self._on_rh_dh_workflow_changed(idx)
+        # 本地还没有数字人工作流时，尝试从服务端订阅列表自动补全（失败静默）
+        if not digital:
+            self._rh_fetch_server_workflows_async()
+
+    def _rh_fetch_server_workflows_async(self):
+        """后台拉取服务端订阅的工作流列表并合并到本地（供数字人 Tab 下拉使用）。"""
+        if getattr(self, "_rh_server_fetching", False):
+            return
+        self._rh_server_fetching = True
+
+        def run_task():
+            from utils import digital_human_client as dhc
+            return dhc.get_workflows()
+
+        def on_done(items):
+            self._rh_server_fetching = False
+            if not items:
+                return
+            existing_ids = set()
+            for row in range(self.rh_workflow_table.rowCount()):
+                item = self.rh_workflow_table.item(row, 0)
+                if item:
+                    data = item.data(Qt.UserRole) or {}
+                    existing_ids.add(data.get("id"))
+            added = 0
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                wf_id = it.get("id") or it.get("workflowId")
+                if wf_id and wf_id not in existing_ids:
+                    self._rh_add_workflow_row({
+                        "id": wf_id,
+                        "name": it.get("name") or wf_id,
+                        "type": it.get("type") or "其他",
+                        "instanceType": it.get("instance_type") or it.get("instanceType") or "default",
+                    })
+                    existing_ids.add(wf_id)
+                    added += 1
+            if added:
+                self._rh_save_workflow_list()
+                self._rh_refresh_dh_workflow_selector()
+
+        self.start_worker(run_task, on_done)
 
     def _on_rh_dh_workflow_changed(self, index):
         """数字人 Tab：下拉列表切换时同步隐藏 ID 输入框并自动获取节点。"""

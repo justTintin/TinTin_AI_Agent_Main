@@ -122,7 +122,6 @@ class ScheduledTasksMgmtPage(QWidget):
         btn_agents.setCursor(Qt.PointingHandCursor)
         btn_agents.clicked.connect(self._on_view_agents)
         row.addWidget(btn_agents)
-        self._on_type_changed()
         cl.addLayout(row)
 
         # 拆解结果预览（云端智能体类型）：展示 LLM 拆出的执行步骤
@@ -134,6 +133,8 @@ class ScheduledTasksMgmtPage(QWidget):
         self.plan_preview.setWordWrap(True)
         pl.addWidget(self.plan_preview, 1)
         cl.addWidget(self.plan_row)
+        # 类型初始状态（需在 goal_row/plan_row 创建之后，否则属性不存在）
+        self._on_type_changed()
 
         row2 = QHBoxLayout(); row2.setSpacing(8)
         row2.addWidget(QLabel("调度"))

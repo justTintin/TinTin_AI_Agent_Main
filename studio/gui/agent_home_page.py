@@ -10,6 +10,7 @@ AI 对话（参考 Cherry Studio 对话体验，服务端暂不支持流式 → 
 对话框下方；点击后把唤醒词插入输入框。选择的产品/素材/脚本/附件同样以文本
 形式插入输入框，用户编辑完成后点「发送」才提交给智能体（所见即所得）。
 """
+import json
 import os
 import re
 
@@ -377,12 +378,17 @@ class _MdBrowser(QTextBrowser):
 class _ChatBubble(QWidget):
     """对话气泡：头像 + Markdown 内容；用户右对齐蓝底，助手左对齐深灰底。
 
+    助手回复下方常驻操作栏（参考 Cherry Studio 消息操作栏）：复制/引用/重新生成；
     智能体回复若含成片视频资产，可在内容下方挂「播放/下载」按钮（set_asset_actions）。
     """
+    quoteRequested = Signal(str)     # 引用：回复原文（面板插入输入框）
+    regenerateRequested = Signal()   # 重新生成：面板重发上一条用户消息并替换本气泡
 
     def __init__(self, role, text, parent=None):
         super().__init__(parent)
         is_user = role == "user"
+        self._role = role
+        self._raw_text = text or ""
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -418,6 +424,43 @@ class _ChatBubble(QWidget):
         self._asset_url = ""
         self._asset_tid = ""
 
+        # 助手消息操作栏（参考 Cherry Studio）：复制/引用/重新生成，无需手动选中
+        self._action_box = QWidget()
+        self._action_box.setVisible(False)
+        if not is_user:
+            ah = QHBoxLayout(self._action_box)
+            ah.setContentsMargins(2, 0, 2, 0)
+            ah.setSpacing(6)
+            _act_style = (
+                "QPushButton { background:transparent; border:1px solid #3a4152;"
+                " border-radius:12px; color:#9aa3b2; padding:2px 12px; font-size:12px; }"
+                " QPushButton:hover { background:#2d3344; color:#e2e6ef;"
+                " border-color:#5b8ef0; }")
+            self._btn_copy = QPushButton("📋 复制")
+            self._btn_copy.setCursor(Qt.PointingHandCursor)
+            self._btn_copy.setToolTip("复制本条回复原文（纯文本）到剪贴板")
+            self._btn_copy.setStyleSheet(_act_style)
+            self._btn_copy.clicked.connect(self._copy_text)
+            ah.addWidget(self._btn_copy)
+            self._btn_quote = QPushButton("❝ 引用")
+            self._btn_quote.setCursor(Qt.PointingHandCursor)
+            self._btn_quote.setToolTip("把本条回复引用到输入框，补充指令后再发送")
+            self._btn_quote.setStyleSheet(_act_style)
+            self._btn_quote.clicked.connect(
+                lambda: self.quoteRequested.emit(self._raw_text))
+            ah.addWidget(self._btn_quote)
+            self._btn_regen = QPushButton("🔄 重新生成")
+            self._btn_regen.setCursor(Qt.PointingHandCursor)
+            self._btn_regen.setToolTip(
+                "用上一条问题重新生成回答（服务端无重生成接口，以新一轮对话重发，"
+                "会多占一轮会话；本条回复被新结果替换）")
+            self._btn_regen.setStyleSheet(_act_style)
+            self._btn_regen.clicked.connect(self.regenerateRequested.emit)
+            ah.addWidget(self._btn_regen)
+            ah.addStretch()
+            self._action_box.setVisible(True)
+            col.addWidget(self._action_box)
+
         self.set_text(text)
 
         if is_user:
@@ -430,7 +473,24 @@ class _ChatBubble(QWidget):
             lay.addStretch()
 
     def set_text(self, text):
+        self._raw_text = text or ""
         self._browser.setMarkdown(text or "")
+        # 内容被替换（如重新生成）→ 清掉旧回复挂的资产按钮，避免指向旧成片
+        if hasattr(self, "_asset_box"):
+            al = self._asset_box.layout()
+            for i in reversed(range(al.count())):
+                w = al.itemAt(i).widget()
+                if w is not None:
+                    w.deleteLater()
+            self._asset_box.setVisible(False)
+            self._asset_url = ""
+            self._asset_tid = ""
+
+    def _copy_text(self):
+        """复制回复原文到剪贴板；按钮短暂变「✓ 已复制」反馈（2s 后还原）。"""
+        QApplication.clipboard().setText(self._raw_text)
+        self._btn_copy.setText("✓ 已复制")
+        QTimer.singleShot(2000, lambda: self._btn_copy.setText("📋 复制"))
 
     # ── 成片资产操作（播放/下载）──────────────────────────────────────
     def set_asset_actions(self, url, title="", tid=""):
@@ -952,6 +1012,7 @@ class _ChatPanel(QWidget):
         self._ctx_materials = []     # [dict]（按 material_id 去重；含 mid/pool_key/pending）
         self._ctx_scripts = []       # [dict]（按 id 去重）
         self._setup_ui()
+        self._restore_chat()   # 本地持久化恢复（消息 + 服务端会话续接）
         self._load_models()
         self._load_agents()
 
@@ -1096,6 +1157,8 @@ class _ChatPanel(QWidget):
     def append_bubble(self, role, text):
         """追加气泡到消息区底部，返回气泡对象（供占位更新）。"""
         bubble = _ChatBubble(role, text)
+        bubble.quoteRequested.connect(self._on_quote)
+        bubble.regenerateRequested.connect(lambda b=bubble: self._on_regenerate(b))
         self._msg_lay.insertWidget(self._msg_lay.count() - 1, bubble)
         QTimer.singleShot(0, self._scroll_to_bottom)
         return bubble
@@ -1108,6 +1171,7 @@ class _ChatPanel(QWidget):
                 w.deleteLater()
         self._history.clear()
         self._reset_session()   # 删除服务端会话（素材池一并清理）并重置本地上下文
+        self._save_chat()       # 同步清空本地持久化
         self._rebuild_ctx_bar()
         self.append_bubble("assistant", "对话已清空，有什么想聊的？")
 
@@ -1117,18 +1181,25 @@ class _ChatPanel(QWidget):
 
     # ── 发送/回复 ─────────────────────────────────────────
     def _on_send(self):
-        if self._worker is not None and self._worker.isRunning():
-            return
         text = self.input_edit.toPlainText().strip()
         if not text:
             return
         self.input_edit.clear()
-        self.append_bubble("user", text)
+        self._send_text(text)
+
+    def _send_text(self, text, regen_bubble=None):
+        """发送一条用户消息；regen_bubble 非空时为重新生成：不新建用户气泡，
+        新回复替换该旧助手气泡（服务端无重生成接口，以新一轮对话重发）。"""
+        if self._worker is not None and self._worker.isRunning():
+            return
+        if regen_bubble is None:
+            self.append_bubble("user", text)
         # 发送内容 = 用户输入 + 当前对话上下文（选择项不删除则持续携带）
         ctx = self._build_context_text()
         message = f"{text}\n\n{ctx}" if ctx else text
         self._history.append({"role": "user", "content": text})
         self._trim_history()
+        self._save_chat()
         self._set_busy(True)
         if self._busy_timer is not None:
             self._busy_timer.stop()
@@ -1136,7 +1207,12 @@ class _ChatPanel(QWidget):
         self._busy_timer.setSingleShot(True)
         self._busy_timer.timeout.connect(self._on_busy_timeout)
         self._busy_timer.start(120000)
-        self._pending = self.append_bubble("assistant", "⏳ 思考中…")
+        # 重新生成：旧助手气泡直接转占位；普通发送：新建占位气泡
+        if regen_bubble is not None:
+            regen_bubble.set_text("⏳ 思考中…")
+            self._pending = regen_bubble
+        else:
+            self._pending = self.append_bubble("assistant", "⏳ 思考中…")
         # 智能体模式：素材/附件走服务端会话素材池（多轮自动注入）
         #   - 已有会话 → 选择时已入池；无会话（未发送过）→ 随本次发送由 worker 建会话并入池
         # 通用模式（无服务端会话）：保持文本拼接兼容路径
@@ -1156,6 +1232,43 @@ class _ChatPanel(QWidget):
         self._worker.done.connect(self._on_reply_ok)
         self._worker.failed.connect(self._on_reply_failed)
         self._worker.start()
+
+    def _on_quote(self, text):
+        """引用回复：以 Markdown 引用块形式插入输入框顶部，补充指令后再发送。"""
+        quoted = "\n".join("> " + ln for ln in (text or "").splitlines()) or "> "
+        cur = self.input_edit.toPlainText()
+        self.input_edit.setPlainText(f"{quoted}\n\n{cur}" if cur.strip() else quoted + "\n")
+        self.input_edit.moveCursor(QTextCursor.End)
+        self.input_edit.setFocus()
+
+    def _on_regenerate(self, bubble):
+        """重新生成：找到该回复对应的用户提问重发，新回复替换旧气泡。
+
+        服务端无重生成接口 → 以新一轮对话重发（多占一轮会话）；同时把旧回复
+        从本地 history 移除，避免旧答案继续参与后续上下文。
+        """
+        if self._worker is not None and self._worker.isRunning():
+            return
+        if bubble is self._pending:
+            return
+        # 消息区中该气泡前最近的用户气泡即对应提问
+        last_user = None
+        for i in range(self._msg_lay.count()):
+            w = self._msg_lay.itemAt(i).widget()
+            if w is bubble:
+                break
+            if isinstance(w, _ChatBubble) and w._role == "user":
+                last_user = w
+        if last_user is None:
+            return
+        q = last_user._raw_text
+        # 同步清理 history 里该轮的旧回复（找不到则跳过，不影响重发）
+        for i, m in enumerate(self._history):
+            if m["role"] == "user" and m["content"] == q:
+                if i + 1 < len(self._history) and self._history[i + 1]["role"] == "assistant":
+                    del self._history[i + 1]
+                break
+        self._send_text(q, regen_bubble=bubble)
 
     def _product_summary(self, item):
         """产品上下文文本：品牌/型号/品类/货号 + 性能 + 卖点。"""
@@ -1217,6 +1330,7 @@ class _ChatPanel(QWidget):
             self._session_id = sid
         self._history.append({"role": "assistant", "content": reply})
         self._trim_history()
+        self._save_chat()
         if self._pending is not None:
             self._pending.set_text(reply)
             bubble = self._pending
@@ -1463,6 +1577,58 @@ class _ChatPanel(QWidget):
         self._ctx_product = None
         self._ctx_materials = []
         self._ctx_scripts = []
+
+    # ── 本地持久化（重启后消息与会话不丢）────────────────────
+    _CHAT_SAVE_ROUNDS = 40   # 落盘保留的最近消息条数（含用户/助手）
+
+    def _chat_file(self):
+        from config.paths import DATA_DIR
+        return os.path.join(DATA_DIR, "agent_chat_history.json")
+
+    def _save_chat(self):
+        """消息 + 服务端会话落盘（原子写）；失败仅记日志不影响对话。"""
+        try:
+            data = {"session_id": self._session_id,
+                    "history": self._history[-self._CHAT_SAVE_ROUNDS:]}
+            path = self._chat_file()
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception as e:
+            log.warning(f"[工作台对话] 会话落盘失败: {e}")
+
+    def _restore_chat(self):
+        """启动时恢复本地消息，并以 session_id 续接服务端会话（素材池仍在服务端）。"""
+        try:
+            path = self._chat_file()
+            if not os.path.isfile(path):
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            msgs = [m for m in (data.get("history") or [])
+                    if isinstance(m, dict) and m.get("role") in ("user", "assistant")
+                    and str(m.get("content") or "").strip()]
+            if not msgs:
+                return
+            # 移除欢迎占位气泡，用历史消息替代
+            while self._msg_lay.count() > 1:
+                item = self._msg_lay.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
+            self._history = msgs
+            self._session_id = str(data.get("session_id") or "")
+            for m in msgs:
+                bubble = self.append_bubble(m["role"], m["content"])
+                if m["role"] == "assistant":
+                    url, tid = self._detect_video_asset(m["content"])
+                    if url:
+                        bubble.set_asset_actions(url, title=f"任务 #{tid}", tid=tid)
+            log.info(f"[工作台对话] 恢复本地消息 {len(msgs)} 条"
+                     f"（会话 {self._session_id or '无'}）")
+        except Exception as e:
+            log.warning(f"[工作台对话] 本地会话恢复失败: {e}")
 
     # ── 会话素材池后台入池（已有会话时选择即入池，上传不阻塞 UI）──────────
     def _start_pool_upload(self, atts):

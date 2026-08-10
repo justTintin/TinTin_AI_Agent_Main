@@ -66,6 +66,9 @@ studio/config/erp_config.json
 
 # 运行时缓存（从服务端拉取的快照，不入库）
 studio/data/agent_registry.json
+# 工作台对话本地持久化（机器级运行时数据：消息 + 会话 ID，不入库）
+studio/data/agent_chat_history.json
+studio/data/agent_chat_history.json.tmp
 
 # Node
 node_modules/

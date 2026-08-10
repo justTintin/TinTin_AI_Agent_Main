@@ -332,6 +332,14 @@ class AIGenMixin:
             self.rh_workflow_info.setText("请至少添加一个驱动音频")
             return
 
+        # 只提交新添加的音频：已成功处理过的文件不重复提交
+        processed = getattr(self, "_rh_processed_audios", None) or set()
+        new_files = [f for f in audio_files if f not in processed]
+        if not new_files:
+            self.rh_workflow_info.setText("当前音频都已处理过，请先添加新的驱动音频")
+            return
+        audio_files = new_files
+
         # 构建待处理队列
         self.rh_queue_paused = False
         wf_cfg = self._rh_find_workflow_config(wf_id) or {}
@@ -372,6 +380,10 @@ class AIGenMixin:
             return
         if not os.path.isfile(img_file) or not os.path.isfile(aud_file):
             QMessageBox.warning(self, "文件不存在", "请选择存在的图片和音频文件")
+            return
+        processed = getattr(self, "_rh_processed_audios", None) or set()
+        if aud_file in processed:
+            QMessageBox.warning(self, "已处理", "该音频已处理过，请勿重复提交")
             return
         image_nodes, audio_nodes = self._get_checked_rh_nodes()
         if not image_nodes or not audio_nodes:
@@ -513,7 +525,16 @@ class AIGenMixin:
             wf_id = self.rh_workflow_id_input.text().strip()
             if wf_id and hasattr(self, "rh_node_list") and self.rh_node_list.count() == 0:
                 QTimer.singleShot(300, self.view_rh_api_detail)
-            self.btn_run_workflow.setEnabled(bool(wf_id) and self.rh_audio_list.rowCount() > 0)
+            self.btn_run_workflow.setEnabled(bool(wf_id) and self._rh_has_new_audios())
+
+    def _rh_has_new_audios(self):
+        """列表中是否存在未处理过的驱动音频（只认新增的，已处理过的不重复提交）。"""
+        processed = getattr(self, "_rh_processed_audios", None) or set()
+        for row in range(self.rh_audio_list.rowCount()):
+            item = self.rh_audio_list.item(row, 0)
+            if item and item.data(Qt.UserRole) and item.data(Qt.UserRole) not in processed:
+                return True
+        return False
 
     def _test_runninghub_config(self):
         """在 AI 设置页测试 RunningHub API Key 是否可用。"""
@@ -684,7 +705,8 @@ class AIGenMixin:
             all_done = all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks)
             if all_done and not self.rh_submitted_tasks:
                 self.log_area.append("所有任务已完成。")
-                self.btn_run_workflow.setEnabled(True)
+                self.btn_run_workflow.setEnabled(
+                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
             return
 
         now = time.time()
@@ -702,6 +724,7 @@ class AIGenMixin:
         aud_file = task["aud_file"]
         idx = task["idx"]
 
+        self._set_rh_audio_row_state(aud_file, "running")
         self.log_area.append(f"[{idx+1}/{len(self.rh_pending_tasks)}] 正在上传并提交: {os.path.basename(aud_file)}")
 
         def run_task():
@@ -809,6 +832,7 @@ class AIGenMixin:
                     task["retry_count"] = task.get("retry_count", 0) + 1
                     task["state"] = "pending"
                     task["next_attempt_at"] = time.time() + 30
+                    self._set_rh_audio_row_state(aud_file, "pending")
                     self.log_area.append(f"[{idx+1}] 提交失败（415 资源不足），30 秒后自动重试第 {task['retry_count']} 次")
                     self._update_rh_queue_stats()
                     if not self.rh_queue_paused:
@@ -818,6 +842,7 @@ class AIGenMixin:
                     return
                 task["state"] = "failed"
                 task["error"] = info
+                self._set_rh_audio_row_state(aud_file, "failed")
                 self.log_area.append(f"[{idx+1}] 提交失败: {info}")
                 self._update_rh_queue_stats()
 
@@ -875,6 +900,10 @@ class AIGenMixin:
             if status == "SUCCESS":
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
+                self._set_rh_audio_row_state(task.get("aud_file") or "", "done")
+                processed = getattr(self, "_rh_processed_audios", None)
+                if processed is not None:
+                    processed.add(task.get("aud_file") or "")
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
                 self._auto_download_rh_results(task_id, results, record.get("meta") or {})
@@ -882,6 +911,7 @@ class AIGenMixin:
                 task["state"] = "failed"
                 task["error"] = error_msg
                 self.rh_submitted_tasks.pop(task_id, None)
+                self._set_rh_audio_row_state(task.get("aud_file") or "", "failed")
                 self.log_area.append(f"任务失败: {task_id} {error_msg}")
                 self._update_rh_queue_stats()
 
@@ -893,7 +923,8 @@ class AIGenMixin:
             if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
-                self.btn_run_workflow.setEnabled(True)
+                self.btn_run_workflow.setEnabled(
+                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
                 self.log_area.append("批量任务队列已全部结束。")
 
         self.start_worker(run_task, on_done)
@@ -932,6 +963,10 @@ class AIGenMixin:
             if status in ("success", "completed"):
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
+                self._set_rh_audio_row_state(task.get("aud_file") or "", "done")
+                processed = getattr(self, "_rh_processed_audios", None)
+                if processed is not None:
+                    processed.add(task.get("aud_file") or "")
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
                 self._auto_download_rh_results(task_id, results, record.get("meta") or {})
@@ -939,6 +974,7 @@ class AIGenMixin:
                 task["state"] = "failed"
                 task["error"] = err or "工作流运行失败"
                 self.rh_submitted_tasks.pop(task_id, None)
+                self._set_rh_audio_row_state(task.get("aud_file") or "", "failed")
                 self.log_area.append(f"任务失败: {task_id} {task['error']}")
                 self._update_rh_queue_stats()
             else:
@@ -951,7 +987,8 @@ class AIGenMixin:
             if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
-                self.btn_run_workflow.setEnabled(True)
+                self.btn_run_workflow.setEnabled(
+                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
                 self.log_area.append("批量任务队列已全部结束。")
 
         self.start_worker(run_task, on_done)

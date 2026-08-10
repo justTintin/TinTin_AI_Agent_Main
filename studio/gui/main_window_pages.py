@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (QTextBrowser,QApplication, QMainWindow, QWidget, 
                                   QSpinBox, QDoubleSpinBox, QTabWidget)
 from PySide6.QtGui import QIcon, QFont, QPixmap
 from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QPalette, QColor, QBrush
 from PySide6.QtGui import QFont
 from utils.gui_icons import mdi_button, mdi_icon
 
@@ -202,10 +202,14 @@ class PageSetupMixin:
         self.product_image_tool = ProductImagePage(p2, self); self.product_image_tool.setup()
         tabs.addTab(p2, "🆕 产品生图")
 
-        # Tab 3: 数字人
+        # Tab 3: 数字人（外层滚动容器：音频列表加高后窗口偏矮时也能滚动查看）
         p3 = QWidget(); p3.setObjectName("tab_page")
         self._build_digital_human_tab(p3)
-        tabs.addTab(p3, "🤖 数字人")
+        dh_scroll = QScrollArea()
+        dh_scroll.setWidgetResizable(True)
+        dh_scroll.setWidget(p3)
+        dh_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        tabs.addTab(dh_scroll, "🤖 数字人")
 
         # Tab 4: MG 动画
         p4 = QWidget(); p4.setObjectName("tab_page")
@@ -959,16 +963,15 @@ class PageSetupMixin:
             self.rh_audio_list.verticalHeader().setVisible(False)
             self.rh_audio_list.setSelectionBehavior(QAbstractItemView.SelectRows)
             self.rh_audio_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            self.rh_audio_list.setMinimumHeight(100)
-            self.rh_audio_list.setMaximumHeight(180)
-            rh_audio_group_layout.addWidget(self.rh_audio_list)
+            # 默认至少显示 10 行（行高约 28px + 表头）；不设上限，空间充足时自动扩展
+            self.rh_audio_list.setMinimumHeight(340)
+            rh_audio_group_layout.addWidget(self.rh_audio_list, 1)
             rh_input_layout.addWidget(self.rh_audio_input_group)
 
-            rh_layout.addWidget(self.rh_input_panel)
+            rh_layout.addWidget(self.rh_input_panel, 1)
             self.rh_queue_stats_label = QLabel("任务队列: 共 0 | 成功 0 | 失败 0 | 运行中 0 | 待处理 0 | 进度 0%")
             self.rh_queue_stats_label.setObjectName("muted_text")
             rh_layout.addWidget(self.rh_queue_stats_label)
-            rh_layout.addStretch()
 
             config_layout.addWidget(self.rh_section)
             self.rh_section.hide()
@@ -982,20 +985,66 @@ class PageSetupMixin:
             config_layout.addSpacing(20)
             config_layout.addWidget(self.btn_run_workflow)
 
-            # --- Log Output ---
+            # --- Log Output（默认折叠，点击标题行展开/收起） ---
+            self.log_toggle_btn = QPushButton("▸ 任务日志（点击展开）")
+            self.log_toggle_btn.setCursor(Qt.PointingHandCursor)
+            self.log_toggle_btn.setStyleSheet(
+                "QPushButton { border: none; background: transparent; color: #8b93a3;"
+                " font-size: 12px; text-align: left; padding: 4px 0; }"
+                "QPushButton:hover { color: #34d399; }")
+            self.log_toggle_btn.clicked.connect(self._toggle_dh_log)
+            config_layout.addWidget(self.log_toggle_btn)
             self.log_area = QTextEdit()
             self.log_area.setReadOnly(True)
             self.log_area.setPlaceholderText("任务日志...")
-            self.log_area.setMinimumHeight(80)
+            self.log_area.setMinimumHeight(120)
+            self.log_area.hide()
             config_layout.addWidget(self.log_area)
 
             layout.addWidget(card)
             layout.addStretch()
-        
+
             self.current_workflow_data = None
+            # 已成功处理过的驱动音频路径（跨队列保留：只提交新增音频，不重复处理旧文件）
+            self._rh_processed_audios = set()
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
             QTimer.singleShot(600, lambda: self._on_dh_backend_changed(self.backend_selector.currentIndex()))
+
+    def _toggle_dh_log(self):
+        """折叠/展开数字人任务日志区（默认折叠，点击标题切换）。"""
+        show = self.log_area.isHidden()
+        self.log_area.setVisible(show)
+        self.log_toggle_btn.setText("▸ 任务日志（点击展开）" if not show else "▾ 任务日志（点击折叠）")
+
+    def _set_rh_audio_row_state(self, file_path, state):
+        """按音频文件路径给表格行设置状态背景色（智能混剪同款绿色风格）。
+
+        state: running=进行中(浅绿) / done=完成(绿) / failed=失败(红) / 其他=恢复默认。
+        """
+        bg_map = {
+            "running": QColor(46, 204, 113, 30),
+            "done": QColor(46, 204, 113, 64),
+            "failed": QColor(231, 76, 60, 64),
+        }
+        bg = bg_map.get(state)
+        for row in range(self.rh_audio_list.rowCount()):
+            item = self.rh_audio_list.item(row, 0)
+            if not item or item.data(Qt.UserRole) != file_path:
+                continue
+            for col in range(2):  # 文件名、大小两列
+                it = self.rh_audio_list.item(row, col)
+                if it is not None:
+                    it.setBackground(bg if bg is not None else QBrush())
+            cell = self.rh_audio_list.cellWidget(row, 2)
+            if cell is not None:
+                if bg is not None:
+                    cell.setAttribute(Qt.WA_StyledBackground, True)
+                    cell.setStyleSheet(f"background-color: {bg.name(QColor.HexArgb)};")
+                else:
+                    cell.setStyleSheet("")
+            break
+
     def select_image(self):
         """数字人 ComfyUI：选择人物图片。"""
         file, _ = pick_file(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")

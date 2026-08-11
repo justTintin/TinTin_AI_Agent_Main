@@ -296,7 +296,16 @@ class VideoMontagePage(BasePage):
         confirmed_paths = self._collect_assembled_paths() if hasattr(self, "_collect_assembled_paths") else []
         if confirmed_paths:
             dir_path = os.path.dirname(confirmed_paths[0])
-        
+            # 配音表只列本批已合成的预合成视频，避免目录里残留的
+            # 其他视频（如历史分割镜头片段）被整目录扫描混入
+            self.selected_voice_video_files = list(confirmed_paths)
+            self._voice_scan_allow_dir_fallback = True
+        else:
+            self.selected_voice_video_files = []
+            # 本次会话没有已合成的预合成视频（如重启后新建任务）：
+            # 禁止整目录扫描回退，避免上次生成的旧视频自动出现在配音表
+            self._voice_scan_allow_dir_fallback = False
+
         if not dir_path:
             src_dir = self.folder_path_input.text().strip()
             if src_dir:
@@ -1910,11 +1919,18 @@ class VideoMontagePage(BasePage):
         )
         if file_paths:
             dir_path = os.path.dirname(file_paths[0])
-            self.voice_video_dir_input.setText(dir_path)
+            # 先记录选中的文件，再更新输入框，避免信号先触发旧状态的目录扫描
             self.selected_voice_video_files = file_paths
+            self._voice_scan_allow_dir_fallback = True
+            self.voice_video_dir_input.blockSignals(True)
+            self.voice_video_dir_input.setText(dir_path)
+            self.voice_video_dir_input.blockSignals(False)
             self._scan_voice_video_dir()
     # [6·配音]  _on_voice_video_dir_changed
     def _on_voice_video_dir_changed(self):
+        # 用户手动改目录时，清除旧的文件级选择并恢复目录扫描语义
+        self.selected_voice_video_files = []
+        self._voice_scan_allow_dir_fallback = True
         self._scan_voice_video_dir()
     # [6·配音]  _scan_voice_video_dir
     def _scan_voice_video_dir(self):
@@ -1953,14 +1969,28 @@ class VideoMontagePage(BasePage):
         exts = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v")
         files = []
         
-        # If user explicitly selected files, use them if they match current dir_path
+        # If user explicitly selected files (或进入步骤3时自动传入的已合成视频), use them
         if hasattr(self, "selected_voice_video_files") and self.selected_voice_video_files:
-            first_parent = os.path.abspath(os.path.dirname(self.selected_voice_video_files[0]))
-            current_dir = os.path.abspath(dir_path)
-            if first_parent == current_dir:
-                files = [os.path.abspath(f) for f in self.selected_voice_video_files]
+            sel = [os.path.abspath(f) for f in self.selected_voice_video_files
+                   if f and os.path.isfile(f)]
+            if sel:
+                parents = {os.path.dirname(f) for f in sel}
+                current_dir = os.path.abspath(dir_path)
+                if len(parents) == 1:
+                    # 单目录：仅当与当前输入目录一致时使用（兼容手动选文件场景）
+                    if current_dir in parents:
+                        files = sel
+                else:
+                    # 跨目录的已合成视频（每个视频各自工作目录场景）：
+                    # 直接以选中文件为准，不受单一目录限制
+                    files = sel
 
         if not files:
+            # 会话内无已合成视频且未手动选择文件/目录时（如重启后新建任务），
+            # 不做整目录扫描，避免历史生成的旧视频自动出现在配音表
+            if not getattr(self, "_voice_scan_allow_dir_fallback", True):
+                self._adjust_table_height()
+                return
             try:
                 for f in os.listdir(dir_path):
                     if f.lower().endswith(exts):
@@ -1970,7 +2000,8 @@ class VideoMontagePage(BasePage):
                 self._adjust_table_height()
                 return
             
-        # Sort naturally or alphabetically
+        # 去重（同一路径只保留一次）+ 存在性过滤，再排序
+        files = [f for f in dict.fromkeys(files) if os.path.isfile(f)]
         files.sort(key=lambda x: os.path.basename(x).lower())
         self.voice_video_paths = files
         
@@ -2277,6 +2308,7 @@ class VideoMontagePage(BasePage):
                 QMessageBox.warning(self.parent_widget, "导出失败", f"无法导出文件: {e}")
     # [6·配音]  _play_audio
     def _play_audio(self, wav_path):
+        """试听配音：同一音频 播放→暂停→继续 切换；切换其它音频时重新播放。"""
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             from PySide6.QtCore import QUrl
@@ -2286,11 +2318,21 @@ class VideoMontagePage(BasePage):
                 self._audio_output = QAudioOutput()
                 self._media_player.setAudioOutput(self._audio_output)
             
-            if self._media_player.playbackState() == QMediaPlayer.PlayingState:
-                self._media_player.stop()
-                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):
+            target = os.path.normpath(os.path.abspath(wav_path))
+            current = os.path.normpath(self._media_player.source().toLocalFile() or "")
+            state = self._media_player.playbackState()
+
+            # 同一条音频：播放中→暂停；已暂停→继续播放
+            if current == target:
+                if state == QMediaPlayer.PlayingState:
+                    self._media_player.pause()
                     return
-            
+                if state == QMediaPlayer.PausedState:
+                    self._media_player.play()
+                    return
+
+            # 切换到其它音频：停止当前并从头播放新音频
+            self._media_player.stop()
             self._media_player.setSource(QUrl.fromLocalFile(wav_path))
             self._audio_output.setVolume(1.0)
             self._media_player.play()
@@ -2424,6 +2466,11 @@ class VideoMontagePage(BasePage):
     # ==================== CONTROLLER RUN WORKERS ====================
 
     # --- Step 1 single video split ---
+    # [3·分割]  _get_product_prompt
+    def _get_product_prompt(self):
+        """读取步骤1的「主要产品提示词」（去首尾空白，未创建控件时返回空）。"""
+        inp = getattr(self, "product_prompt_input", None)
+        return (inp.text().strip() if inp else "")
     # [3·分割]  _start_split
     def _start_split(self):
         """合并后的智能镜头分割入口：对列表中所有视频逐个处理。
@@ -2448,6 +2495,12 @@ class VideoMontagePage(BasePage):
 
         dur = self.spin_highlight_sec.value()
 
+        # 主要产品提示词（选填）：非空时分割完成后自动触发围绕该产品的镜头分析
+        product_prompt = self._get_product_prompt()
+        self._split_product_prompt = product_prompt
+        if product_prompt:
+            log.info(f"[智能分割] 主要产品提示词: {product_prompt}")
+
         # 确定共享根目录（用于界面显示）
         shared_root = self.folder_path_input.text().strip()
         if not shared_root or not os.path.isdir(shared_root):
@@ -2470,11 +2523,16 @@ class VideoMontagePage(BasePage):
         else:
             out_summary = f"{len(per_video_splits)} 个视频各自工作目录\n(例: {per_video_splits[0]})"
 
+        prompt_line = ""
+        if product_prompt:
+            prompt_line = f"· AI 镜头分析将围绕产品「{product_prompt}」精确评分（分割完成后自动分析）；\n"
+
         reply = QMessageBox.question(
             self.parent_widget, "智能镜头分割",
             f"将对列表中全部 {len(paths)} 个视频逐个处理：\n"
             f"· 能做镜头分割的，先做镜头分割；\n"
-            f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n\n"
+            f"· 无法分割的，自动挑出一段约 {dur:.0f} 秒的精华片段。\n"
+            f"{prompt_line}\n"
             f"输出目录：{out_summary}\n"
             f"注意：会先清空各目录里已有的分镜片段。\n\n确认继续？",
             QMessageBox.Yes | QMessageBox.No
@@ -2629,6 +2687,13 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 0)
         self._pending_dialog = ("智能镜头分割完成", detail)
         self._check_split_clips_exist()
+
+        # 填写了主要产品提示词时，自动触发围绕该产品的镜头分析
+        if getattr(self, "_split_product_prompt", ""):
+            log.info(f"[智能分割] 检测到产品提示词，自动触发镜头分析: {self._split_product_prompt}")
+            self.stage_label.setText(
+                f"✅ {msg} 正在按产品提示词「{self._split_product_prompt}」分析镜头...")
+            self._gen_shot_analysis()
     # [3·分割]  _rename_video_splits_with_metadata
     def _rename_video_splits_with_metadata(self, splits_dir, video_path, scenes):
         """重命名单个视频刚分割出的片段（写入时间戳元数据），仅处理该视频前缀的文件。"""
@@ -2969,7 +3034,92 @@ class VideoMontagePage(BasePage):
         if file_item:
             path = file_item.data(Qt.UserRole)
             if path and os.path.exists(path):
-                self._play_video(path)
+                self._preview_shot(path, row)
+    # [8·事件回调]  _preview_shot
+    def _preview_shot(self, clip_path, row=None):
+        """预览单个分镜头。
+
+        优先用 ffplay 从镜头起始时间点直接播放：
+        - 镜头文件名带时间戳（_shot_xxx_起_止）时，从原始素材的对应时间点
+          定点播放该镜头时长，无需从头等待；
+        - 其它情况直接播放镜头片段文件本身。
+        找不到 ffplay 时回退为系统默认播放器。
+        """
+        if not clip_path or not os.path.exists(clip_path):
+            QMessageBox.warning(self.parent_widget, "文件不存在", f"找不到视频文件:\n{clip_path}")
+            return
+
+        # 解析镜头在原始素材中的起止时间（优先文件名，其次表格时长列/缓存）
+        start_sec, end_sec = 0.0, 0.0
+        parsed = self._parse_split_filename(os.path.basename(clip_path))
+        if parsed:
+            try:
+                start_sec = float(parsed[1].replace(",", "."))
+                end_sec = float(parsed[2].replace(",", "."))
+            except Exception:
+                start_sec, end_sec = 0.0, 0.0
+        if start_sec <= 0.0 and end_sec <= 0.0 and row is not None:
+            cached = self.split_clips_cache.get(os.path.abspath(clip_path))
+            if cached:
+                time_str = cached.get("time_str", "")
+                try:
+                    s_part, e_part = time_str.split("-->")
+                    def _to_sec(t):
+                        t = t.strip().replace(",", ".")
+                        h, m, s = t.split(":")
+                        return int(h) * 3600 + int(m) * 60 + float(s)
+                    start_sec, end_sec = _to_sec(s_part), _to_sec(e_part)
+                except Exception:
+                    pass
+
+        duration_sec = max(0.5, end_sec - start_sec) if end_sec > start_sec else 0.0
+
+        # 尝试用 ffplay 定点预览（播放完该镜头自动退出）
+        try:
+            from utils.platform_utils import find_ffplay, create_no_window_flag
+            ffplay = find_ffplay()
+            if ffplay and os.path.isfile(ffplay):
+                window_title = os.path.basename(clip_path)
+                cmd = [ffplay, "-autoexit", "-window_title", window_title]
+                if start_sec > 0.0 or duration_sec > 0.0:
+                    # 优先用镜头片段文件 + 定点起始；无时间戳信息时直接播完整片段
+                    if start_sec > 0.0:
+                        cmd += ["-ss", f"{start_sec:.3f}"]
+                    if duration_sec > 0.0:
+                        cmd += ["-t", f"{duration_sec:.3f}"]
+                cmd.append(clip_path)
+                subprocess.Popen(cmd, creationflags=create_no_window_flag())
+                self.stage_label.setText(
+                    f"▶ 正在预览镜头（起点 {start_sec:.1f}s，时长 {duration_sec:.1f}s，播完自动关闭）")
+                return
+        except Exception as e:
+            log.warning(f"ffplay 预览失败，回退默认播放器: {e}")
+
+        self._play_video(clip_path)
+    # [8·事件回调]  _preview_shot_by_row
+    def _preview_shot_by_row(self, row):
+        """供表格预览按钮调用：按行号预览对应分镜头。"""
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is None:
+            return
+        file_item = tbl.item(row, 2)
+        if not file_item:
+            return
+        path = file_item.data(Qt.UserRole)
+        if path and os.path.exists(path):
+            self._preview_shot(path, row)
+    # [8·事件回调]  _preview_selected_shot
+    def _preview_selected_shot(self):
+        """「预览选中镜头」按钮入口：预览表格当前选中的分镜头。"""
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is None:
+            return
+        row = tbl.currentRow()
+        if row < 0:
+            QMessageBox.information(self.parent_widget, "未选中镜头",
+                                    "请先在表格中单击选中一行镜头，再点「预览选中镜头」。")
+            return
+        self._preview_shot_by_row(row)
     # [8·事件回调]  _on_table_cell_changed
     def _on_table_cell_changed(self, row, col):
         if col == 5:  # 主要画面列（可编辑）
@@ -3863,16 +4013,9 @@ class VideoMontagePage(BasePage):
         if self.dubbed_video_paths:
             src_vids = list(self.dubbed_video_paths.values())
             source_type = "已配音视频"
-        else:
-            dir_path = self.voice_video_dir_input.text().strip()
-            if not dir_path:
-                dir_path = self.folder_path_input.text().strip()
-            if dir_path:
-                out_montage_dir = self._get_out_montage_dir(dir_path)
-                if os.path.exists(out_montage_dir):
-                    src_vids = [os.path.join(out_montage_dir, f) for f in os.listdir(out_montage_dir) 
-                                if f.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"))]
-                    source_type = "排列视频"
+        # 注意：不再回退扫描 outputs 目录——重启/新建任务后，
+        # 目录里上次生成的旧视频不应自动出现在成片列表；
+        # 如需使用旧视频，可通过「添加视频」手动选择。
                     
         # Add to table
         for filepath in src_vids:
@@ -4519,7 +4662,8 @@ class VideoMontagePage(BasePage):
         self.stage_label.setText(f"🤖 正在调用服务端分析 {len(clips)} 个镜头...")
         log.info(f"[镜头分析] 开始分析 {len(clips)} 个镜头，服务端地址: {server_url}/material/score_clip")
 
-        self._analysis_worker = ServerClipAnalysisWorker(clips, server_url)
+        self._analysis_worker = ServerClipAnalysisWorker(
+            clips, server_url, product_prompt=self._get_product_prompt())
         self._analysis_worker.item_ready.connect(self._on_analysis_item_ready)
         self._analysis_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
         self._analysis_worker.finished.connect(self._on_analysis_all_done)

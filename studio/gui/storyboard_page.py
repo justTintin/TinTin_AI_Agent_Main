@@ -32,6 +32,34 @@ from gui.base_page import BasePage
 SHOT_TYPES = ["特写", "近景", "中景", "远景", "全景", "俯拍", "仰拍", "主观", "空镜"]
 
 
+def _material_search(query, top_k=30, brand="", category="", path_prefix=""):
+    """调用服务端 POST /material/search 做 CLIP 向量相似度检索（替代已移除的本地索引）。"""
+    import requests
+    server_url = ""
+    try:
+        from config.paths import AI_CONFIG_FILE
+        if os.path.isfile(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                server_url = (json.load(f).get("compute_server_url") or "").strip().rstrip("/")
+    except Exception:
+        pass
+    if not server_url:
+        raise RuntimeError("未配置算力服务端地址，请先在系统设置中填写 compute_server_url")
+    body = {"query": query, "limit": top_k}
+    if brand:
+        body["brand"] = brand
+    if category:
+        body["category"] = category
+    resp = requests.post(f"{server_url}/material/search", json=body, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"服务端返回 {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    rows = data.get("results") or data.get("data") or []
+    if path_prefix:
+        rows = [r for r in rows if str(r.get("path", "")).startswith(path_prefix)]
+    return rows
+
+
 # ─────────────────────────────── Workers ────────────────────────────────────
 
 class BatchShotImageWorker(BaseWorker):
@@ -124,14 +152,12 @@ class _SimilarSearchWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        None  # material_clip_indexer removed
-        rows, _total = search_by_text(
+        rows = _material_search(
             self.query,
-            top_k=max(self.top_k * 3, self.top_k),   # 多取一些用于按文件去重
-            filter_brand=self.filter_brand,
-            filter_category=self.filter_category,
-            filter_path_prefix=self.filter_path_prefix,
-            comprehensive=True,
+            top_k=max(self.top_k * 3, self.top_k),   # 多取一些用来按文件去重
+            brand=self.filter_brand or "",
+            category=self.filter_category or "",
+            path_prefix=self.filter_path_prefix or "",
         )
         # 按 material_id / path 去重，保留每个素材的最高分帧
         best = {}
@@ -162,7 +188,6 @@ class _AutoBindShotsWorker(BaseWorker):
         self.filter_path_prefix = filter_path_prefix or None
 
     def do_work(self):
-        None  # material_clip_indexer removed
         result = {}
         total = len(self.shots)
         for n, (shot_idx, query) in enumerate(self.shots, 1):
@@ -171,12 +196,11 @@ class _AutoBindShotsWorker(BaseWorker):
             if not q:
                 continue
             try:
-                rows, _total = search_by_text(
+                rows = _material_search(
                     q, top_k=5,
-                    filter_brand=self.filter_brand,
-                    filter_category=self.filter_category,
-                    filter_path_prefix=self.filter_path_prefix,
-                    comprehensive=True,
+                    brand=self.filter_brand or "",
+                    category=self.filter_category or "",
+                    path_prefix=self.filter_path_prefix or "",
                 )
             except Exception:
                 rows = []

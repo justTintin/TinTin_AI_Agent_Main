@@ -274,10 +274,12 @@ class ServerClipAnalysisWorker(BaseWorker):
     _POLL_INTERVAL = 2.0       # 轮询间隔（秒）
     _POLL_TIMEOUT = 300.0      # 单条镜头最大等待时间（秒）
 
-    def __init__(self, clip_paths, server_url):
+    def __init__(self, clip_paths, server_url, product_prompt=""):
         super().__init__()
         self.clip_paths = list(clip_paths)
         self.server_url = (server_url or "").strip().rstrip("/")
+        # 主要产品提示词（选填）：非空时随请求提交，服务端 AI 围绕该产品评分与描述
+        self.product_prompt = (product_prompt or "").strip()
         self._should_stop = False
 
     def stop(self):
@@ -293,12 +295,15 @@ class ServerClipAnalysisWorker(BaseWorker):
         submit_url = f"{self.server_url}/material/score_clip"
 
         # ── 第 1 步：提交文件，获取 task_id ──
+        form_data = {"analyze_shot": "true", "product_mode": "true"}
+        if self.product_prompt:
+            form_data["product_prompt"] = self.product_prompt
         log.info(f"[镜头分析] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url}")
         with open(clip_path, "rb") as f:
             resp = requests.post(
                 submit_url,
                 files={"file": (fname, f, "video/mp4")},
-                data={"analyze_shot": "true", "product_mode": "true"},
+                data=form_data,
                 timeout=60,
             )
         log.info(f"[镜头分析] {fname} 提交响应: HTTP {resp.status_code}, body={resp.text[:300]}")

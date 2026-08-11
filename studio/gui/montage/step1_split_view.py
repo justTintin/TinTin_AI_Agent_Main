@@ -49,6 +49,25 @@ class Step1SplitView(BaseStepView):
         self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)
         card_layout.addWidget(self.main_page.video_list)
 
+        # 主要产品提示词（选填，用于 AI 镜头分析围绕该产品精确评分与描述）
+        row_prompt = QHBoxLayout()
+        row_prompt.addWidget(QLabel("主要产品提示词:"))
+        self.main_page.product_prompt_input = QLineEdit()
+        self.main_page.product_prompt_input.setMaxLength(100)
+        self.main_page.product_prompt_input.setPlaceholderText(
+            "选填，如：无线蓝牙耳机。填写后 AI 分析将围绕该产品精确评分与描述")
+        self.main_page.product_prompt_input.setToolTip(
+            "填写主要产品名称/关键词后：\n"
+            "· 分割完成会自动调用镜头分析；\n"
+            "· AI 会为包含该产品的镜头给出更高评分与聚焦描述；\n"
+            "· 留空则保持原有通用分析行为。")
+        row_prompt.addWidget(self.main_page.product_prompt_input)
+        btn_clear_prompt = QPushButton("清空")
+        btn_clear_prompt.setObjectName("secondary_button")
+        btn_clear_prompt.clicked.connect(self.main_page.product_prompt_input.clear)
+        row_prompt.addWidget(btn_clear_prompt)
+        card_layout.addLayout(row_prompt)
+
         # SceneDetect Config
         split_row = QHBoxLayout()
         split_row.addWidget(QLabel("分割阈值 (10-100):"))
@@ -124,6 +143,13 @@ class Step1SplitView(BaseStepView):
         # Split results table view (with score filter row above)
         table_header_row = QHBoxLayout()
         table_header_row.addWidget(QLabel("已分割出的最小单位镜头片段 (双击可播放预览，双击画面描述列可手动修改):"), 1)
+        btn_preview_shot = mdi_button("▶ 预览选中镜头", "play")
+        btn_preview_shot.setObjectName("secondary_button")
+        btn_preview_shot.setToolTip(
+            "从镜头起始时间点直接预览选中的镜头（播完自动关闭），\n"
+            "无需从头播放整个视频。先在表格中单击选中一行。")
+        btn_preview_shot.clicked.connect(self.main_page._preview_selected_shot)
+        table_header_row.addWidget(btn_preview_shot)
         table_header_row.addStretch()
         table_header_row.addWidget(QLabel("评分过滤:"))
         self.main_page.step1_score_filter_combo = QComboBox()

@@ -871,6 +871,7 @@ class VoiceClonePage(BasePage):
 
 
     def _play_audio(self, wav_path):
+        """试听克隆声音：同一音频 播放→暂停→继续 切换；切换其它音频时重新播放。"""
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             from PySide6.QtCore import QUrl
@@ -880,11 +881,21 @@ class VoiceClonePage(BasePage):
                 self._audio_output = QAudioOutput()
                 self._media_player.setAudioOutput(self._audio_output)
             
-            if self._media_player.playbackState() == QMediaPlayer.PlayingState:
-                self._media_player.stop()
-                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):
+            target = os.path.normpath(os.path.abspath(wav_path))
+            current = os.path.normpath(self._media_player.source().toLocalFile() or "")
+            state = self._media_player.playbackState()
+
+            # 同一条音频：播放中→暂停；已暂停→继续播放
+            if current == target:
+                if state == QMediaPlayer.PlayingState:
+                    self._media_player.pause()
                     return
-            
+                if state == QMediaPlayer.PausedState:
+                    self._media_player.play()
+                    return
+
+            # 切换到其它音频：停止当前并从头播放新音频
+            self._media_player.stop()
             self._media_player.setSource(QUrl.fromLocalFile(wav_path))
             self._audio_output.setVolume(1.0)
             self._media_player.play()

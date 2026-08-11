@@ -13,6 +13,7 @@ from utils.logger_utils import log
 from config.paths import TMP_DIR, REMBG_DIR
 
 class RembgWorker(BaseWorker):
+    """服务端抠图 Worker：上传图片到算力服务端 /material/matting，不再本地加载模型。"""
     progress = Signal(str)
     finished = Signal(bool, str, str) # success, output_path, error_msg
     
@@ -24,45 +25,17 @@ class RembgWorker(BaseWorker):
         
     def run(self):
         try:
-            self.progress.emit("正在配置 rembg 抠图运行环境...")
-            import sys
-            import os
-            # Add rembg directory to Python path dynamically
-            rembg_dir = REMBG_DIR
-            
-            if rembg_dir not in sys.path:
-                sys.path.insert(0, rembg_dir)
-                
-            # Configure U2NET_HOME to support integrated green portability
-            if "U2NET_HOME" not in os.environ:
-                default_home = os.path.expanduser(os.path.join("~", ".u2net"))
-                model_filename = f"{self.model_name}.onnx"
-                default_model_path = os.path.join(default_home, model_filename)
-                
-                if not os.path.exists(default_model_path):
-                    from config.paths import WORKSPACE_ROOT
-                    local_home = os.path.join(WORKSPACE_ROOT, "apps", "rembg", "models")
-                    os.makedirs(local_home, exist_ok=True)
-                    os.environ["U2NET_HOME"] = local_home
-                    
-            from rembg import remove, new_session
-            from PIL import Image
-            
-            self.progress.emit(f"正在加载 AI 模型: {self.model_name} (首次使用会自动下载)...")
-            session = new_session(self.model_name)
-            
-            self.progress.emit("AI 正在深度擦除背景并分析边缘...")
-            input_image = Image.open(self.img_path)
-            output_image = remove(input_image, session=session)
-            
-            self.progress.emit("正在保存透明抠图结果...")
-            output_image.save(self.out_path, format="PNG")
-            
-            self.finished.emit(True, self.out_path, "")
+            from utils.matting_client import matting_image
+
+            self.progress.emit("正在上传图片到服务端抠图...")
+            out = matting_image(self.img_path, model=self.model_name, out_path=self.out_path)
+
+            self.progress.emit("服务端抠图完成，正在保存透明抠图结果...")
+            self.finished.emit(True, out, "")
             
         except Exception as e:
             tb = traceback.format_exc()
-            log.error(f"Rembg processing failed: {e}\n{tb}")
+            log.error(f"Matting processing failed: {e}\n{tb}")
             self.finished.emit(False, "", str(e))
 
 

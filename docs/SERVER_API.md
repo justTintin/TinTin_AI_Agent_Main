@@ -44,6 +44,7 @@ min_scene_len: 0.5
 | product_mode | boolean | ❌ | false | 产品模式（产品/普通） |
 | analyze_shot | boolean | ❌ | false | 是否做镜头画面分析 |
 | frame_at | number | ❌ | 0.5 | 抽帧时间点（秒） |
+| product_prompt | string | ❌ | "" | 主要产品提示词；非空时 AI 分析围绕该产品进行（判断产品是否出现/是否为主体，影响评分与描述）；为空时保持原有行为 |
 
 **请求示例**：
 ```
@@ -54,6 +55,7 @@ file: <clip_001.mp4>
 product_mode: false
 analyze_shot: true
 frame_at: 0.5
+product_prompt: 无线蓝牙耳机
 ```
 
 **响应**（提交成功）：
@@ -273,6 +275,28 @@ CLIP 编码查询文本 → pgvector cosine 相似度。
 | `/material/enqueue_analysis` | POST | 按条件批量加入分析队列 |
 | `/material/logs` | GET | 单素材分析日志 |
 | `/material/logs_list` | GET | 分析日志分页列表 |
+
+### 3.7 图片抠图 `POST /material/matting`
+
+上传图片 → 服务端 rembg/U2Net 抠图 → 同步返回透明背景 PNG 二进制（单图推理 < 5s，无需任务队列）。
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| file | binary | ✅ | — | 待抠图片（png/jpg，multipart/form-data） |
+| model | string | ❌ | u2net | 模型名：u2net / u2netp / u2net_human_seg / isnet-general-use |
+
+**请求示例**：
+```
+POST /material/matting
+Content-Type: multipart/form-data
+
+file: <product.png>
+model: u2net
+```
+
+**响应**：`Content-Type: image/png`，直接返回透明背景 PNG 二进制；错误时返回 HTTP 非 200 + JSON 错误信息。
+
+> 服务端实现要点：复用 `rembg`（`new_session(model)` + `remove()`），session 按 model 缓存；模型文件放服务端统一目录；并发用信号量限流。
 
 ---
 

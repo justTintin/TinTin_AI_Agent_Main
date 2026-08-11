@@ -480,9 +480,6 @@ class VoiceSamplesPage(BasePage):
                         break
                 save_voice_samples(samples)
                 
-                if sample_id in self.transcribe_workers:
-                    del self.transcribe_workers[sample_id]
-                
                 self._load_table_data()
 
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
@@ -506,13 +503,20 @@ class VoiceSamplesPage(BasePage):
 
         def on_error(err):
             self.status_label.setText("❌ 识别文本失败")
-            if sample_id in self.transcribe_workers:
-                del self.transcribe_workers[sample_id]
             self._load_table_data()
             QMessageBox.critical(self.parent_widget, "识别文本失败", f"无法从音频中提取文本：\n{err}")
 
+        def _safe_cleanup(*args):
+            """延迟清理 worker 引用，确保 QThread 线程完全退出后再销毁对象，
+            避免 'QThread: Destroyed while thread is still running' 导致的闪退"""
+            w = self.transcribe_workers.pop(sample_id, None)
+            if w is not None:
+                w.deleteLater()
+
         worker.finished.connect(on_finished)
+        worker.finished.connect(_safe_cleanup)
         worker.error.connect(on_error)
+        worker.error.connect(_safe_cleanup)
         worker.start()
 
     def _clean_srt_to_text(self, srt_content):

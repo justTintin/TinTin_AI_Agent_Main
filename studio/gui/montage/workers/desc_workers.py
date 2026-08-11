@@ -100,29 +100,16 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                     user_content.append({"type": "text", "text": "\n\n"})
                 
             # Call LLM API
-            # 走服务端代理
-            from utils.llm_proxy import llm_chat
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                "temperature": 0.2
-            }
-            
-            log.info(f"BatchGenerateDescriptionsWorker - 正在请求大模型 API: {url}，以整体方式生成镜头描述。")
-            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=self.model, timeout=60)
-            class _R:
-                status_code = 200
-            res = _R()
-            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
-            if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")
-            
-            data = res.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            # 走服务端统一代理 /llm/chat/completions（支持多模态 content）
+            from utils.llm_proxy import llm_chat_messages
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+
+            log.info("BatchGenerateDescriptionsWorker - 正在通过服务端代理请求大模型，以整体方式生成镜头描述。")
+            content = (llm_chat_messages(messages, model=self.model, temperature=0.2, timeout=60) or "").strip()
             log.info(f"BatchGenerateDescriptionsWorker - 大模型返回内容:\n{content}")
             
             # Clean markdown codeblocks
@@ -160,7 +147,8 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
 
 class LocalVisionDescWorker(BaseWorker):
-    """使用本地 Ollama 视觉模型（qwen2.5vl）分析每个分割镜头的画面内容，生成画面描述文案。
+    """通过服务端统一代理（/llm/chat/completions）调用视觉模型分析每个分割镜头的画面内容，
+    生成画面描述文案（不再直连本地/独立 Ollama 服务）。
 
     有字幕时：结合字幕文案 + 画面截图，生成带营销感的描述。
     无字幕时：纯画面视觉分析。

@@ -144,6 +144,25 @@ def find_ffprobe() -> str:
     return exe
 
 
+def find_ffplay() -> str:
+    """查找 ffplay 可执行文件（用于镜头定点预览），找不到返回空串。"""
+    exe = binary_name("ffplay")
+    ffmpeg = find_ffmpeg()
+    if ffmpeg:
+        sibling = os.path.join(os.path.dirname(ffmpeg), binary_name("ffplay"))
+        if os.path.isfile(sibling):
+            return sibling
+    found = shutil.which(exe)
+    if found:
+        return os.path.abspath(found)
+
+    for c in _ffmpeg_fallback_candidates(exe):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+
+    return ""
+
+
 def find_python() -> str:
     from config.paths import PYTHON_EMBEDED_DIR
     for p in (

@@ -187,11 +187,17 @@
   - 兼容：手动选择文件/修改目录时恢复目录扫描语义
   - **文件**：`studio/gui/video_montage_page.py`
 
+- [x] **26.** VSR 去字幕切换服务端（客户端轻量化 P3-E）
+  - 新增 `utils/vsr_client.py`：`vsr_remove_remote()` 封装上传 `/vsr/remove` → 轮询 `/tasks/unified/{id}` → 下载 `/vsr/download/{filename}` 并落盘本地（原名_no_sub.mp4）
+  - 两个去字幕页面新增「使用服务端处理」开关且默认勾选：老页远程 Worker 改用 vsr_client（结果直接落盘，不再只显示下载链接）；v14 页新增服务端分支（多选区转 sub_areas，sttn→sttn_auto 映射）
+  - 本地模式保留作回退；连通性已验证（/vsr/remove 路由就绪）；待实际视频端到端验证后可移除 apps/vsr-* 目录
+  - **文件**：`studio/utils/vsr_client.py`、`studio/gui/subtitle_removal_page.py`、`studio/gui/subtitle_removal_page_v14.py`
+
 ---
 
 ## 待实现
 
-- [ ] **26.** 生成脚本后关联素材
+- [ ] **27.** 生成脚本后关联素材
   - 当前生成的 `.txt` 口播文案与素材的关联是隐式的（同名、同目录）
   - 需要为脚本建立与源镜头/素材的显式关联（如在产品资料库中关联脚本）
   - 支持从脚本反查使用了哪些分割镜头，从分割镜头反查属于哪个脚本

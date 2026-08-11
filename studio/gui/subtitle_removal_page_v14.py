@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QC
 from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
+from utils.base_worker import BaseWorker
 from config.paths import TMP_DIR, VSR_V14_DIR
 from utils.platform_utils import python_binary
 
@@ -710,6 +711,18 @@ class SubtitleRemovalPageV14(BasePage):
         self.h264_chk.setChecked(True)
         bottom_container_layout.addWidget(self.h264_chk)
 
+        # 服务端模式（默认开启：去字幕推理统一由算力服务端执行，本机无需部署算法包）
+        server_row = QHBoxLayout()
+        self.chk_server_mode = QCheckBox("☁️ 使用服务端处理（推荐，本机无需部署去字幕算法包）")
+        self.chk_server_mode.setChecked(True)
+        self.chk_server_mode.setStyleSheet("padding: 4px 8px;")
+        server_row.addWidget(self.chk_server_mode)
+        self.lbl_server_status = QLabel("")
+        self.lbl_server_status.setObjectName("muted_text")
+        server_row.addWidget(self.lbl_server_status)
+        server_row.addStretch()
+        bottom_container_layout.addLayout(server_row)
+
         # STTN batch size control (key for high-resolution videos)
         batch_row = QHBoxLayout()
         batch_lbl = QLabel("🎞️ STTN 每批处理帧数:")
@@ -1105,6 +1118,11 @@ class SubtitleRemovalPageV14(BasePage):
             QMessageBox.warning(self.parent_widget, "参数错误", "请先设置至少一个擦除选区！")
             return
 
+        # 服务端模式：上传 → 服务端去字幕 → 下载结果到本地
+        if getattr(self, "chk_server_mode", None) is not None and self.chk_server_mode.isChecked():
+            self._start_remote_removal(video_path)
+            return
+
         vsr_dir = VSR_V14_DIR
         vsr_python = os.path.join(vsr_dir, "Python", python_binary())
         # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
@@ -1180,6 +1198,91 @@ class SubtitleRemovalPageV14(BasePage):
         self.timer.setInterval(400)
         self.timer.timeout.connect(self.poll_preview_image)
         self.timer.start()
+
+    def _start_remote_removal(self, video_path):
+        """使用服务端 API 去除字幕（上传 → 轮询 → 下载结果到本地）。"""
+        # v14 本地算法名 → 服务端 inpaint_mode（sttn 映射为 sttn_auto 自动检测模式）
+        mode = self.mode_combo.currentData() or "sttn"
+        if mode == "sttn":
+            mode = "sttn_auto"
+
+        # boxes 为 [x, y, w, h]，转为服务端 (ymin, ymax, xmin, xmax)
+        sub_areas = [(by, by + bh, bx, bx + bw) for (bx, by, bw, bh) in self.boxes]
+
+        self.btn_start.setEnabled(False)
+        self.chk_server_mode.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.log_view.clear()
+        self.lbl_server_status.setText("⏳ 上传中...")
+
+        stem, _ = os.path.splitext(video_path)
+        out_path = f"{stem}_no_sub.mp4"
+
+        class _RemoteVSRWorkerV14(BaseWorker):
+            finished = Signal(str)
+            error = Signal(str)
+            stage = Signal(str)
+
+            def __init__(self, path, mode, sub_areas, out_path):
+                super().__init__()
+                self.path = path
+                self.mode = mode
+                self.sub_areas = sub_areas
+                self.out_path = out_path
+
+            def do_work(self):
+                try:
+                    from utils.vsr_client import vsr_remove_remote
+                    result = vsr_remove_remote(
+                        self.path,
+                        inpaint_mode=self.mode,
+                        sub_areas=self.sub_areas,
+                        out_path=self.out_path,
+                        progress_cb=lambda t: self.stage.emit(t),
+                    )
+                    self.finished.emit(result)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        w = _RemoteVSRWorkerV14(video_path, mode, sub_areas, out_path)
+        self._remote_worker = w
+        w.stage.connect(lambda t: self.lbl_server_status.setText(t))
+        w.finished.connect(lambda p: self._on_remote_done(p))
+        w.error.connect(lambda msg: self._on_remote_error(msg))
+        w.start()
+
+    def _on_remote_done(self, out_path):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.lbl_server_status.setText("✅ 处理完成")
+        self.btn_start.setEnabled(True)
+        self.chk_server_mode.setEnabled(True)
+        self.status_lbl.setText("状态: 字幕擦除完毕！")
+
+        msg_box = QMessageBox(self.parent_widget)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("去字幕完成")
+        msg_box.setText(f"视频去字幕已完成！\n结果已保存至：\n\n{out_path}")
+        open_btn = msg_box.addButton("打开文件夹", QMessageBox.ActionRole)
+        msg_box.addButton("确定", QMessageBox.AcceptRole)
+        msg_box.exec()
+        if msg_box.clickedButton() == open_btn:
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
+            except Exception as e:
+                log.error(f"打开输出目录失败: {e}")
+        self.update_preview()
+
+    def _on_remote_error(self, msg):
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.lbl_server_status.setText(f"❌ 失败: {str(msg)[:80]}")
+        self.btn_start.setEnabled(True)
+        self.chk_server_mode.setEnabled(True)
+        QMessageBox.critical(self.parent_widget, "错误", f"服务端处理失败:\n{msg}")
 
     def stop_removal(self):
         if self.worker and self.worker.isRunning():

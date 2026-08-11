@@ -10,7 +10,7 @@ from PySide6.QtCore import Signal, QThread, Qt, QRectF
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 from utils.logger_utils import log
-from config.paths import TMP_DIR, REMBG_DIR
+from config.paths import TMP_DIR
 
 class RembgWorker(BaseWorker):
     """服务端抠图 Worker：上传图片到算力服务端 /material/matting，不再本地加载模型。"""
@@ -209,7 +209,7 @@ class ImageMattingPage(BasePage):
         
         left_layout.addStretch()
         
-        tips = QLabel("💡 提示：本功能基于深度学习，完全自动抠除背景。首次使用对应模型时会自动联网下载权重文件到用户主目录下的 .u2net 文件夹中，请保持网络畅通。")
+        tips = QLabel("💡 提示：抠图由算力服务端远程执行（/material/matting），本机无需下载模型权重；需在「环境配置」中配置算力服务端地址。")
         tips.setWordWrap(True)
         tips.setObjectName("muted_text")
         tips.setStyleSheet("font-size: 11px; line-height: 14px;")

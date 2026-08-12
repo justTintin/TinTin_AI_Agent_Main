@@ -87,45 +87,116 @@ class FeishuSyncWorker(BaseWorker):
             self.error.emit(str(e))
 
 class WebSearchWorker(BaseWorker):
+    """联网素材搜索：优先走服务端 POST /material/stock_search（Pexels/Pixabay 免版权，
+    支持中文），服务端不可达时才回退客户端直连 DuckDuckGo（国内网络常超时）。"""
     finished = Signal(str)
 
-    def __init__(self, query):
+    def __init__(self, query, kind="video"):
         super().__init__()
         self.query = query
+        self.kind = kind
 
     def run(self):
         try:
-            import requests
-            from utils.http_client import http_get
-            from lxml import html
-            import urllib.parse
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-            }
-            q = self.query.strip()
-            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
-            res = http_get(url, headers=headers, timeout=15)
-            if res.status_code != 200:
-                raise RuntimeError(f"搜索请求失败，HTTP 状态码: {res.status_code}")
-                
-            tree = html.fromstring(res.text)
-            results = []
-            bodies = tree.xpath('//div[@class="result__body"]')
-            for b in bodies[:5]:
-                title_elem = b.xpath('.//a[@class="result__url"]')
-                snippet_elem = b.xpath('.//a[@class="result__snippet"]')
-                if title_elem and snippet_elem:
-                    title = title_elem[0].text_content().strip()
-                    snippet = snippet_elem[0].text_content().strip()
-                    results.append(f"【标题】: {title}\n【摘要】: {snippet}\n")
-            
-            if not results:
-                self.finished.emit("未找到相关联网资料，您可以手动输入参考背景。")
-            else:
-                self.finished.emit("\n---\n".join(results))
+            text = self._search_via_server()
+            if text:
+                self.finished.emit(text)
+                return
+        except _ServerUnavailable as e:
+            log.warning(f"[联网搜索] 服务端 stock_search 不可用（{e}），回退 DuckDuckGo 直连")
+        except RuntimeError as e:
+            # 服务端可达但明确报错（如未配置 API key 的 503）：直接提示，不回退
+            self.error.emit(str(e))
+            return
+        try:
+            self.finished.emit(self._search_duckduckgo())
         except Exception as e:
             self.error.emit(str(e))
+
+    # ── 服务端在线素材搜索（/guide「在线素材搜索 Stock Material」）──
+    def _search_via_server(self):
+        from utils.http_client import http_post
+        base = self._server_url()
+        if not base:
+            raise _ServerUnavailable("未配置服务端地址")
+        res = http_post(f"{base}/material/stock_search",
+                        json={"query": self.query.strip(), "kind": self.kind,
+                              "page": 1, "per": 10},
+                        timeout=20)
+        if res.status_code == 503:
+            raise RuntimeError(
+                "服务端在线素材搜索未启用（HTTP 503）：需服务端 config.yaml 配置 "
+                "stock.pexels_api_key / stock.pixabay_api_key 后重试。")
+        if res.status_code != 200:
+            raise _ServerUnavailable(f"HTTP {res.status_code}")
+        items = (res.json() or {}).get("items") or []
+        if not items:
+            return "未找到相关在线素材，可换关键词重试。"
+        provider = (res.json() or {}).get("provider", "")
+        lines = [f"以下在线素材免版权可商用（来源：{provider or 'Pexels/Pixabay'}）：", ""]
+        for it in items:
+            meta = []
+            if it.get("duration_sec"):
+                meta.append(f"{it['duration_sec']}s")
+            if it.get("width") and it.get("height"):
+                meta.append(f"{it['width']}x{it['height']}")
+            if it.get("author"):
+                meta.append(f"作者: {it['author']}")
+            lines.append(f"【{it.get('type', '')}】 {' | '.join(meta)}")
+            if it.get("thumb"):
+                lines.append(f"预览: {it['thumb']}")
+            if it.get("url"):
+                lines.append(f"直链: {it['url']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _server_url():
+        try:
+            from config.paths import AI_CONFIG_FILE
+            if os.path.isfile(AI_CONFIG_FILE):
+                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
+                if url:
+                    return url
+        except Exception:
+            pass
+        return ""
+
+    # ── 回退：客户端直连 DuckDuckGo（国内网络可能不通）──
+    def _search_duckduckgo(self):
+        from utils.http_client import http_get
+        from lxml import html
+        import urllib.parse
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
+        q = self.query.strip()
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
+        res = http_get(url, headers=headers, timeout=15)
+        if res.status_code != 200:
+            raise RuntimeError(f"搜索请求失败，HTTP 状态码: {res.status_code}")
+
+        tree = html.fromstring(res.text)
+        results = []
+        bodies = tree.xpath('//div[@class="result__body"]')
+        for b in bodies[:5]:
+            title_elem = b.xpath('.//a[@class="result__url"]')
+            snippet_elem = b.xpath('.//a[@class="result__snippet"]')
+            if title_elem and snippet_elem:
+                title = title_elem[0].text_content().strip()
+                snippet = snippet_elem[0].text_content().strip()
+                results.append(f"【标题】: {title}\n【摘要】: {snippet}\n")
+
+        if not results:
+            return "未找到相关联网资料，您可以手动输入参考背景。"
+        return "\n---\n".join(results)
+
+
+class _ServerUnavailable(Exception):
+    """服务端不可达/无此接口 → 允许回退直连；区别于服务端明确报错（不回退）。"""
 
 class LLMWorker(BaseWorker):
     finished = Signal(str)

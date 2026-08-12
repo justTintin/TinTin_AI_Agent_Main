@@ -240,7 +240,8 @@ class ShotMaterialDialog(QDialog):
     """每个镜头的「引用素材」弹窗，包含四个来源：本地素材/即梦生成/MG动画/联网素材。"""
 
     def __init__(self, shot_desc="", ratio="9:16", brand="", model="",
-                 category="", shot_type="", extra_ctx="", main_window=None, parent=None):
+                 category="", shot_type="", extra_ctx="", style="", topic="",
+                 main_window=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("引用素材")
         self.resize(1300, 850)
@@ -262,6 +263,8 @@ class ShotMaterialDialog(QDialog):
         self.category = (category or "").strip()
         self.shot_type = (shot_type or "").strip()
         self._extra_ctx = (extra_ctx or "").strip()
+        self.style = (style or "").strip()
+        self._topic = (topic or "").strip()
         self._setup(shot_desc)
 
     def _setup(self, shot_desc):
@@ -270,9 +273,27 @@ class ShotMaterialDialog(QDialog):
 
         self.tabs = QTabWidget()
 
-        # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
+        # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 风格 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
         self._search_ctx = " ".join(
-            x for x in (self.shot_type, self.brand, self.model, self.category, self._extra_ctx) if x)
+            x for x in (self.shot_type, self.brand, self.model, self.category,
+                        self.style, self._extra_ctx) if x)
+
+        # ── 脚本基本信息（所有 tab 可见，作为全部素材搜索的统一过滤上下文）──
+        info_parts = []
+        if self._topic:
+            info_parts.append(f"选题：{self._topic[:40]}")
+        prod_txt = " ".join(x for x in (self.brand, self.model, self.category) if x)
+        if prod_txt:
+            info_parts.append(f"产品：{prod_txt}")
+        if self.style:
+            info_parts.append(f"风格：{self.style}")
+        if self.shot_type:
+            info_parts.append(f"景别：{self.shot_type}")
+        if self._ratio:
+            info_parts.append(f"画幅：{self._ratio}")
+        self._script_info = " ｜ ".join(info_parts)
+        if self._script_info:
+            layout.addWidget(self._muted("📌 脚本信息（所有素材搜索自动带上）：" + self._script_info))
 
         # ── Tab 1: 本地素材 ──────────────────────────────────────────
         local_tab = QWidget()
@@ -367,7 +388,7 @@ class ShotMaterialDialog(QDialog):
         wt.setSpacing(8)
         web_row = QHBoxLayout()
         self.web_input = QLineEdit()
-        self.web_input.setPlaceholderText("输入搜索词，联网查找参考素材（DuckDuckGo）")
+        self.web_input.setPlaceholderText("输入搜索词，联网查找免版权参考素材（服务端 Pexels/Pixabay）")
         # 与本地素材一致：默认带入景别/品牌/型号/产品类型 + 镜头文案
         self.web_input.setText((self._search_ctx + " " + shot_desc)[:80] if (self._search_ctx or shot_desc) else "")
         self.web_input.returnPressed.connect(self._search_web)
@@ -411,9 +432,16 @@ class ShotMaterialDialog(QDialog):
         lbl.setWordWrap(True)
         return lbl
 
+    def _with_ctx(self, user_text):
+        """搜索必须携带脚本基本信息过滤；用户输入已含上下文时不重复拼接。"""
+        t = (user_text or "").strip()
+        if self._search_ctx and self._search_ctx not in t:
+            return f"{self._search_ctx} {t}".strip()
+        return t
+
     # ── 本地素材（CLIP 相似度检索）────────────────────────────────────
     def _search_local(self):
-        query = self.local_input.text().strip()
+        query = self._with_ctx(self.local_input.text().strip())
         self.local_list.clear()
         self.btn_confirm.setEnabled(False)
         if not query:
@@ -620,6 +648,9 @@ class ShotMaterialDialog(QDialog):
         if not prompt:
             QMessageBox.warning(self, "提示词为空", "请填写即梦生图提示词。")
             return
+        # 强制带上脚本基本信息（产品/风格/景别）作为生成约束
+        if self._search_ctx and self._search_ctx not in prompt:
+            prompt = f"{self._search_ctx}，{prompt}"
         self.btn_dreamina_gen.setEnabled(False)
         self.dreamina_pbar.setVisible(True)
         self.dreamina_thumb.setText("生成中，请稍候（约 1-4 分钟）...")
@@ -668,7 +699,7 @@ class ShotMaterialDialog(QDialog):
 
     # ── 联网搜索 ─────────────────────────────────────────────────────
     def _search_web(self):
-        query = self.web_input.text().strip()
+        query = self._with_ctx(self.web_input.text().strip())
         if not query:
             return
         self.btn_web.setEnabled(False)
@@ -1641,6 +1672,8 @@ class StoryboardPage(BasePage):
             category=str(prod.get("category") or ""),
             shot_type=card["combo_type"].currentText(),
             extra_ctx="，".join(extra),
+            style=(self.combo_stylization.currentText() if self._selected_stylization else ""),
+            topic=str(topic),
             main_window=self.main_window,
             parent=self.parent_widget,
         )

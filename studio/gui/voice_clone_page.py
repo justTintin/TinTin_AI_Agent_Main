@@ -84,11 +84,10 @@ class RemoteAsrWorker(BaseWorker):
     finished = Signal(list)   # segments: [{"start","end","text","words"?}, ...]
     error = Signal(str)
 
-    def __init__(self, audio_path, language=None, task_type="transcribe"):
+    def __init__(self, audio_path, language=None):
         super().__init__()
         self.audio_path = audio_path
         self.language = language
-        self.task_type = task_type
 
     def do_work(self):
         try:
@@ -97,7 +96,6 @@ class RemoteAsrWorker(BaseWorker):
             segments = transcribe_remote(
                 self.audio_path, asr_url,
                 language=self.language or "",
-                task_type=self.task_type,
             )
             self.finished.emit(segments)
         except Exception as e:
@@ -694,7 +692,7 @@ class VoiceClonePage(BasePage):
         self.btn_transcribe_ref.setText("⏳ 正在识别文本...")
         self.stage_label.setText("正在识别参考音频文本...")
 
-        self.transcribe_worker = RemoteAsrWorker(ref_audio, language=None, task_type="transcribe")
+        self.transcribe_worker = RemoteAsrWorker(ref_audio, language=None)
 
         def on_finished(segments):
             self.btn_transcribe_ref.setEnabled(True)
@@ -797,7 +795,7 @@ class VoiceClonePage(BasePage):
             self.btn_split_text.setText("⏳ 智能识别拆分中...")
             self.stage_label.setText("⏳ 正在调用远程 ASR 分析整段音频时间戳...")
 
-            self.align_worker = RemoteAsrWorker(whole_audio_path, language=None, task_type="transcribe")
+            self.align_worker = RemoteAsrWorker(whole_audio_path, language=None)
 
             def on_align_finished(segments):
                 self.btn_split_text.setEnabled(True)

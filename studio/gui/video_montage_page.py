@@ -2601,7 +2601,7 @@ class VideoMontagePage(BasePage):
                     from utils.asr_client import transcribe_remote, segments_to_srt
                     segments = transcribe_remote(
                         self.video_path, asr_url,
-                        language="", task_type="transcribe",
+                        language="",
                     )
                     srt_content = segments_to_srt(segments)
                     with open(self.srt_path, "w", encoding="utf-8") as f:

@@ -6,7 +6,7 @@ import traceback
 import sys
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame,
+                               QFileDialog, QProgressBar, QMessageBox, QFrame,
                                QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QDialogButtonBox,
                                QWidget, QTextEdit, QTextBrowser, QSplitter, QApplication)
 from PySide6.QtCore import Signal, Qt, QUrl, QTimer, QObject, QEvent
@@ -92,15 +92,6 @@ class TranscriptionToolPage(BasePage):
         self.lang_input.setPlaceholderText("zh/en/空则自动")
         self.lang_input.setMaximumWidth(120)
         row1.addWidget(self.lang_input)
-
-        row1.addWidget(QLabel("任务:"))
-        self.task_combo = QComboBox()
-        self.task_combo.addItems(["转写（原语言）", "翻译为英文"])
-        self.task_combo.setMaximumWidth(140)
-        row1.addWidget(self.task_combo)
-
-        self.multi_speaker_check = QCheckBox("👥 多人模式")
-        row1.addWidget(self.multi_speaker_check)
 
         btn_process = mdi_button("开始处理", "play")
         btn_process.setObjectName("action_button")
@@ -891,6 +882,9 @@ class TranscriptionToolPage(BasePage):
 
     def _start_batch(self):
         if self.worker and self.worker.isRunning():
+            # 任务进行中：明确告知当前在等什么，而不是静默吞掉点击
+            cur = self.stage_label.text() or "处理中"
+            self.show_warning(f"当前任务仍在处理中，请等待完成后再提交。\n\n当前状态：{cur}", "正在处理")
             return
 
         pending = [i for i, f in enumerate(self.files) if f["status"] == "等待处理" or f["status"] == "❌ 失败"]
@@ -909,8 +903,6 @@ class TranscriptionToolPage(BasePage):
                 return
 
         language = self.lang_input.text().strip() or None
-        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
-        diarize = self.multi_speaker_check.isChecked()
 
         self.btn_process.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -919,9 +911,9 @@ class TranscriptionToolPage(BasePage):
         self._current_pending = pending
         self._current_index = 0
 
-        self._process_next(language, task_type, diarize)
+        self._process_next(language)
 
-    def _process_next(self, language, task_type, diarize):
+    def _process_next(self, language):
         if self._current_index >= len(self._current_pending):
             self.btn_process.setEnabled(True)
             self.progress_bar.setValue(self.progress_bar.maximum())
@@ -947,23 +939,22 @@ class TranscriptionToolPage(BasePage):
 
         class BatchWorker(BaseWorker):
             finished = Signal(int, str, list)  # file_list_index, srt_text, segments(含 words)
+            stage = Signal(str)
             error = Signal(int, str)
 
-            def __init__(self, file_idx, path, language, task_type, diarize):
+            def __init__(self, file_idx, path, language):
                 super().__init__()
                 self.file_idx = file_idx
                 self.path = path
                 self.language = language
-                self.task_type = task_type
-                self.diarize = diarize
 
             def do_work(self):
                 try:
                     asr_url = read_asr_url()
                     segments = transcribe_remote(
                         self.path, asr_url,
-                        language=self.language, task_type=self.task_type,
-                        diarize=self.diarize,
+                        language=self.language,
+                        progress_cb=lambda m: self.stage.emit(m),
                     )
                     # 生成 SRT
                     lines = []
@@ -984,8 +975,10 @@ class TranscriptionToolPage(BasePage):
                 except Exception as e:
                     self.error.emit(self.file_idx, str(e))
 
-        self.worker = BatchWorker(idx, f["path"], language, task_type, diarize)
+        self.worker = BatchWorker(idx, f["path"], language)
         self.worker.finished.connect(self._on_file_done)
+        self.worker.stage.connect(
+            lambda m: self.stage_label.setText(f"{os.path.basename(f['path'])}：{m}"))
         self.worker.error.connect(self._on_file_error)
         self.worker.start()
 
@@ -1013,9 +1006,7 @@ class TranscriptionToolPage(BasePage):
 
         self._current_index += 1
         language = self.lang_input.text().strip() or None
-        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
-        diarize = self.multi_speaker_check.isChecked()
-        self._process_next(language, task_type, diarize)
+        self._process_next(language)
 
     def _on_file_error(self, file_idx, err):
         f = self.files[file_idx]
@@ -1035,6 +1026,4 @@ class TranscriptionToolPage(BasePage):
 
         self._current_index += 1
         language = self.lang_input.text().strip() or None
-        task_type = "translate" if "翻译" in self.task_combo.currentText() else "transcribe"
-        diarize = self.multi_speaker_check.isChecked()
-        self._process_next(language, task_type, diarize)
+        self._process_next(language)

@@ -440,7 +440,7 @@ class VoiceSamplesPage(BasePage):
                     from utils.asr_client import transcribe_remote, read_asr_url
                     segments = transcribe_remote(
                         self.audio_path, read_asr_url(),
-                        language="", task_type="transcribe",
+                        language="",
                     )
                     self.finished.emit(segments)
                 except Exception as e:

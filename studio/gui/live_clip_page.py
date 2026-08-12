@@ -1994,7 +1994,7 @@ class LiveClipPage(BasePage):
                     try:
                         log.info(f"[_RemoteWorker] 开始 file={self.video_path}")
                         segs = transcribe_remote(self.video_path, read_asr_url(),
-                            language=self.language, task_type="transcribe",
+                            language=self.language,
                             progress_cb=lambda m: (self.stage.emit(m), log.info(f"[_RemoteWorker] {m}")))
                         if self.isInterruptionRequested(): return
                         lines = []

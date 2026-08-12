@@ -212,6 +212,9 @@ class ScheduledTasksPage(BasePage):
         self.variants_container.setVisible(False)
         dl.addWidget(self.variants_container)
         self._current_task_id = None   # 当前展示详情的任务 id（供打分回调用）
+        self._agent_link = {}          # 执行层任务号 → 编排层任务号（a_ 前缀）
+        self._agent_eval = {}          # 编排层任务号 → 服务端深度评审 evaluation dict
+        self._task_eval = {}           # 执行层任务号 → 深度评审（/evaluate/by-task 直接命中）
 
         root.addWidget(detail_card, 1)
 
@@ -225,21 +228,103 @@ class ScheduledTasksPage(BasePage):
 
     # ── 数据刷新（调服务端）──────────────────────────────────────────────
     def refresh(self):
-        """从服务端拉取任务列表并刷新表格（HTTP 放后台线程，避免服务端异常时卡界面）。"""
+        """从服务端拉取任务列表并刷新表格（HTTP 放后台线程，避免服务端异常时卡界面）。
+        同时拉取编排任务列表，建立 执行号 → 编排任务号（a_）映射。"""
         from utils.thread_worker import TaskWorker as Worker
         if getattr(self, "_refresh_worker", None) and self._refresh_worker.isRunning():
             return
-        w = Worker(stc.list_tasks)
+
+        def _fetch_all():
+            items = stc.list_tasks() or []
+            link, evals, task_evals = {}, {}, self._fetch_task_evaluations(items)
+            try:
+                from utils import agent_client
+                link = self._build_agent_link(agent_client.list_tasks(root_only=False) or {})
+                evals = self._fetch_evaluations(set(link.values()))
+            except Exception as e:
+                log.warning(f"[成片任务] 编排任务映射/评审获取失败（不影响列表）: {e}")
+            return items, link, evals, task_evals
+
+        w = Worker(_fetch_all)
         self._refresh_worker = w
         w.finished.connect(self._on_refresh_done)
         w.error.connect(self._on_refresh_error)
         w.start()
 
+    @staticmethod
+    def _build_agent_link(agent_data):
+        """由编排任务列表建立 {执行层任务号: 编排根任务号} 映射。
+        编排子任务（auto_pipeline/scheduled_montage 等）的 result.id 即执行层任务号；
+        沿 parent_task_id 上溯到根任务（对话创建的 a_ 任务号）。"""
+        tasks = agent_data.get("tasks") or []
+        by_id = {t.get("id"): t for t in tasks if t.get("id")}
+
+        def _root(tid):
+            seen = set()
+            cur = by_id.get(tid)
+            while cur and cur.get("parent_task_id") and cur["parent_task_id"] in by_id \
+                    and cur["id"] not in seen:
+                seen.add(cur["id"])
+                cur = by_id[cur["parent_task_id"]]
+            return cur.get("id") if cur else tid
+
+        link = {}
+        for t in tasks:
+            rid = (t.get("result") or {}).get("id") if isinstance(t.get("result"), dict) else None
+            # 执行层任务号为纯数字；a_/script_ 等属编排层自身产物，不纳入映射
+            if rid is not None and str(rid).isdigit():
+                link[str(rid)] = _root(t.get("id"))
+        return link
+
+    @staticmethod
+    def _fetch_evaluations(agent_ids):
+        """逐个查询编排任务的深度评审（GET /tasks/unified/a_xxx 顶层 evaluation 字段）。
+        服务端仅在单任务详情中返回 evaluation，列表接口不携带。"""
+        out = {}
+        for aid in agent_ids:
+            try:
+                u = stc.get_task(aid)
+                ev = (u or {}).get("evaluation")
+                if isinstance(ev, dict):
+                    out[aid] = ev
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _fetch_task_evaluations(items):
+        """按执行层任务号直查深度评审（GET /evaluate/by-task/{id}）。
+        成片类任务完成后服务端自动投递评价，数字任务不依赖编排映射也能命中。"""
+        from utils.http_client import http_get
+        out = {}
+        for t in items or []:
+            tid = t.get("id")
+            if tid is None or t.get("status") != "completed":
+                continue
+            try:
+                r = http_get(f"{stc._server_url()}/evaluate/by-task/{tid}", timeout=10)
+                if r.status_code != 200:
+                    continue
+                ev = (r.json() or {}).get("evaluation")
+                if isinstance(ev, dict) and ev.get("total") is not None:
+                    out[str(tid)] = ev
+            except Exception:
+                continue
+        return out
+
     def _on_refresh_error(self, msg):
         log.warning(f"[成片任务] 刷新失败: {msg}")
 
-    def _on_refresh_done(self, items):
+    def _on_refresh_done(self, fetched):
         """后台拉取完成，主线程刷新表格（保持原有逻辑）。"""
+        if isinstance(fetched, tuple) and len(fetched) == 4:
+            items, self._agent_link, self._agent_eval, self._task_eval = fetched
+        elif isinstance(fetched, tuple) and len(fetched) == 3:
+            items, self._agent_link, self._agent_eval = fetched
+        elif isinstance(fetched, tuple):
+            items, self._agent_link = fetched
+        else:   # 兼容旧回调签名
+            items = fetched
         items = items or []
         self.table.setRowCount(len(items))
         self.table.clearContents()
@@ -253,8 +338,13 @@ class ScheduledTasksPage(BasePage):
             check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             check_item.setCheckState(Qt.Unchecked)
             self.table.setItem(i, 0, check_item)
-            # ID
-            self.table.setItem(i, 1, QTableWidgetItem(str(tid)))
+            # ID：优先展示编排任务号（a_），执行号作辅助（悬停可见）
+            agent_tid = self._agent_link.get(str(tid))
+            id_item = QTableWidgetItem(f"{agent_tid}\n#{tid}" if agent_tid else str(tid))
+            id_item.setToolTip(
+                f"编排任务号：{agent_tid or '—（非对话发起）'}\n执行任务号：{tid}" if agent_tid
+                else f"执行任务号：{tid}")
+            self.table.setItem(i, 1, id_item)
             # 标题（收窄列，悬停显示全标题）
             title = t.get("title", "") or "—"
             name_item = QTableWidgetItem(title)
@@ -331,7 +421,13 @@ class ScheduledTasksPage(BasePage):
         lines = [
             f"### {t.get('title', '')}",
             "",
-            f"- **任务 ID**：{t.get('id')}",
+        ]
+        agent_tid = self._agent_link.get(str(t.get('id')))
+        if agent_tid:
+            lines.append(f"- **任务 ID**：{agent_tid}（执行号 #{t.get('id')}）")
+        else:
+            lines.append(f"- **任务 ID**：{t.get('id')}")
+        lines += [
             f"- **类型**：{self._type_label(t.get('task_type', ''))}",
             f"- **状态**：{self._status_label(t.get('status', ''))}（{t.get('progress', 0)}%）",
             f"- **创建**：{self._fmt_time(t.get('created_at'))}",
@@ -339,7 +435,63 @@ class ScheduledTasksPage(BasePage):
         ]
         if t.get("error_msg"):
             lines.append(f"- **错误**：`{t.get('error_msg')}`")
-        if result:
+        # ── 评审信息：服务端深度评审（优先执行号直查，编排任务兜底）──
+        ev = self._task_eval.get(str(t.get("id")))
+        if not isinstance(ev, dict):
+            agent_tid2 = self._agent_link.get(str(t.get("id")))
+            ev = self._agent_eval.get(agent_tid2) if agent_tid2 else None
+        if isinstance(ev, dict):
+            verdict_map = {"pass": "✅ 通过", "rejected": "❌ 不通过",
+                           "excellent": "🏆 优秀", "marginal": "⚠️ 边缘"}
+            lines += ["", "#### 🎬 成片评审（服务端深度评审）"]
+            lines.append(f"- **总分**：**{ev.get('total')}** / 10　**结论**："
+                         f"{verdict_map.get(ev.get('verdict'), ev.get('verdict') or '—')}"
+                         f"（置信度 {ev.get('confidence')}，引擎：{ev.get('engine') or '—'}）")
+            layer_labels = (("technical", "技术质量"), ("editing", "剪辑节奏"),
+                            ("narrative", "叙事表达"), ("aesthetic", "美学画面"),
+                            ("audio", "音频质量"), ("compliance", "合规性"))
+            ls = ev.get("layer_scores") or {}
+            for k, label in layer_labels:
+                if ls.get(k) is not None:
+                    lines.append(f"- {label}：{ls.get(k)}")
+            vetoes = ev.get("vetoes") or []
+            if vetoes:
+                vs = "；".join(
+                    str(v.get("detail") or v.get("reason") or v) for v in vetoes[:3])
+                lines.append(f"- ⛔ 否决项：{vs}")
+            if ev.get("comment"):
+                lines.append(f"- 💬 总评：{ev.get('comment')}")
+        # ── 评审信息：成片质量评分（storyboard_montage result.quality_score）──
+        qs = result.get("quality_score") if isinstance(result, dict) else None
+        if isinstance(qs, dict):
+            lines += ["", "#### 📊 评审评分（成片质量评分）"]
+            lines.append(f"- **总分**：**{qs.get('total')}** / 10（评分引擎：{qs.get('engine') or '—'}）")
+            for k, label in (("clarity", "清晰度"), ("texture", "质感"), ("aesthetics", "美学"),
+                             ("composition", "构图"), ("color_quality", "色彩质量"),
+                             ("figure_quality", "人物质量"), ("subject_prominence", "主体突出度")):
+                if qs.get(k) is not None:
+                    lines.append(f"- {label}：{qs.get(k)}")
+        # ── 关键结果：成片路径/时长/大小/镜头数 ──
+        if isinstance(result, dict) and result:
+            lines += ["", "#### 结果"]
+            vid = result.get("output_url") or result.get("video_path") or result.get("output_path") or ""
+            if vid:
+                lines.append(f"- **成片视频**：{vid}")
+            dur = result.get("total_duration") or result.get("duration")
+            if dur:
+                lines.append(f"- **时长**：{dur}s")
+            sz = result.get("video_size_mb") or result.get("size_mb")
+            if sz:
+                lines.append(f"- **大小**：{sz} MB")
+            if result.get("shots") is not None:
+                lines.append(f"- **镜头数**：{result.get('shots')}")
+            if result.get("clip_count") is not None:
+                lines.append(f"- **片段数**：{result.get('clip_count')}")
+            if result.get("narration"):
+                lines.append(f"- **旁白**：{result.get('narration')}")
+            if result.get("warnings"):
+                lines.append(f"- **警告**：`{result.get('warnings')}`")
+        elif result:
             lines.append(f"- **结果**：`{result}`")
         lines += ["", "#### 参数"]
         if params:

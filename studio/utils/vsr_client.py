@@ -119,13 +119,19 @@ def vsr_remove_remote(video_path, inpaint_mode="sttn_det", sub_areas=None,
         status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
         if status in ("completed", "done", "success", "finished"):
             result = task_obj.get("result") if isinstance(task_obj.get("result"), dict) else {}
+            params = task_obj.get("params") if isinstance(task_obj.get("params"), dict) else {}
             filename = (task_obj.get("filename") or task_obj.get("output")
-                        or result.get("filename") or result.get("output") or "")
+                        or result.get("filename") or result.get("output")
+                        or params.get("output") or "")
             break
         if status in ("failed", "error", "cancelled"):
             err = (task_obj.get("error_msg") or task_obj.get("error")
                    or task_obj.get("message") or "未知错误")
-            raise RuntimeError(f"去字幕任务失败: {err}")
+            err = str(err)[:600]
+            logs = task_obj.get("log") or []
+            tail = "\n".join(str(l) for l in logs[-5:]) if isinstance(logs, list) else ""
+            suffix = f"\n\n服务端日志:\n{tail}" if tail else ""
+            raise RuntimeError(f"去字幕任务失败: {err}{suffix}")
     else:
         raise RuntimeError(f"去字幕任务超时({timeout:.0f}s)，task_id={task_id}")
 

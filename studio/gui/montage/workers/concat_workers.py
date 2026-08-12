@@ -9,6 +9,7 @@ from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from utils.hwaccel import get_video_encode_args
+from config.paths import TMP_DIR
 from gui.montage.utils_media import find_ffmpeg, get_media_duration
 
 
@@ -537,26 +538,124 @@ class FinalMixWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)  # Returns a list of final video paths
 
+    _STALL_TIMEOUT = 120.0  # 输出文件连续 120 秒无增长 → 判定 I/O 卡死，强制终止
+
     def __init__(self, tasks, bgm_path, bgm_volume):
         super().__init__()
         self.tasks = tasks  # list of tuples: (video_path, output_path)
         self.bgm_path = bgm_path
         self.bgm_volume = bgm_volume
+        self._proc = None
+        self._cancelled = False
+
+    def cancel(self):
+        """外部可调用：终止当前 ffmpeg 子进程。"""
+        self._cancelled = True
+        try:
+            if self._proc is not None and self._proc.poll() is None:
+                self._proc.kill()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resolve_ffprobe():
+        """定位 ffprobe 完整路径（裸名 "ffprobe" 在无 PATH 环境下会直接失败）。"""
+        try:
+            from utils.platform_utils import find_ffprobe
+            p = find_ffprobe()
+            if p and os.path.isfile(p):
+                return p
+        except Exception:
+            pass
+        ff = find_ffmpeg()
+        return ff.replace("ffmpeg", "ffprobe") if ff else "ffprobe"
+
+    def _run_ffmpeg_checked(self, cmd, output_path):
+        """带卡死看门狗的 ffmpeg 执行。
+
+        每 0.5s 检查一次输出文件增长情况：若连续 _STALL_TIMEOUT 秒无增长，
+        判定 ffmpeg 阻塞在不可访问磁盘（移动硬盘休眠/网络盘断开）的 I/O 上，
+        强制杀进程并报错，避免 Worker 线程永久挂起导致界面假死。
+        """
+        import time as _time
+        err_path = output_path + ".ffmpeg_err.txt"
+        with open(err_path, "w", encoding="utf-8", errors="replace") as err_f:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=err_f,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            last_size = -1
+            last_grow = _time.monotonic()
+            while True:
+                if self._cancelled:
+                    self._proc.kill()
+                    raise RuntimeError("合成任务已取消")
+                if self._proc.poll() is not None:
+                    break
+                try:
+                    cur = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                except OSError:
+                    cur = last_size
+                if cur != last_size:
+                    last_size = cur
+                    last_grow = _time.monotonic()
+                elif _time.monotonic() - last_grow > self._STALL_TIMEOUT:
+                    self._proc.kill()
+                    raise RuntimeError(
+                        f"ffmpeg 编码卡死（输出文件超过 {int(self._STALL_TIMEOUT)} 秒无增长）。\n"
+                        "常见原因：BGM/素材位于已断开或休眠的移动硬盘、网络映射盘。\n"
+                        "请将相关文件放到本机磁盘后重试。")
+                _time.sleep(0.5)
+            rc = self._proc.returncode
+        if rc != 0:
+            err_tail = ""
+            try:
+                with open(err_path, "r", encoding="utf-8", errors="replace") as f:
+                    err_tail = f.read()
+            except Exception:
+                pass
+            raise RuntimeError(f"最后合成视频失败：\n{(err_tail or '')[-500:]}")
+        try:
+            os.remove(err_path)
+        except Exception:
+            pass
 
     def run(self):
+        bgm_local = ""
         try:
             ffmpeg_path = find_ffmpeg()
             if not ffmpeg_path:
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
+            ffprobe_exe = self._resolve_ffprobe()
 
             creationflags = subprocess.CREATE_NO_WINDOW
             has_bgm = bool(self.bgm_path and os.path.exists(self.bgm_path))
+            if self.bgm_path and not has_bgm:
+                raise RuntimeError(
+                    f"BGM 文件不存在或无法访问：{self.bgm_path}\n"
+                    "若位于移动硬盘/网络映射盘，请确认磁盘已连接，或将 BGM 复制到本机磁盘。")
             bgm_vol = self.bgm_volume / 100.0
-            
+
+            # BGM 预先拷贝到本地临时目录：合成期间即使原盘（移动硬盘/网络盘）断开，
+            # ffmpeg 读取本地副本也不会阻塞在 I/O 上导致整个任务假死。
+            if has_bgm:
+                try:
+                    ext = os.path.splitext(self.bgm_path)[1] or ".mp3"
+                    bgm_local = os.path.join(TMP_DIR, f"final_mix_bgm_{os.getpid()}{ext}")
+                    self.stage.emit("正在准备配乐文件（拷贝到本地）...")
+                    shutil.copyfile(self.bgm_path, bgm_local)
+                except Exception as e:
+                    raise RuntimeError(f"BGM 文件读取失败（请确认所在磁盘可访问）：{e}")
+                bgm_src = bgm_local
+            else:
+                bgm_src = ""
+
             results = []
             total = len(self.tasks)
             
             for index, (video_path, output_path) in enumerate(self.tasks):
+                if self._cancelled:
+                    raise RuntimeError("合成任务已取消")
                 self.stage.emit(f"正在进行最终合成配乐 ({index + 1}/{total})...")
                 self.progress.emit(int(index / total * 100))
                 
@@ -567,10 +666,11 @@ class FinalMixWorker(BaseWorker):
                     has_audio = False
                     try:
                         ffprobe_cmd = [
-                            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+                            ffprobe_exe, "-v", "error", "-show_entries", "stream=codec_type",
                             "-of", "csv=p=0", video_path
                         ]
-                        p_probe = subprocess.run(ffprobe_cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags)
+                        p_probe = subprocess.run(ffprobe_cmd, capture_output=True, text=True, errors="replace",
+                                                 creationflags=creationflags, timeout=15)
                         if "audio" in (p_probe.stdout or ""):
                             has_audio = True
                     except Exception:
@@ -593,7 +693,7 @@ class FinalMixWorker(BaseWorker):
                         )
                         cmd = [
                             ffmpeg_path, "-y", "-i", video_path,
-                            "-stream_loop", "-1", "-i", self.bgm_path,
+                            "-stream_loop", "-1", "-i", bgm_src,
                             "-filter_complex", filter_complex,
                             "-map", "0:v", "-map", "[a]",
                             "-c:v", "copy", "-c:a", "aac", "-shortest",
@@ -602,7 +702,7 @@ class FinalMixWorker(BaseWorker):
                     else:
                         cmd = [
                             ffmpeg_path, "-y", "-i", video_path,
-                            "-stream_loop", "-1", "-i", self.bgm_path,
+                            "-stream_loop", "-1", "-i", bgm_src,
                             "-filter_complex", f"[1:a]volume={bgm_vol},{bgm_fades},loudnorm=I=-16:TP=-1.5:LRA=11[bgm]",
                             "-map", "0:v", "-map", "[bgm]",
                             "-c:v", "copy", "-c:a", "aac", "-shortest",
@@ -615,9 +715,8 @@ class FinalMixWorker(BaseWorker):
                         output_path
                     ]
                 
-                r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags)
-                if r.returncode != 0:
-                    raise RuntimeError(f"最后合成视频失败：\n{(r.stderr or '')[-500:]}")
+                # 带卡死看门狗执行：磁盘 I/O 挂起时自动终止并报错，不再永久阻塞
+                self._run_ffmpeg_checked(cmd, output_path)
                     
                 results.append(output_path)
                 
@@ -628,6 +727,13 @@ class FinalMixWorker(BaseWorker):
         except Exception:
             log.exception("最终合成失败")
             self.error.emit(traceback.format_exc())
+        finally:
+            # 清理 BGM 本地临时副本
+            if bgm_local:
+                try:
+                    os.remove(bgm_local)
+                except Exception:
+                    pass
 
 
 

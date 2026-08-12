@@ -193,11 +193,25 @@
   - 本地模式保留作回退；连通性已验证（/vsr/remove 路由就绪）；待实际视频端到端验证后可移除 apps/vsr-* 目录
   - **文件**：`studio/utils/vsr_client.py`、`studio/gui/subtitle_removal_page.py`、`studio/gui/subtitle_removal_page_v14.py`
 
+- [x] **27.** 修复最终合成（特效包装步骤）卡在中间不动的问题
+  - 根因：BGM 位于移动硬盘/网络映射盘（如 F:），合成中途磁盘休眠/断开后 ffmpeg 阻塞在 I/O 上（CPU 0%），且 `subprocess.run` 无超时无法终止，Worker 线程永久挂起导致界面假死
+  - 修复：① BGM 开工前预拷贝到本地临时目录，合成期间不依赖原盘；② ffmpeg 执行改为带卡死看门狗（输出文件连续 120 秒无增长自动杀进程并报错）；③ ffprobe 改用 `find_ffprobe()` 完整路径并加 15s 超时；④ 新增 `cancel()` 支持取消
+  - **文件**：`studio/gui/montage/workers/concat_workers.py`
+
+- [x] **28.** 去字幕“一直处理失败”排查与客户端健壮性改进
+  - 排查结论：客户端链路（上传/轮询/状态解析）实测全部正常，失败发生在服务端——`apps/vsr-v1.4.0/vsr_run.py` 引擎启动约 5 秒即退出码 1（自动检测与手动指定字幕区域均失败，与视频内容无关），需服务端排查依赖/模型权重/GPU
+  - 客户端改进：① 失败提示附带服务端任务日志尾部（直接可见真实报错）；② 修复结果文件名解析——服务端把文件名放在 `params.output` 字段，之前未取该字段会导致下载 404
+  - **文件**：`studio/utils/vsr_client.py`
+
 ---
 
 ## 待实现
 
-- [ ] **27.** 生成脚本后关联素材
+- [ ] **29.** 服务端 VSR 引擎崩溃修复（待服务端排查）
+  - 现象：`/vsr/remove` 任务提交成功但执行即失败（`[ERROR] Subtitle removal did not finish successfully.`，进程退出码 1）
+  - 排查方向：在服务器上手动执行 `.venv/bin/python apps/vsr-v1.4.0/vsr_run.py --video ... --mode sttn --output ...` 查看完整报错；优先查依赖缺失、模型权重不完整、CUDA 不可用
+
+- [ ] **30.** 生成脚本后关联素材
   - 当前生成的 `.txt` 口播文案与素材的关联是隐式的（同名、同目录）
   - 需要为脚本建立与源镜头/素材的显式关联（如在产品资料库中关联脚本）
   - 支持从脚本反查使用了哪些分割镜头，从分割镜头反查属于哪个脚本

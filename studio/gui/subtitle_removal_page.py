@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import traceback
 import time
-import gc
 from PIL import Image, ImageDraw
 
 from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
@@ -15,144 +14,7 @@ from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon, QPainter, QPen, QColor
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
-from config.paths import TMP_DIR, VSR_DIR
-from utils.platform_utils import python_binary
-
-class SubtitleRemovalWorker(BaseWorker):
-    progress_updated = Signal(int)
-    status_updated = Signal(str)
-    log_received = Signal(str)
-    finished = Signal(bool, str)
-
-    def __init__(self, vsr_python, vsr_script, video_path, ymin, ymax, xmin, xmax, mode, skip_detect, lama_fast, h264, preview_path):
-        super().__init__()
-        self.vsr_python = vsr_python
-        self.vsr_script = vsr_script
-        self.video_path = video_path
-        self.ymin = ymin
-        self.ymax = ymax
-        self.xmin = xmin
-        self.xmax = xmax
-        self.mode = mode
-        self.skip_detect = skip_detect
-        self.lama_fast = lama_fast
-        self.h264 = h264
-        self.preview_path = preview_path
-        self.process = None
-
-    def run(self):
-        cmd = [
-            self.vsr_python,
-            self.vsr_script,
-            "--video", self.video_path,
-            "--ymin", str(self.ymin),
-            "--ymax", str(self.ymax),
-            "--xmin", str(self.xmin),
-            "--xmax", str(self.xmax),
-            "--mode", self.mode,
-            "--preview_path", self.preview_path
-        ]
-        if self.skip_detect:
-            cmd.append("--skip_detect")
-        if self.lama_fast:
-            cmd.append("--lama_fast")
-        if self.h264:
-            cmd.append("--h264")
-
-        self.status_updated.emit("正在准备启动 AI 去字幕算法包...")
-        self.log_received.emit(f"执行后端命令: {' '.join(cmd)}")
-        
-        try:
-            # Hide the command prompt console window on Windows
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
-
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                startupinfo=startupinfo,
-                bufsize=1,
-                cwd=os.path.dirname(self.vsr_script)
-            )
-            
-            while self.process.poll() is None:
-                line = self.process.stdout.readline()
-                if not line:
-                    continue
-                line = line.strip()
-                self.log_received.emit(line)
-                
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-                elif line.startswith("[STARTING]"):
-                    self.status_updated.emit("AI 正在深度擦除字幕并重绘视频区域...")
-            
-            # Read remaining output
-            for line in self.process.stdout:
-                line = line.strip()
-                self.log_received.emit(line)
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-                elif line.startswith("[STARTING]"):
-                    self.status_updated.emit("AI 正在深度擦除字幕并重绘视频区域...")
-                
-            ret_code = self.process.returncode
-            if ret_code == 0:
-                # Find output path. VSR outputs to {vd_name}_no_sub.mp4 in the same directory
-                base_dir = os.path.dirname(self.video_path)
-                vd_name = os.path.splitext(os.path.basename(self.video_path))[0]
-                ext = os.path.splitext(self.video_path)[1].lower()
-                is_pic = ext in [".jpg", ".jpeg", ".png", ".bmp"]
-                if is_pic:
-                    out_path = os.path.join(base_dir, "no_sub", f"{vd_name}{ext}")
-                else:
-                    out_path = os.path.join(base_dir, f"{vd_name}_no_sub.mp4")
-                self.finished.emit(True, out_path)
-            else:
-                self.finished.emit(False, f"去字幕引擎非正常退出，错误码: {ret_code}")
-                
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
-    def stop(self):
-        if self.process:
-            try:
-                # 使用 taskkill /T 确保终止包含 CUDA 子进程在内的整个进程树
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                    capture_output=True
-                )
-                try:
-                    self.process.wait(timeout=5)
-                except Exception:
-                    pass
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
-            finally:
-                # 进程终止后释放 GPU 缓存
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        gc.collect()
-                except Exception:
-                    pass
+from config.paths import TMP_DIR
 
 
 class InteractivePreviewLabel(QLabel):
@@ -596,11 +458,10 @@ class SubtitleRemovalPage(BasePage):
         btn_row.addWidget(self.btn_stop)
         action_layout.addLayout(btn_row)
 
-        self.chk_server_mode = QCheckBox("使用服务端处理（推荐，本机无需部署去字幕算法包）")
-        self.chk_server_mode.setChecked(True)
-        self.chk_server_mode.setStyleSheet("padding: 4px 8px;")
         server_row = QHBoxLayout()
-        server_row.addWidget(self.chk_server_mode)
+        _srv_hint = QLabel("☁️ 去字幕由算力服务端执行（本地无需部署算法包）")
+        _srv_hint.setObjectName("muted_text")
+        server_row.addWidget(_srv_hint)
         self.lbl_server_status = QLabel("")
         self.lbl_server_status.setObjectName("muted_text")
         server_row.addWidget(self.lbl_server_status)
@@ -852,7 +713,6 @@ class SubtitleRemovalPage(BasePage):
         xmax = int(self.x_slider.value() + self.w_slider.value())
 
         self.btn_start.setEnabled(False)
-        self.chk_server_mode.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.log_view.clear()
@@ -904,7 +764,6 @@ class SubtitleRemovalPage(BasePage):
         self.progress_bar.setValue(100)
         self.lbl_server_status.setText("✅ 处理完成")
         self.btn_start.setEnabled(True)
-        self.chk_server_mode.setEnabled(True)
 
         msg_box = QMessageBox(self.parent_widget)
         msg_box.setIcon(QMessageBox.Information)
@@ -924,7 +783,6 @@ class SubtitleRemovalPage(BasePage):
         self.progress_bar.setVisible(False)
         self.lbl_server_status.setText(f"❌ 失败: {msg[:80]}")
         self.btn_start.setEnabled(True)
-        self.chk_server_mode.setEnabled(True)
         QMessageBox.critical(self.parent_widget, "错误", f"服务端处理失败:\n{msg}")
 
     def start_removal(self):
@@ -933,136 +791,16 @@ class SubtitleRemovalPage(BasePage):
             QMessageBox.warning(self.parent_widget, "参数错误", "请先选择有效的输入视频或图片！")
             return
 
-        # 服务端模式
-        if self.chk_server_mode.isChecked():
-            self._start_remote_removal(video_path)
-            return
-
-        # 本地模式（原逻辑）
-
-        # Resolve paths to VSR local modules
-        vsr_dir = VSR_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", python_binary())
-        # QPT 打包的嵌入式 Python 没有 Scripts/ 子目录，python.exe 直接在 Python/ 下
-        if not os.path.exists(vsr_python):
-            vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
-
-        if not os.path.exists(vsr_python) or not os.path.exists(vsr_script):
-            QMessageBox.critical(
-                self.parent_widget,
-                "文件丢失",
-                f"未能定位到去字幕算法包及其关联的 Python 环境，请检查以下目录是否完整存在：\n\n{vsr_dir}"
-            )
-            return
-
-        # Remove previous preview file
-        if os.path.exists(self.preview_img_path):
-            try:
-                os.remove(self.preview_img_path)
-            except Exception:
-                pass
-
-        # Disable controls during execution
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        self.video_path_input.setEnabled(False)
-        self.x_slider.setEnabled(False)
-        self.w_slider.setEnabled(False)
-        self.y_slider.setEnabled(False)
-        self.h_slider.setEnabled(False)
-        self.btn_reset_area.setEnabled(False)
-        self.mode_combo.setEnabled(False)
-        self.skip_detect_chk.setEnabled(False)
-        self.lama_fast_chk.setEnabled(False)
-        self.h264_chk.setEnabled(False)
-        self.seek_slider.setEnabled(False)
-        self.btn_prev_frame.setEnabled(False)
-        self.btn_next_frame.setEnabled(False)
-
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.log_view.clear()
-
-        # Instantiate background worker
-        self.worker = SubtitleRemovalWorker(
-            vsr_python=vsr_python,
-            vsr_script=vsr_script,
-            video_path=video_path,
-            ymin=self.y_slider.value(),
-            ymax=self.y_slider.value() + self.h_slider.value(),
-            xmin=self.x_slider.value(),
-            xmax=self.x_slider.value() + self.w_slider.value(),
-            mode=self.mode_combo.currentData(),
-            skip_detect=self.skip_detect_chk.isChecked(),
-            lama_fast=self.lama_fast_chk.isChecked(),
-            h264=self.h264_chk.isChecked(),
-            preview_path=self.preview_img_path
-        )
-        self.worker.progress_updated.connect(self.on_worker_progress)
-        self.worker.status_updated.connect(self.on_worker_status)
-        self.worker.log_received.connect(self.on_worker_log)
-        self.worker.finished.connect(self.on_worker_finished)
-        self.worker.start()
-
-        # Timer to update preview frames from file (runs every 400ms)
-        self.timer = QTimer()
-        self.timer.setInterval(400)
-        self.timer.timeout.connect(self.poll_preview_image)
-        self.timer.start()
+        # 去字幕已服务端化：统一走算力服务端（本地不再内置 VSR 算法包）
+        self._start_remote_removal(video_path)
 
     def stop_removal(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.status_lbl.setText("状态: 已被用户终止。")
-            self.log_view.append("\n[WARN] 去字幕引擎任务已被用户终止。")
-            self.cleanup_ui()
-
-    def on_worker_progress(self, val):
-        self.progress_bar.setValue(val)
-
-    def on_worker_status(self, text):
-        self.status_lbl.setText(f"状态: {text}")
-
-    def on_worker_log(self, text):
-        self.log_view.append(text)
-
-    def on_worker_finished(self, success, out_path):
-        self.cleanup_ui()
-        if success:
-            self.status_lbl.setText("状态: 字幕擦除完毕！")
-            QMessageBox.information(
-                self.parent_widget,
-                "去字幕成功",
-                f"字幕擦除并画面重绘成功！\n新生成的媒体文件已保存至：\n\n{out_path}"
-            )
-            # Load the new video first frame as the preview
-            self._on_video_path_changed(out_path)
-            self.video_path_input.setText(out_path)
-        else:
-            self.status_lbl.setText(f"状态: 出错。")
-            QMessageBox.critical(
-                self.parent_widget,
-                "处理失败",
-                f"去字幕执行过程中发生错误：\n\n{out_path}"
-            )
-
-    def poll_preview_image(self):
-        # Read the file by loading it into memory to avoid OS file locks
-        if os.path.exists(self.preview_img_path):
-            try:
-                pix = QPixmap()
-                with open(self.preview_img_path, "rb") as f:
-                    data = f.read()
-                pix.loadFromData(data)
-                if not pix.isNull():
-                    self.preview_label.setPixmap(pix.scaled(
-                        self.preview_label.size(), 
-                        Qt.KeepAspectRatio, 
-                        Qt.SmoothTransformation
-                    ))
-            except Exception:
-                pass
+        # 去字幕已服务端化：任务提交后无法从本地终止
+        QMessageBox.information(
+            self.parent_widget,
+            "提示",
+            "去字幕任务已提交至服务端，本地无法中途终止，请等待其完成或超时。"
+        )
 
     def cleanup_ui(self):
         if self.timer:

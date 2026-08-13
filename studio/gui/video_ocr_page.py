@@ -13,133 +13,60 @@ from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap, QIcon
 from utils.logger_utils import log
-from config.paths import TMP_DIR, VSR_V14_DIR, OUTPUTS_DIR, PADDLEOCR_PYTHON, PADDLEOCR_SCRIPT
+from config.paths import TMP_DIR, OUTPUTS_DIR
 
 class VideoOcrWorker(BaseWorker):
+    """视频 OCR 服务端 Worker：上传视频 → 服务端逐帧 OCR → 下载 CSV。
+
+    客户端不再依赖本地 PaddleOCR（apps/PaddleOCR），识别由算力服务端执行。
+    """
     progress_updated = Signal(int)
     status_updated = Signal(str)
     log_received = Signal(str)
     finished = Signal(bool, str) # success, output_path_or_error
 
-    def __init__(self, vsr_python, ocr_script, video_path, box, sample_interval, filter_mode, output_path, preview_path):
+    def __init__(self, video_path, box, sample_interval, filter_mode, output_path):
         """
-        :param box: list of (ymin, ymax, xmin, xmax)
+        :param box: (ymin, ymax, xmin, xmax)
         """
         super().__init__()
-        self.vsr_python = vsr_python
-        self.ocr_script = ocr_script
         self.video_path = video_path
         self.box = box
         self.sample_interval = sample_interval
         self.filter_mode = filter_mode
         self.output_path = output_path
-        self.preview_path = preview_path
-        self.process = None
         self.is_aborted = False
 
-    def run(self):
-        ymin, ymax, xmin, xmax = self.box
-        
-        cmd = [
-            self.vsr_python,
-            self.ocr_script,
-            "--video", self.video_path,
-            "--ymin", str(ymin),
-            "--ymax", str(ymax),
-            "--xmin", str(xmin),
-            "--xmax", str(xmax),
-            "--sample_interval", str(self.sample_interval),
-            "--filter_mode", self.filter_mode,
-            "--preview_path", self.preview_path,
-            "--output", self.output_path
-        ]
-
-        self.status_updated.emit("正在初始化 OCR 推理引擎...")
-        self.log_received.emit(f"[INFO] 开始 OCR 识别任务")
-        self.log_received.emit(f"[INFO] 视频文件: {self.video_path}")
-        self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")
-        self.log_received.emit(f"[INFO] 执行后端命令: {' '.join(cmd)}")
-
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0 # SW_HIDE
-
+    def do_work(self):
         try:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                startupinfo=startupinfo,
-                bufsize=1,
-                cwd=os.path.dirname(self.ocr_script)
+            from utils.ocr_client import video_ocr_remote
+
+            def _cb(stage):
+                self.status_updated.emit(stage)
+                self.log_received.emit(stage)
+
+            ymin, ymax, xmin, xmax = self.box
+            self.status_updated.emit("正在调用服务端 OCR 识别...")
+            self.log_received.emit("[INFO] 开始 OCR 识别任务（服务端模式）")
+            self.log_received.emit(f"[INFO] 视频文件: {self.video_path}")
+            self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")
+            result = video_ocr_remote(
+                self.video_path,
+                box=self.box,
+                sample_interval=self.sample_interval,
+                filter_mode=self.filter_mode,
+                out_path=self.output_path,
+                progress_cb=_cb,
             )
-
-            while self.process.poll() is None:
-                if self.is_aborted:
-                    self.process.terminate()
-                    break
-                    
-                line = self.process.stdout.readline()
-                if not line:
-                    continue
-                line = line.strip()
-                self.log_received.emit(line)
-                
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-                elif line.startswith("[STARTING]"):
-                    self.status_updated.emit("OCR 引擎启动中...")
-                elif line.startswith("[OCR]"):
-                    self.status_updated.emit(f"正在识别中: {line.split('|')[-2].strip()}")
-
-            # Read remaining stdout
-            for line in self.process.stdout:
-                line = line.strip()
-                self.log_received.emit(line)
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-
-            ret_code = self.process.returncode
-            if self.is_aborted:
-                self.finished.emit(False, "用户终止运行。")
-            elif ret_code == 0:
-                self.finished.emit(True, self.output_path)
-            else:
-                self.finished.emit(False, f"OCR 进程退出异常，错误码: {ret_code}")
-
+            self.progress_updated.emit(100)
+            self.finished.emit(True, result)
         except Exception as e:
-            self.finished.emit(False, f"执行 OCR 时发生异常: {str(e)}")
+            self.finished.emit(False, str(e))
 
     def stop(self):
+        # 服务端任务提交后无法从本地终止，仅做标记
         self.is_aborted = True
-        if self.process:
-            try:
-                # 异步运行 taskkill 防止 GUI 主线程卡死
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0 # SW_HIDE
-                subprocess.Popen(
-                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=startupinfo
-                )
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
+        self.log_received.emit("[WARN] 服务端任务已提交，本地无法中途终止，请等待完成或超时。")
 
 
 class InteractivePreviewLabelOCR(QLabel):
@@ -819,17 +746,6 @@ class VideoOcrPage(BasePage):
             QMessageBox.warning(self.parent_widget, "错误", "请指定输出 CSV 保存路径。")
             return
 
-        vsr_python = PADDLEOCR_PYTHON
-        ocr_script = PADDLEOCR_SCRIPT
-
-        if not os.path.exists(vsr_python) or not os.path.exists(ocr_script):
-            QMessageBox.warning(
-                self.parent_widget,
-                "环境未就绪",
-                "未检测到 PaddleOCR 专属运行环境，请先前往「🤖 大模型配置」或「⚙️ 环境配置」菜单下一键部署创建专属环境！"
-            )
-            return
-
         # Get settings
         sample_interval = self.rate_combo.currentData()
         filter_mode = self.filter_combo.currentData()
@@ -857,16 +773,13 @@ class VideoOcrPage(BasePage):
         self.btn_prev_frame.setEnabled(False)
         self.btn_next_frame.setEnabled(False)
 
-        # Spawn worker
+        # Spawn worker（服务端 OCR 模式）
         self.worker = VideoOcrWorker(
-            vsr_python=vsr_python,
-            ocr_script=ocr_script,
             video_path=video_path,
             box=box_tuple,
             sample_interval=sample_interval,
             filter_mode=filter_mode,
-            output_path=out_path,
-            preview_path=self.preview_img_path
+            output_path=out_path
         )
         self.worker.progress_updated.connect(self.progress_bar.setValue)
         self.worker.status_updated.connect(self.status_lbl.setText)

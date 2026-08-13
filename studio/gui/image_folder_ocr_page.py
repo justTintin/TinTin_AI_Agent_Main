@@ -11,185 +11,71 @@ from PySide6.QtCore import Signal, QThread, Qt, QSize
 from utils.base_worker import BaseWorker
 from PySide6.QtGui import QImage, QPixmap
 from utils.logger_utils import log
-from config.paths import TMP_DIR, OUTPUTS_DIR, PADDLEOCR_PYTHON, IMAGE_FOLDER_OCR_SCRIPT
+from config.paths import TMP_DIR, OUTPUTS_DIR
 from gui.video_ocr_page import InteractivePreviewLabelOCR
 
 class ImageFolderOcrWorker(BaseWorker):
+    """图片文件夹批量 OCR 服务端 Worker：打包 zip 上传 → 服务端识别提取 → 下载结果。
+
+    客户端不再依赖本地 PaddleOCR，识别由算力服务端执行。
+    """
     progress_updated = Signal(int)
     status_updated = Signal(str)
     log_received = Signal(str)
     finished = Signal(bool, str) # success, output_path_or_error
 
-    def __init__(self, vsr_python, ocr_script, folder_path, key_text, output_path):
+    def __init__(self, folder_path, key_text, output_path):
         super().__init__()
-        self.vsr_python = vsr_python
-        self.ocr_script = ocr_script
         self.folder_path = folder_path
         self.key_text = key_text
         self.output_path = output_path
-        self.process = None
         self.is_aborted = False
 
-    def run(self):
-        cmd = [
-            self.vsr_python,
-            self.ocr_script,
-            "--folder", self.folder_path,
-            "--key", self.key_text,
-            "--output", self.output_path
-        ]
-
-        self.status_updated.emit("正在初始化 OCR 推理引擎...")
-        self.log_received.emit("[INFO] 开始图片文件夹批量 OCR 识别任务")
-        self.log_received.emit(f"[INFO] 文件夹路径: {self.folder_path}")
-        self.log_received.emit(f"[INFO] 定位关键词: {self.key_text}")
-        self.log_received.emit(f"[INFO] 执行后端命令: {' '.join(cmd)}")
-
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0 # SW_HIDE
-
+    def do_work(self):
         try:
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                startupinfo=startupinfo,
-                bufsize=1,
-                cwd=os.path.dirname(self.ocr_script)
+            from utils.ocr_client import image_folder_ocr_remote
+
+            def _cb(stage):
+                self.status_updated.emit(stage)
+                self.log_received.emit(stage)
+
+            fmt = "txt" if str(self.output_path).lower().endswith(".txt") else "csv"
+            self.status_updated.emit("正在调用服务端批量 OCR...")
+            self.log_received.emit("[INFO] 开始图片文件夹批量 OCR 识别任务（服务端模式）")
+            self.log_received.emit(f"[INFO] 文件夹路径: {self.folder_path}")
+            self.log_received.emit(f"[INFO] 定位关键词: {self.key_text}")
+            result = image_folder_ocr_remote(
+                self.folder_path,
+                key_text=self.key_text,
+                out_path=self.output_path,
+                output_format=fmt,
+                progress_cb=_cb,
             )
-
-            saved_path = self.output_path
-            while self.process.poll() is None:
-                if self.is_aborted:
-                    self.process.terminate()
-                    break
-                    
-                line = self.process.stdout.readline()
-                if not line:
-                    continue
-                line = line.strip()
-                self.log_received.emit(line)
-                
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-                elif line.startswith("[STARTING]"):
-                    self.status_updated.emit("OCR 引擎批量运行中...")
-                elif line.startswith("[OCR]"):
-                    self.status_updated.emit(f"正在识别中: {line.split('|')[0].replace('[OCR] Image:', '').strip()}")
-                elif line.startswith("[SUCCESS]"):
-                    import re
-                    match = re.search(r"Results saved to:\s*(.*)$", line)
-                    if match:
-                        saved_path = match.group(1).strip()
-
-            # Read remaining stdout
-            for line in self.process.stdout:
-                line = line.strip()
-                self.log_received.emit(line)
-                if line.startswith("[PROGRESS]"):
-                    try:
-                        prog = int(line.split()[1])
-                        self.progress_updated.emit(prog)
-                    except Exception:
-                        pass
-                elif line.startswith("[SUCCESS]"):
-                    import re
-                    match = re.search(r"Results saved to:\s*(.*)$", line)
-                    if match:
-                        saved_path = match.group(1).strip()
-
-            ret_code = self.process.returncode
-            if self.is_aborted:
-                self.finished.emit(False, "用户终止运行。")
-            elif ret_code == 0:
-                self.finished.emit(True, saved_path)
-            else:
-                self.finished.emit(False, f"OCR 进程退出异常，错误码: {ret_code}")
-
+            self.progress_updated.emit(100)
+            self.finished.emit(True, result)
         except Exception as e:
-            self.finished.emit(False, f"执行 OCR 时发生异常: {str(e)}")
+            self.finished.emit(False, str(e))
 
     def stop(self):
+        # 服务端任务提交后无法从本地终止，仅做标记
         self.is_aborted = True
-        if self.process:
-            try:
-                # 异步运行 taskkill 防止 GUI 主线程卡死
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0 # SW_HIDE
-                subprocess.Popen(
-                    ["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=startupinfo
-                )
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
+        self.log_received.emit("[WARN] 服务端任务已提交，本地无法中途终止。")
 
 
 class ImageOcrTestWorker(BaseWorker):
+    """选区 OCR 测试 Worker：单图 ROI 裁剪 OCR（服务端同步接口）。"""
     finished = Signal(bool, str) # success, text_or_error
 
-    def __init__(self, vsr_python, ocr_script, image_path, box):
+    def __init__(self, image_path, box):
         super().__init__()
-        self.vsr_python = vsr_python
-        self.ocr_script = ocr_script
         self.image_path = image_path
-        self.box = box # [ymin, ymax, xmin, xmax]
+        self.box = box # (ymin, ymax, xmin, xmax)
 
-    def run(self):
-        ymin, ymax, xmin, xmax = self.box
-        cmd = [
-            self.vsr_python,
-            self.ocr_script,
-            "--test_mode",
-            "--image", self.image_path,
-            "--ymin", str(ymin),
-            "--ymax", str(ymax),
-            "--xmin", str(xmin),
-            "--xmax", str(xmax)
-        ]
-
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0 # SW_HIDE
-
+    def do_work(self):
         try:
-            p = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                startupinfo=startupinfo,
-                cwd=os.path.dirname(self.ocr_script)
-            )
-            
-            output, _ = p.communicate()
-            
-            # Find test result line
-            test_result = ""
-            for line in output.splitlines():
-                if line.startswith("[TEST_RESULT] Text:"):
-                    test_result = line.replace("[TEST_RESULT] Text:", "").strip()
-                    break
-                    
-            if p.returncode == 0:
-                self.finished.emit(True, test_result if test_result else "(无识别文本)")
-            else:
-                self.finished.emit(False, f"测试进程异常退出，错误码: {p.returncode}\n日志: {output}")
+            from utils.ocr_client import ocr_image_roi
+            text = ocr_image_roi(self.image_path, box=self.box)
+            self.finished.emit(True, text if text else "(无识别文本)")
         except Exception as e:
             self.finished.emit(False, str(e))
 
@@ -641,17 +527,6 @@ class ImageFolderOcrPage(BasePage):
             QMessageBox.warning(self.parent_widget, "提示", "请先选择包含有效图片的文件夹。")
             return
 
-        vsr_python = PADDLEOCR_PYTHON
-        ocr_script = IMAGE_FOLDER_OCR_SCRIPT
-
-        if not os.path.exists(vsr_python) or not os.path.exists(ocr_script):
-            QMessageBox.warning(
-                self.parent_widget,
-                "环境未就绪",
-                "未检测到 PaddleOCR 专属运行环境，请先前往「⚙️ 环境配置」部署专属环境。"
-            )
-            return
-
         x, y, w, h = self.box
         ymin = y
         ymax = y + h
@@ -664,8 +539,6 @@ class ImageFolderOcrPage(BasePage):
         self.status_lbl.setText("状态: 正在测试选区 OCR...")
 
         self.test_worker = ImageOcrTestWorker(
-            vsr_python=vsr_python,
-            ocr_script=ocr_script,
             image_path=self.template_image_path,
             box=box_tuple
         )
@@ -725,16 +598,12 @@ class ImageFolderOcrPage(BasePage):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.status_lbl.setText("状态: 正在初始化本地 OCR 批量任务...")
+        self.status_lbl.setText("状态: 正在初始化服务端 OCR 批量任务...")
 
-        vsr_python = PADDLEOCR_PYTHON
-        ocr_script = IMAGE_FOLDER_OCR_SCRIPT
         out_path = self.output_path_input.text().strip()
 
-        # Spawn worker thread
+        # Spawn worker thread（服务端 OCR 模式）
         self.worker = ImageFolderOcrWorker(
-            vsr_python=vsr_python,
-            ocr_script=ocr_script,
             folder_path=folder_path,
             key_text=key_text,
             output_path=out_path

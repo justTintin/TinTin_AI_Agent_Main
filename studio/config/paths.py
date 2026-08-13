@@ -63,15 +63,8 @@ VOICE_SAMPLES_BUNDLE_DIR = os.path.join(BUNDLE_ASSETS_DIR, "voice_samples")
 APPS_DIR = os.path.join(WORKSPACE_ROOT, "apps")
 PW_BROWSERS_DIR = os.path.join(APPS_DIR, "pw-browsers")
 WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
-VSR_DIR = os.path.join(APPS_DIR, "vsr-v1.1.1-windows-nvidia-cuda")
-VSR_V14_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0")
-PADDLEOCR_VENV_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0", "Python")
-PADDLEOCR_PYTHON = os.path.join(PADDLEOCR_VENV_DIR, "python.exe")
-if not os.path.isfile(PADDLEOCR_PYTHON):
-    from utils.platform_utils import find_python
-    PADDLEOCR_PYTHON = find_python()
-PADDLEOCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "video_ocr_backend.py")
-IMAGE_FOLDER_OCR_SCRIPT = os.path.join(APPS_DIR, "PaddleOCR", "image_folder_ocr_backend.py")
+# VSR 去字幕已服务端化：客户端不再内置本地 VSR 算法包，去字幕由算力服务端执行（见 utils/vsr_client.py）
+# PaddleOCR 已服务端化：客户端不再内置本地 OCR 引擎，识别由算力服务端执行（见 utils/ocr_client.py）
 REMBG_DIR = os.path.join(APPS_DIR, "rembg")
 # 只读资源：assets 下的内置浏览器包（frozen 时在 _BUNDLE_DIR）
 BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")

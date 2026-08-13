@@ -14,7 +14,7 @@ from utils.base_worker import BaseWorker
 import configparser
 from utils.logger_utils import log
 from config.paths import (WORKSPACE_ROOT, APPS_DIR,
-                           VSR_DIR, KNOWLEDGE_MATERIALS_DIR,
+                           KNOWLEDGE_MATERIALS_DIR,
                            KNOWLEDGE_MEDIA_DIR,
                            DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
@@ -180,7 +180,7 @@ class EnvConfigPage(BasePage):
         layout_other.setContentsMargins(16, 20, 16, 16)
         layout_other.setSpacing(10)
         self._add_status_row(layout_other, "ffmpeg", "🎞️ FFmpeg 编解码器")
-        self._add_status_row(layout_other, "vsr", "✂️ VSR 去字幕算法组件")
+        self._add_status_row(layout_other, "vsr", "✂️ VSR 去字幕（算力服务端）")
         
         # Add local refresh button for codecs
         self.btn_refresh_codecs = QPushButton("🔄 刷新音视频编解码检测")
@@ -401,59 +401,20 @@ class EnvConfigPage(BasePage):
             info["ffmpeg_ok"] = False
             info["ffmpeg_path"] = "未在系统环境或软件目录中检测到 ffmpeg.exe"
 
-        # 6. VSR Subtitle Remover
-        vsr_dir = VSR_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        vsr_script = os.path.join(vsr_dir, "resources", "vsr_run.py")
-        if os.path.isdir(vsr_dir) and os.path.isfile(vsr_python) and os.path.isfile(vsr_script):
-            info["vsr_ok"] = True
-            info["vsr_status"] = f"已就绪 (内嵌环境: {vsr_python})"
-        else:
-            info["vsr_ok"] = False
-            info["vsr_status"] = "未就绪 (缺少 apps/vsr-v1.1.1-windows-nvidia-cuda 主目录或内嵌 Python 环境)"
+        # 6. VSR 去字幕（纯远程模式，客户端不再内置本地算法包）
+        info["vsr_ok"] = True
+        info["vsr_status"] = "远程模式（由 compute_server_url 提供去字幕服务）"
 
         # 8. VoxCPM（纯远程模式）
         info["voxcpm_installed"] = True
         info["voxcpm_ok"] = True
         info["voxcpm_status"] = "远程模式（由 ai_config 配置 vox_api_url）"
 
-        # 9. PaddleOCR Isolated Environment & Models
-        from config.paths import PADDLEOCR_PYTHON, PADDLEOCR_SCRIPT
-        info["paddleocr_ok"] = False
-        info["paddleocr_status"] = "未安装"
-        if os.path.isfile(PADDLEOCR_PYTHON):
-            try:
-                # Dynamically inject the path inside python command to bypass embedded Python ignoring PYTHONPATH
-                paddleocr_src = os.path.abspath(os.path.join(WORKSPACE_ROOT, "apps", "PaddleOCR"))
-                cmd_str = f"import sys; sys.path.insert(0, r'{paddleocr_src}'); import paddleocr, paddlex, aiohttp"
-                result = subprocess.run(
-                    [PADDLEOCR_PYTHON, "-c", cmd_str],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                if result.returncode == 0:
-                    info["paddleocr_ok"] = True
-                    info["paddleocr_status"] = "已就绪"
-                else:
-                    err = result.stderr.strip() or result.stdout.strip()
-                    last_line = err.splitlines()[-1] if err else "未知错误"
-                    info["paddleocr_status"] = f"依赖缺失: {last_line}"
-            except Exception as e:
-                info["paddleocr_status"] = f"依赖缺失: {str(e)}"
-        else:
-            info["paddleocr_status"] = "未安装 (缺少专属虚拟环境)"
-
-        local_paddlex_dir = os.path.join(APPS_DIR, "PaddleOCR", "paddle-models", "official_models")
-        info["paddleocr_models_dir"] = local_paddlex_dir
-        found_p_models = []
-        if os.path.isdir(local_paddlex_dir):
-            for fn in os.listdir(local_paddlex_dir):
-                sub_path = os.path.join(local_paddlex_dir, fn)
-                if os.path.isdir(sub_path):
-                    found_p_models.append(fn)
-        info["paddleocr_models"] = found_p_models if found_p_models else ["暂无集成模型 (运行或一键集成时会自动加载)"]
+        # 9. PaddleOCR（纯远程模式，客户端不再内置本地 OCR 引擎）
+        info["paddleocr_ok"] = True
+        info["paddleocr_status"] = "远程模式（由 compute_server_url 提供 OCR 服务）"
+        info["paddleocr_models"] = ["远程模式，无需本地模型"]
+        info["paddleocr_models_dir"] = ""
 
         # 10. Hardware Info
         try:

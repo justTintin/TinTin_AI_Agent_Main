@@ -19,7 +19,7 @@ from config.paths import (
     PROJECT_ROOT, AI_CONFIG_FILE, ERP_CONFIG_FILE, CONFIG_INI_FILE,
     PRODUCT_LIBRARY_FILE, MY_KNOWLEDGE_FILE, MEDIA_LIBRARY_FILE,
     ACCOUNTS_DIR, VOICE_SAMPLES_DIR, OUTPUTS_DIR,
-    VIDEO_CONFIG_FILE, CONFIG_DIR,
+    VIDEO_CONFIG_FILE, CONFIG_DIR, SKILLS_DIR,
 )
 
 DATA_ITEMS = [
@@ -44,6 +44,8 @@ DATA_ITEMS = [
     {"key": "accounts", "label": "抖音账号(含登录态)", "path": ACCOUNTS_DIR,
      "category": "business", "sensitive": True, "kind": "dir"},
     {"key": "voice_samples", "label": "声音样本库", "path": VOICE_SAMPLES_DIR,
+     "category": "business", "sensitive": False, "kind": "dir"},
+    {"key": "skills", "label": "已安装技能", "path": SKILLS_DIR,
      "category": "business", "sensitive": False, "kind": "dir"},
 ]
 

@@ -69,6 +69,11 @@ studio/data/agent_registry.json
 # 工作台对话本地持久化（机器级运行时数据：消息 + 会话 ID，不入库）
 studio/data/agent_chat_history.json
 studio/data/agent_chat_history.json.tmp
+# 本地技能（用户安装的 SKILL.md 包，不入库）
+studio/data/skills/
+studio/data/skills_index.json
+# 自动上架运行时（同步数据包 / Chrome 用户目录 / 结果截图，不入库）
+studio/data/auto_listing/
 
 # Node
 node_modules/

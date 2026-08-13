@@ -19,7 +19,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
-    QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from gui.base_page import BasePage
@@ -125,10 +125,17 @@ class ExtensionPage(BasePage):
 
         outer = QVBoxLayout(self.parent_widget)
         outer.setContentsMargins(0, 0, 0, 0)
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        outer.addWidget(self.tabs)
+
+        download_tab = QWidget()
+        dl_lay = QVBoxLayout(download_tab)
+        dl_lay.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
-        outer.addWidget(scroll)
+        dl_lay.addWidget(scroll)
         body = QWidget()
         scroll.setWidget(body)
         root = QVBoxLayout(body)
@@ -150,9 +157,15 @@ class ExtensionPage(BasePage):
         root.addWidget(self._build_browser_card())
         root.addWidget(self._build_bridge_card())
         root.addWidget(self._build_records_card(), 1)
+        self.tabs.addTab(download_tab, "⬇ 下载插件")
 
         self.bridge.record_added.connect(lambda _rec: self._refresh_records())
         self.bridge.log_message.connect(lambda _msg: self._refresh_bridge_status())
+
+        from gui.auto_listing_tab import AutoListingTab
+        self.auto_listing_tab = AutoListingTab(self)
+        self.tabs.addTab(self.auto_listing_tab, "🚀 自动上架")
+
         self._refresh_browsers()
         self._refresh_bridge_status()
         self._refresh_records()
@@ -594,3 +607,5 @@ class ExtensionPage(BasePage):
     def refresh(self):
         self._refresh_bridge_status()
         self._refresh_records()
+        if hasattr(self, "auto_listing_tab"):
+            self.auto_listing_tab.refresh()

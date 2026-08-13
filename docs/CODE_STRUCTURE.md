@@ -341,9 +341,12 @@ TinTin_AI_Agent_Main/                      # 项目根目录
 | `logger_utils.py` | 日志工具 | loguru 封装 |
 | `agent_client.py` | 智能体编排客户端 | HTTP → 服务端 `/agent/*`（注册表/任务树/产物） |
 | `agent_router.py` | 意图路由 | 关键词规则 + LLM 拆解 plan |
+| `skill_manager.py` | 本地技能安装/管理 | `data/skills/` 目录 + ZIP 安装/卸载 |
+| `skill_manager_dialog.py` | 技能管理弹窗 | 工作台「技能」入口，安装后并入智能体列表 |
+| `auto_listing/` | 自动上架引擎 | 数据包校验 + Chrome CDP + Playwright 抖店商品创建 |
 | `local_scheduler.py` | 本地定时任务调度 | Windows schtasks 命令注册/查询/注销 |
 | `scheduled_task_client.py` | 服务端成片任务调度 | HTTP → `/tasks/unified` |
-| `agent_home_page.py` | 智能体工作台 | 高频任务 + 一句话需求（关键词/编排入口） |
+| `agent_home_page.py` | 智能体工作台 | 高频任务 + 一句话需求 + 本地技能/智能体合并唤起 |
 | `scheduled_tasks_mgmt_page.py` | 定时任务管理页 | 本地 schtasks + 服务端任务 + 编排任务概览 |
 
 ### 3.4 核心引擎层 — `studio/core/`
@@ -547,7 +550,8 @@ gui_main.py (MainWindow)
 | 媒体库 | 素材管理 | `video_indexer.py` |
 | 媒体库 | 素材浏览器 | Electron app + `asset_browser_client.py` |
 | 媒体库 | 向量检索 | `vector_search_page.py` |
-| 媒体库 | 任务队列 | — |
+| 系统设置 | 任务队列 | `main_window_pages.py`（原媒体库任务队列页迁移） |
+| 系统设置 | 扩展插件（下载插件 + 自动上架） | `gui/extension_page.py`, `gui/auto_listing_tab.py` |
 | 成片制作 | 智能混剪 | `video_montage_page.py`, `gui/montage/` |
 | 成片制作 | 直播切片 | `live_clip_page.py` |
 | 图形处理 | 图像抠图 | `image_matting_page.py` |

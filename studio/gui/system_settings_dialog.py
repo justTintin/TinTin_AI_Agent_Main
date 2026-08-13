@@ -22,6 +22,7 @@ SETTINGS_MENUS = [
     ("本地配置", "download", 21),
     ("环境与维护", "server", 36),
     ("扩展插件", "puzzle", 43),
+    ("任务队列", "format-list-checks", 9),
     ("关于", "information", 6),
 ]
 
@@ -90,7 +91,7 @@ class SystemSettingsDialog(QDialog):
                 log.warning(f"[系统设置] 关于页构建失败: {e}")
         attr_map = {
             7: "ai_settings", 22: "llm_settings", 21: "voice_samples",
-            36: "backup", 43: "extension", 6: "about",
+            36: "backup", 43: "extension", 9: "task_list", 6: "about",
         }
         stack = main_window.content_stack
         self._page_index = {}
@@ -129,6 +130,14 @@ class SystemSettingsDialog(QDialog):
         """切换菜单时刷新页面数据（对齐原 trigger_page_logic 对应分支）。"""
         mw = self.main_window
         try:
+            if idx == 9:
+                if hasattr(mw, "refresh_server_tasks"):
+                    mw.refresh_server_tasks()
+                if hasattr(mw, "refresh_timer"):
+                    mw.refresh_timer.start()
+            else:
+                if hasattr(mw, "refresh_timer"):
+                    mw.refresh_timer.stop()
             if idx == 7 and hasattr(mw, "refresh_llm_page_status"):
                 mw.refresh_llm_page_status()
             elif idx == 36:
@@ -145,3 +154,10 @@ class SystemSettingsDialog(QDialog):
                 mw.extension_tool.refresh()
         except Exception as e:
             log.warning(f"[系统设置] 菜单刷新失败 index={idx}: {e}")
+
+    def closeEvent(self, event):
+        """关闭设置窗口时停止任务队列轮询，避免后台继续请求。"""
+        mw = self.main_window
+        if hasattr(mw, "refresh_timer"):
+            mw.refresh_timer.stop()
+        super().closeEvent(event)

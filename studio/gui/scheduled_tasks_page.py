@@ -189,9 +189,15 @@ class ScheduledTasksPage(BasePage):
         log_row.addWidget(self.btn_select_all)
         self.btn_download_selected = QPushButton("⬇ 下载所选")
         self.btn_download_selected.setObjectName("secondary_button")
-        self.btn_download_selected.setToolTip("下载所有已勾选任务的成片到指定目录")
+        self.btn_download_selected.setToolTip("下载所有已勾选任务的成片视频到指定目录")
         self.btn_download_selected.clicked.connect(self._download_selected)
         log_row.addWidget(self.btn_download_selected)
+        self.btn_download_selected_pkg = QPushButton("🗜 打包所选")
+        self.btn_download_selected_pkg.setObjectName("secondary_button")
+        self.btn_download_selected_pkg.setToolTip(
+            "下载所有已勾选且支持打包任务（成片+全部素材+manifest.json）")
+        self.btn_download_selected_pkg.clicked.connect(self._download_selected_package)
+        log_row.addWidget(self.btn_download_selected_pkg)
         log_row.addStretch()
         self.btn_view_log = QPushButton("📜 查看日志")
         self.btn_view_log.setObjectName("secondary_button")
@@ -365,10 +371,7 @@ class ScheduledTasksPage(BasePage):
                 btn_play = table_action_button("▶", "播放成片")
                 btn_play.clicked.connect(lambda _=False, u=url: self._play_video(u))
                 self.table.setCellWidget(i, 6, btn_play)
-                btn_dl = table_action_button("⬇", "下载成片")
-                btn_dl.clicked.connect(
-                    lambda _=False, u=url, tid=tid: self._download_single(u, tid))
-                self.table.setCellWidget(i, 7, btn_dl)
+                self.table.setCellWidget(i, 7, self._make_download_cell(t))
             # 创建时间
             self.table.setItem(i, 8, QTableWidgetItem(self._fmt_time(t.get("created_at"))))
             # 操作列：删除
@@ -477,6 +480,9 @@ class ScheduledTasksPage(BasePage):
             vid = result.get("output_url") or result.get("video_path") or result.get("output_path") or ""
             if vid:
                 lines.append(f"- **成片视频**：{vid}")
+            pkg = result.get("package_url") or ""
+            if pkg:
+                lines.append(f"- **打包下载（成片+素材+manifest）**：{pkg}")
             dur = result.get("total_duration") or result.get("duration")
             if dur:
                 lines.append(f"- **时长**：{dur}s")
@@ -491,6 +497,13 @@ class ScheduledTasksPage(BasePage):
                 lines.append(f"- **旁白**：{result.get('narration')}")
             if result.get("warnings"):
                 lines.append(f"- **警告**：`{result.get('warnings')}`")
+            assets = result.get("assets") or []
+            if assets:
+                lines += ["", "#### 素材资产"]
+                for a in assets:
+                    lines.append(
+                        f"- **{a.get('type')}**｜{a.get('filename')}｜"
+                        f"{a.get('duration')}s｜`{a.get('source_uri')}`")
         elif result:
             lines.append(f"- **结果**：`{result}`")
         lines += ["", "#### 参数"]
@@ -618,6 +631,24 @@ class ScheduledTasksPage(BasePage):
         lay.addWidget(btn_del)
         return w
 
+    def _make_download_cell(self, task):
+        """下载列：视频下载 + 打包下载两个按钮。"""
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(4)
+        btn_video = table_action_button("⬇ 视频", "下载成片视频")
+        btn_video.clicked.connect(
+            lambda _=False, t=task: self._download_video(t))
+        lay.addWidget(btn_video)
+        if _resolve_package_url(task):
+            btn_pkg = table_action_button(
+                "🗜 打包", "打包下载：成片+素材+manifest.json")
+            btn_pkg.clicked.connect(
+                lambda _=False, t=task: self._download_package(t))
+            lay.addWidget(btn_pkg)
+        lay.addStretch()
+        return w
+
     def _resolve_video_url(self, t):
         """从任务 result 解析出可访问的成片 URL。
 
@@ -625,40 +656,58 @@ class ScheduledTasksPage(BasePage):
         （如 '/editor/render/192/result/'），相对路径拼服务端地址；
         绝对 http(s) 地址直接使用。
         """
-        result = t.get("result", {}) or {}
-        raw = (result.get("video_url") or result.get("url")
-               or result.get("output_url") or result.get("output_file")
-               or result.get("file_url") or "")
-        raw = str(raw or "").strip()
-        if not raw:
-            return ""
-        if raw.startswith("http"):
-            return raw
-        base = stc._server_url()
-        if not base:
-            return ""
-        return base + raw if raw.startswith("/") else f"{base}/{raw}"
+        return _resolve_task_video_url(t)
 
     def _play_video(self, url, title=""):
         dlg = _VideoPlayerDialog(url, title, self.parent_widget)
         self._player_dialog = dlg   # 持有引用防 GC
         dlg.exec()
 
-    def _download_single(self, url, tid):
-        """下载单个任务成片（表格行 ⬇ 按钮）。"""
+    def _download_video(self, task):
+        """下载单个任务的成片视频。"""
+        tid = task.get("id") or ""
+        url = self._resolve_video_url(task)
+        if not url:
+            self.show_warning("该任务没有可下载的成片地址。")
+            return
         path, _ = QFileDialog.getSaveFileName(
-            self.parent_widget, "保存成片",
+            self.parent_widget, "保存成片视频",
             os.path.join(os.path.expanduser("~"), "Desktop", f"render_{tid}.mp4"),
             "视频文件 (*.mp4 *.mov *.webm);;所有文件 (*.*)")
         if not path:
             return
         from utils.thread_worker import TaskWorker as Worker
         self._dl_worker = Worker(lambda: _download_to_file(url, path))
-        self._dl_worker.finished.connect(lambda p: self.show_info(f"✅ 成片已保存：{p}"))
+        self._dl_worker.finished.connect(
+            lambda p: self.show_info(f"✅ 成片视频已保存：{p}"))
         self._dl_worker.error.connect(lambda e: self.show_error(f"下载失败：{e}", "错误"))
         self.track_worker(self._dl_worker)
         self._dl_worker.start()
-        self.show_info(f"开始下载成片到 {os.path.basename(path)}，请稍候…")
+        self.show_info("开始下载成片视频，请稍候…")
+
+    def _download_package(self, task):
+        """下载单个任务的成片包（成片+全部素材+manifest.json）。"""
+        package_url = _resolve_package_url(task)
+        if not package_url:
+            self.show_info("该任务暂无打包下载接口（package_url）。")
+            return
+        tid = task.get("id") or ""
+        path, _ = QFileDialog.getSaveFileName(
+            self.parent_widget, "保存成片包（成片+素材+manifest）",
+            os.path.join(os.path.expanduser("~"), "Desktop",
+                         f"render_{tid}_package.zip"),
+            "ZIP 文件 (*.zip)")
+        if not path:
+            return
+        from utils.thread_worker import TaskWorker as Worker
+        self._dl_worker = Worker(lambda: _download_to_file(package_url, path))
+        self._dl_worker.finished.connect(
+            lambda p: self.show_info(f"✅ 成片+素材包已保存：{p}"))
+        self._dl_worker.error.connect(
+            lambda e: self.show_error(f"下载失败：{e}", "错误"))
+        self.track_worker(self._dl_worker)
+        self._dl_worker.start()
+        self.show_info("开始下载成片+素材包，请稍候…")
 
     def _toggle_select_all(self):
         """全选 / 取消全选表格任务（☑ 列）。"""
@@ -671,14 +720,14 @@ class ScheduledTasksPage(BasePage):
         self.btn_select_all.setText("☐ 取消全选" if self._all_checked else "☑ 全选")
 
     def _download_selected(self):
-        """批量下载所有已勾选任务的成片到所选目录。"""
+        """批量下载所有已勾选任务的成片视频到所选目录。"""
         rows = []
         for i in range(self.table.rowCount()):
             it = self.table.item(i, 0)
             if it and it.checkState() == Qt.Checked and 0 <= i < len(self._last_items):
-                url = self._resolve_video_url(self._last_items[i])
-                if url:
-                    rows.append((str(self._last_items[i].get("id") or ""), url))
+                task = self._last_items[i]
+                if self._resolve_video_url(task):
+                    rows.append(task)
         if not rows:
             self.show_warning("请先勾选要下载的任务（表格第一列 ☑）。")
             return
@@ -691,7 +740,31 @@ class ScheduledTasksPage(BasePage):
         self._dl_worker.error.connect(lambda e: self.show_error(f"批量下载失败：{e}", "错误"))
         self.track_worker(self._dl_worker)
         self._dl_worker.start()
-        self.show_info(f"开始下载 {len(rows)} 个成片到 {save_dir}，请稍候…")
+        self.show_info(f"开始下载 {len(rows)} 个成片视频到 {save_dir}，请稍候…")
+
+    def _download_selected_package(self):
+        """批量下载已勾选任务的成片包（zip）。"""
+        rows = []
+        for i in range(self.table.rowCount()):
+            it = self.table.item(i, 0)
+            if it and it.checkState() == Qt.Checked and 0 <= i < len(self._last_items):
+                task = self._last_items[i]
+                if _resolve_package_url(task):
+                    rows.append(task)
+        if not rows:
+            self.show_warning("请先勾选支持打包下载的任务（表格第一列 ☑）。")
+            return
+        save_dir = QFileDialog.getExistingDirectory(self.parent_widget, "选择保存目录")
+        if not save_dir:
+            return
+        from utils.thread_worker import TaskWorker as Worker
+        self._dl_worker = Worker(lambda: _download_many_packages(rows, save_dir))
+        self._dl_worker.finished.connect(lambda msg: self.show_info(msg))
+        self._dl_worker.error.connect(
+            lambda e: self.show_error(f"批量打包失败：{e}", "错误"))
+        self.track_worker(self._dl_worker)
+        self._dl_worker.start()
+        self.show_info(f"开始下载 {len(rows)} 个成片包到 {save_dir}，请稍候…")
 
     @staticmethod
     def _do_download(url, path):
@@ -765,16 +838,72 @@ def _download_to_file(url, path):
     return path
 
 
-def _download_many(rows, save_dir):
-    """批量下载（tid, url）列表到目录，单个失败继续；返回结果摘要文本。"""
+def _resolve_task_video_url(task):
+    """从任务 result 解析成片 URL（相对路径拼服务端地址）。"""
+    result = task.get("result") or {}
+    raw = (result.get("video_url") or result.get("url")
+           or result.get("output_url") or result.get("output_file")
+           or result.get("file_url") or "")
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http"):
+        return raw
+    base = stc._server_url()
+    if not base:
+        return ""
+    return base + raw if raw.startswith("/") else f"{base}/{raw}"
+
+
+def _resolve_package_url(task):
+    """从任务 result 解析打包下载 URL（成片+全部素材+manifest.json）。"""
+    result = task.get("result") or {}
+    raw = str(result.get("package_url") or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("http"):
+        return raw
+    base = stc._server_url()
+    if not base:
+        return ""
+    return base + raw if raw.startswith("/") else f"{base}/{raw}"
+
+
+def _download_many(tasks, save_dir):
+    """批量下载成片视频到目录，单个失败继续；返回结果摘要文本。"""
     ok, fail = 0, []
-    for tid, url in rows:
+    for task in tasks:
+        tid = task.get("id") or ""
         try:
-            _download_to_file(url, os.path.join(save_dir, f"render_{tid}.mp4"))
+            url = _resolve_task_video_url(task)
+            if not url:
+                raise RuntimeError("任务没有可下载的成片地址")
+            _download_to_file(
+                url, os.path.join(save_dir, f"render_{tid}.mp4"))
             ok += 1
         except Exception as e:
             fail.append(f"{tid}: {e}")
-    msg = f"✅ 已下载 {ok} 个成片到：{save_dir}"
+    msg = f"✅ 已下载 {ok} 个成片视频到：{save_dir}"
+    if fail:
+        msg += f"\n\n失败（{len(fail)} 个）：\n" + "\n".join(fail)
+    return msg
+
+
+def _download_many_packages(tasks, save_dir):
+    """批量下载成片包（zip）到目录，单个失败继续；返回结果摘要文本。"""
+    ok, fail = 0, []
+    for task in tasks:
+        tid = task.get("id") or ""
+        try:
+            url = _resolve_package_url(task)
+            if not url:
+                raise RuntimeError("任务没有打包下载地址")
+            _download_to_file(
+                url, os.path.join(save_dir, f"render_{tid}_package.zip"))
+            ok += 1
+        except Exception as e:
+            fail.append(f"{tid}: {e}")
+    msg = f"✅ 已下载 {ok} 个成片包到：{save_dir}"
     if fail:
         msg += f"\n\n失败（{len(fail)} 个）：\n" + "\n".join(fail)
     return msg

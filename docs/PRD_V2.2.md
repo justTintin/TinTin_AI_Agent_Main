@@ -471,7 +471,7 @@ ffmpeg 滤镜链：
 ### 7.1 目标
 
 把「分镜脚本」从客户端本地文件存储迁移到服务端，与产品库 / 素材库保持同一架构：多端可见、可备份、可协作；「一键成片 → 脚本成片」直接读取服务端脚本列表。
-> **状态（2026-08-01）**：🟡 接口需求已提交（保存/列表/读取/更新/删除 5 个接口），服务端 `/guide` 尚未出现接口，客户端仍走本地 JSON。
+> **状态（2026-08-12）**：✅ 服务端 `/guide` 已上线分镜脚本 CRUD（`/api/storyboard/scripts`），客户端已通过 `utils/storyboard_client.py` 双路径对接（保存/列表/读取），本地 JSON 保留为离线兜底。
 
 ### 7.2 现状与问题
 
@@ -500,12 +500,12 @@ ffmpeg 滤镜链：
 
 **提交与实现（2026-08-01）**：已按服务端 `/guide`「POST /interfaces/request 提交新接口需求」契约，将本章 CRUD 整理为可直接提交的负载 [分镜脚本服务端接口需求.json](分镜脚本服务端接口需求.json)（保存/列表/读取/更新/删除 5 个接口）。**提交结果（2026-08-01）**：服务端 `/interfaces/request` 已实现，5 条需求已全部提交成功（status=pending）：保存=REQ_A3CEB501，列表=REQ_D6F64EFD，读取=REQ_1BA7246F，更新=REQ_36570C3A，删除=REQ_D0532DC5（保存/列表已按“多端共享、不做机器码隔离”修正重提）。服务端实现后状态置 done 并补充 /guide，客户端再按 /guide 对齐。
 
-**现状核对（2026-08-01）**：服务端 `/guide` 已有「分镜脚本成片」任务接口——`POST /scheduled/tasks`，`task_type=storyboard_montage`，`params.shots[]`（服务端自动搜素材→TTS→FFmpeg→质量评分），客户端提交后轮询 `/tasks/unified/{id}`；但「分镜脚本存储/列表」接口（`/api/storyboard/scripts`）尚未在 `/guide` 出现，本节存储部分仍为规划，待服务端实现后补充文档，客户端再对齐（当前客户端保存先走本地 JSON，服务端接口就绪后切换）。
+**现状核对（2026-08-12）**：服务端 `/guide` 已提供「分镜脚本（Storyboard Scripts）」章节——`POST/GET /api/storyboard/scripts`、`GET/PUT/DELETE /api/storyboard/scripts/{id}`，保存时自动收集本地 + 在线候选（`material_candidates`）；客户端 `storyboard_client` 已按新路径 `/storyboard/scripts` 优先、`/api/storyboard/scripts` 回退对接，脚本成片任务仍走 `POST /scheduled/tasks` + `/tasks/unified/{id}`。
 
 ### 7.5 客户端改动
 
-- `storyboard_page`：`_save_storyboard` 增加服务端上传（`config_manager` 服务端地址 + `http_post`）；
-- `compile_video_page`：`_scan_storyboard_scripts` 优先服务端列表，本地扫描作回退；
+- `storyboard_page`：`_save_storyboard` 增加服务端上传（`storyboard_client.save_script`，已实现）；
+- `compile_video_page`：`_scan_storyboard_scripts` 优先服务端列表，本地扫描作回退（已实现）；
 - 数据字段沿用现有 JSON 结构（`topic / ratio / total_duration / shot_count / shots / saved_at`）。
 
 ---
@@ -518,8 +518,9 @@ ffmpeg 滤镜链：
 | P1 | 剪映导出增强 + 审美判断 | jianying_exporter 基础已有 | 3 周 | 🟡 多片段时间轴/转场/字幕/BGM 已落地，审美判断未做 |
 | P1 | 电影解说模板 | LLM + TTS + 素材匹配 | 2 周 | ⏳ 规划中 |
 | P1 | 即梦定时任务 | dreamina.exe 已有 | 1 周 | 🔴 未实现（仅单次文生图） |
-| P1 | 分镜脚本服务端存储 | 服务端脚本 CRUD 接口 + 客户端改造 | 1 周 | 🟡 接口需求已提交，待服务端实现 |
+| P1 | 分镜脚本服务端存储 | 服务端脚本 CRUD 接口 + 客户端改造 | 1 周 | ✅ 服务端已实现，客户端已对接 |
 | P1 | 脚本成片全链路闭环（3.9：音色选择/页内进度/结果播放下载） | 一期纯客户端；二期需服务端结果结构扩展 | 1~2 周 | ⏳ 规划已定（3.9），一期待开发 |
+| P1 | 扩展插件页 Tab 化 + 抖店自动上架（14） | Playwright 已有；历史技能代码可恢复复用 | 2~3 周 | ✅ P0/P1 初版已实现（2026-08-13） |
 | P2 | 希区柯克 & 特效镜头 | ffmpeg 滤镜 | 1 周 | ⏳ 规划中 |
 | P2 | 知识科普模板 | 同上 | 1 周 | ⏳ 规划中 |
 | P2 | MG 动画整合 | Remotion 已有 | 1 周 | 🟡 客户端已就绪，建议服务端渲染并接入一键成片 |
@@ -714,7 +715,7 @@ MG动画：提交渲染 / 查询进度
 ### 12.7 服务端依赖结论
 
 - **P0 / P1 纯客户端改造，服务端无需改接口**：复用的均为已存在且已对接的接口（`/voxcpm/tts`、`/scheduled/tasks`、`/montage/concat`、`/material/search`、`/llm/chat/completions` 等），接口契约以服务端 `/guide` 为准。
-- **一键发布是唯一可能需服务端新增的能力点**：当前客户端无任何视频发布能力；需在 M3 前定案：① 服务端新增统一发布接口（合规、可扩展）或 ② 客户端浏览器自动化发布（复用现有浏览器采集技术栈）。
+- **一键发布是唯一可能需服务端新增的能力点**：当前客户端无任何视频发布能力；**已定案（2026-08-13）**：采用 ② 客户端浏览器自动化发布，作为「系统设置 → 扩展插件 → 自动上架」Tab 落地（见第十四章）；后续如出现多端共享、合规审计或集中管控需求，再评估服务端统一发布接口。
 - 任务卡片覆盖范围受限处（如分镜脚本存储、模板市场等 PRD 标注「待服务端实现」的能力）在 P0/P1 暂不做或先做本地版。
 
 ### 12.8 验收标准
@@ -728,7 +729,7 @@ MG动画：提交渲染 / 查询进度
 
 ## 十三、多智能体编排（服务端智能体化）
 
-> 服务端接口需求单：[多智能体编排服务端接口需求.md](多智能体编排服务端接口需求.md)（S1~S6，提交 /interfaces/request 用）
+> 服务端接口需求单：[多智能体编排服务端接口需求.md](多智能体编排服务端接口需求.md)（S1~S6，2026-08-12 已实现）
 
 > **决策（2026-08-08）**：工作台「一句话需求」要真正"拆解任务→分配给不同智能体→统一管理任务"，需要两层前提：
 > ① **能力注册表**（编排器必须知道服务端/客户端/外部各有多少智能体、各自输入输出）；
@@ -744,7 +745,7 @@ MG动画：提交渲染 / 查询进度
 
 | 层 | 能力单元（示例） | 同步/异步 |
 |---|---|---|
-| 服务端接口 | `/llm/chat/completions`、`/voxcpm/tts`、`/whisper/transcribe`、`/material/search|list|scan|serve|thumbnail|distinct`、`/material/ocr`、`/material/score_clip`、`/montage/split|concat|beat`、`/vsr/remove`、`/scheduled/tasks`、`/tasks/unified/{id}`、`/comfyui/*`、`/health` | 同步 + 异步两类 |
+| 服务端接口 | `/llm/chat/completions`、`/voxcpm/tts`、`/whisper/transcribe`、`/material/search|list|scan|serve|thumbnail|distinct|stock_search|web_download`、`/material/ocr`、`/material/score_clip`、`/montage/split|concat|beat|effect|auto`、`/vsr/remove`、`/digital-human/*`、`/api/storyboard/scripts`、`/prompt/image|video`、`/agent/*`、`/agent/chat`、`/scheduled/tasks`、`/tasks/unified/{id}`、`/editor/*`、`/review/*`、`/evaluate/*`、`/comfyui/*`、`/health` | 同步 + 异步两类 |
 | 客户端本地工具 | ffmpeg（切/拼/混音/转码）、剪映草稿导出、封面（ffmpeg+rembg+Dreamina）、直播切片 | 同步/本地任务 |
 | 外部工作流 | 数字人（RunningHub/ComfyUI）、即梦（本地 CLI） | 异步/第三方 |
 
@@ -758,14 +759,18 @@ MG动画：提交渲染 / 查询进度
 {
   "id": "tts_voice_clone",
   "name": "声音克隆/TTS",
+  "tags": ["audio"],
   "description": "输入文案+参考音频，返回克隆语音",
   "executor": "server",            // server | client_tool | external
   "api": "POST /voxcpm/tts",
-  "input_schema": {"text": "string", "prompt_audio": "base64", "speaker": "string"},
+  "method": "POST",
+  "path": "/voxcpm/tts",
+  "input_schema": {"text": "string", "prompt_audio": "base64?", "speaker": "string?"},
   "output": {"audio": "file_ref"},
   "sync": true,                     // 同步返回 or 提交后轮询
   "needs_user_input": false,        // 是否需要人工确认/选素材
-  "dependencies": []
+  "dependencies": [],
+  "poll": "GET /tasks/unified/{task_id}"  // 仅异步能力
 }
 ```
 
@@ -794,21 +799,25 @@ MG动画：提交渲染 / 查询进度
 | Step 3（服务端终态） | 服务端 Agent 编排 | 客户端只做：提交/轮询/人工确认/展示 |
 
 > **plan 是纯 JSON（步骤/参数/依赖/中间产物引用）**，Step 1 写的拆解逻辑在 Step 3 不重写，只换执行地。
+>
+> **当前状态（2026-08-12）**：Step 3 已具备——`POST /agent/tasks mode=execute` 可执行 plan，`/agent/chat mode=plan` 负责自然语言拆解；客户端已完成注册表拉取、任务列表/确认/暂停/恢复/重试等骨架对接。
 
-### 13.6 服务端智能体化工作项（接口需求，按 POST /interfaces/request 提交）
+### 13.6 服务端智能体化接口（2026-08-12 /guide 核对：已实现）
 
-| # | 需求 | 说明 |
-|---|---|---|
-| S1 | `GET /agent/registry` | 能力注册表：返回全部可编排能力（schema 见 13.3） |
-| S2 | `POST /agent/tasks` | 提交 plan（或自然语言，服务端拆解），返回 `task_id` |
-| S3 | 子任务模型 | 父任务 + 子任务树（`parent_task_id`），`/tasks/unified` 返回树状状态 |
-| S4 | 人工确认节点 | 任务状态 `waiting_user_input`；`POST /agent/tasks/{id}/confirm` 继续 |
-| S5 | 中间产物登记 | 子任务产物（音频/视频/图片）路径登记，供下游步骤引用 |
-| S6 | 编排任务管理 | 列表/暂停/取消/重试；支持断点续跑（不依赖客户端在线） |
+| # | 接口 | 说明 | 状态 |
+|---|---|---|---|
+| S1 | `GET /agent/registry` | 能力注册表：返回全部可编排能力（schema 见 13.3） | 已实现（36 server 能力） |
+| S2 | `POST /agent/tasks` | `mode=execute` 提交 plan 自动执行；自然语言拆解走 `/agent/chat mode=plan` | 已实现 |
+| S3 | 子任务模型 | 父任务 + 子任务树（`parent_task_id`），`/tasks/unified` 返回 `a_*` 树状状态 | 已实现 |
+| S4 | 人工确认节点 | 子任务状态 `waiting_user_input`；`POST /agent/tasks/{子任务id}/confirm` 继续 | 已实现 |
+| S5 | 中间产物登记 | 自动扫描 + 手动 `POST /agent/artifacts`；`GET /agent/tasks/{id}/artifacts` 查询 | 已实现 |
+| S6 | 编排任务管理 | 列表/暂停/恢复/重试/取消；支持断点续跑（不依赖客户端在线） | 已实现 |
 
 ### 13.7 MCP 集成（能力调用协议与归属）
 
 > **参考（2026-08-08）**：开源项目 [MediaHub](https://github.com/StartAI-Best/MediaHub) 的价值点——把素材库能力暴露成 **MCP Server**，AI 智能体（Claude/Cursor 等）通过标准 MCP 工具直接调用。对本项目的意义：**MCP 可作为「服务端智能体化」的子能力调用协议**，`list_tools` 天然就是能力注册表（正好回答"服务端有多少智能体"）。
+>
+> **实现（2026-08-12）**：服务端已提供 `server/mcp/server.py`（stdio JSON-RPC），`tools/list` 对齐注册表，`tools/call` 转调现有接口。
 
 #### 归属结论
 
@@ -822,7 +831,7 @@ MG动画：提交渲染 / 查询进度
 
 #### 落地
 
-1. 服务端 MCP Server：`list_tools` 返回能力清单（对齐 13.3 注册表 schema）；`call_tool` 转调现有接口。
+1. 服务端 MCP Server（已实现 `server/mcp/server.py`）：`list_tools` 返回能力清单（对齐 13.3 注册表 schema）；`call_tool` 转调现有接口。
 2. 能力注册表 S1（13.6）与 MCP `list_tools` 的 tool 描述格式对齐，单一事实源。
 3. 客户端 Orchestrator Agent 通过 MCP 调用子能力；外部 AI 工具（Claude/Cursor）同样可用，生态复用。
 ### 13.8 优先级与验收
@@ -834,4 +843,132 @@ MG动画：提交渲染 / 查询进度
 | C1（客户端） | Orchestrator Agent 骨架 + 注册表合并 + plan 生成 | S0 可用或本地兜底 | 一句话"数字人口播带货视频"→ 自动拆解并逐个执行/轮询 |
 | C2（客户端） | 编排任务管理页（进度/暂停/取消/人工确认） | S1 | 与工作台结果中心统一 |
 
-> 状态：⏳ 规划中。用户已确认**服务端先行智能体化**；S0/S1 接口需求整理后走 `POST /interfaces/request` 提交服务端。
+> 状态（2026-08-12 /guide 核对）：✅ S0/S1 已实现——`/agent/registry`（36 server 能力）、`mode=execute` plan 执行、子任务树、人工确认、产物登记、暂停/恢复/重试/取消均已在服务端上线；客户端骨架已对接（`agent_client.py`、编排任务管理页）。
+
+---
+
+## 十四、扩展插件重构：下载插件 Tab + 自动上架 Tab
+
+> **背景（2026-08-13）**：客户端「扩展插件」页目前是单页浏览器采集扩展管理。用户要求把「下载插件」整体保留为一个 tab，再新增「自动上架」tab；自动上架复用现有浏览器操作技术栈，并结合历史自动化上架代码与 GitHub 同类实现一起参考。本章同时记录近期相关需求的最终结论与状态。
+
+### 14.1 关联需求状态（2026-08-13）
+
+| 需求 | 结论 / 状态 | 说明 |
+|---|---|---|
+| API 鉴权 | 待服务端定 | 服务端已有 `/api/auth/token \| tokens \| revoke`，但 `auth.auth_code` 未配置、业务接口未强制鉴权；客户端未实现。等服务端开启后按 `/guide` 对齐，客户端预留统一 token 管理 |
+| 服务端接口文档同步 | ✅ 已同步 | 已核对 `/guide` + `/agent/registry`（S1~S6）；客户端接口注释、`docs/多智能体编排服务端接口需求.md`、`docs/服务端参考-多智能体编排.md` 已更新 |
+| 本地技能（SKILL.md） | ✅ 已实现 | `studio/utils/skill_manager.py` + `studio/gui/skill_manager_dialog.py`；支持单个 `.md`、含 `SKILL.md`（或唯一 `.md`）的文件夹、ZIP 安装 |
+| 技能安装归属 | 客户端本地 | 技能存储在 `studio/data/skills/`，安装后与智能体合并到快捷条和 `/` 菜单，由智能体按同一链路执行；服务端继续负责能力注册、编排与 API 鉴权 |
+| 成片任务下载 | ✅ 已实现 | 按服务端 `/guide` 解析 `result.package_url / assets`；成片任务每行提供「下载视频」「打包下载」，支持「打包所选」；旧任务无 `package_url` 时仅显示视频下载 |
+| 任务队列迁移 | ✅ 已实现 | 从媒体库侧边栏移到「系统设置 → 任务队列」；轮询随页面启停；`agent_router` 中「任务队列」跳转成片任务 |
+
+### 14.2 目标
+
+- 把现有扩展插件页改为双 Tab：`下载插件`（原功能整体保留）+ `自动上架`（电商平台商品上架自动化）。
+- 自动上架首批支持抖店（`fxg.jinritemai.com`），复用已登录 Chrome 会话，避免二次登录。
+- 自动上架与智能体使用方式一致：数据包可作为本地技能输入，由 Agent 唤起同一套自动化流程。
+- 技术路线定案为**客户端本地浏览器自动化**，本期不新增服务端发布接口。
+
+### 14.3 页面结构
+
+```
+「系统设置 → 扩展插件」→ QTabWidget
+├─ Tab 1「下载插件」
+│    ├─ 浏览器检测 / 扩展安装 / 打开扩展目录
+│    ├─ 采集桥接服务：端口、保存目录、NAS 同步、服务端扫描、yt-dlp、代理
+│    └─ 最近采集记录
+└─ Tab 2「自动上架」
+     ├─ 浏览器连接与登录：检测调试端口、启动/复用 Chrome、扫码登录提示
+     ├─ 店铺选择与批次数据包导入：sku.xlsx + 主图/sku图/详情页 + 店铺关键词校验
+     ├─ 任务执行：开始 / 停止 / 断点续跑 / 保存草稿 / 上架，阶段进度 + 实时日志 + 截图
+     ├─ 任务结果：草稿链接 / 商品链接 / 失败原因 / 重试
+     └─ 配置：调试端口、Chrome 路径、user-data-dir、店铺映射、ERP 参数
+```
+
+### 14.4 自动上架业务流程
+
+```
+导入数据包（目录 / ZIP）
+  → 校验：sku.xlsx、主图/详情页/sku图目录非空、文件名店铺关键词匹配
+  → 检查 / 启动 Chrome 调试模式（默认 127.0.0.1:9222，固定 user-data-dir）
+  → 复用已登录抖店会话；未登录则提示扫码
+  → 校验当前页面店铺与目标店铺一致
+  → 进入商品创建页
+  → 阶段1：主图 / 标题 / 自动选类目 / 下一步
+  → 阶段2：基础信息 / 图文信息 / 价格库存 / 服务与履约 / 其他信息
+  → 保存草稿强校验（轮询“必填报错 / 保存成功 / URL 跳转”）
+  → 按配置保存草稿或直接上架
+  → 结果、截图、日志写入 data/auto_listing/
+```
+
+### 14.5 关键业务规则
+
+- 一个批次 = 一个商品：`sku.xlsx` 中所有行属于同一商品的多规格（SKU），只允许填入当前商品页的「价格与库存」表格，严禁拆分为多个商品发布。
+- 数据包命名必须包含店铺关键词（如“桔柚”或“555”），与所选店铺不匹配时终止并提示修改命名。
+- 通过 URL 特征区分阶段：无参数 `create` 为阶段1，`create?` 进入详情配置页；按当前活跃 Tab 支持断点续跑。
+- 保存成功判定必须经过页面状态轮询，避免“看起来点了保存、实际失败”的虚假完成。
+- 自动上架任务使用客户端 Worker 直接执行，不依赖外部 PowerShell/CMD 终端。
+
+### 14.6 技术方案
+
+```python
+# 核心链路（与旧 Automated_Listing_Skill 一致）
+from playwright.async_api import async_playwright
+browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+```
+
+- 浏览器：Playwright（已有依赖）连接本地 Chrome CDP 调试端口，复用已登录会话。
+- Chrome 启动参数：`--remote-debugging-port=9222`、固定 `--user-data-dir`、`--no-first-run`、`--disable-sync`、`--disable-blink-features=AutomationControlled` 等，参考历史 `chrome_manager.py`。
+- DOM 操作：文本 Label 关联定位、JS Direct-Click 上传、React/Vue 状态层原生点击多级兜底、自动关闭“智能裁剪/知道了”等弹窗。
+- 数据解析：`openpyxl` / 现有 Excel 读取逻辑解析 `sku.xlsx` 与商品标题；图片按 主图_序号 / 详情图片_序号 / sku图 目录收集排序。
+- 建议模块结构：
+
+```
+studio/gui/extension_page.py            # 改为 QTabWidget 容器
+studio/gui/download_plugin_tab.py       # 原下载插件功能整体迁移
+studio/gui/auto_listing_tab.py          # 自动上架 Tab
+studio/utils/auto_listing/
+    chrome_manager.py                   # 调试 Chrome 启停 / CDP 检测
+    excel_reader.py                     # 数据包解析与校验
+    batch_publish.py                    # 全流程编排 / 断点续跑
+    tab_basic_info.py                   # 基础信息
+    tab_image_text.py                   # 图文信息
+    tab_price_inventory.py              # 价格库存（多规格）
+    tab_service.py                      # 服务与履约
+    tab_other_info.py                   # 其他信息 / 保存草稿
+    skill_config.py                     # 店铺映射 / 端口 / 数据目录
+data/auto_listing/
+    runs/ logs/ results/                # 每次任务独立 run_id
+```
+
+- 服务端依赖：本期**无新增服务端接口**；ERP 拉取等外部能力沿用旺店通 API 或用户手动导入数据包。
+
+### 14.7 可复用与参考实现
+
+| 来源 | 位置 / 链接 | 可借鉴点 |
+|---|---|---|
+| 历史技能（Python） | git `2550abb^`：`ai_skills/Automated_Listing_Skill/` | `chrome_manager.py`（CDP 9222 启动）、`batch_publish.py`（全流程编排）、`tab_*.py`（分 Tab 填写）、`excel_reader.py`（数据包解析） |
+| 历史独立程序（Electron） | git `2550abb^`：`ai_skills/Automate_List_Chrome/` | Electron + `playwright-core` + CDP 9222；webview 承载登录会话、Debugger 驱动 DOM、阶段1/2 脚本拆分 |
+| 抖店自动上货 | [wj5205580/douyin-shop-automation](https://github.com/wj5205580/douyin-shop-automation) | Playwright 模拟抖店后台操作、批量上传、重试与完整链路参考 |
+| 闲鱼自动化 | [donggeai/xianyu-skills](https://github.com/donggeai/xianyu-skills) | Chrome 扩展桥 + 本地 Python CLI/WebSocket，直接复用已登录 Chrome，与本项目 `extension_bridge` 同构 |
+| 通用电商浏览器底座 | [81211860/ecommerce-agent-browser-skill](https://github.com/81211860/ecommerce-agent-browser-skill) | 持久化 profile、CDP / 短 id 动作协议、可观察、可执行、可复盘 |
+| 跨平台上架流程 | [southernspark-nfxh/aliexpress-auto-listing-skill](https://github.com/southernspark-nfxh/aliexpress-auto-listing-skill)、[zpoint/vibe-seller](https://github.com/zpoint/vibe-seller) | 1688 → ERP → 平台发布的多段流程；多平台 Agent 化任务与复盘 |
+
+### 14.8 优先级与里程碑
+
+> 状态（2026-08-13）：P0（扩展插件页 Tab 化）与 P1 初版（数据包校验 + Chrome CDP + 抖店自动填写/保存草稿）已落地；P2 待后续迭代。
+
+| 里程碑 | 内容 | 依赖 | 验收 |
+|---|---|---|---|
+| P0 | 扩展插件页 Tab 化，原功能迁入「下载插件」Tab | 现有 `extension_page.py` | 下载插件功能与现状一致，无行为回归 |
+| P1 | 抖店自动上架单店铺版 | Playwright 已有；历史技能代码恢复复用 | 数据包校验、复用登录 Chrome、店铺校验、单商品多规格填写、保存草稿/上架、截图日志、停止与断点续跑 |
+| P2 | 批量 / 多店铺 / ERP / 智能体唤起 | P1；旺店通 API；本地技能机制 | 多店铺任务队列；Agent 可直接唤起同一技能；平台流程抽象为可扩展配置 |
+
+### 14.9 验收标准
+
+- 「系统设置 → 扩展插件」进入后默认展示双 Tab，切换不丢状态；
+- 原浏览器采集扩展安装、桥接服务、采集记录全部保留在「下载插件」Tab，行为不变；
+- 自动上架可导入数据包并完成校验，复用已登录 Chrome 完成商品创建与保存草稿；
+- 任务可停止、可断点续跑，失败有截图和日志可复盘；
+- 自动上架可作为本地技能被智能体唤起，与智能体任务使用同一数据包和确认流程；
+- 本期不依赖服务端新增发布接口；服务端开启 API 鉴权后，客户端再按 `/guide` 统一对接。

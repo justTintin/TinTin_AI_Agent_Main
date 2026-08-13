@@ -261,7 +261,8 @@ class _SlashPopup(QListWidget):
             if k and k not in name.lower() and k not in desc.lower():
                 continue
             self._match.append(a)
-            item = QListWidgetItem(f"🤖 {name}")
+            item = QListWidgetItem(
+                f"🧩 {name}" if a.get("source") == "skill" else f"🤖 {name}")
             item.setToolTip(desc)
             self.addItem(item)
         if not self._match:
@@ -314,8 +315,13 @@ class _SlashPopup(QListWidget):
             cur.setPosition(cur.block().position() + pos, QTextCursor.KeepAnchor)
             cur.removeSelectedText()
         name = agent.get("name") or agent.get("id") or "该智能体"
-        desc = (agent.get("desc") or "").strip()
-        prefix = f"请【{name}】智能体执行：{desc}" if desc else f"请【{name}】智能体执行"
+        if agent.get("source") == "skill":
+            instruction = (agent.get("instruction") or "").strip()
+            prefix = (f"请按技能【{name}】执行：{instruction}"
+                      if instruction else f"请按技能【{name}】执行")
+        else:
+            desc = (agent.get("desc") or "").strip()
+            prefix = f"请【{name}】智能体执行：{desc}" if desc else f"请【{name}】智能体执行"
         cur.insertText(prefix)
         w.setTextCursor(cur)
         w.setFocus()
@@ -1003,6 +1009,7 @@ class _ChatPanel(QWidget):
         self._agent_loader = None
         self._pending = None     # 等待回复的占位气泡
         self._agents = []        # 服务端智能体列表缓存（斜杠菜单与快捷条共用）
+        self._skills = []        # 本地已安装技能（与智能体合并展示）
         self._busy_timer = None  # 发送后 120s 超时自动恢复输入（防 worker 卡住）
         self._session_id = ""    # 服务端会话（多轮续接 + 素材池归属）
         self._pool_worker = None # 会话素材池后台入池线程
@@ -1093,6 +1100,13 @@ class _ChatPanel(QWidget):
         self.chk_plan.setToolTip("开启后：智能体对话以编排任务方式提交（mode=plan），"
                                  "服务端先拆解为 plan 再自动执行，回复返回任务 ID")
         tool_row.addWidget(self.chk_plan)
+        self.btn_skills = QPushButton("🧩 技能")
+        self.btn_skills.setObjectName("secondary_button")
+        self.btn_skills.setFixedHeight(30)
+        self.btn_skills.setCursor(Qt.PointingHandCursor)
+        self.btn_skills.setToolTip("安装/管理本地技能；安装后与智能体一样出现在快捷条和斜杠菜单")
+        self.btn_skills.clicked.connect(self._open_skill_manager)
+        tool_row.addWidget(self.btn_skills)
         tool_row.addStretch()
         v.addLayout(tool_row)
 
@@ -1456,9 +1470,22 @@ class _ChatPanel(QWidget):
         self._agent_loader.start()
 
     def _on_agents_loaded(self, agents):
-        self._agents = agents
-        self._agent_bar.set_agents(agents)
-        self._slash_popup.set_agents(agents)
+        try:
+            from utils.skill_manager import skill_entries
+            self._skills = skill_entries()
+        except Exception as e:
+            log.warning(f"[工作台对话] 加载本地技能失败: {e}")
+            self._skills = []
+        self._agents = list(agents or []) + self._skills
+        self._agent_bar.set_agents(self._agents)
+        self._slash_popup.set_agents(self._agents)
+
+    def _open_skill_manager(self):
+        """打开技能管理弹窗；安装/卸载后重新加载智能体列表（含本地技能）。"""
+        from gui.skill_manager_dialog import SkillManagerDialog
+        dlg = SkillManagerDialog(self)
+        dlg.skillsChanged.connect(self._load_agents)
+        dlg.exec()
 
     def _on_agent_clicked(self, agent):
         """点击智能体：切到智能体对话，把唤醒词插入输入框开头（已存在则替换旧智能体）。"""
@@ -1467,11 +1494,17 @@ class _ChatPanel(QWidget):
             if idx >= 0:
                 self.mode_combo.setCurrentIndex(idx)
         name = agent.get("name") or agent.get("id") or "该智能体"
-        desc = (agent.get("desc") or "").strip()
-        prefix = f"请【{name}】智能体执行：{desc}" if desc else f"请【{name}】智能体执行"
+        if agent.get("source") == "skill":
+            instruction = (agent.get("instruction") or "").strip()
+            prefix = (f"请按技能【{name}】执行：{instruction}"
+                      if instruction else f"请按技能【{name}】执行")
+        else:
+            desc = (agent.get("desc") or "").strip()
+            prefix = f"请【{name}】智能体执行：{desc}" if desc else f"请【{name}】智能体执行"
         old = self.input_edit.toPlainText()
         first_line = old.split("\n", 1)[0]
-        if first_line.startswith("请【") and "智能体执行：" in first_line:
+        if (first_line.startswith("请【") and "智能体执行：" in first_line) or (
+                first_line.startswith("请按技能【") and "执行：" in first_line):
             old = old.split("\n", 1)[1].lstrip("\n") if "\n" in old else ""
         self.input_edit.setPlainText((prefix + "\n\n" + old) if old else prefix)
         self.input_edit.moveCursor(QTextCursor.MoveOperation.End)

@@ -29,6 +29,8 @@ FEATURES = [
     ("镜头分析缓存 (shot_analysis_cache)", ["TestShotAnalysisCache"]),
     ("抖音视频解析 (douyin_parser)", ["TestDouyinParser"]),
     ("数据备份 (backup_manager)", ["TestBackupManager"]),
+    ("本地技能安装 (skill_manager)", ["TestSkillManager"]),
+    ("自动上架数据包校验 (auto_listing)", ["TestAutoListingValidation"]),
     ("语法/导入健康 (全部 studio)", ["TestSyntaxImports"]),
     ("UI 静态回归 (就绪/布局/分镜JSON)", ["TestUIRegression"]),
     ("未定义名静态检查 (AST, 全 studio)", ["TestUndefinedNames"]),

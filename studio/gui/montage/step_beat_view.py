@@ -323,12 +323,12 @@ class BeatSegmentCard(QFrame):
         if is_full_track:
             n_bp = max(0, len(self.beats) - 1)
             if n_bp > 0:
-                title_text = (f"🎵 整体卡点（全曲 {self.seg_start:.1f}s ~ {self.seg_end:.1f}s，"
+                title_text = (f" 整体卡点（全曲 {self.seg_start:.1f}s ~ {self.seg_end:.1f}s，"
                               f"共 {n_bp} 个卡点）")
             else:
-                title_text = f"🎵 全曲预览（{self.seg_start:.1f}s ~ {self.seg_end:.1f}s）"
+                title_text = f" 全曲预览（{self.seg_start:.1f}s ~ {self.seg_end:.1f}s）"
         else:
-            title_text = (f"🎬 片段 {index + 1}：{self.seg_start:.1f}s ~ {self.seg_end:.1f}s  "
+            title_text = (f" 片段 {index + 1}：{self.seg_start:.1f}s ~ {self.seg_end:.1f}s  "
                           f"({self.seg_end - self.seg_start:.1f}s) → 将生成视频 {index + 1}")
         title = QLabel(title_text)
         title.setStyleSheet("color: #f9c74f; font-weight: bold; font-size: 12px;")
@@ -341,7 +341,7 @@ class BeatSegmentCard(QFrame):
         left_col = QVBoxLayout()
         left_col.setSpacing(6)
         left_col.addStretch()
-        self.btn_play = QPushButton("▶")
+        self.btn_play = QPushButton("播放")
         self.btn_play.setObjectName("secondary_button")
         if is_full_track:
             self.btn_play.setFixedSize(64, 64)
@@ -429,16 +429,16 @@ class BeatSegmentCard(QFrame):
                 self.waveform.set_play_pos(self.seg_start)
                 self.time_lbl.setText(self._fmt_range(self.seg_start))
         self._player.play()
-        self.btn_play.setText("⏸")
+        self.btn_play.setText("暂停")
         self.play_started.emit(self)
 
     def pause(self):
         self._player.pause()
-        self.btn_play.setText("▶")
+        self.btn_play.setText("播放")
 
     def stop(self):
         self._player.stop()
-        self.btn_play.setText("▶")
+        self.btn_play.setText("播放")
 
     def is_playing(self):
         return self._player.playbackState() == QMediaPlayer.PlayingState
@@ -485,7 +485,7 @@ class BeatSegmentCard(QFrame):
             if vdur > 0.1 and rel >= vdur - 0.05:
                 self._player.pause()
                 self._player.setPosition(0)
-                self.btn_play.setText("▶")
+                self.btn_play.setText("播放")
                 self.waveform.set_play_pos(self.seg_start)
                 self.time_lbl.setText(f"{self._fmt(0.0)} / {self._fmt(vdur)}")
                 self.finished.emit(self)
@@ -502,7 +502,7 @@ class BeatSegmentCard(QFrame):
         if abs_sec >= self.seg_end:
             self._player.pause()
             self._player.setPosition(int(self.seg_start * 1000))
-            self.btn_play.setText("▶")
+            self.btn_play.setText("播放")
             self.waveform.set_play_pos(self.seg_start)
             self.time_lbl.setText(self._fmt_range(self.seg_start))
             self.finished.emit(self)
@@ -513,7 +513,7 @@ class BeatSegmentCard(QFrame):
 
     def _on_media_status(self, status):
         if status == QMediaPlayer.EndOfMedia:
-            self.btn_play.setText("▶")
+            self.btn_play.setText("播放")
             self.finished.emit(self)
 
     def _on_seek_requested(self, abs_sec):

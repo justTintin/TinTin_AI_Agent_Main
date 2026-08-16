@@ -94,7 +94,7 @@ class AutoListingTab(QWidget):
         lay.setSpacing(12)
 
         hdr = QHBoxLayout()
-        title = QLabel("🚀 自动上架")
+        title = QLabel(" 自动上架")
         title.setObjectName("heading")
         hdr.addWidget(title)
         desc = QLabel("抖店商品自动上架：导入数据包 → 复用已登录 Chrome → 自动填写并保存草稿")
@@ -313,13 +313,13 @@ class AutoListingTab(QWidget):
         self._prepared_info = data.get("info")
         warns = "；".join(data.get("warnings") or []) or "无"
         self.package_summary.setText(
-            f"✅ 店铺：{data['shop_name']} | 标题：{data['title'] or '（未命名）'} | "
+            f"完成： 店铺：{data['shop_name']} | 标题：{data['title'] or '（未命名）'} | "
             f"SKU：{data['sku_count']} | 主图：{data['main_images']} | "
             f"详情：{data['detail_images']} | SKU图：{data['sku_images']}\n警告：{warns}")
         self.log_view.append(f"[校验] 数据包校验通过：{data['title'] or '（未命名商品）'}，{data['sku_count']} 个SKU")
 
     def _on_validate_error(self, msg):
-        self.package_summary.setText(f"❌ 校验失败：{msg}")
+        self.package_summary.setText(f"失败： 校验失败：{msg}")
         self.log_view.append(f"[校验] 失败：{msg}")
 
     def _start(self):

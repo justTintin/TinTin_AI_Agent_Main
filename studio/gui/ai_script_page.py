@@ -343,7 +343,7 @@ class AIScriptPage(BasePage):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(16)
 
-        heading = QLabel("✍️ AI 文案创作")
+        heading = QLabel(" AI 文案创作")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
@@ -370,9 +370,9 @@ class AIScriptPage(BasePage):
         topics_layout.setSpacing(10)
 
         title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("📋 飞书选题"))
+        title_row.addWidget(QLabel(" 飞书选题"))
         title_row.addStretch()
-        self.btn_sync_topics = QPushButton("🔧 同步飞书选题")
+        self.btn_sync_topics = QPushButton(" 同步飞书选题")
         self.btn_sync_topics.setObjectName("secondary_button")
         self.btn_sync_topics.clicked.connect(self._sync_feishu_topics)
         self.btn_sync_topics.hide()
@@ -398,7 +398,7 @@ class AIScriptPage(BasePage):
         topic_layout = QVBoxLayout(card_topic)
         topic_layout.setContentsMargins(20, 16, 20, 16)
         topic_layout.setSpacing(10)
-        topic_layout.addWidget(QLabel("📋 选题标题"))
+        topic_layout.addWidget(QLabel(" 选题标题"))
         self.edit_topic_title = QLineEdit()
         self.edit_topic_title.setPlaceholderText("输入视频选题标题，用于生成AI文案...")
         self.edit_topic_title.textChanged.connect(self._on_topic_text_changed)
@@ -411,7 +411,7 @@ class AIScriptPage(BasePage):
         ref_layout = QVBoxLayout(card_ref)
         ref_layout.setContentsMargins(20, 16, 20, 16)
         ref_layout.setSpacing(10)
-        ref_layout.addWidget(QLabel("📝 选题背景 / 参考笔记（可选）"))
+        ref_layout.addWidget(QLabel(" 选题背景 / 参考笔记（可选）"))
         self.edit_references = QTextEdit()
         self.edit_references.setPlaceholderText(
             "可在此手动填写选题的背景知识、数据来源或参考要点，供大模型写文案时参考。\n"
@@ -430,8 +430,8 @@ class AIScriptPage(BasePage):
         sl.setSpacing(10)
 
         style_hdr = QHBoxLayout()
-        style_hdr.addWidget(QLabel("🎨 风格化（可选）"))
-        btn_refresh_style = QPushButton("🔄")
+        style_hdr.addWidget(QLabel(" 风格化（可选）"))
+        btn_refresh_style = QPushButton("")
         btn_refresh_style.setObjectName("secondary_button")
         btn_refresh_style.setFixedWidth(36)
         btn_refresh_style.setToolTip("重新加载知识库风格化列表")
@@ -468,13 +468,13 @@ class AIScriptPage(BasePage):
         draft_layout.setSpacing(10)
 
         draft_title_row = QHBoxLayout()
-        draft_title_row.addWidget(QLabel("📝 爆款视频文案草稿（支持修改）"))
+        draft_title_row.addWidget(QLabel(" 爆款视频文案草稿（支持修改）"))
         draft_title_row.addStretch()
-        self.btn_check_extreme = QPushButton("🚫 极限词检测")
+        self.btn_check_extreme = QPushButton(" 极限词检测")
         self.btn_check_extreme.setObjectName("secondary_button")
         self.btn_check_extreme.clicked.connect(self._check_extreme_words)
         draft_title_row.addWidget(self.btn_check_extreme)
-        self.btn_gen_draft = QPushButton("✨ 生成 AI 文案")
+        self.btn_gen_draft = QPushButton(" 生成 AI 文案")
         self.btn_gen_draft.setObjectName("primary_button")
         self.btn_gen_draft.setEnabled(False)
         self.btn_gen_draft.clicked.connect(self._generate_copywriting)
@@ -495,7 +495,7 @@ class AIScriptPage(BasePage):
         self.edit_copywriting.setMinimumWidth(100)
         draft_layout.addWidget(self.edit_copywriting, 1)
 
-        self.btn_go_storyboard = QPushButton("➡️ 前往分镜脚本创作")
+        self.btn_go_storyboard = QPushButton(" 前往分镜脚本创作")
         self.btn_go_storyboard.setObjectName("primary_button")
         self.btn_go_storyboard.setFixedHeight(45)
         self.btn_go_storyboard.setEnabled(False)
@@ -540,7 +540,7 @@ class AIScriptPage(BasePage):
         for it in stylizations:
             score = it.get("score", 5.0)
             cnt = it.get("source_count", 0)
-            label = f"{it.get('name','')}  ⭐{score:.1f} ({cnt}条)"
+            label = f"{it.get('name','')} {score:.1f} ({cnt}条)"
             self.combo_stylization.addItem(label, it.get("id"))
         self.combo_stylization.blockSignals(False)
         self._on_stylization_selected()

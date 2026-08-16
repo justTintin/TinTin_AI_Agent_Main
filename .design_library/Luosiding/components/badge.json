@@ -1,0 +1,40 @@
+{
+  "name": "Badge",
+  "slug": "badge",
+  "description": "徽章/标签组件，用于显示状态、分类或平台标识。",
+  "tags": ["status", "tag", "label"],
+  "variants": [
+    {
+      "name": "Status",
+      "slug": "status",
+      "description": "状态徽章，如运行中、成功、失败。",
+      "tokens": ["--color-success", "--color-warning", "--color-error", "--color-info", "--radius-full"]
+    },
+    {
+      "name": "Platform",
+      "slug": "platform",
+      "description": "平台标签，如小红书、B站、抖音。",
+      "tokens": ["--color-surface-container", "--color-on-surface", "--radius-md"]
+    },
+    {
+      "name": "Tag",
+      "slug": "tag",
+      "description": "普通标签，用于分类。",
+      "tokens": ["--color-secondary-container", "--color-on-secondary-container", "--radius-md"]
+    }
+  ],
+  "sizes": [
+    { "name": "Small", "slug": "sm", "height": "20px", "padding": "0 8px", "fontSize": "11px" },
+    { "name": "Medium", "slug": "md", "height": "24px", "padding": "0 10px", "fontSize": "12px" }
+  ],
+  "usage": {
+    "dos": [
+      "状态徽章颜色与语义保持一致",
+      "平台标签可使用平台品牌色"
+    ],
+    "donts": [
+      "避免在同一行使用过多徽章",
+      "不要使用 Emoji 替代状态徽章"
+    ]
+  }
+}

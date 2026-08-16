@@ -36,7 +36,7 @@ class Step2ConcatView(BaseStepView):
         row_params1.addWidget(QLabel("排列逻辑:"))
         self.main_page.logic_combo = QComboBox()
         self.main_page.logic_combo.addItem("智能重排", "random")
-        # self.main_page.logic_combo.addItem("🎯 按文案智能匹配", "script")  # 暂时隐藏
+        # self.main_page.logic_combo.addItem(" 按文案智能匹配", "script")  # 暂时隐藏
         self.main_page.logic_combo.setToolTip(
             "智能重排：镜头智能排列组合。")
         self.main_page.logic_combo.currentIndexChanged.connect(self.main_page._on_logic_combo_changed)
@@ -126,7 +126,7 @@ class Step2ConcatView(BaseStepView):
         self.main_page.clip_count_info_lbl.setStyleSheet("font-weight: bold; font-size: 11pt; color: #f1c40f;")
         script_toolbar.addWidget(self.main_page.clip_count_info_lbl)
         script_toolbar.addSpacing(20)
-        self.main_page.btn_gen_script = mdi_button("🤖 AI 生成文案", "sparkles")
+        self.main_page.btn_gen_script = mdi_button(" AI 生成文案", "sparkles")
         self.main_page.btn_gen_script.setObjectName("primary_button")
         self.main_page.btn_gen_script.setFixedHeight(35)
         self.main_page.btn_gen_script.setToolTip("根据已勾选的镜头素材描述，调用大模型自动生成口播文案（受时长限制约束）")
@@ -168,7 +168,7 @@ class Step2ConcatView(BaseStepView):
         self.main_page.assembled_clips_list_widget.customContextMenuRequested.connect(self.main_page._show_assembled_context_menu)
         left_vbox.addWidget(self.main_page.assembled_clips_list_widget)
 
-        left_vbox.addWidget(QLabel("📋 视频组成镜头详情 (拖动把手调序，右键删除/恢复镜头):"))
+        left_vbox.addWidget(QLabel(" 视频组成镜头详情 (拖动把手调序，右键删除/恢复镜头):"))
         
         # 引用 ReorderableClipsTable (由于是在主页面导入，主页面 setup 会对其进行实例化赋给 sources_detail_widget)
         # 这里我们在主页面中对其进行初始化：
@@ -185,7 +185,7 @@ class Step2ConcatView(BaseStepView):
         player_vbox.setContentsMargins(6, 6, 6, 6)
         player_vbox.setSpacing(6)
         
-        self.main_page.preview_title = QLabel("🎥 视频播放预览")
+        self.main_page.preview_title = QLabel(" 视频播放预览")
         self.main_page.preview_title.setObjectName("muted_text")
         player_vbox.addWidget(self.main_page.preview_title)
         

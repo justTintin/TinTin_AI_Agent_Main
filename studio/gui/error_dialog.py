@@ -7,7 +7,7 @@ QMessageBox 无法滚动、无法复制、长信息会撑满屏幕，故改用�
 设计要点：
   · QPlainTextEdit 只读 + 自带垂直滚动条 → 长信息可滚动，不撑满
   · 限制最大高度（屏幕 70%）→ 即使 traceback 极长也不撑满屏幕
-  · 「📋 复制日志」按钮 → 一键复制完整错误到剪贴板，便于反馈排查
+  · 「 复制日志」按钮 → 一键复制完整错误到剪贴板，便于反馈排查
   · 等宽字体 → traceback / 接口错误对齐易读
   · 暗色主题 → 与工程其它弹窗一致
 """
@@ -76,7 +76,7 @@ class ErrorDialog(QDialog):
         layout.setSpacing(10)
 
         # 标题（红色，醒目）
-        title_lbl = QLabel(f"❌ {title or '错误'}")
+        title_lbl = QLabel(f"失败： {title or '错误'}")
         title_lbl.setWordWrap(True)
         layout.addWidget(title_lbl)
 
@@ -90,9 +90,9 @@ class ErrorDialog(QDialog):
         self.text_edit.setFont(mono)
         layout.addWidget(self.text_edit, 1)  # stretch=1 吃掉主要空间
 
-        # 按钮行：[📋 复制日志] [stretch] [关闭]
+        # 按钮行：[ 复制日志] [stretch] [关闭]
         btn_row = QHBoxLayout()
-        self.btn_copy = QPushButton("📋 复制日志")
+        self.btn_copy = QPushButton(" 复制日志")
         self.btn_copy.setToolTip("复制完整错误信息到剪贴板")
         self.btn_copy.clicked.connect(self._copy_to_clipboard)
         btn_row.addWidget(self.btn_copy)
@@ -112,9 +112,9 @@ class ErrorDialog(QDialog):
                 clipboard.setText(self._message)
         except Exception:
             pass
-        # 按钮文字短暂变为"✓ 已复制"，1.5 秒后恢复
+        # 按钮文字短暂变为"已 已复制"，1.5 秒后恢复
         original = self.btn_copy.text()
-        self.btn_copy.setText("✓ 已复制")
+        self.btn_copy.setText("已 已复制")
         self.btn_copy.setEnabled(False)
         QTimer.singleShot(self._COPIED_FEEDBACK_MS,
                           lambda: (self.btn_copy.setText(original),

@@ -94,7 +94,7 @@ def logged_request(method, url, *, timeout=30, quiet=False, **kwargs):
     try:
         resp = requests.request(method, url, timeout=timeout, **kwargs)
     except Exception as e:
-        log.error(f"[HTTP] ✗ {method} {url} 请求失败: {e}")
+        log.error(f"[HTTP] 失败 {method} {url} 请求失败: {e}")
         raise
     ms = int((time.perf_counter() - start) * 1000)
     if not quiet:

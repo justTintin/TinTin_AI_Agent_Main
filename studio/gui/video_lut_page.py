@@ -116,16 +116,16 @@ class VideoLutWorker(BaseWorker):
 
                     if r.returncode == 0:
                         success += 1
-                        self.log_line.emit(f"✅ {basename} → {os.path.basename(dst)}")
+                        self.log_line.emit(f"完成： {basename} → {os.path.basename(dst)}")
                     else:
                         fail += 1
                         err_snippet = (r.stderr or r.stdout or "")[-300:]
-                        self.log_line.emit(f"❌ {basename} 失败：{err_snippet}")
+                        self.log_line.emit(f"失败： {basename} 失败：{err_snippet}")
                         log.warning(f"LUT转换失败 {basename}: {r.stderr}")
 
                 except Exception as e:
                     fail += 1
-                    self.log_line.emit(f"❌ {basename} 异常：{e}")
+                    self.log_line.emit(f"失败： {basename} 异常：{e}")
                     log.exception(f"LUT转换异常 {basename}")
 
             self.progress.emit(100)
@@ -163,7 +163,7 @@ class VideoLutPage(BasePage):
         lay.setSpacing(14)
 
         # ── 标题 ────────────────────────────────────────────────────────────
-        title = QLabel("🎨 批量 LUT 调色转换")
+        title = QLabel(" 批量 LUT 调色转换")
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #ecf0f1;")
         lay.addWidget(title)
 
@@ -175,7 +175,7 @@ class VideoLutPage(BasePage):
         lay.addWidget(hint)
 
         # ── 输入文件夹 ───────────────────────────────────────────────────────
-        lay.addWidget(self._section("📁 视频输入文件夹"))
+        lay.addWidget(self._section(" 视频输入文件夹"))
         row_in = QHBoxLayout()
         self.input_dir_edit = QLineEdit()
         self.input_dir_edit.setPlaceholderText("选择包含视频文件的文件夹…")
@@ -192,7 +192,7 @@ class VideoLutPage(BasePage):
         lay.addWidget(self.lbl_found)
 
         # ── LUT 文件 ────────────────────────────────────────────────────────
-        lay.addWidget(self._section("🎨 LUT 文件"))
+        lay.addWidget(self._section(" LUT 文件"))
         row_lut = QHBoxLayout()
         self.lut_edit = QLineEdit()
         self.lut_edit.setPlaceholderText("选择 .cube / .3dl / .lut 文件…")
@@ -204,7 +204,7 @@ class VideoLutPage(BasePage):
         lay.addLayout(row_lut)
 
         # ── 输出文件夹 ───────────────────────────────────────────────────────
-        lay.addWidget(self._section("💾 输出文件夹"))
+        lay.addWidget(self._section(" 输出文件夹"))
         row_out = QHBoxLayout()
         self.output_dir_edit = QLineEdit()
         self.output_dir_edit.setPlaceholderText("默认：输入文件夹下的 lut_output 子目录")
@@ -239,12 +239,12 @@ class VideoLutPage(BasePage):
 
         # ── 开始按钮 ────────────────────────────────────────────────────────
         row_btn = QHBoxLayout()
-        self.btn_start = QPushButton("▶ 开始批量 LUT 转换")
+        self.btn_start = QPushButton("播放 开始批量 LUT 转换")
         self.btn_start.setObjectName("primary_button")
         self.btn_start.setFixedHeight(40)
         self.btn_start.clicked.connect(self._start)
         row_btn.addWidget(self.btn_start)
-        self.btn_open_out = QPushButton("📂 打开输出目录")
+        self.btn_open_out = QPushButton(" 打开输出目录")
         self.btn_open_out.setFixedHeight(40)
         self.btn_open_out.setEnabled(False)
         self.btn_open_out.clicked.connect(self._open_output)
@@ -346,15 +346,15 @@ class VideoLutPage(BasePage):
         out_dir = self.output_dir_edit.text().strip()
 
         if not in_dir or not os.path.isdir(in_dir):
-            self._log("❗ 请先选择有效的视频输入文件夹")
+            self._log(" 请先选择有效的视频输入文件夹")
             return
         if not lut or not os.path.isfile(lut):
-            self._log("❗ 请先选择有效的 LUT 文件")
+            self._log(" 请先选择有效的 LUT 文件")
             return
 
         videos = self._collect_videos(in_dir)
         if not videos:
-            self._log("❗ 输入文件夹中未找到视频文件")
+            self._log(" 输入文件夹中未找到视频文件")
             return
 
         if not out_dir:
@@ -387,12 +387,12 @@ class VideoLutPage(BasePage):
         self.btn_start.setEnabled(True)
         self.btn_open_out.setEnabled(True)
         self._log("─" * 50)
-        self._log(f"✅ 完成！成功 {success} 个，失败 {fail} 个")
+        self._log(f" 完成！成功 {success} 个，失败 {fail} 个")
         self.stage_label.setText(f"完成：成功 {success} 个，失败 {fail} 个")
 
     def _on_error(self, msg):
         self.btn_start.setEnabled(True)
-        self._log(f"❌ 发生严重错误：\n{msg}")
+        self._log(f"失败： 发生严重错误：\n{msg}")
         self.stage_label.setText("发生错误，请查看日志")
 
     def _log(self, text):

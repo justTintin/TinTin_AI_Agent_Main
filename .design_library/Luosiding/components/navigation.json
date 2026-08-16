@@ -1,0 +1,43 @@
+{
+  "name": "Navigation",
+  "slug": "navigation",
+  "description": "导航组件，包括侧边栏导航按钮、顶部标签和面包屑。",
+  "tags": ["navigation", "sidebar", "layout"],
+  "variants": [
+    {
+      "name": "Sidebar Button",
+      "slug": "sidebar-button",
+      "description": "侧边栏菜单项按钮。",
+      "tokens": ["--color-sidebar", "--color-on-surface", "--color-on-surface-variant", "--color-primary", "--radius-md"]
+    },
+    {
+      "name": "Top Tab",
+      "slug": "top-tab",
+      "description": "顶部标签页。",
+      "tokens": ["--color-surface", "--color-primary", "--color-on-surface-variant", "--radius-md"]
+    },
+    {
+      "name": "Breadcrumb",
+      "slug": "breadcrumb",
+      "description": "面包屑导航。",
+      "tokens": ["--color-muted-foreground", "--color-on-surface", "--color-primary"]
+    }
+  ],
+  "states": [
+    { "name": "Default", "slug": "default" },
+    { "name": "Hover", "slug": "hover" },
+    { "name": "Active", "slug": "active" },
+    { "name": "Expanded", "slug": "expanded" }
+  ],
+  "usage": {
+    "dos": [
+      "侧边栏图标统一使用 20px",
+      "激活态使用品牌色填充背景 + 左侧高亮条",
+      "分组标题使用 eyebrow 样式"
+    ],
+    "donts": [
+      "禁止使用 Emoji 作为导航图标",
+      "避免侧边栏菜单项文字换行"
+    ]
+  }
+}

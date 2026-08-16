@@ -293,7 +293,7 @@ class ShotMaterialDialog(QDialog):
             info_parts.append(f"画幅：{self._ratio}")
         self._script_info = " ｜ ".join(info_parts)
         if self._script_info:
-            layout.addWidget(self._muted("📌 脚本信息（所有素材搜索自动带上）：" + self._script_info))
+            layout.addWidget(self._muted(" 脚本信息（所有素材搜索自动带上）：" + self._script_info))
 
         # ── Tab 1: 本地素材 ──────────────────────────────────────────
         local_tab = QWidget()
@@ -306,7 +306,7 @@ class ShotMaterialDialog(QDialog):
         self.local_input.setText((self._search_ctx + " " + base).strip() if self._search_ctx else base)
         self.local_input.returnPressed.connect(self._search_local)
         row.addWidget(self.local_input, 1)
-        btn_local = QPushButton("🎯 相似度检索")
+        btn_local = QPushButton(" 相似度检索")
         btn_local.clicked.connect(self._search_local)
         row.addWidget(btn_local)
         lt.addLayout(row)
@@ -323,7 +323,7 @@ class ShotMaterialDialog(QDialog):
         self.local_list.itemClicked.connect(self._on_item_clicked)
         lt.addWidget(self.local_list, 1)
         lt.addWidget(self._muted("勾选所需素材（可多选）；双击缩略图预览/播放；确认后素材 Hash 绑定到当前镜头。"))
-        self.tabs.addTab(local_tab, "🗂️ 素材库")
+        self.tabs.addTab(local_tab, " 素材库")
 
         # ── Tab 2: 即梦生成 ──────────────────────────────────────────
         dreamina_tab = QWidget()
@@ -341,7 +341,7 @@ class ShotMaterialDialog(QDialog):
         prow.addWidget(self.dreamina_input, 1)
         dt.addLayout(prow)
         gen_row = QHBoxLayout()
-        self.btn_dreamina_gen = QPushButton("🎨 生成镜头参考图（即梦）")
+        self.btn_dreamina_gen = QPushButton(" 生成镜头参考图（即梦）")
         self.btn_dreamina_gen.setObjectName("primary_button")
         self.btn_dreamina_gen.clicked.connect(self._dreamina_gen)
         gen_row.addWidget(self.btn_dreamina_gen)
@@ -357,13 +357,13 @@ class ShotMaterialDialog(QDialog):
         self.dreamina_thumb.setStyleSheet("border:1px solid #3a3a3a; border-radius:4px;")
         self.dreamina_thumb.setObjectName("muted_text")
         dt.addWidget(self.dreamina_thumb, 1)
-        self.btn_dreamina_select = QPushButton("✅ 选择此图作为镜头素材")
+        self.btn_dreamina_select = QPushButton("完成： 选择此图作为镜头素材")
         self.btn_dreamina_select.setObjectName("secondary_button")
         self.btn_dreamina_select.setEnabled(False)
         self.btn_dreamina_select.clicked.connect(self._select_dreamina)
         dt.addWidget(self.btn_dreamina_select)
         self._dreamina_file = None
-        self.tabs.addTab(dreamina_tab, "🎨 即梦生成")
+        self.tabs.addTab(dreamina_tab, " 即梦生成")
 
         # ── Tab 3: MG 动画 ───────────────────────────────────────────
         mg_tab = QWidget()
@@ -375,12 +375,12 @@ class ShotMaterialDialog(QDialog):
         mg_lbl.setAlignment(Qt.AlignCenter)
         mg_lbl.setWordWrap(True)
         mg.addWidget(mg_lbl)
-        btn_mg_jump = QPushButton("🎞️ 跳转到 MG 动画页")
+        btn_mg_jump = QPushButton(" 跳转到 MG 动画页")
         btn_mg_jump.setObjectName("secondary_button")
         btn_mg_jump.clicked.connect(self._open_mg)
         mg.addWidget(btn_mg_jump, 0, Qt.AlignCenter)
         mg.addStretch()
-        self.tabs.addTab(mg_tab, "🎞️ MG动画")
+        self.tabs.addTab(mg_tab, " MG动画")
 
         # ── Tab 4: 联网素材 ──────────────────────────────────────────
         web_tab = QWidget()
@@ -405,14 +405,14 @@ class ShotMaterialDialog(QDialog):
         self.web_results.setReadOnly(True)
         self.web_results.setPlaceholderText("点击「联网搜索」查找相关参考资料...")
         wt.addWidget(self.web_results, 1)
-        self.tabs.addTab(web_tab, "🌐 联网素材")
+        self.tabs.addTab(web_tab, " 联网素材")
 
         layout.addWidget(self.tabs, 1)
 
         # ── 底部按钮 ─────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_confirm = QPushButton("✅ 确认选择")
+        self.btn_confirm = QPushButton("完成： 确认选择")
         self.btn_confirm.setObjectName("primary_button")
         self.btn_confirm.setEnabled(False)
         self.btn_confirm.clicked.connect(self._confirm)
@@ -810,7 +810,7 @@ class StoryboardPage(BasePage):
 
         # 标题行：标题 + 介绍（介绍放标题后，stretch 推开资源监控区）
         hdr = QHBoxLayout()
-        heading = QLabel("🎬 分镜脚本创作")
+        heading = QLabel(" 分镜脚本创作")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         desc = QLabel("视频分镜设计 + 即梦 / MG 动画素材生成")
@@ -865,7 +865,7 @@ class StoryboardPage(BasePage):
         sxp = QVBoxLayout(card_script)
         sxp.setContentsMargins(20, 16, 20, 16)
         sxp.setSpacing(10)
-        sxp.addWidget(self._card_title("📂 已有脚本（继续创作）"))
+        sxp.addWidget(self._card_title(" 已有脚本（继续创作）"))
         scr_row = QHBoxLayout()
         self.combo_sb_script = SearchableComboBox(placeholder="搜索服务端已有脚本…")
         self.combo_sb_script.addItem("── 创建新脚本 ──", None)
@@ -885,14 +885,14 @@ class StoryboardPage(BasePage):
         sp.setContentsMargins(20, 16, 20, 16)
         sp.setSpacing(10)
 
-        sp.addWidget(self._card_title("🎨 风格化（可选）"))
+        sp.addWidget(self._card_title(" 风格化（可选）"))
 
         ratio_row = QHBoxLayout()
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.addItem("── 不使用风格化 ──", None)
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         ratio_row.addWidget(self.combo_stylization, 1)
-        btn_reset_style = QPushButton("🔄 重置")
+        btn_reset_style = QPushButton(" 重置")
         btn_reset_style.setObjectName("secondary_button")
         btn_reset_style.setToolTip("重新加载知识库风格化列表")
         btn_reset_style.clicked.connect(self._reload_stylizations)
@@ -912,7 +912,7 @@ class StoryboardPage(BasePage):
         self.edit_extra_prompt.setPlaceholderText("可输入补充要求，配合风格化通过大模型重新调整视频文案...")
         sp.addWidget(self.edit_extra_prompt)
 
-        self.btn_adjust_copy = QPushButton("🔄 大模型调整文案")
+        self.btn_adjust_copy = QPushButton(" 大模型调整文案")
         self.btn_adjust_copy.setObjectName("secondary_button")
         self.btn_adjust_copy.clicked.connect(self._adjust_copy)
         sp.addWidget(self.btn_adjust_copy)
@@ -926,7 +926,7 @@ class StoryboardPage(BasePage):
         cp.setContentsMargins(20, 16, 20, 16)
         cp.setSpacing(10)
 
-        cp.addWidget(self._card_title("📝 视频文案（可在此处精简或重新编辑）"))
+        cp.addWidget(self._card_title(" 视频文案（可在此处精简或重新编辑）"))
 
         self.edit_copy = QTextEdit()
         self.edit_copy.setPlaceholderText(
@@ -959,10 +959,10 @@ class StoryboardPage(BasePage):
 
         # 头信息行
         hdr = QHBoxLayout()
-        hdr.addWidget(QLabel("🎬 分镜脚本（可直接编辑各镜头字段）"))
+        hdr.addWidget(QLabel(" 分镜脚本（可直接编辑各镜头字段）"))
         hdr.addStretch()
 
-        self.btn_auto_bind = QPushButton("🎯 相似度自动绑定")
+        self.btn_auto_bind = QPushButton(" 相似度自动绑定")
         self.btn_auto_bind.setObjectName("secondary_button")
         self.btn_auto_bind.setToolTip("按每个镜头的画面描述做 CLIP 相似度检索，自动绑定最相似素材")
         self.btn_auto_bind.clicked.connect(self._auto_bind_materials)
@@ -999,12 +999,12 @@ class StoryboardPage(BasePage):
 
         # 操作行（同一行）：同步多维表格 → 创建飞书文档 → 飞书关联状态 → 保存分镜脚本
         bottom_row = QHBoxLayout()
-        self.btn_sync_bitable = QPushButton("📊 同步到多维表格")
+        self.btn_sync_bitable = QPushButton(" 同步到多维表格")
         self.btn_sync_bitable.setObjectName("secondary_button")
         self.btn_sync_bitable.setEnabled(False)
         self.btn_sync_bitable.clicked.connect(lambda: self._upload_to_feishu("bitable"))
         bottom_row.addWidget(self.btn_sync_bitable)
-        self.btn_sync_docx = QPushButton("📝 创建飞书文档")
+        self.btn_sync_docx = QPushButton(" 创建飞书文档")
         self.btn_sync_docx.setObjectName("secondary_button")
         self.btn_sync_docx.setEnabled(False)
         self.btn_sync_docx.clicked.connect(lambda: self._upload_to_feishu("docx"))
@@ -1013,7 +1013,7 @@ class StoryboardPage(BasePage):
         self.lbl_feishu_info.setObjectName("muted_text")
         bottom_row.addWidget(self.lbl_feishu_info)
         bottom_row.addStretch()
-        btn_save = QPushButton("💾 保存分镜脚本")
+        btn_save = QPushButton(" 保存分镜脚本")
         btn_save.setObjectName("secondary_button")
         btn_save.setToolTip("将分镜脚本（JSON + 文本）保存到素材管理目录，并同步到服务端")
         btn_save.clicked.connect(self._save_storyboard)
@@ -1048,7 +1048,7 @@ class StoryboardPage(BasePage):
         self.edit_copy.setPlainText(text)
         self.feishu_record = feishu_record
         if feishu_record:
-            self.lbl_feishu_info.setText(f"🔗 已关联飞书选题: {feishu_record.get('topic', '')}")
+            self.lbl_feishu_info.setText(f" 已关联飞书选题: {feishu_record.get('topic', '')}")
             self.btn_sync_bitable.setEnabled(True)
             self.btn_sync_docx.setEnabled(True)
             self.lbl_status.setText("已载入飞书选题文案，请点击「生成分镜脚本」开始拆解。")
@@ -1314,10 +1314,10 @@ class StoryboardPage(BasePage):
 
         def _done(ok):
             if not ok:
-                self.lbl_status.setText("⚠ 分镜脚本已保存到本地，但同步服务端失败")
+                self.lbl_status.setText("注意： 分镜脚本已保存到本地，但同步服务端失败")
                 log.warning("[分镜脚本] 同步服务端失败（详见日志）")
             else:
-                self.lbl_status.setText("✅ 分镜脚本已保存并同步到服务端")
+                self.lbl_status.setText("完成： 分镜脚本已保存并同步到服务端")
                 # 刷新「继续创作」下拉，服务端脚本立即可见
                 try:
                     self._reload_sb_scripts()
@@ -1325,7 +1325,7 @@ class StoryboardPage(BasePage):
                     pass
 
         def _err(e):
-            self.lbl_status.setText("⚠ 分镜脚本已保存到本地，但同步服务端失败")
+            self.lbl_status.setText("注意： 分镜脚本已保存到本地，但同步服务端失败")
             log.warning(f"[分镜脚本] 同步服务端异常: {e}")
 
         w = Worker(_do)
@@ -1449,7 +1449,7 @@ class StoryboardPage(BasePage):
             hint = "服务端未实现分镜脚本接口（404）"
         elif "无法连接" in str(msg):
             hint = "服务端不可达，请检查统一计算节点地址"
-        self.lbl_status.setText(f"⚠ 加载服务端脚本失败：{hint}（{msg}）")
+        self.lbl_status.setText(f"注意： 加载服务端脚本失败：{hint}（{msg}）")
 
     def _on_sb_scripts_loaded(self, items):
         cur = self.combo_sb_script.currentData()
@@ -1527,7 +1527,7 @@ class StoryboardPage(BasePage):
             label = it.get("name", "（无名）")
             score = it.get("score", 0)
             if score:
-                label += f"  ★{score}"
+                label += f"  {score}"
             self.combo_stylization.addItem(label, it)
             if it.get("id") == prev_id:
                 restore_idx = self.combo_stylization.count() - 1
@@ -1600,7 +1600,7 @@ class StoryboardPage(BasePage):
         edit_sfx.setText(sfx)
         edit_sfx.setPlaceholderText("如：轻松背景音乐、键盘敲击声…")
         hdr.addWidget(edit_sfx, 1)  # 音效输入框占据剩余空间，按钮紧随其后贴在右侧
-        btn_mat = QPushButton("🔍 引用素材")
+        btn_mat = QPushButton(" 引用素材")
         btn_mat.setObjectName("secondary_button")
         # 不设固定高度：跟随全局 QSS（与底部「保存分镜脚本」等按钮等高）
         hdr.addWidget(btn_mat)
@@ -1966,7 +1966,7 @@ class StoryboardPage(BasePage):
             self.btn_gen_shots.setEnabled(True)
             self.pbar.setVisible(False)
             if files:
-                self.lbl_status.setText(f"✅ 已生成 {len(files)} 张镜头素材：{out_dir}")
+                self.lbl_status.setText(f" 已生成 {len(files)} 张镜头素材：{out_dir}")
             else:
                 self.lbl_status.setText("未生成任何素材（可能未登录或全部失败）。")
 

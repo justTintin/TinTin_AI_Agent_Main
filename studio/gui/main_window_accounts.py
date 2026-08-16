@@ -125,10 +125,10 @@ class AccountsMixin:
     def update_system_default_login_status(self):
         cookie_path = os.path.join(PROJECT_ROOT, "douyin_cookies.txt")
         if os.path.exists(cookie_path) and os.path.getsize(cookie_path) > 0:
-            self.lbl_default_login_status.setText("登录状态: ✅ 已登录 (Cookie 已同步并生效)")
+            self.lbl_default_login_status.setText("登录状态:  已登录 (Cookie 已同步并生效)")
             self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #2ecc71;")
         else:
-            self.lbl_default_login_status.setText("登录状态: ❌ 未登录 (抓取任务可能会受限)")
+            self.lbl_default_login_status.setText("登录状态: 失败： 未登录 (抓取任务可能会受限)")
             self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #e74c3c;")
 
     def refresh_accounts_list(self):
@@ -178,7 +178,7 @@ class AccountsMixin:
             if acc.get('avatar'):
                 self.set_remote_image(acc['avatar'], avatar)
             else:
-                avatar.setText("👤")
+                avatar.setText("")
                 avatar.setStyleSheet("font-size: 32px; color: #3498db; background-color: #f0f2f5; border-radius: 32px;")
             
             card_layout.addWidget(avatar)
@@ -195,7 +195,7 @@ class AccountsMixin:
             name_label.setAlignment(Qt.AlignCenter)
             name_layout.addWidget(name_label)
             
-            btn_edit = QPushButton("✏️")
+            btn_edit = QPushButton("")
             btn_edit.setFixedSize(20, 20)
             btn_edit.setStyleSheet("""
                 QPushButton {
@@ -241,7 +241,7 @@ class AccountsMixin:
             card_layout.addStretch()
             
             # Button to open independent browser
-            btn_open_browser = QPushButton("🌐 打开独立浏览器")
+            btn_open_browser = QPushButton(" 打开独立浏览器")
             btn_open_browser.setStyleSheet("""
                 QPushButton {
                     background-color: #3498db;
@@ -259,7 +259,7 @@ class AccountsMixin:
             btn_open_browser.clicked.connect(lambda checked=False, a=acc: self.open_account_browser(a))
             card_layout.addWidget(btn_open_browser)
 
-            btn_sync_cookie = QPushButton("🍪 同步 Cookie")
+            btn_sync_cookie = QPushButton(" 同步 Cookie")
             btn_sync_cookie.setStyleSheet("""
                 QPushButton {
                     background-color: #f3f4f6;
@@ -281,13 +281,13 @@ class AccountsMixin:
             # Action buttons row
             actions_layout = QHBoxLayout()
 
-            btn_close_browser = QPushButton("⏹ 关闭浏览器")
+            btn_close_browser = QPushButton("停止 关闭浏览器")
             btn_close_browser.setStyleSheet("color: #6b7280; border: none; font-size: 11px; padding: 0px;")
             btn_close_browser.setCursor(Qt.PointingHandCursor)
             btn_close_browser.clicked.connect(lambda checked=False, a=acc: self.close_account_browser(a))
             actions_layout.addWidget(btn_close_browser)
             
-            btn_exit = QPushButton("🗑️ 退出登录")
+            btn_exit = QPushButton(" 退出登录")
             btn_exit.setStyleSheet("color: #e74c3c; border: none; font-size: 11px; padding: 0px;")
             btn_exit.setCursor(Qt.PointingHandCursor)
             btn_exit.clicked.connect(lambda checked=False, u=acc['uid']: self.remove_account(u))
@@ -474,7 +474,7 @@ class AccountsMixin:
         if account.get('avatar'):
             self.set_remote_image(account['avatar'], self.detail_avatar, size=(80, 80))
         else:
-            self.detail_avatar.setText("👤")
+            self.detail_avatar.setText("")
             self.detail_avatar.setStyleSheet("font-size: 40px; color: #3498db; background-color: #f0f2f5; border-radius: 40px;")
             
         self.switch_page(10) # Account Detail is index 10

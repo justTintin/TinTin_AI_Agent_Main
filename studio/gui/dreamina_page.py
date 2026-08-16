@@ -119,12 +119,12 @@ class DreaminaPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(16)
 
-        heading = QLabel("🎨 即梦生成")
+        heading = QLabel(" 即梦生成")
         heading.setObjectName("heading")
         root.addWidget(heading)
 
         if not self.client.is_installed():
-            warn = QLabel("⚠️ 未检测到 dreamina 可执行文件（studio/bin/dreamina.exe）。"
+            warn = QLabel("注意： 未检测到 dreamina 可执行文件（studio/bin/dreamina.exe）。"
                           "请先放置即梦 CLI 二进制后重启。")
             warn.setObjectName("muted_text"); warn.setWordWrap(True)
             root.addWidget(warn)
@@ -157,7 +157,7 @@ class DreaminaPage(BasePage):
         self.login_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.login_hint)
 
-        self.btn_open_auth = QPushButton("🌐 在浏览器打开授权页（用抖音扫码/确认）")
+        self.btn_open_auth = QPushButton(" 在浏览器打开授权页（用抖音扫码/确认）")
         self.btn_open_auth.setObjectName("secondary_button")
         self.btn_open_auth.clicked.connect(self._open_auth_url)
         self.btn_open_auth.setVisible(False)
@@ -167,7 +167,7 @@ class DreaminaPage(BasePage):
     def _build_generate_card(self):
         card = QFrame(); card.setObjectName("card")
         lay = QVBoxLayout(card); lay.setContentsMargins(20, 14, 20, 14); lay.setSpacing(10)
-        lay.addWidget(QLabel("🖼️ 文生图（text2image，消耗额度）"))
+        lay.addWidget(QLabel(" 文生图（text2image，消耗额度）"))
 
         self.edit_prompt = QTextEdit()
         self.edit_prompt.setPlaceholderText("输入画面提示词（可来自分镜脚本的『画面视觉描述』）…")
@@ -185,7 +185,7 @@ class DreaminaPage(BasePage):
         self.combo_res = QComboBox(); self.combo_res.addItems(RESOLUTIONS)
         opt.addWidget(self.combo_res)
         opt.addStretch()
-        self.btn_gen = QPushButton("🎨 生成图片")
+        self.btn_gen = QPushButton(" 生成图片")
         self.btn_gen.setObjectName("primary_button")
         self.btn_gen.clicked.connect(self._generate)
         opt.addWidget(self.btn_gen)
@@ -204,7 +204,7 @@ class DreaminaPage(BasePage):
         card = QFrame(); card.setObjectName("card")
         lay = QVBoxLayout(card); lay.setContentsMargins(20, 14, 20, 14); lay.setSpacing(10)
         top = QHBoxLayout()
-        top.addWidget(QLabel("📦 生成结果"))
+        top.addWidget(QLabel(" 生成结果"))
         top.addStretch()
         self.btn_open_dir = QPushButton("打开输出目录"); self.btn_open_dir.setObjectName("secondary_button")
         self.btn_open_dir.clicked.connect(self._open_out_dir); self.btn_open_dir.setEnabled(False)
@@ -223,10 +223,10 @@ class DreaminaPage(BasePage):
 
     def _on_credit(self, logged, credit):
         if logged:
-            self.lbl_login.setText(f"✅ 已登录　额度：{credit or '—'}")
+            self.lbl_login.setText(f" 已登录　额度：{credit or '—'}")
             self.btn_login.setText("重新登录")
         else:
-            self.lbl_login.setText("❌ 未登录")
+            self.lbl_login.setText("失败： 未登录")
             self.btn_login.setText("登录即梦")
 
     def _start_login(self):
@@ -255,7 +255,7 @@ class DreaminaPage(BasePage):
         self.btn_login.setEnabled(True)
         if ok:
             self.btn_open_auth.setVisible(False)
-            self.login_hint.setText("✅ 登录成功，本地会话已保存。")
+            self.login_hint.setText("完成： 登录成功，本地会话已保存。")
             self._refresh_login_state()
         else:
             self.login_hint.setText("未检测到登录完成。若已在手机确认，请点『刷新额度』；否则重试登录。")
@@ -295,7 +295,7 @@ class DreaminaPage(BasePage):
     def _on_generated(self, files, submit_id):
         self.btn_gen.setEnabled(True)
         self.gen_pbar.setVisible(False)
-        self.gen_status.setText(f"✅ 生成完成，{len(files)} 个文件（submit_id={submit_id[:12]}…）")
+        self.gen_status.setText(f"完成： 生成完成，{len(files)} 个文件（submit_id={submit_id[:12]}…）")
         for f in files:
             self.result_list.addItem(QListWidgetItem(f))
         self.btn_open_dir.setEnabled(bool(files))

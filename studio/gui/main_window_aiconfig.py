@@ -191,18 +191,18 @@ class AIConfigMixin:
             return
         # Update VoxCPM status label
         if info.get("voxcpm_ok", False):
-            vox_status = f"<font color='#16a34a'><b>✅ {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#16a34a'><b>完成： {info.get('voxcpm_status', '')}</b></font>"
         elif info.get("voxcpm_installed", False):
-            vox_status = f"<font color='#d97706'><b>⚠️ {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#d97706'><b>注意： {info.get('voxcpm_status', '')}</b></font>"
         else:
-            vox_status = f"<font color='#dc2626'><b>❌ {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#dc2626'><b>失败： {info.get('voxcpm_status', '')}</b></font>"
         self.llm_vox_status_val.setText(vox_status)
 
         # Update PaddleOCR status labels
         if info.get("paddleocr_ok", False):
-            paddle_status = f"<font color='#16a34a'><b>✅ {info.get('paddleocr_status', '')}</b></font>"
+            paddle_status = f"<font color='#16a34a'><b>完成： {info.get('paddleocr_status', '')}</b></font>"
         else:
-            paddle_status = f"<font color='#dc2626'><b>❌ {info.get('paddleocr_status', '')}</b></font>"
+            paddle_status = f"<font color='#dc2626'><b>失败： {info.get('paddleocr_status', '')}</b></font>"
         self.llm_paddle_status_val.setText(paddle_status)
         
         p_models_status = f"<font color='#2563eb'><b>{', '.join(info.get('paddleocr_models', []))}</b></font> (存放目录: {info.get('paddleocr_models_dir', '')})"
@@ -279,25 +279,25 @@ class AIConfigMixin:
             from utils import comfyui_client as comfy
             # Test ComfyUI：外部地址 + 本地引擎双后端
             if comfyui_addr and comfy.is_alive(comfyui_addr):
-                results.append("ComfyUI(外部): ✅ 在线")
+                results.append("ComfyUI(外部): 完成： 在线")
             elif comfyui_addr:
-                results.append("ComfyUI(外部): ❌ 无法连接")
+                results.append("ComfyUI(外部):  无法连接")
             else:
-                results.append("ComfyUI(外部): ⚪ 未配置")
+                results.append("ComfyUI(外部):  未配置")
             local = comfy.ComfyUILocal.get()
             if not local.is_present():
-                results.append("ComfyUI(本地): ⚪ 未安装 (apps/comfyui)")
+                results.append("ComfyUI(本地):  未安装 (apps/comfyui)")
             elif local.is_running():
-                results.append("ComfyUI(本地): ✅ 运行中")
+                results.append("ComfyUI(本地): 完成： 运行中")
             else:
-                results.append("ComfyUI(本地): 🟡 已就位 (未运行，提交任务时自动启动)")
+                results.append("ComfyUI(本地):  已就位 (未运行，提交任务时自动启动)")
 
             # Test Voice Clone
             try:
                 res = http_get(voice_addr, timeout=5)
-                results.append(f"克隆声音: {'✅ 在线' if res.status_code == 200 else '❌ 异常 ('+str(res.status_code)+')'}")
+                results.append(f"克隆声音: {'完成： 在线' if res.status_code == 200 else ' 异常 ('+str(res.status_code)+')'}")
             except:
-                results.append("克隆声音: ❌ 无法连接")
+                results.append("克隆声音:  无法连接")
             
             QMessageBox.information(self, "测试结果", "\n".join(results))
         except Exception as e:
@@ -355,11 +355,11 @@ class AIConfigMixin:
                 try:
                     from utils.llm_proxy import llm_chat
                     llm_chat("", "Hi", model=self.mdl, timeout=10, max_tokens=5)
-                    self.done.emit(True, f"✅ 连接成功 ({self.mdl})")
+                    self.done.emit(True, f"完成： 连接成功 ({self.mdl})")
                 except RuntimeError as e:
-                    self.done.emit(False, f"❌ {e}")
+                    self.done.emit(False, f"失败： {e}")
                 except Exception as e:
-                    self.done.emit(False, f"❌ 连接失败: {str(e)[:80]}")
+                    self.done.emit(False, f"失败： 连接失败: {str(e)[:80]}")
 
         def _on_done(ok, text):
             status_lbl.setText(text)
@@ -389,19 +389,19 @@ class AIConfigMixin:
                 from utils.llm_proxy import llm_chat
                 try:
                     llm_chat("", "Hi", model=None, max_tokens=5, timeout=120)
-                    self.done.emit(True, "✅ 连接成功（视觉模型由服务端选择）", "#2ecc71")
+                    self.done.emit(True, "完成： 连接成功（视觉模型由服务端选择）", "#2ecc71")
                 except RuntimeError as e:
                     err = str(e)[:80]
                     if "Read timed out" in err or "ReadTimeout" in err or "超时" in err:
-                        self.done.emit(False, "⏳ 模型可能正在加载，请稍后重试", "#f39c12")
+                        self.done.emit(False, "模型可能正在加载，请稍后重试", "#f39c12")
                     elif "404" in err or "not found" in err.lower():
-                        self.done.emit(False, "❌ 服务端接口不存在 (404)", "#e74c3c")
+                        self.done.emit(False, "失败： 服务端接口不存在 (404)", "#e74c3c")
                     elif "未配置服务端" in err:
-                        self.done.emit(False, "❌ 未配置服务端地址", "#e74c3c")
+                        self.done.emit(False, "失败： 未配置服务端地址", "#e74c3c")
                     else:
-                        self.done.emit(False, f"❌ 连接失败: {err}", "#e74c3c")
+                        self.done.emit(False, f"失败： 连接失败: {err}", "#e74c3c")
                 except Exception as e:
-                    self.done.emit(False, f"❌ 连接失败: {str(e)[:80]}", "#e74c3c")
+                    self.done.emit(False, f"失败： 连接失败: {str(e)[:80]}", "#e74c3c")
 
         def _on_done(ok, text, color):
             self.vision_status_lbl.setText(text)
@@ -422,7 +422,7 @@ class AIConfigMixin:
 
         api_url = self.vox_api_url_input.text().strip()
         if not api_url:
-            self.llm_vox_status_val.setText("⚠️ 请填写 API 地址")
+            self.llm_vox_status_val.setText("注意： 请填写 API 地址")
             self.llm_vox_status_val.setStyleSheet("color: #f39c12;")
             if sender: sender.setEnabled(True)
             return
@@ -434,13 +434,13 @@ class AIConfigMixin:
                 base = api_url.rstrip("/v1/tts").rstrip("/voxcpm/tts").rstrip("/")
                 r = http_get(f"{base}/voxcpm/health", timeout=5, quiet=True)
                 if r.status_code == 200:
-                    self.llm_vox_status_val.setText("✅ 连接成功")
+                    self.llm_vox_status_val.setText("完成： 连接成功")
                     self.llm_vox_status_val.setStyleSheet("color: #2ecc71;")
                 else:
-                    self.llm_vox_status_val.setText(f"❌ HTTP {r.status_code}")
+                    self.llm_vox_status_val.setText(f"失败： HTTP {r.status_code}")
                     self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
             except Exception as e:
-                self.llm_vox_status_val.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.llm_vox_status_val.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
             if sender: sender.setEnabled(True)
 
@@ -456,7 +456,7 @@ class AIConfigMixin:
 
         api_url = self.whisper_api_url_input.text().strip()
         if not api_url:
-            self.whisper_status_lbl.setText("⚠️ 请填写 ASR 服务地址")
+            self.whisper_status_lbl.setText("注意： 请填写 ASR 服务地址")
             self.whisper_status_lbl.setStyleSheet("color: #f39c12;")
             if sender: sender.setEnabled(True)
             return
@@ -468,13 +468,13 @@ class AIConfigMixin:
                 base = api_url.rstrip("/")
                 r = http_get(f"{base}/whisper/health", timeout=5, quiet=True)
                 if r.status_code == 200:
-                    self.whisper_status_lbl.setText("✅ 连接成功")
+                    self.whisper_status_lbl.setText("完成： 连接成功")
                     self.whisper_status_lbl.setStyleSheet("color: #2ecc71;")
                 else:
-                    self.whisper_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.whisper_status_lbl.setText(f"失败： HTTP {r.status_code}")
                     self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
             except Exception as e:
-                self.whisper_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.whisper_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
             if sender: sender.setEnabled(True)
 
@@ -490,7 +490,7 @@ class AIConfigMixin:
 
         api_url = self.clip_api_url_input.text().strip()
         if not api_url:
-            self.clip_status_lbl.setText("⚠️ 请填写 CLIP API 地址")
+            self.clip_status_lbl.setText("注意： 请填写 CLIP API 地址")
             self.clip_status_lbl.setStyleSheet("color: #f39c12;")
             if sender: sender.setEnabled(True)
             return
@@ -502,13 +502,13 @@ class AIConfigMixin:
                 base = api_url.rstrip("/")
                 r = http_get(f"{base}/clip/health", timeout=5, quiet=True)
                 if r.status_code == 200:
-                    self.clip_status_lbl.setText("✅ 连接成功")
+                    self.clip_status_lbl.setText("完成： 连接成功")
                     self.clip_status_lbl.setStyleSheet("color: #2ecc71;")
                 else:
-                    self.clip_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.clip_status_lbl.setText(f"失败： HTTP {r.status_code}")
                     self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
             except Exception as e:
-                self.clip_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.clip_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
             if sender: sender.setEnabled(True)
 
@@ -524,7 +524,7 @@ class AIConfigMixin:
 
         api_url = self.ocr_api_url_input.text().strip()
         if not api_url:
-            self.ocr_status_lbl.setText("⚠️ 请填写 OCR 服务地址")
+            self.ocr_status_lbl.setText("注意： 请填写 OCR 服务地址")
             self.ocr_status_lbl.setStyleSheet("color: #f39c12;")
             if sender: sender.setEnabled(True)
             return
@@ -537,13 +537,13 @@ class AIConfigMixin:
                 # 探测 /material/status（与 check_server_ocr 一致）
                 r = http_get(f"{base}/material/status", timeout=5, quiet=True)
                 if r.status_code == 200:
-                    self.ocr_status_lbl.setText("✅ 连接成功（/material/ocr 可用）")
+                    self.ocr_status_lbl.setText("完成： 连接成功（/material/ocr 可用）")
                     self.ocr_status_lbl.setStyleSheet("color: #2ecc71;")
                 else:
-                    self.ocr_status_lbl.setText(f"❌ HTTP {r.status_code}")
+                    self.ocr_status_lbl.setText(f"失败： HTTP {r.status_code}")
                     self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
             except Exception as e:
-                self.ocr_status_lbl.setText(f"❌ 连接失败: {str(e)[:60]}")
+                self.ocr_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
             if sender: sender.setEnabled(True)
 
@@ -551,7 +551,7 @@ class AIConfigMixin:
         threading.Thread(target=_run, daemon=True).start()
 
     def _dreamina_login(self):
-        self.dr_status.setText("⏳ 发起登录…")
+        self.dr_status.setText("发起登录…")
         try:
             from utils.dreamina_client import DreaminaClient
             client = DreaminaClient()
@@ -559,7 +559,7 @@ class AIConfigMixin:
                 # Windows: 使用 dreamina CLI 设备码 OAuth
                 ok, kv = client.login_headless()
                 if not ok:
-                    self.dr_status.setText(f"<font color='#dc2626'>❌ {kv}</font>")
+                    self.dr_status.setText(f"<font color='#dc2626'>失败： {kv}</font>")
                     return
                 device_code = kv.get("device_code", "")
                 verify_url = kv.get("verification_uri", "")
@@ -574,34 +574,34 @@ class AIConfigMixin:
                 def poll():
                     ok2, msg = client.checklogin(device_code, poll=30)
                     if ok2:
-                        self.dr_status.setText("<font color='#16a34a'>✅ 登录成功</font>")
+                        self.dr_status.setText("<font color='#16a34a'>完成： 登录成功</font>")
                     else:
-                        self.dr_status.setText(f"<font color='#dc2626'>❌ 登录失败: {msg[:100]}</font>")
+                        self.dr_status.setText(f"<font color='#dc2626'>失败： 登录失败: {msg[:100]}</font>")
                 threading.Thread(target=poll, daemon=True).start()
             else:
                 # Linux: CLI 不可用，打开浏览器
                 self.dr_status.setText(
-                    "<font color='#f59e0b'>⏳ 即梦 CLI 未安装（Windows 专属）。建议使用素材浏览器左侧「即梦AI」标签直接访问。</font>")
+                    "<font color='#f59e0b'>即梦 CLI 未安装（Windows 专属）。建议使用素材浏览器左侧「即梦AI」标签直接访问。</font>")
                 import webbrowser
                 webbrowser.open("https://jimeng.jianying.com/ai-tool/image/generate")
         except Exception as e:
-            self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+            self.dr_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 
     def _dreamina_check(self):
-        self.dr_status.setText("⏳ 检测中…")
+        self.dr_status.setText("检测中…")
         try:
             from utils.dreamina_client import DreaminaClient
             client = DreaminaClient()
             if not client.is_installed():
-                self.dr_status.setText("<font color='#dc2626'>❌ CLI 未安装</font>")
+                self.dr_status.setText("<font color='#dc2626'>失败： CLI 未安装</font>")
                 return
             ok, msg = client.is_logged_in()
             if ok:
-                self.dr_status.setText(f"<font color='#16a34a'>✅ 已登录 · 额度: {msg}</font>")
+                self.dr_status.setText(f"<font color='#16a34a'> 已登录 · 额度: {msg}</font>")
             else:
-                self.dr_status.setText("<font color='#f59e0b'>⚠ 未登录</font>")
+                self.dr_status.setText("<font color='#f59e0b'> 未登录</font>")
         except Exception as e:
-            self.dr_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+            self.dr_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 
     # ── 飞书配置 ──
 
@@ -648,21 +648,21 @@ class AIConfigMixin:
             log.error(f"保存飞书配置失败: {e}")
 
     def _test_feishu(self):
-        self.fs_test_status.setText("⏳ 测试中…")
+        self.fs_test_status.setText("测试中…")
         import requests as req
         from utils.http_client import http_post
         app_id = self.edit_feishu_appid.text().strip()
         app_secret = self.edit_feishu_appsecret.text().strip()
         if not app_id or not app_secret:
-            self.fs_test_status.setText("<font color='#dc2626'>❌ 请填入 App ID 和 Secret</font>")
+            self.fs_test_status.setText("<font color='#dc2626'>失败： 请填入 App ID 和 Secret</font>")
             return
         try:
             r = http_post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
                           json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
             if r.status_code == 200 and r.json().get("tenant_access_token"):
-                self.fs_test_status.setText("<font color='#16a34a'>✅ 连接成功</font>")
+                self.fs_test_status.setText("<font color='#16a34a'>完成： 连接成功</font>")
             else:
-                self.fs_test_status.setText(f"<font color='#dc2626'>❌ HTTP {r.status_code}</font>")
+                self.fs_test_status.setText(f"<font color='#dc2626'>失败： HTTP {r.status_code}</font>")
         except Exception as e:
-            self.fs_test_status.setText(f"<font color='#dc2626'>❌ {e}</font>")
+            self.fs_test_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 

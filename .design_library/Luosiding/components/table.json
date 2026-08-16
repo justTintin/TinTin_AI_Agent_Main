@@ -1,0 +1,45 @@
+{
+  "name": "Table",
+  "slug": "table",
+  "description": "表格组件，用于展示结构化数据，支持表头、行、选中态和空状态。",
+  "tags": ["data", "list", "container"],
+  "variants": [
+    {
+      "name": "Default",
+      "slug": "default",
+      "description": "标准表格。",
+      "tokens": ["--color-surface", "--color-border", "--color-on-surface", "--color-muted-foreground"]
+    },
+    {
+      "name": "Striped",
+      "slug": "striped",
+      "description": "斑马纹表格，增强可读性。",
+      "tokens": ["--color-surface", "--color-surface-container-low", "--color-border", "--color-on-surface"]
+    }
+  ],
+  "states": [
+    { "name": "Default", "slug": "default" },
+    { "name": "Hover", "slug": "hover" },
+    { "name": "Selected", "slug": "selected" },
+    { "name": "Empty", "slug": "empty" },
+    { "name": "Loading", "slug": "loading" }
+  ],
+  "anatomy": [
+    { "name": "Header", "description": "表头行，包含列标题" },
+    { "name": "Row", "description": "数据行" },
+    { "name": "Cell", "description": "单元格" },
+    { "name": "Selection", "description": "复选框列" },
+    { "name": "Actions", "description": "操作列" }
+  ],
+  "usage": {
+    "dos": [
+      "表头文字使用 semibold",
+      "行高统一为 44px",
+      "空状态时显示 EmptyState 组件"
+    ],
+    "donts": [
+      "避免表格列过多导致横向滚动",
+      "不要在单元格内使用 Emoji"
+    ]
+  }
+}

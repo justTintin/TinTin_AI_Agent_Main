@@ -2,7 +2,7 @@
 """智能体编排客户端：封装 /agent 接口族（能力注册表 + 编排任务树 + 中间产物）。
 
 服务端「智能体化」契约（权威：服务端 /guide 智能体化章节，客户端 PRD_V2.2 §13）：
-- GET  /agent/registry                 能力注册表（36 server 能力，只读；include_external 附加客户端/外部共 39）
+- GET  /agent/registry                 能力注册表（只读；数量以服务端实时返回为准，含 viral 仿爆款/音频生成等；include_external 附加客户端/外部）
 - POST /agent/tasks                    登记编排任务；mode=execute 提交 plan 由服务端 Orchestrator 自动执行
 - GET  /agent/tasks                    列表（默认只列根任务；root_only=false 全部）
 - GET  /agent/tasks/{id}               详情 + children 嵌套子任务树（derived_status 聚合推导）
@@ -262,7 +262,7 @@ def agent_chat(message, history=None, agent_id=None, model=None,
             if not reply and mode == "plan":
                 tid = str(data.get("task_id") or "")
                 if tid:
-                    reply = (f"✅ 已创建编排任务：`{tid}`，服务端将自动执行。\n"
+                    reply = (f" 已创建编排任务：`{tid}`，服务端将自动执行。\n"
                              f"可在「编排任务」页查看进度与产物。")
             return {
                 "reply": reply,

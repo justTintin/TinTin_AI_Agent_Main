@@ -837,7 +837,7 @@ class CoverEditDialog(QDialog):
         col1_layout.setContentsMargins(0, 0, 0, 0)
         col1_layout.setSpacing(10)
         
-        player_title = QLabel("<b>🎥 视频截取区域 (拖动滑块定帧)</b>")
+        player_title = QLabel("<b> 视频截取区域 (拖动滑块定帧)</b>")
         player_title.setObjectName("cover_section_title")
         col1_layout.addWidget(player_title)
         
@@ -931,7 +931,7 @@ class CoverEditDialog(QDialog):
         col2_layout.setSpacing(12)
         col2_layout.setAlignment(Qt.AlignTop)
         
-        h_cover_title = QLabel("<b>🖼️ 横屏封面预览 (16:9)</b>")
+        h_cover_title = QLabel("<b> 横屏封面预览 (16:9)</b>")
         h_cover_title.setObjectName("cover_section_title")
         col2_layout.addWidget(h_cover_title)
         
@@ -974,7 +974,7 @@ class CoverEditDialog(QDialog):
         col3_layout.setSpacing(12)
         col3_layout.setAlignment(Qt.AlignTop)
         
-        v_cover_title = QLabel("<b>📱 竖屏封面预览 (9:16)</b>")
+        v_cover_title = QLabel("<b> 竖屏封面预览 (9:16)</b>")
         v_cover_title.setObjectName("cover_section_title")
         col3_layout.addWidget(v_cover_title)
         
@@ -1174,13 +1174,13 @@ class ClipListItemWidget(QFrame):
         top_layout.addWidget(self.lbl_title, 1)
         
         score = self.clip_info.get('score', 0.0)
-        self.lbl_score = QLabel(f"⭐ {score}")
+        self.lbl_score = QLabel(f"评分 {score}")
         self.lbl_score.setObjectName("clip_list_item_score")
         top_layout.addWidget(self.lbl_score)
         layout.addLayout(top_layout)
         
         meta_layout = QHBoxLayout()
-        meta_text = f"⏱ {self.clip_info.get('start_str', '00:00')} - {self.clip_info.get('end_str', '00:00')} ({self.clip_info.get('duration', 0)}s)"
+        meta_text = f"{self.clip_info.get('start_str', '00:00')} - {self.clip_info.get('end_str', '00:00')} ({self.clip_info.get('duration', 0)}s)"
         self.lbl_meta = QLabel(meta_text)
         self.lbl_meta.setObjectName("clip_list_item_meta")
         meta_layout.addWidget(self.lbl_meta, 1)
@@ -1684,8 +1684,8 @@ class LiveClipPage(BasePage):
         ar = QHBoxLayout()
         ar.addWidget(QLabel("分析方法:"))
         self.analysis_mode = QComboBox()
-        self.analysis_mode.addItem("🤖 AI 大模型 (DeepSeek/OpenAI)", "llm")
-        self.analysis_mode.addItem("🧠 内置算法 (无需 API)", "rule")
+        self.analysis_mode.addItem(" AI 大模型 (DeepSeek/OpenAI)", "llm")
+        self.analysis_mode.addItem(" 内置算法 (无需 API)", "rule")
         ar.addWidget(self.analysis_mode)
 
         # Transcribe Language Selection
@@ -1729,7 +1729,7 @@ class LiveClipPage(BasePage):
         sub_vl.setSpacing(8)
         sub_vl.setContentsMargins(12, 10, 12, 10)
         sub_header = QHBoxLayout()
-        sub_header.addWidget(QLabel("<b>📝 字幕预览</b>"))
+        sub_header.addWidget(QLabel("<b> 字幕预览</b>"))
         sub_header.addStretch()
         self.btn_export_sub = mdi_button("导出字幕", "save")
         self.btn_export_sub.setObjectName("secondary_button")
@@ -2094,7 +2094,7 @@ class LiveClipPage(BasePage):
                 w.wait(2000)
         self._workers.clear()
         self._reset_ui()
-        self.stage_lbl.setText("⏹ 已停止")
+        self.stage_lbl.setText("停止 已停止")
         log.info("[LiveClip] _stop_analysis 完成")
 
     def _do_analyze(self, srt_path):
@@ -2461,7 +2461,7 @@ class LiveClipPage(BasePage):
         self.btn_clip.setEnabled(True)
         self.btn_export.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.stage_lbl.setText(f"✅ 封面生成完成：{len(covers_info)} 个")
+        self.stage_lbl.setText(f"完成： 封面生成完成：{len(covers_info)} 个")
 
         for ci in covers_info:
             idx = ci["index"]
@@ -2514,7 +2514,7 @@ class LiveClipPage(BasePage):
         self.btn_export.setEnabled(True)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)
-        self.stage_lbl.setText("❌ 操作失败")
+        self.stage_lbl.setText("失败： 操作失败")
         
         for widget in getattr(self, "clip_item_widgets", []):
             if not widget.clip_info.get("video_path"):

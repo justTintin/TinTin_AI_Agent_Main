@@ -1,0 +1,111 @@
+/* ═══════════════════════════════════════════════════════════════
+   components.css — Design System Component Definitions
+   Auto-extracted from preview/component-*.html
+   DO NOT EDIT MANUALLY — regenerate via extract-components-css.mjs
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Badge ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">状态 SM</span> <span class="badge sm status-success">运行中</span> <span class="badge sm status-warning">待审核</span> <span class="badge sm status-error">失败</span> <span class="badge sm status-info">排队中</span>
+*/
+.badge { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); border: none; white-space: nowrap; }
+  .badge.sm { height: 20px; min-width: 20px; padding: 0 var(--space-2); border-radius: var(--radius-full); font-size: 11px; font-weight: var(--font-weight-h4); }
+  .badge.md { height: 24px; min-width: 24px; padding: 0 10px; border-radius: var(--radius-full); font-size: var(--font-size-caption); font-weight: var(--font-weight-h4); }
+  .badge.status-success { background: var(--color-success); color: var(--color-on-primary); }
+  .badge.status-warning { background: var(--color-warning); color: var(--color-on-primary); }
+  .badge.status-error { background: var(--color-error); color: var(--color-on-primary); }
+  .badge.status-info { background: var(--color-info); color: var(--color-on-primary); }
+  .badge.platform { background: var(--color-surface-container); color: var(--color-on-surface); border-radius: var(--radius-md); }
+  .badge.tag { background: var(--color-secondary-container); color: var(--color-on-secondary-container); border-radius: var(--radius-md); }
+
+/* ── Button ────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">主要</span><button class="btn primary size-md">创建任务</button><button class="btn primary size-md" disabled>创建任务</button><button class="btn primary size-md loading"><img class="spin" src="https://cdn.jsdelivr.net/npm/lucide-static@1.8.0/icons/loader-2.svg" width="16" height="16" alt="">创建任务</button>
+*/
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:var(--space-1); border:1px solid transparent; border-radius:var(--radius-md); font-family:var(--font-family-base); font-weight:var(--font-weight-caption); white-space:nowrap; cursor:pointer; transition:background var(--duration-fast), border-color var(--duration-fast), filter var(--duration-fast), opacity var(--duration-fast); }
+  .size-sm { height:var(--size-button-height-sm); min-width:var(--size-button-height-sm); padding:0 var(--space-2); font-size:var(--font-size-caption); }
+  .size-md { height:var(--size-button-height); min-width:var(--size-button-height); padding:0 var(--space-3); font-size:var(--font-size-body); }
+  .size-lg { height:var(--size-button-height-lg); min-width:var(--size-button-height-lg); padding:0 var(--space-4); font-size:var(--font-size-lead); }
+  .primary { background:var(--color-primary); color:var(--color-on-primary); }
+  .primary:hover { background:var(--color-primary-hover); }
+  .secondary { background:var(--color-secondary); color:var(--color-on-secondary-container); border-color:var(--color-border); }
+  .secondary:hover { background:var(--color-surface-container-high); }
+  .ghost { background:var(--color-surface); color:var(--color-on-surface); border-color:var(--color-border); }
+  .ghost:hover { background:var(--interactive-hover); }
+  .danger { background:var(--color-error); color:var(--color-on-error); }
+  .danger:hover { filter:brightness(1.08); }
+  .icon { background:var(--color-surface); color:var(--color-muted-foreground); border-color:var(--color-border); padding:0; width:var(--size-button-height); }
+  .icon.size-sm { width:var(--size-button-height-sm); }
+  .icon.size-md { width:var(--size-button-height); }
+  .icon.size-lg { width:var(--size-button-height-lg); }
+  .icon:hover { background:var(--interactive-hover); color:var(--color-on-surface); }
+  .btn:disabled, .btn.loading { opacity:.5; cursor:not-allowed; pointer-events:none; }
+  .spin { animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── Card ──────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">标准</span><div class="card standard"><div class="card-title">项目概览
+*/
+.card { position:relative; flex:1; min-width:0; background:var(--color-card); border:1px solid var(--color-border); border-radius:var(--radius-xl); box-shadow:var(--shadow-1); padding:var(--space-4); overflow:hidden; transition:border-color var(--duration-fast), box-shadow var(--duration-fast); cursor:pointer; }
+  .card:hover { border-color:var(--color-primary); box-shadow:var(--shadow-2); }
+  .card:active { box-shadow:var(--shadow-1); }
+  .card.disabled { opacity:.5; cursor:not-allowed; pointer-events:none; }
+  .accent { position:absolute; top:0; left:0; right:0; height:4px; background:var(--color-primary); }
+  .card-icon { width:var(--size-icon-lg); height:var(--size-icon-lg); margin-bottom:var(--space-2); }
+  .card-title { font-size:var(--font-size-h4); font-weight:var(--font-weight-h4); color:var(--color-on-surface); }
+  .card-desc { font-size:var(--font-size-body); color:var(--color-muted-foreground); margin-top:var(--space-1); line-height:var(--line-height-body); }
+  .card-action { display:inline-flex; align-items:center; gap:var(--space-1); margin-top:var(--space-3); font-size:var(--font-size-caption); color:var(--color-primary); font-weight:var(--font-weight-caption); }
+
+/* ── Input ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">文本</span><input class="input" type="text" placeholder="请输入任务名称">
+*/
+.input-wrap { position:relative; flex:1; min-width:0; max-width:240px; }
+  .input { width:100%; height:var(--size-input-height); padding:0 var(--space-3); background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-md); color:var(--color-on-surface); font-family:var(--font-family-base); font-size:var(--font-size-body); outline:none; transition:border-color var(--duration-fast), box-shadow var(--duration-fast); box-sizing:border-box; }
+  .input::placeholder { color:var(--color-muted-foreground); }
+  .input.search { padding-left:var(--space-7); }
+  .input-icon { position:absolute; left:var(--space-2); top:50%; transform:translateY(-50%); width:var(--size-icon-md); height:var(--size-icon-md); pointer-events:none; }
+  .input:focus { border-color:var(--color-primary); box-shadow:0 0 0 2px var(--ring); }
+  .input.error { border-color:var(--color-error); background:var(--color-error-container); color:var(--color-on-error-container); }
+  .input:disabled { opacity:.5; cursor:not-allowed; }
+  .textarea { min-height:72px; padding:var(--space-2) var(--space-3); resize:vertical; line-height:var(--line-height-body); }
+  .hint { font-size:var(--font-size-caption); color:var(--color-error); margin-top:var(--space-1); }
+
+/* ── Navigation ────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">侧边栏</span> <div class="sb-item"><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.8.0/icons/home.svg" alt="">首页
+*/
+.sb-item { display: inline-flex; align-items: center; gap: var(--space-2); width: 208px; height: var(--size-button-height); padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--color-on-surface); background: transparent; cursor: pointer; transition: background var(--duration-fast) var(--easing-default); white-space: nowrap; }
+  .sb-item img { width: var(--size-icon-md); height: var(--size-icon-md); flex-shrink: 0; opacity: 0.85; }
+  .sb-item:hover { background: var(--interactive-hover); }
+  .sb-item.active { background: var(--color-primary-container); color: var(--color-on-primary-container); box-shadow: inset 3px 0 0 0 var(--color-primary); }
+  .sb-item.active img { opacity: 1; }
+  .tab { display: inline-flex; align-items: center; height: var(--size-button-height); padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--color-on-surface-variant); cursor: pointer; transition: background var(--duration-fast) var(--easing-default), color var(--duration-fast) var(--easing-default); white-space: nowrap; }
+  .tab:hover { background: var(--interactive-hover); color: var(--color-on-surface); }
+  .tab.active { background: var(--color-primary-container); color: var(--color-on-primary-container); font-weight: var(--font-weight-h4); }
+  .bc { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-muted-foreground); font-size: var(--font-size-body); white-space: nowrap; }
+  .bc a { color: var(--color-muted-foreground); text-decoration: none; transition: color var(--duration-fast) var(--easing-default); }
+  .bc a:hover { color: var(--color-on-surface); }
+  .bc .current { color: var(--color-on-surface); }
+  .bc img { width: var(--size-icon-sm); height: var(--size-icon-sm); flex-shrink: 0; opacity: 0.6; }
+
+/* ── Table ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认</span>
+*/
+.table-wrap { width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; background: var(--color-surface); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { height: 44px; padding: 0 var(--space-3); text-align: left; border-bottom: 1px solid var(--color-border); white-space: nowrap; }
+  th { font-weight: var(--font-weight-h4); color: var(--color-muted-foreground); background: var(--color-surface-container-low); }
+  tbody tr { transition: background var(--duration-fast) var(--easing-default); }
+  tbody tr:hover { background: var(--interactive-hover); }
+  tbody tr.selected { background: var(--color-primary-container); color: var(--color-on-primary-container); }
+  tbody tr.selected a { color: var(--color-on-primary-container); }
+  tbody tr:last-child td { border-bottom: none; }
+  .col-sel { width: 40px; }
+  .ck { width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--color-border); border-radius: var(--radius-sm); appearance: none; margin: 0; }
+  .ck:checked { background: var(--color-primary); border-color: var(--color-primary); }
+  .act { color: var(--color-primary); text-decoration: none; font-size: var(--font-size-caption); transition: color var(--duration-fast) var(--easing-default); }
+  .act:hover { color: var(--color-primary-hover); }
+  .empty { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--color-muted-foreground); font-size: var(--font-size-body); }

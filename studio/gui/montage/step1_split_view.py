@@ -112,7 +112,7 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table.verticalHeader().setDefaultSectionSize(30)
         self.main_page.split_result_table.setColumnCount(9)
         self.main_page.split_result_table.setHorizontalHeaderLabels(
-            ["☑", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
+            ["", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
         self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.main_page.split_result_table.setMinimumHeight(180)
         self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)

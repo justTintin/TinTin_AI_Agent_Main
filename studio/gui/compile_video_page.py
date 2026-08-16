@@ -98,32 +98,32 @@ class MaterialMatchWorker(BaseWorker):
                 params["category"] = self.category
             if self.model:
                 params["model"] = self.model
-            self.log_line.emit(f"🔎 远程匹配素材: brand={self.brand!r} category={self.category!r}")
+            self.log_line.emit(f" 远程匹配素材: brand={self.brand!r} category={self.category!r}")
             resp = http_post(url, json=params, timeout=15)
             if resp.status_code != 200:
-                self.log_line.emit(f"⚠ 服务端返回 {resp.status_code}")
+                self.log_line.emit(f"注意： 服务端返回 {resp.status_code}")
                 self.result_ready.emit("")
                 return
             results = resp.json().get("results") or resp.json().get("data") or []
             if not results:
-                self.log_line.emit("⚠ 远程未匹配到任何素材")
+                self.log_line.emit("注意： 远程未匹配到任何素材")
                 self.result_ready.emit("")
                 return
             # 收集所有 path，取公共父目录作为素材目录
             paths = [r.get("path", "") for r in results if r.get("path")]
             paths = [p for p in paths if p]
             if not paths:
-                self.log_line.emit("⚠ 匹配结果无可用 path 字段")
+                self.log_line.emit("注意： 匹配结果无可用 path 字段")
                 self.result_ready.emit("")
                 return
             common = os.path.commonpath(paths) if len(paths) > 1 else os.path.dirname(paths[0])
             # commonpath 可能指向文件，确保是目录：若指向文件则取其父
             if os.path.isfile(common):
                 common = os.path.dirname(common)
-            self.log_line.emit(f"✅ 匹配到 {len(paths)} 个素材，目录: {common}")
+            self.log_line.emit(f" 匹配到 {len(paths)} 个素材，目录: {common}")
             self.result_ready.emit(common)
         except Exception as e:
-            self.log_line.emit(f"⚠ 远程匹配失败: {e}")
+            self.log_line.emit(f"注意： 远程匹配失败: {e}")
             # 异常交由 BaseWorker.run() 统一 emit error；这里发空结果让 UI 回落
             self.result_ready.emit("")
 
@@ -157,7 +157,7 @@ class CompileVideoWorker(BaseWorker):
         has_audio = bool(self.audio and os.path.isfile(self.audio))
         if not has_audio and self.total_dur > 0:
             per_dur = max(0.8, self.total_dur / len(images))
-            self.log_line.emit(f"📏 按总时长 {self.total_dur}s / {len(images)} 张 → 每张 {per_dur:.2f}s")
+            self.log_line.emit(f" 按总时长 {self.total_dur}s / {len(images)} 张 → 每张 {per_dur:.2f}s")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results = []
@@ -168,7 +168,7 @@ class CompileVideoWorker(BaseWorker):
             self.progress.emit(20)
             self._compile_one(images, out_path, per_dur, has_audio)
             results.append(out_path)
-            self.log_line.emit(f"✅ 成片: {os.path.basename(out_path)}")
+            self.log_line.emit(f"完成： 成片: {os.path.basename(out_path)}")
         else:
             # N 个成片：把 images 分成 N 组（不足循环填充）
             groups = self._split_groups(images, self.count)
@@ -180,9 +180,9 @@ class CompileVideoWorker(BaseWorker):
                 try:
                     self._compile_one(group, out_path, per_dur, has_audio)
                     results.append(out_path)
-                    self.log_line.emit(f"✅ [{i + 1}/{total}] {os.path.basename(out_path)}")
+                    self.log_line.emit(f"完成： [{i + 1}/{total}] {os.path.basename(out_path)}")
                 except Exception as e:
-                    self.log_line.emit(f"❌ [{i + 1}/{total}] 失败: {e}")
+                    self.log_line.emit(f"失败： [{i + 1}/{total}] 失败: {e}")
                     log.warning(f"成片 {i + 1} 失败: {e}")
 
         self.progress.emit(100)
@@ -355,17 +355,17 @@ class CompileVideoPage(BasePage):
         # tab1：产品成片（原有完整界面）
         tab_product = QWidget()
         self._setup_product_tab(tab_product)
-        self.tabs.addTab(tab_product, "📦 产品成片")
+        self.tabs.addTab(tab_product, " 产品成片")
 
         # tab2：脚本成片（选分镜脚本提交服务端）
         tab_script = QWidget()
         self._setup_script_tab(tab_script)
-        self.tabs.addTab(tab_script, "📜 脚本成片")
+        self.tabs.addTab(tab_script, " 脚本成片")
 
         # tab3：卡点成片（音乐卡点 + 服务端逐段生成视频）
         tab_beat = QWidget()
         self._setup_beat_tab(tab_beat)
-        self.tabs.addTab(tab_beat, "🎵 卡点成片")
+        self.tabs.addTab(tab_beat, " 卡点成片")
 
     # ════════════════════════════════════════════════════════════
     #  卡点成片 tab（独立控制器 + StepBeatView）
@@ -401,7 +401,7 @@ class CompileVideoPage(BasePage):
         left_lay = QVBoxLayout(left_card)
         left_lay.setContentsMargins(16, 14, 16, 14); left_lay.setSpacing(10)
 
-        left_title = QLabel("📦 产品选择（必选）"); left_title.setStyleSheet("font-weight:bold;")
+        left_title = QLabel(" 产品选择（必选）"); left_title.setStyleSheet("font-weight:bold;")
         left_lay.addWidget(left_title)
 
         prod_row = QHBoxLayout()
@@ -420,7 +420,7 @@ class CompileVideoPage(BasePage):
 
         # 模板库（成片模板，独立于动效模板；header 行内放 刷新，每个模板后放预览播放）
         tmpl_header = QHBoxLayout()
-        tmpl_header.addWidget(QLabel("🎬 成片模板"))
+        tmpl_header.addWidget(QLabel(" 成片模板"))
         tmpl_header.addStretch(1)
         self.btn_refresh_templates = mdi_button("刷新", "refresh")
         self.btn_refresh_templates.setObjectName("secondary_button")
@@ -457,7 +457,7 @@ class CompileVideoPage(BasePage):
                                         self._browse_folder, folder=True,
                                         placeholder="留空则按产品自动从素材库匹配")
         mat_header = QHBoxLayout()
-        mat_header.addWidget(QLabel("📁 素材列表（来自素材检索，可选）"))
+        mat_header.addWidget(QLabel(" 素材列表（来自素材检索，可选）"))
         mat_header.addStretch(1)
         self.btn_clear_materials = mdi_button("清空", "delete")
         self.btn_clear_materials.setObjectName("secondary_button")
@@ -520,7 +520,7 @@ class CompileVideoPage(BasePage):
         lay_cover.addStretch(1)
         self.tabs_params.addTab(tab_cover, "开场封面")
 
-        left_lay.addWidget(QLabel("🎬 模板参数"))
+        left_lay.addWidget(QLabel(" 模板参数"))
         left_lay.addWidget(self.tabs_params, 1)
 
         top_splitter.addWidget(right_card)
@@ -555,11 +555,11 @@ class CompileVideoPage(BasePage):
         self.combo_predict_platform.setFixedWidth(96)
         row2.addWidget(self.combo_predict_platform)
         row2.addStretch()
-        self.btn_make = mdi_button("🚀 开始执行", "video"); self.btn_make.setObjectName("primary_button")
+        self.btn_make = mdi_button(" 开始执行", "video"); self.btn_make.setObjectName("primary_button")
         self.btn_make.setFixedHeight(36)
         self.btn_make.clicked.connect(self._make)
         row2.addWidget(self.btn_make)
-        self.btn_add_task = QPushButton("📌 添加为定时任务")
+        self.btn_add_task = QPushButton(" 添加为定时任务")
         self.btn_add_task.setFixedHeight(36)
         self.btn_add_task.setToolTip("把当前配置提交给服务端，由服务端定时执行（可在「定时任务」页监控状态）")
         self.btn_add_task.clicked.connect(self._add_scheduled_task)
@@ -584,7 +584,7 @@ class CompileVideoPage(BasePage):
         # ── 输出结果（占主要空间，供预览）─────────────────────────────────
         out_left = QWidget()
         ol_lay = QVBoxLayout(out_left); ol_lay.setContentsMargins(0, 0, 0, 0); ol_lay.setSpacing(6)
-        ol_lay.addWidget(QLabel("🎞️ 输出结果"))
+        ol_lay.addWidget(QLabel(" 输出结果"))
         self.result_table = QTableWidget(0, 4)
         self.result_table.setHorizontalHeaderLabels(["序号", "文件名", "状态", "操作"])
         self.result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -620,7 +620,7 @@ class CompileVideoPage(BasePage):
         right_lay.addWidget(out_left, 1)
 
         # ── 执行日志：放最下面，固定小高度，默认折叠（空间让给输出结果）──
-        self.btn_toggle_log = QPushButton("📜 执行日志（点击展开）")
+        self.btn_toggle_log = QPushButton(" 执行日志（点击展开）")
         self.btn_toggle_log.setCheckable(True)
         self.btn_toggle_log.setChecked(False)
         self.btn_toggle_log.setObjectName("secondary_button")
@@ -645,7 +645,7 @@ class CompileVideoPage(BasePage):
         """执行日志展开/收起。"""
         show = self.btn_toggle_log.isChecked()
         self.log_box.setVisible(show)
-        self.btn_toggle_log.setText("📜 执行日志（点击折叠）" if show else "📜 执行日志（点击展开）")
+        self.btn_toggle_log.setText(" 执行日志（点击折叠）" if show else " 执行日志（点击展开）")
 
     # ════════════════════════════════════════════════════════════════════════
     #  脚本成片 tab（选分镜脚本 → 提交服务端成片）
@@ -673,7 +673,7 @@ class CompileVideoPage(BasePage):
         root.addLayout(sel_row)
 
         # ── 脚本预览 ───────────────────────────────────────────────────────
-        root.addWidget(QLabel("📋 脚本预览"))
+        root.addWidget(QLabel(" 脚本预览"))
         self.script_preview = QTextBrowser()
         self.script_preview.setOpenExternalLinks(False)
         self.script_preview.setMinimumHeight(220)
@@ -704,12 +704,12 @@ class CompileVideoPage(BasePage):
 
         # ── 执行按钮行 ─────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        self.btn_script_make = mdi_button("🚀 开始执行", "video")
+        self.btn_script_make = mdi_button(" 开始执行", "video")
         self.btn_script_make.setObjectName("primary_button")
         self.btn_script_make.setFixedHeight(36)
         self.btn_script_make.clicked.connect(lambda: self._submit_script(immediate=True))
         btn_row.addWidget(self.btn_script_make)
-        self.btn_script_add_task = QPushButton("📌 添加为定时任务")
+        self.btn_script_add_task = QPushButton(" 添加为定时任务")
         self.btn_script_add_task.setFixedHeight(36)
         self.btn_script_add_task.clicked.connect(self._add_script_scheduled_task)
         btn_row.addWidget(self.btn_script_add_task)
@@ -765,13 +765,13 @@ class CompileVideoPage(BasePage):
             self.script_status.setText(f"共 {len(scripts)} 个脚本（来自服务端）")
         else:
             self.script_preview.setMarkdown(
-                "## ⚠ 服务端暂无分镜脚本\n\n"
+                "## 注意： 服务端暂无分镜脚本\n\n"
                 "在「分镜脚本创作」页生成脚本并保存（会自动上传服务端）后，回到本页点「刷新」即可看到。")
             self.script_status.setText("服务端暂无脚本")
 
     def _on_scripts_load_error(self, msg):
         log.warning(f"从服务端加载脚本失败，回退本地扫描: {msg}")
-        self.script_status.setText(f"⚠ 服务端脚本加载失败：{msg}（已回退本地扫描）")
+        self.script_status.setText(f"注意： 服务端脚本加载失败：{msg}（已回退本地扫描）")
         scripts = self._scan_storyboard_scripts()
         self.combo_script.blockSignals(True)
         self.combo_script.clear()
@@ -785,7 +785,7 @@ class CompileVideoPage(BasePage):
             self.script_preview.setMarkdown("*选择上方脚本查看预览*")
             self.script_status.setText(f"服务端不可用，已回退本地（{len(scripts)} 个脚本）")
         else:
-            self.script_preview.setMarkdown("## ⚠ 暂无可用的分镜脚本\n\n服务端不可用且本地也未找到脚本。")
+            self.script_preview.setMarkdown("## 注意： 暂无可用的分镜脚本\n\n服务端不可用且本地也未找到脚本。")
             self.script_status.setText("未找到脚本（服务端不可用）")
 
     @staticmethod
@@ -860,7 +860,7 @@ class CompileVideoPage(BasePage):
 
     def _on_script_detail_error(self, err, sid):
         log.warning(f"加载脚本详情失败({sid}): {err}")
-        self.script_preview.setMarkdown(f"⚠ 脚本加载失败：{err}")
+        self.script_preview.setMarkdown(f"注意： 脚本加载失败：{err}")
 
     def _apply_script_to_ui(self, s):
         # 比例默认取脚本里的
@@ -949,16 +949,16 @@ class CompileVideoPage(BasePage):
         def _ok(tid):
             self.btn_script_make.setEnabled(True); self.btn_script_add_task.setEnabled(True)
             if tid:
-                self.script_status.setText(f"✅ 已提交服务端，任务 ID={tid}")
+                self.script_status.setText(f" 已提交服务端，任务 ID={tid}")
                 self.show_info(f"任务已提交服务端（ID={tid}）。\n\n"
                                + ("服务端正在执行，可在「成片任务」页查看进度。" if immediate
                                   else "服务端将按计划定时执行，可在「成片任务」页监控。"))
             else:
-                self.script_status.setText("⚠ 提交失败")
+                self.script_status.setText("注意： 提交失败")
                 self.show_warning("提交服务端失败，请确认服务端在线后重试。")
         def _err(e):
             self.btn_script_make.setEnabled(True); self.btn_script_add_task.setEnabled(True)
-            self.script_status.setText("⚠ 提交异常")
+            self.script_status.setText("注意： 提交异常")
             self.show_error(f"提交异常：{e}", "错误")
 
         worker.finished.connect(_ok)
@@ -1036,13 +1036,13 @@ class CompileVideoPage(BasePage):
                         self.combo_product.addItem(label, it.get("id", ""))
         except Exception as e:
             log.error(f"载入产品库失败: {e}")
-            self._log(f"⚠ 载入产品库失败: {e}")
+            self._log(f"注意： 载入产品库失败: {e}")
         self.combo_product.setCurrentIndex(0)
         self.combo_product.blockSignals(False)
 
     def _on_products_error(self, msg):
         log.error(f"载入产品库失败: {msg}")
-        self._log(f"⚠ 载入产品库失败: {msg}")
+        self._log(f"注意： 载入产品库失败: {msg}")
 
     def _on_product_changed(self, _idx):
         item_id = self.combo_product.currentData() or ""
@@ -1110,8 +1110,8 @@ class CompileVideoPage(BasePage):
         def done(path):
             self.btn_tts.setEnabled(True); self.progress_bar.setVisible(False)
             self.in_audio.setText(path)
-            self.stage_label.setText(f"✅ 配音已生成并填入：{os.path.basename(path)}")
-            self._log(f"✅ 配音已生成: {path}")
+            self.stage_label.setText(f"完成： 配音已生成并填入：{os.path.basename(path)}")
+            self._log(f"完成： 配音已生成: {path}")
 
         worker.done.connect(done)
         worker.error.connect(lambda e: (self.btn_tts.setEnabled(True), self.progress_bar.setVisible(False),
@@ -1145,8 +1145,8 @@ class CompileVideoPage(BasePage):
         def done(path):
             self.btn_mg_intro.setEnabled(True); self.progress_bar.setVisible(False)
             self.in_intro.setText(path)
-            self.stage_label.setText(f"✅ 开场动画已生成：{os.path.basename(path)}")
-            self._log(f"✅ MG 开场已生成: {path}")
+            self.stage_label.setText(f"完成： 开场动画已生成：{os.path.basename(path)}")
+            self._log(f"完成： MG 开场已生成: {path}")
         w.finished.connect(done)
         w.error.connect(lambda e: (self.btn_mg_intro.setEnabled(True), self.progress_bar.setVisible(False),
                                    self.show_error(str(e), "MG 开场生成失败")))
@@ -1264,7 +1264,7 @@ class CompileVideoPage(BasePage):
         self.btn_make.setEnabled(False)
         self.btn_add_task.setEnabled(False)
         self.stage_label.setText("正在提交到服务端…")
-        self._log(f"📤 提交任务到服务端：{task_title}（{'立即执行' if immediate else '定时执行'}）")
+        self._log(f" 提交任务到服务端：{task_title}（{'立即执行' if immediate else '定时执行'}）")
 
         # 用 TaskWorker 异步提交（避免阻塞 UI）
         from utils.thread_worker import TaskWorker as Worker
@@ -1276,8 +1276,8 @@ class CompileVideoPage(BasePage):
         def _on_done(tid):
             self.btn_make.setEnabled(True); self.btn_add_task.setEnabled(True)
             if tid:
-                self.stage_label.setText(f"✅ 已提交服务端，任务 ID={tid}")
-                self._log(f"✅ 服务端已接收，任务 ID={tid}。可在「成片任务」页监控状态。")
+                self.stage_label.setText(f" 已提交服务端，任务 ID={tid}")
+                self._log(f"完成： 服务端已接收，任务 ID={tid}。可在「成片任务」页监控状态。")
                 self.show_info(f"任务已提交服务端（ID={tid}）。\n\n"
                                + ("服务端正在执行，已自动打开「成片任务」页监控进度。"
                                   if immediate else
@@ -1285,13 +1285,13 @@ class CompileVideoPage(BasePage):
                 if immediate:
                     self._auto_open_task_monitor()
             else:
-                self.stage_label.setText("⚠ 提交失败")
-                self._log("❌ 服务端提交失败，请检查服务端连接")
+                self.stage_label.setText("注意： 提交失败")
+                self._log("失败： 服务端提交失败，请检查服务端连接")
                 self.show_warning("提交服务端失败，请确认服务端在线后重试。")
         def _on_err(e):
             self.btn_make.setEnabled(True); self.btn_add_task.setEnabled(True)
-            self.stage_label.setText("⚠ 提交失败")
-            self._log(f"❌ 提交异常: {e}")
+            self.stage_label.setText("注意： 提交失败")
+            self._log(f"失败： 提交异常: {e}")
             self.show_error(f"提交异常：{e}", "错误")
 
         worker.finished.connect(_on_done)
@@ -1312,15 +1312,15 @@ class CompileVideoPage(BasePage):
             self.btn_make.setEnabled(True)
             if folder and os.path.isdir(folder):
                 self.in_folder.setText(folder)
-                self.stage_label.setText(f"✅ 已匹配素材目录: {folder}")
+                self.stage_label.setText(f" 已匹配素材目录: {folder}")
                 self._do_make(folder)
             else:
-                self.stage_label.setText("⚠ 未能自动匹配素材目录")
+                self.stage_label.setText(" 未能自动匹配素材目录")
                 self.show_warning("未能自动匹配到素材目录，请手动选择「镜头素材目录」。")
 
         def on_err(e):
             self.btn_make.setEnabled(True)
-            self.stage_label.setText("⚠ 素材匹配失败")
+            self.stage_label.setText("注意： 素材匹配失败")
             self.show_warning(f"素材匹配失败：{e}\n请手动选择「镜头素材目录」。")
 
         mw.result_ready.connect(on_done)
@@ -1363,13 +1363,13 @@ class CompileVideoPage(BasePage):
         for i, path in enumerate(self._last_results):
             self.result_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
             self.result_table.setItem(i, 1, QTableWidgetItem(os.path.basename(path)))
-            status_item = QTableWidgetItem("✅ 完成")
+            status_item = QTableWidgetItem(" 完成")
             status_item.setForeground(Qt.GlobalColor.green)
             self.result_table.setItem(i, 2, status_item)
-            btn = table_action_button("📂", "打开")
+            btn = table_action_button("", "打开")
             btn.clicked.connect(lambda _=False, p=path: self._open_file(p))
             self.result_table.setCellWidget(i, 3, btn)
-        self.stage_label.setText(f"✅ 完成：共生成 {len(self._last_results)} 个成片")
+        self.stage_label.setText(f" 完成：共生成 {len(self._last_results)} 个成片")
         self._log(f"═══ 全部完成：{len(self._last_results)} 个成片 ═══")
 
         # 自动视频评价预测（只对第一个成片）
@@ -1383,7 +1383,7 @@ class CompileVideoPage(BasePage):
                     calib = VideoPredictionManager().calibration_text(platform=platform)
                 except Exception:
                     calib = ""
-                self.score_label.setText(f"⏳ 正在按「{platform}」做视频评价预测…")
+                self.score_label.setText(f"正在按「{platform}」做视频评价预测…")
                 self.score_widget.setVisible(True)
                 out = self._last_results[0]
                 sw = HookScoreWorker(out, cfg, platform=platform, calibration=calib)
@@ -1400,7 +1400,7 @@ class CompileVideoPage(BasePage):
         total = data.get("total", "—")
         level = data.get("play_level", "")
         comment = str(data.get("comment", ""))
-        self.score_label.setText(f"📈 视频预测：综合 {total} 分 · 预测{level}　{comment}")
+        self.score_label.setText(f" 视频预测：综合 {total} 分 · 预测{level}　{comment}")
         self.btn_detail.setVisible(True)
         try:
             if self._last_results:
@@ -1421,7 +1421,7 @@ class CompileVideoPage(BasePage):
     def _err(self, e):
         self.btn_make.setEnabled(True)
         self.stage_label.setText("成片失败。")
-        self._log(f"❌ 失败: {e}")
+        self._log(f" 失败: {e}")
         self.show_error(str(e), "一键成片失败")
 
     # ════════════════════════════════════════════════════════════════════════
@@ -1459,11 +1459,11 @@ class CompileVideoPage(BasePage):
                 if target_brand and target_model:
                     if b == target_brand and (mo == target_model or target_model in mo or mo in target_model):
                         self.combo_product.setCurrentIndex(i)
-                        self._log(f"📦 已根据素材自动选择产品: {self.combo_product.currentText()}")
+                        self._log(f" 已根据素材自动选择产品: {self.combo_product.currentText()}")
                         return
                 elif target_brand and b == target_brand:
                     self.combo_product.setCurrentIndex(i)
-                    self._log(f"📦 已根据素材品牌自动选择产品: {self.combo_product.currentText()}")
+                    self._log(f" 已根据素材品牌自动选择产品: {self.combo_product.currentText()}")
                     return
         except Exception as e:
             log.error(f"自动选择产品失败: {e}")
@@ -1475,7 +1475,7 @@ class CompileVideoPage(BasePage):
         for m in self._materials:
             fname = m.get("filename") or m.get("material_id") or ""
             mtype = (m.get("media_type") or "").lower()
-            icon = {"video": "🎬", "image": "🖼️", "audio": "🎵"}.get(mtype, "📁")
+            icon = {"video": "", "image": "", "audio": ""}.get(mtype, "")
             item = QListWidgetItem(f"{icon} {fname}")
             item.setData(Qt.UserRole, m)
             self.material_list.addItem(item)
@@ -1544,7 +1544,7 @@ class CompileVideoPage(BasePage):
         """播放模板返回的视频地址。"""
         if not url:
             return
-        self._log(f"▶ 播放模板预览: {url}")
+        self._log(f"播放 播放模板预览: {url}")
         self._play_preview(url)
 
     def _fill_template_list(self, templates, current_id=None):
@@ -1579,7 +1579,7 @@ class CompileVideoPage(BasePage):
             self.list_templates.setItem(current_row, 0, item)
             url = self._video_url_for_template(t)
             if url:
-                btn = QPushButton("▶")
+                btn = QPushButton("播放")
                 btn.setFixedSize(32, 26)
                 btn.setToolTip(f"播放预览: {url}")
                 btn.clicked.connect(lambda checked=False, u=url: self._play_template_video(u))
@@ -1628,9 +1628,9 @@ class CompileVideoPage(BasePage):
         # 避免“内置模板(本地兜底) + 自定义模板(服务端)”来源混杂同时显示。
         if server_templates:
             self._templates = list(server_templates)
-            self._log(f"✅ 已加载服务端成片模板 {len(server_templates)} 个")
+            self._log(f" 已加载服务端成片模板 {len(server_templates)} 个")
         else:
-            self._log("⚠ 未从服务端加载到成片模板，使用内置模板")
+            self._log(" 未从服务端加载到成片模板，使用内置模板")
             self._templates = list(VIDEO_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
         self._fill_template_list(self._templates, current_id=current_id)
@@ -1917,7 +1917,7 @@ class CompileVideoPage(BasePage):
                                      title="成片模板预览", size=(560, 760))
             dlg.exec()
         except Exception as e:
-            self._log(f"⚠ 内置播放失败，改用系统播放器: {e}")
+            self._log(f"注意： 内置播放失败，改用系统播放器: {e}")
             try:
                 os.startfile(os.path.abspath(path))  # noqa
             except Exception:

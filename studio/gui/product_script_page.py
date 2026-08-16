@@ -43,7 +43,7 @@ class ProductScriptPage(BasePage):
         layout.setSpacing(16)
 
         hdr = QHBoxLayout()
-        heading = QLabel("🛒 产品文案创作")
+        heading = QLabel(" 产品文案创作")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         desc = QLabel("基于产品资料与风格化画像，一键生成产品文案与分镜脚本")
@@ -94,14 +94,14 @@ class ProductScriptPage(BasePage):
         src.setSpacing(10)
 
         search_row = QHBoxLayout()
-        lbl_search = QLabel("📦 产品选择")
+        lbl_search = QLabel(" 产品选择")
         lbl_search.setObjectName("card_title")
         search_row.addWidget(lbl_search)
         self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
         self.combo_product.currentIndexChanged.connect(self._on_product_selected)
         self.combo_product.setMinimumWidth(100)
         search_row.addWidget(self.combo_product, 1)
-        btn_reload = QPushButton("🔄 重置")
+        btn_reload = QPushButton(" 重置")
         btn_reload.setObjectName("secondary_button")
         btn_reload.setToolTip("重新载入产品资料与我的知识库")
         btn_reload.clicked.connect(self.reload_sources)
@@ -116,7 +116,7 @@ class ProductScriptPage(BasePage):
         detail.setContentsMargins(20, 16, 20, 16)
         detail.setSpacing(10)
 
-        title_detail = QLabel("📋 产品已保存资料 (性能参数与核心卖点)")
+        title_detail = QLabel(" 产品已保存资料 (性能参数与核心卖点)")
         title_detail.setObjectName("card_title")
         title_detail.setWordWrap(True)
         detail.addWidget(title_detail)
@@ -144,7 +144,7 @@ class ProductScriptPage(BasePage):
         sl.setSpacing(10)
 
         style_hdr = QHBoxLayout()
-        style_title = QLabel("🎨 风格化（可选）")
+        style_title = QLabel(" 风格化（可选）")
         style_title.setObjectName("card_title")
         style_hdr.addWidget(style_title)
         sl.addLayout(style_hdr)
@@ -153,7 +153,7 @@ class ProductScriptPage(BasePage):
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
         self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
         style_row.addWidget(self.combo_stylization, 1)
-        btn_refresh_style = QPushButton("🔄 重置")
+        btn_refresh_style = QPushButton(" 重置")
         btn_refresh_style.setObjectName("secondary_button")
         btn_refresh_style.setToolTip("重新加载知识库风格化列表")
         btn_refresh_style.clicked.connect(self._reload_stylizations)
@@ -214,13 +214,13 @@ class ProductScriptPage(BasePage):
         cp.addLayout(gen_settings)
 
         cp_row = QHBoxLayout()
-        cp_row.addWidget(QLabel("📝 视频文案（可编辑）"))
+        cp_row.addWidget(QLabel(" 视频文案（可编辑）"))
         cp_row.addStretch()
-        self.btn_check_extreme = QPushButton("🚫 极限词检测")
+        self.btn_check_extreme = QPushButton(" 极限词检测")
         self.btn_check_extreme.setObjectName("secondary_button")
         self.btn_check_extreme.clicked.connect(self._check_extreme_words)
         cp_row.addWidget(self.btn_check_extreme)
-        self.btn_gen_copy = QPushButton("✨ 生成文案")
+        self.btn_gen_copy = QPushButton(" 生成文案")
         self.btn_gen_copy.setObjectName("primary_button")
         self.btn_gen_copy.clicked.connect(self._generate_copywriting)
         cp_row.addWidget(self.btn_gen_copy)
@@ -242,7 +242,7 @@ class ProductScriptPage(BasePage):
         self.edit_copy.setMinimumWidth(100)
         cp.addWidget(self.edit_copy, 1)
 
-        self.btn_go_storyboard = QPushButton("➡️ 前往分镜脚本设计")
+        self.btn_go_storyboard = QPushButton(" 前往分镜脚本设计")
         self.btn_go_storyboard.setObjectName("primary_button")
         self.btn_go_storyboard.setFixedHeight(45)
         self.btn_go_storyboard.clicked.connect(self._go_to_storyboard)
@@ -290,7 +290,7 @@ class ProductScriptPage(BasePage):
         for it in stylizations:
             score = it.get("score", 5.0)
             cnt = it.get("source_count", 0)
-            label = f"{it.get('name','')}  ⭐{score:.1f} ({cnt}条)"
+            label = f"{it.get('name','')} {score:.1f} ({cnt}条)"
             self.combo_stylization.addItem(label, it.get("id"))
         self.combo_stylization.blockSignals(False)
         self._on_stylization_selected()

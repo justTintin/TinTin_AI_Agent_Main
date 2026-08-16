@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""「系统设置」独立窗口：侧边栏底部「⚙ 系统设置」入口打开。
+"""「系统设置」独立窗口：侧边栏底部「 系统设置」入口打开。
 
 主侧边栏不再直接展示系统配置菜单，统一收纳到本窗口的二级菜单：
 左侧菜单（模型配置/平台接入/本地配置/环境与维护/扩展插件/关于）+ 右侧页面区。
@@ -49,7 +49,7 @@ class SystemSettingsDialog(QDialog):
         ml.setContentsMargins(10, 20, 10, 14)
         ml.setSpacing(4)
 
-        title = QLabel("⚙ 系统设置")
+        title = QLabel("系统设置")
         title.setObjectName("heading")
         ml.addWidget(title)
         ml.addSpacing(10)
@@ -70,11 +70,6 @@ class SystemSettingsDialog(QDialog):
         self._stack = QStackedWidget()
         self._stack.setObjectName("settings_stack")
         root.addWidget(self._stack, 1)
-
-        # 菜单面板样式（与侧边栏同色系，独立右分割线）
-        menu_panel.setStyleSheet(
-            "QFrame#settings_menu_panel { background-color: #0f1016;"
-            " border-right: 1px solid #1e212b; }")
 
     # ──────────────────────────── 页面挂载 ────────────────────────────
     def attach_pages(self, main_window):

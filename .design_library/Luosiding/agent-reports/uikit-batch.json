@@ -1,0 +1,10 @@
+{
+  "kitType": "dashboard",
+  "writtenFiles": [
+    "ui_kits/dashboard/index.html",
+    "ui_kits/dashboard/quality-report.json"
+  ],
+  "screens": ["工作台概览", "成片任务", "系统设置"],
+  "coreComponentsUsed": ["button", "card", "input", "navigation", "table", "badge"],
+  "completedAt": "2026-08-16T11:15:00+08:00"
+}

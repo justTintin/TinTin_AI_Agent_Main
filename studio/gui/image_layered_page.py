@@ -271,12 +271,12 @@ class LayerCardWidget(QFrame):
         
         # Buttons layout
         btn_layout = QHBoxLayout()
-        btn_view = QPushButton("🔍 查看")
+        btn_view = QPushButton(" 查看")
         btn_view.setObjectName("pill_button")
         btn_view.setCursor(Qt.PointingHandCursor)
         btn_view.clicked.connect(lambda: on_preview(img_path, layer_idx))
         
-        btn_export = QPushButton("💾 另存")
+        btn_export = QPushButton(" 另存")
         btn_export.setObjectName("pill_button")
         btn_export.setCursor(Qt.PointingHandCursor)
         btn_export.clicked.connect(lambda: on_save(img_path, layer_idx))
@@ -351,7 +351,7 @@ class ImageLayeredPage(BasePage):
             card_layout.setSpacing(20)
             card_layout.setAlignment(Qt.AlignCenter)
             
-            icon_label = QLabel("⚠️")
+            icon_label = QLabel("注意：")
             icon_label.setAlignment(Qt.AlignCenter)
             icon_label.setStyleSheet("font-size: 64px;")
             card_layout.addWidget(icon_label)
@@ -480,7 +480,7 @@ class ImageLayeredPage(BasePage):
         self.progress_bar.setVisible(False)
         left_layout.addWidget(self.progress_bar)
         
-        self.btn_run = QPushButton("⚡ 开始智能分层")
+        self.btn_run = QPushButton(" 开始智能分层")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.setCursor(Qt.PointingHandCursor)
         self.btn_run.setEnabled(False)
@@ -491,19 +491,19 @@ class ImageLayeredPage(BasePage):
         left_layout.addWidget(QLabel("4. 导出整图工程:"))
         
         export_layout = QHBoxLayout()
-        self.btn_export_pptx = QPushButton("📊 PPTX")
+        self.btn_export_pptx = QPushButton(" PPTX")
         self.btn_export_pptx.setObjectName("secondary_button")
         self.btn_export_pptx.setCursor(Qt.PointingHandCursor)
         self.btn_export_pptx.setEnabled(False)
         self.btn_export_pptx.clicked.connect(self.save_pptx)
         
-        self.btn_export_zip = QPushButton("📦 ZIP")
+        self.btn_export_zip = QPushButton(" ZIP")
         self.btn_export_zip.setObjectName("secondary_button")
         self.btn_export_zip.setCursor(Qt.PointingHandCursor)
         self.btn_export_zip.setEnabled(False)
         self.btn_export_zip.clicked.connect(self.save_zip)
         
-        self.btn_export_psd = QPushButton("🎨 PSD")
+        self.btn_export_psd = QPushButton(" PSD")
         self.btn_export_psd.setObjectName("secondary_button")
         self.btn_export_psd.setCursor(Qt.PointingHandCursor)
         self.btn_export_psd.setEnabled(False)
@@ -526,13 +526,13 @@ class ImageLayeredPage(BasePage):
         
         # Preview view headers
         view_tabs_layout = QHBoxLayout()
-        self.btn_view_orig = QPushButton("🎨 原始图像 (Original)")
+        self.btn_view_orig = QPushButton(" 原始图像 (Original)")
         self.btn_view_orig.setObjectName("pill_button")
         self.btn_view_orig.setCheckable(True)
         self.btn_view_orig.setChecked(True)
         self.btn_view_orig.setCursor(Qt.PointingHandCursor)
         
-        self.btn_view_gallery = QPushButton("🗂️ 分层预览 (decomposed)")
+        self.btn_view_gallery = QPushButton(" 分层预览 (decomposed)")
         self.btn_view_gallery.setObjectName("pill_button")
         self.btn_view_gallery.setCheckable(True)
         self.btn_view_gallery.setCursor(Qt.PointingHandCursor)

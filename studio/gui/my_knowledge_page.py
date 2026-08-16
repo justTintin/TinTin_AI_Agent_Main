@@ -93,11 +93,11 @@ class SampleDetailDialog(QDialog):
         has_media  = bool(media_path and os.path.exists(media_path))
         transcript = (sample.get("transcript") or "").strip()
         if src.get("is_liked"):
-            badge = "👍 点赞"
+            badge = " 点赞"
         elif src.get("is_collected"):
-            badge = "🔖 收藏"
+            badge = " 收藏"
         else:
-            badge = "👤 关注"
+            badge = " 关注"
 
         # ── 标题 ──
         title_lbl = QLabel(sample.get("name", "(未命名)"))
@@ -126,7 +126,7 @@ class SampleDetailDialog(QDialog):
         ll.setContentsMargins(0, 0, 8, 0)
         ll.setSpacing(8)
 
-        ll.addWidget(QLabel("📺 视频播放（网页在线预览 / 本地关联）："))
+        ll.addWidget(QLabel(" 视频播放（网页在线预览 / 本地关联）："))
         
         try:
             from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -163,7 +163,7 @@ class SampleDetailDialog(QDialog):
             self.web_view.setMinimumHeight(480)
             ll.addWidget(self.web_view, 1)
         else:
-            placeholder = QLabel("📺 暂无在线播放链接")
+            placeholder = QLabel(" 暂无在线播放链接")
             placeholder.setObjectName("muted_text")
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("border: 1px solid #3a3a3c; border-radius: 8px; background-color: #1c1c1e;")
@@ -173,25 +173,25 @@ class SampleDetailDialog(QDialog):
         # 关联操作栏
         local_row = QHBoxLayout()
         if url:
-            btn_open = QPushButton("🌐 在外部浏览器打开链接")
+            btn_open = QPushButton(" 在外部浏览器打开链接")
             btn_open.setObjectName("secondary_button")
             _u = url
             btn_open.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(_u)))
             local_row.addWidget(btn_open)
 
         if has_media:
-            btn_play = QPushButton("▶️ 用本地播放器播放")
+            btn_play = QPushButton("播放 用本地播放器播放")
             btn_play.setObjectName("primary_button")
             _mp = media_path
             btn_play.clicked.connect(lambda: os.startfile(_mp))
             local_row.addWidget(btn_play)
             
-            btn_folder = QPushButton("📁 打开本地文件夹")
+            btn_folder = QPushButton(" 打开本地文件夹")
             btn_folder.setObjectName("secondary_button")
             btn_folder.clicked.connect(lambda: subprocess.Popen(f'explorer /select,"{_mp}"'))
             local_row.addWidget(btn_folder)
         else:
-            lbl_no_local = QLabel("📥 本地媒体：未下载（您可通过上方窗口或外部链接直接在线预览）")
+            lbl_no_local = QLabel(" 本地媒体：未下载（您可通过上方窗口或外部链接直接在线预览）")
             lbl_no_local.setObjectName("muted_text")
             local_row.addWidget(lbl_no_local)
         
@@ -204,21 +204,21 @@ class SampleDetailDialog(QDialog):
         rl.setContentsMargins(8, 0, 0, 0)
         rl.setSpacing(8)
 
-        rl.addWidget(QLabel("📄 内容文本（标题 / 文案）："))
+        rl.addWidget(QLabel(" 内容文本（标题 / 文案）："))
         content_box = QTextEdit()
         content_box.setReadOnly(True)
         content_box.setPlainText(sample.get("content", ""))
         content_box.setMaximumHeight(150)
         rl.addWidget(content_box)
 
-        rl.addWidget(QLabel("📝 字幕 / 转写文本："))
+        rl.addWidget(QLabel(" 字幕 / 转写文本："))
         transcript_box = QTextEdit()
         transcript_box.setReadOnly(True)
         if transcript:
             transcript_box.setPlainText(transcript)
         else:
             transcript_box.setPlaceholderText(
-                "（尚未转写 — 可在「参考素材」面板点「🎬 批量转文字」生成转写文本）")
+                "（尚未转写 — 可在「参考素材」面板点「 批量转文字」生成转写文本）")
         rl.addWidget(transcript_box, 1)
 
         if stylization:
@@ -277,7 +277,7 @@ class _BatchTranscribeWorker(BaseWorker):
                 sample["transcript"] = asr_client.segments_to_plain(segments)
                 count += 1
             except Exception as e:
-                self.progress.emit(f"⚠️ 跳过 {os.path.basename(media_path)}: {e}")
+                self.progress.emit(f"注意： 跳过 {os.path.basename(media_path)}: {e}")
         if count:
             self._manager.save()
         self.finished.emit(count)
@@ -301,7 +301,7 @@ class MyKnowledgePage(BasePage):
         root.setSpacing(16)
 
         hdr = QHBoxLayout()
-        heading = QLabel("📚 我的知识库")
+        heading = QLabel(" 我的知识库")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         subtitle = QLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整")
@@ -314,25 +314,25 @@ class MyKnowledgePage(BasePage):
 
         # ── 工具栏 ──
         bar = QHBoxLayout()
-        btn_sync = QPushButton("🌐 同步关注内容")
+        btn_sync = QPushButton(" 同步关注内容")
         btn_sync.setObjectName("secondary_button")
         btn_sync.setToolTip("打开素材浏览器，同步关注的创作者内容")
         btn_sync.clicked.connect(self._open_browser_sync)
         bar.addWidget(btn_sync)
 
-        btn_import_raw = QPushButton("📋 导入收藏记录")
+        btn_import_raw = QPushButton(" 导入收藏记录")
         btn_import_raw.setObjectName("secondary_button")
         btn_import_raw.setToolTip("从浏览器收藏/点赞记录导入原始素材（无需下载）")
         btn_import_raw.clicked.connect(self._import_kb_items)
         bar.addWidget(btn_import_raw)
 
-        btn_import = QPushButton("🔄 同步记录素材")
+        btn_import = QPushButton(" 同步记录素材")
         btn_import.setObjectName("secondary_button")
         btn_import.setToolTip("合并导入已下载素材 + 浏览器收藏记录")
         btn_import.clicked.connect(self._import_samples)
         bar.addWidget(btn_import)
 
-        self.btn_distill = QPushButton("✨ 提炼风格化")
+        self.btn_distill = QPushButton(" 提炼风格化")
         self.btn_distill.setObjectName("primary_button")
         self.btn_distill.setToolTip(
             "把收藏/点赞样本按四个维度（账号/内容类型/产品品类/行业垂类）\n"
@@ -400,7 +400,7 @@ class MyKnowledgePage(BasePage):
 
         lay.addStretch()
 
-        btn_refresh_stat = QPushButton("🔄 刷新数据统计")
+        btn_refresh_stat = QPushButton(" 刷新数据统计")
         btn_refresh_stat.setObjectName("secondary_button")
         btn_refresh_stat.setFixedHeight(28)
         btn_refresh_stat.setToolTip("重新读取浏览器数据文件，更新未处理数量统计")
@@ -584,32 +584,32 @@ class MyKnowledgePage(BasePage):
 
         # ── 操作按钮行 ──
         btn_row = QHBoxLayout()
-        self.btn_use_style = QPushButton("✍️ 用此风格调文案")
+        self.btn_use_style = QPushButton(" 用此风格调文案")
         self.btn_use_style.setObjectName("primary_button")
         self.btn_use_style.setEnabled(False)
         self.btn_use_style.clicked.connect(self._adjust_copy)
         btn_row.addWidget(self.btn_use_style)
 
-        self.btn_regen = QPushButton("🔄 重新提炼")
+        self.btn_regen = QPushButton(" 重新提炼")
         self.btn_regen.setObjectName("secondary_button")
         self.btn_regen.setEnabled(False)
         self.btn_regen.clicked.connect(self._regen_current)
         btn_row.addWidget(self.btn_regen)
 
-        self.btn_del_style = QPushButton("🗑️ 删除")
+        self.btn_del_style = QPushButton(" 删除")
         self.btn_del_style.setObjectName("secondary_button")
         self.btn_del_style.setEnabled(False)
         self.btn_del_style.clicked.connect(self._delete_current)
         btn_row.addWidget(self.btn_del_style)
 
-        self.btn_like = QPushButton("👍 加分")
+        self.btn_like = QPushButton(" 加分")
         self.btn_like.setObjectName("secondary_button")
         self.btn_like.setToolTip("此风格效果好，评分 +0.5")
         self.btn_like.setEnabled(False)
         self.btn_like.clicked.connect(self._like_current)
         btn_row.addWidget(self.btn_like)
 
-        self.btn_dislike = QPushButton("👎 差评")
+        self.btn_dislike = QPushButton(" 差评")
         self.btn_dislike.setObjectName("secondary_button")
         self.btn_dislike.setToolTip("此风格效果差，评分 -0.3")
         self.btn_dislike.setEnabled(False)
@@ -639,7 +639,7 @@ class MyKnowledgePage(BasePage):
         self.samples_header.setObjectName("card_title")
         hdr_row.addWidget(self.samples_header, 1)
 
-        self.btn_transcribe = QPushButton("🎬 批量转文字")
+        self.btn_transcribe = QPushButton(" 批量转文字")
         self.btn_transcribe.setObjectName("secondary_button")
         self.btn_transcribe.setToolTip(
             "对已下载的素材视频运行 Whisper 转写，跳过未下载或已有转写的素材")
@@ -674,7 +674,7 @@ class MyKnowledgePage(BasePage):
         self.samples_list.itemDoubleClicked.connect(self._on_sample_double_clicked)
         lay.addWidget(self.samples_list, 1)
 
-        legend = QLabel("✅=已下载  ⬜=未下载  📝=已转写  — =未转写  |  双击查看素材详情")
+        legend = QLabel("完成：=已下载  未=未下载  =已转写  — =未转写  |  双击查看素材详情")
         legend.setObjectName("muted_text")
         legend.setVisible(False)
         self.samples_legend = legend
@@ -802,7 +802,7 @@ class MyKnowledgePage(BasePage):
         self.manager.like_item(s.get("id",""))
         self.current_stylization = self.manager.get(s.get("id",""))
         score = self.current_stylization.get("score", 5.0)
-        self.action_status.setText(f"👍 已点赞，当前评分 {score:.1f}")
+        self.action_status.setText(f" 已点赞，当前评分 {score:.1f}")
         self.refresh_stylization_list()
 
     def _dislike_current(self):
@@ -812,7 +812,7 @@ class MyKnowledgePage(BasePage):
         self.manager.dislike_item(s.get("id",""))
         self.current_stylization = self.manager.get(s.get("id",""))
         score = self.current_stylization.get("score", 5.0)
-        self.action_status.setText(f"👎 已差评，当前评分 {score:.1f}")
+        self.action_status.setText(f" 已差评，当前评分 {score:.1f}")
         self.refresh_stylization_list()
 
     # ══════════════ 调文案 ══════════════
@@ -858,8 +858,8 @@ class MyKnowledgePage(BasePage):
             t = it.get("type", "")
             name = it.get("name", "")
             score = it.get("score")
-            score_tag = f" ⭐{score:.1f}" if (t == STYLIZATION_TYPE and score is not None) else ""
-            warn_tag = " ⚠️样本少" if (t == STYLIZATION_TYPE and (it.get("source_count") or 0) < 3) else ""
+            score_tag = f" {score:.1f}分" if (t == STYLIZATION_TYPE and score is not None) else ""
+            warn_tag = " 注意：样本少" if (t == STYLIZATION_TYPE and (it.get("source_count") or 0) < 3) else ""
             node = QListWidgetItem(f"[{t}]  {name}{score_tag}{warn_tag}")
             node.setData(Qt.UserRole, it.get("id"))
             node.setFlags(node.flags() | Qt.ItemIsUserCheckable)
@@ -872,7 +872,7 @@ class MyKnowledgePage(BasePage):
             klist.addItem(node)
         lay.addWidget(klist)
 
-        btn_go = QPushButton("✨ 调整文案")
+        btn_go = QPushButton(" 调整文案")
         btn_go.setObjectName("primary_button")
         lay.addWidget(btn_go)
 
@@ -934,7 +934,7 @@ class MyKnowledgePage(BasePage):
             stylizations = [it for it in stylizations if it.get("dim") == self._style_filter_dim]
 
         if not stylizations:
-            msg = ("（暂无风格化条目，请先导入素材并点「✨ 提炼风格化」）"
+            msg = ("（暂无风格化条目，请先导入素材并点「 提炼风格化」）"
                    if self._style_filter_dim is None
                    else f"（此维度暂无风格化条目）")
             empty = QListWidgetItem(msg)
@@ -972,13 +972,13 @@ class MyKnowledgePage(BasePage):
                 score = it.get("score", 5.0)
                 # 评分徽章：绿 ≥7 / 黄 5–6.9 / 红 <5
                 if score >= 7.0:
-                    badge = f"⭐{score:.1f}"
+                    badge = f"{score:.1f}"
                 elif score >= 5.0:
-                    badge = f"★{score:.1f}"
+                    badge = f"{score:.1f}"
                 else:
-                    badge = f"☆{score:.1f}"
-                warn = "  ⚠️" if cnt < 3 else ""
-                label = f"    🎨  {val}   [{badge}]  ({cnt} 条){warn}"
+                    badge = f"{score:.1f}"
+                warn = "  注意：" if cnt < 3 else ""
+                label = f"      {val}   [{badge}]  ({cnt} 条){warn}"
                 node = QListWidgetItem(label)
                 node.setData(Qt.UserRole, it.get("id"))
                 # 评分颜色
@@ -1037,10 +1037,10 @@ class MyKnowledgePage(BasePage):
         # 未下载/未转写提醒
         warn_parts = []
         if n_missing > 0:
-            warn_parts.append(f"⚠️ {n_missing}/{n_total} 条素材尚未下载，批量转文字将跳过")
+            warn_parts.append(f"注意： {n_missing}/{n_total} 条素材尚未下载，批量转文字将跳过")
         if n_transcribed < n_total - n_missing:
             not_yet = n_total - n_missing - n_transcribed
-            warn_parts.append(f"📝 {not_yet} 条已下载但未转写")
+            warn_parts.append(f" {not_yet} 条已下载但未转写")
         if warn_parts:
             self.samples_warn_label.setText("  |  ".join(warn_parts))
             self.samples_warn_label.setVisible(True)
@@ -1052,11 +1052,11 @@ class MyKnowledgePage(BasePage):
         for s in matched:
             src = s.get("source") or {}
             if src.get("is_liked"):
-                badge = "👍"
+                badge = ""
             elif src.get("is_collected"):
-                badge = "🔖"
+                badge = ""
             else:
-                badge = "👤"
+                badge = ""
             platform   = src.get("platformName") or src.get("platform","")
             creator    = src.get("creator","")
             media_path = src.get("media_path","")
@@ -1065,8 +1065,8 @@ class MyKnowledgePage(BasePage):
 
             title_short = s.get("name","")[:28]
             col0 = f"{badge}  [{platform}]  {creator}  —  {title_short}"
-            col1 = "✅" if has_media else "⬜"
-            col2 = "📝" if has_transcript else "—"
+            col1 = "完成：" if has_media else "未"
+            col2 = "" if has_transcript else "—"
 
             node = QTreeWidgetItem([col0, col1, col2])
             node.setData(0, Qt.UserRole, s.get("id"))

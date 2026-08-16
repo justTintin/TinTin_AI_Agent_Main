@@ -111,7 +111,7 @@ class SidebarMixin:
         # account_header.setObjectName("section_header")
         # account_layout.addWidget(account_header)
         #
-        # account_btn = QPushButton("👥 抖音账户")
+        # account_btn = QPushButton(" 抖音账户")
         # account_btn.setObjectName("nav_button")
         # account_btn.setProperty("target_index", 8)
         # account_btn.setCursor(Qt.PointingHandCursor)
@@ -166,7 +166,6 @@ class SidebarMixin:
             ("素材生成", 31, "palette"),
             ("素材检索", 38, "text-box-search"),
             ("音频素材", 44, "music"),
-            ("即梦素材", 41, "image-multiple"),
             ("媒体工具", 45, "tools"),
         ]
         for text, index, icon_name in media_menus:
@@ -237,7 +236,7 @@ class SidebarMixin:
             self.nav_buttons.append(btn)
         self._nav_full_lay.addWidget(ops_card)
 
-        # 5. 系统配置：已收纳到独立「系统设置」二级菜单窗口（底部 ⚙ 入口打开）
+        # 5. 系统配置：已收纳到独立「系统设置」二级菜单窗口（底部  入口打开）
             
         self._nav_full_lay.addStretch()
 

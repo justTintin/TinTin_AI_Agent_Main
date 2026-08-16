@@ -73,7 +73,7 @@ class HotspotManager:
         """
         path = manifest_path or os.path.join(HOTSPOTS_MATERIALS_DIR, "hotspots_sync.json")
         if not os.path.exists(path):
-            return 0, 0, 0, f"未找到采集清单：{path}\n请先在素材浏览器点「📈 抓取今日热点」。"
+            return 0, 0, 0, f"未找到采集清单：{path}\n请先在素材浏览器点「 抓取今日热点」。"
         try:
             with open(path, "r", encoding="utf-8") as f:
                 snaps = json.load(f)

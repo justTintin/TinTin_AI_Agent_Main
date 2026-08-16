@@ -2,7 +2,8 @@
 import os
 from datetime import datetime
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QLineEdit,
     QFileDialog, QListWidget, QListWidgetItem, QTextEdit,
@@ -17,6 +18,9 @@ from utils.gui_icons import mdi_button
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv"}
 
+_THUMB_SIZE = QSize(160, 160)
+_CELL_SIZE = QSize(185, 215)  # 与素材库页保持一致
+
 
 class DreaminaAssetsPage(BasePage):
     def __init__(self, parent_widget, main_window):
@@ -26,11 +30,11 @@ class DreaminaAssetsPage(BasePage):
 
     def setup(self):
         root = QVBoxLayout(self.parent_widget)
-        root.setContentsMargins(40, 40, 40, 40)
+        root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(14)
 
         hdr = QHBoxLayout()
-        heading = QLabel("🧺 即梦素材")
+        heading = QLabel("即梦素材")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
@@ -70,12 +74,12 @@ class DreaminaAssetsPage(BasePage):
         lay.addLayout(row)
 
         acts = QHBoxLayout()
-        self.btn_open_browser = QPushButton("🌐 打开即梦素材浏览器")
+        self.btn_open_browser = QPushButton("打开即梦素材浏览器")
         self.btn_open_browser.setObjectName("primary_button")
         self.btn_open_browser.clicked.connect(self._open_dreamina_browser)
         acts.addWidget(self.btn_open_browser)
 
-        self.btn_refresh = QPushButton("↺ 刷新文件列表")
+        self.btn_refresh = QPushButton("刷新文件列表")
         self.btn_refresh.setObjectName("secondary_button")
         self.btn_refresh.clicked.connect(self._scan_local_files)
         acts.addWidget(self.btn_refresh)
@@ -98,6 +102,15 @@ class DreaminaAssetsPage(BasePage):
         lay.addLayout(top)
 
         self.file_list = QListWidget()
+        self.file_list.setObjectName("dreamina_file_list")
+        self.file_list.setViewMode(QListWidget.IconMode)
+        self.file_list.setFlow(QListWidget.LeftToRight)
+        self.file_list.setResizeMode(QListWidget.Adjust)
+        self.file_list.setMovement(QListWidget.Static)
+        self.file_list.setGridSize(_CELL_SIZE)
+        self.file_list.setIconSize(_THUMB_SIZE)
+        self.file_list.setSpacing(2)
+        self.file_list.setWordWrap(True)
         lay.addWidget(self.file_list, 1)
         return card
 
@@ -137,7 +150,7 @@ class DreaminaAssetsPage(BasePage):
             from utils import asset_browser_client as abrowser
             ok, msg, _ = abrowser.launch_dreamina_assets(d)
             if ok:
-                self.log_box.append(f"✅ {msg}\n下载目录：{d}")
+                self.log_box.append(f"完成： {msg}\n下载目录：{d}")
             else:
                 self.show_warning(msg, "无法打开素材浏览器")
         except Exception as e:
@@ -160,8 +173,20 @@ class DreaminaAssetsPage(BasePage):
         files.sort()
         for fp in files:
             rel = os.path.relpath(fp, d)
-            self.file_list.addItem(QListWidgetItem(rel))
+            item = QListWidgetItem(rel)
+            item.setIcon(self._thumbnail_for(fp, ext))
+            self.file_list.addItem(item)
         self.lbl_stat.setText(f"共 {len(files)} 个文件")
+
+    def _thumbnail_for(self, fp: str, ext: str):
+        if ext in IMAGE_EXTS:
+            pm = QPixmap(fp)
+            if not pm.isNull():
+                return QPixmap(pm.scaled(_THUMB_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # 视频或加载失败时返回一个纯色占位
+        pm = QPixmap(_THUMB_SIZE)
+        pm.fill(Qt.transparent)
+        return pm
 
     def _set_busy(self, busy: bool):
         self.btn_open_browser.setEnabled(not busy)

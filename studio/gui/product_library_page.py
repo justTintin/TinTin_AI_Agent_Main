@@ -288,7 +288,7 @@ class ProductLibraryPage(BasePage):
         root.setSpacing(16)
 
         hdr = QHBoxLayout()
-        heading = QLabel("📦 产品资料")
+        heading = QLabel(" 产品资料")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
@@ -302,7 +302,7 @@ class ProductLibraryPage(BasePage):
 
         # 顶部：仓库同步条
         sync_bar = QHBoxLayout()
-        self.btn_sync = QPushButton("🔄 从仓库同步")
+        self.btn_sync = QPushButton(" 从仓库同步")
         self.btn_sync.setObjectName("primary_button")
         self.btn_sync.clicked.connect(self._on_sync)
         sync_bar.addWidget(self.btn_sync)
@@ -314,7 +314,7 @@ class ProductLibraryPage(BasePage):
         self.btn_export_template.setObjectName("secondary_button")
         self.btn_export_template.clicked.connect(self._on_export_template)
         sync_bar.addWidget(self.btn_export_template)
-        self.btn_mine_all = QPushButton("⚡ 全量挖掘")
+        self.btn_mine_all = QPushButton(" 全量挖掘")
         self.btn_mine_all.setObjectName("secondary_button")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点")
         self.btn_mine_all.clicked.connect(self._on_mine_all)
@@ -359,7 +359,7 @@ class ProductLibraryPage(BasePage):
         self.tree.itemClicked.connect(self._on_tree_clicked)
         layout.addWidget(self.tree, 1)
 
-        btn_new = QPushButton("➕ 新增型号（清空表单）")
+        btn_new = QPushButton(" 新增型号（清空表单）")
         btn_new.setObjectName("secondary_button")
         btn_new.clicked.connect(self.clear_form)
         layout.addWidget(btn_new)
@@ -382,7 +382,7 @@ class ProductLibraryPage(BasePage):
         top_layout.setContentsMargins(16, 16, 16, 16)
         top_layout.setSpacing(10)
 
-        title_basic = QLabel("📋 产品基本资料")
+        title_basic = QLabel(" 产品基本资料")
         title_basic.setObjectName("card_title")
         top_layout.addWidget(title_basic)
 
@@ -465,11 +465,11 @@ class ProductLibraryPage(BasePage):
         bottom_layout.setSpacing(10)
 
         bottom_title_bar = QHBoxLayout()
-        title_ai = QLabel("✨ 智能挖掘 (性能参数 & 核心卖点)")
+        title_ai = QLabel(" 智能挖掘 (性能参数 & 核心卖点)")
         title_ai.setObjectName("card_title")
         bottom_title_bar.addWidget(title_ai)
         
-        self.btn_mine = QPushButton("🪄 智能挖掘")
+        self.btn_mine = QPushButton(" 智能挖掘")
         self.btn_mine.setObjectName("primary_button")
         self.btn_mine.clicked.connect(self._on_mine)
         bottom_title_bar.addWidget(self.btn_mine)
@@ -511,12 +511,12 @@ class ProductLibraryPage(BasePage):
 
         # --- Bottom Button Bar (outside splitter for consistency) ---
         btn_row = QHBoxLayout()
-        self.btn_save = QPushButton("💾 保存（新增）")
+        self.btn_save = QPushButton(" 保存（新增）")
         self.btn_save.setObjectName("primary_button")
         self.btn_save.clicked.connect(self._on_save)
         btn_row.addWidget(self.btn_save)
 
-        self.btn_delete = QPushButton("🗑️ 删除")
+        self.btn_delete = QPushButton(" 删除")
         self.btn_delete.setObjectName("secondary_button")
         self.btn_delete.clicked.connect(self._on_delete)
         btn_row.addWidget(self.btn_delete)
@@ -698,11 +698,11 @@ class ProductLibraryPage(BasePage):
             return
         tree = tree or {}
         for cat in sorted(tree.keys()):
-            cat_node = QTreeWidgetItem([f"📂 {cat}"])
+            cat_node = QTreeWidgetItem([f" {cat}"])
             cat_node.setData(0, Qt.UserRole, None)
             self.tree.addTopLevelItem(cat_node)
             for brand in sorted(tree[cat].keys()):
-                brand_node = QTreeWidgetItem([f"🏷️ {brand}"])
+                brand_node = QTreeWidgetItem([f" {brand}"])
                 brand_node.setData(0, Qt.UserRole, None)
                 cat_node.addChild(brand_node)
                 for it in sorted(tree[cat][brand], key=lambda x: x.get("model", "")):
@@ -728,7 +728,7 @@ class ProductLibraryPage(BasePage):
         self._fill_form(record)
         is_warehouse = bool(record.get("goods_no") or record.get("spec_no"))
         self._apply_field_locks(is_warehouse)
-        self.btn_save.setText("💾 保存修改")
+        self.btn_save.setText(" 保存修改")
         self._set_status(f"正在编辑：{record.get('brand','')} {record.get('model','')}"
                          + ("（仓库产品：仅可改 商品名称/品类/备注）" if is_warehouse else ""))
 
@@ -759,7 +759,7 @@ class ProductLibraryPage(BasePage):
         for w in self.inputs.values():
             self._set_widget_value(w, "")
         self._apply_field_locks(False)  # 新增/手工录入：全部可改
-        self.btn_save.setText("💾 保存（新增）")
+        self.btn_save.setText(" 保存（新增）")
         self._set_status("新增模式")
 
     def _on_save(self):
@@ -770,7 +770,7 @@ class ProductLibraryPage(BasePage):
             ok, msg, item = self.manager.add_item(data)
             if ok:
                 self.current_id = item["id"]
-                self.btn_save.setText("💾 保存修改")
+                self.btn_save.setText(" 保存修改")
         self._set_status(msg)
         if ok:
             self._refresh_combo_choices()

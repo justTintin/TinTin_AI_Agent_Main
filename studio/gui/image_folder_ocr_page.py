@@ -43,7 +43,7 @@ class ImageFolderOcrPage(BasePage):
         main_layout.setSpacing(16)
 
         # Header Title
-        heading = QLabel("🔍 图片文件夹框选 OCR 识别")
+        heading = QLabel(" 图片文件夹框选 OCR 识别")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -85,7 +85,7 @@ class ImageFolderOcrPage(BasePage):
         p_layout.setContentsMargins(16, 16, 16, 16)
         p_layout.setSpacing(10)
 
-        p_title = QLabel("🖼️ 模板图片框选预览 (在画面上拖拽选择需要 OCR 的框):")
+        p_title = QLabel(" 模板图片框选预览 (在画面上拖拽选择需要 OCR 的框):")
         p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         p_layout.addWidget(p_title, 0)
 
@@ -113,7 +113,7 @@ class ImageFolderOcrPage(BasePage):
         controls_layout.setSpacing(14)
 
         # Title
-        c_title = QLabel("📦 OCR 模板识别选区及设置")
+        c_title = QLabel(" OCR 模板识别选区及设置")
         c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
         controls_layout.addWidget(c_title)
 
@@ -177,7 +177,7 @@ class ImageFolderOcrPage(BasePage):
         self.key_input.setPlaceholderText("例如: 订单编码")
         key_label_row.addWidget(self.key_input)
         
-        self.btn_test_ocr = QPushButton("🧪 测试选区")
+        self.btn_test_ocr = QPushButton(" 测试选区")
         self.btn_test_ocr.setObjectName("secondary_button")
         self.btn_test_ocr.setFixedWidth(90)
         self.btn_test_ocr.clicked.connect(self.test_selection_ocr)
@@ -235,19 +235,19 @@ class ImageFolderOcrPage(BasePage):
 
         # Action Buttons Row
         btn_action_layout = QHBoxLayout()
-        self.btn_start = QPushButton("🚀 开始批量 OCR")
+        self.btn_start = QPushButton(" 开始批量 OCR")
         self.btn_start.setObjectName("primary_button")
         self.btn_start.clicked.connect(self.start_batch_ocr)
         btn_action_layout.addWidget(self.btn_start)
 
-        self.btn_stop = QPushButton("⏹️ 停止运行")
+        self.btn_stop = QPushButton("停止 停止运行")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_batch_ocr)
         btn_action_layout.addWidget(self.btn_stop)
         options_layout.addLayout(btn_action_layout)
 
         # Open Out Dir Button
-        self.btn_open_dir = QPushButton("📂 打开输出文件目录")
+        self.btn_open_dir = QPushButton(" 打开输出文件目录")
         self.btn_open_dir.setObjectName("secondary_button")
         self.btn_open_dir.clicked.connect(self.open_output_directory)
         options_layout.addWidget(self.btn_open_dir)
@@ -263,7 +263,7 @@ class ImageFolderOcrPage(BasePage):
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
 
-        log_layout.addWidget(QLabel("📝 批量 OCR 实时日志与匹配数据:"))
+        log_layout.addWidget(QLabel(" 批量 OCR 实时日志与匹配数据:"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
@@ -484,7 +484,7 @@ class ImageFolderOcrPage(BasePage):
         box_tuple = (ymin, ymax, xmin, xmax)
 
         self.btn_test_ocr.setEnabled(False)
-        self.btn_test_ocr.setText("🧪 正在测试中...")
+        self.btn_test_ocr.setText(" 正在测试中...")
         self.status_lbl.setText("状态: 正在测试选区 OCR...")
 
         self.test_worker = ImageOcrTestWorker(
@@ -496,7 +496,7 @@ class ImageFolderOcrPage(BasePage):
 
     def on_test_finished(self, success, text_or_error):
         self.btn_test_ocr.setEnabled(True)
-        self.btn_test_ocr.setText("🧪 测试识别选区")
+        self.btn_test_ocr.setText(" 测试识别选区")
         self.status_lbl.setText("状态: 测试完成")
 
         if success:

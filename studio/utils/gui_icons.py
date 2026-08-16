@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Windows 原生风格图标（Emoji 回退 + qtawesome 可选）。
-
-所有图标优先使用 Emoji（Windows 原生渲染，无需额外字体），
-qtawesome 作为可选增强。图标尺寸 18px。
+"""图标名到文字标签的映射（qtawesome 可用时使用 MDI 图标，否则回退为文字标签）。
 
 用法：
     btn = mdi_button("播放", "play")
@@ -12,126 +9,126 @@ from PySide6.QtWidgets import QPushButton, QLabel
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
 
-# ── Emoji 映射（Windows 原生，不依赖任何第三方包）──
-EMOJI = {
+# ── 文字标签映射（qtawesome 不可用时，作为按钮前缀提示）──
+ICON_LABEL = {
     # 媒体
-    "play":        "▶️",
-    "stop":        "⏹️",
-    "pause":       "⏸️",
-    "record":      "⏺️",
-    "forward":     "⏩",
-    "backward":    "⏪",
-    "next":        "⏭️",
-    "previous":    "⏮️",
+    "play":        "播放",
+    "stop":        "停止",
+    "pause":       "暂停",
+    "record":      "录制",
+    "forward":     "前进",
+    "backward":    "后退",
+    "next":        "下一个",
+    "previous":    "上一个",
     # 操作
-    "save":        "💾",
-    "search":      "🔍",
-    "refresh":     "🔄",
-    "close":       "❌",
-    "plus":        "➕",
-    "minus":       "➖",
-    "edit":        "✏️",
-    "pencil":      "✏️",
-    "delete":      "🗑️",
-    "copy":        "📋",
-    "paste":       "📋",
-    "cut":         "✂️",
-    "undo":        "↩️",
-    "check":       "✅",
-    "download":    "⬇️",
-    "upload":      "⬆️",
-    "folder":      "📁",
-    "file":        "📄",
-    "open":        "📂",
-    "share":       "🔗",
+    "save":        "保存",
+    "search":      "搜索",
+    "refresh":     "刷新",
+    "close":       "关闭",
+    "plus":        "添加",
+    "minus":       "移除",
+    "edit":        "编辑",
+    "pencil":      "编辑",
+    "delete":      "删除",
+    "copy":        "复制",
+    "paste":       "粘贴",
+    "cut":         "剪切",
+    "undo":        "撤销",
+    "check":       "完成",
+    "download":    "下载",
+    "upload":      "上传",
+    "folder":      "文件夹",
+    "file":        "文件",
+    "open":        "打开",
+    "share":       "链接",
     # 方向
-    "left":        "◀️",
-    "right":       "▶️",
-    "arrow_up":    "⬆️",
-    "arrow_down":  "⬇️",
-    "expand":      "🔽",
-    "collapse":    "🔼",
+    "left":        "左",
+    "right":       "右",
+    "arrow_up":    "上",
+    "arrow_down":  "下",
+    "expand":      "展开",
+    "collapse":    "收起",
     # 工具
-    "cog":         "⚙️",
-    "gear":        "⚙️",
-    "wrench":      "🔧",
-    "rocket":      "🚀",
-    "flash":       "⚡",
-    "broom":       "🧹",
-    "lightbulb":   "💡",
-    "pin":         "📌",
-    "lock":        "🔒",
-    "unlock":      "🔓",
-    "key":         "🔑",
+    "cog":         "设置",
+    "gear":        "设置",
+    "wrench":      "修复",
+    "rocket":      "启动",
+    "flash":       "闪电",
+    "broom":       "清理",
+    "lightbulb":   "提示",
+    "pin":         "固定",
+    "lock":        "锁定",
+    "unlock":      "解锁",
+    "key":         "密钥",
     # 媒体类型
-    "video":       "🎬",
-    "film":        "🎞️",
-    "audio":       "🎵",
-    "mic":         "🎤",
-    "music":       "🎶",
-    "image":       "🖼️",
-    "camera":      "📷",
-    "palette":     "🎨",
-    "voice":       "🗣️",
-    "clipboard":   "📋",
-    "subtitles":   "💬",
-    "closed-caption": "🎞️",
-    "movie-open":  "🎞️",
-    "broadcast":   "📡",
-    "content-cut": "✂️",
-    "clock-outline": "🕐",
+    "video":       "视频",
+    "film":        "视频",
+    "audio":       "音频",
+    "mic":         "音频",
+    "music":       "音乐",
+    "image":       "图片",
+    "camera":      "相机",
+    "palette":     "调色",
+    "voice":       "语音",
+    "clipboard":   "剪贴板",
+    "subtitles":   "字幕",
+    "closed-caption": "字幕",
+    "movie-open":  "视频",
+    "broadcast":   "广播",
+    "content-cut": "剪切",
+    "clock-outline": "时间",
     # AI / 智能
-    "robot":       "🤖",
-    "brain":       "🧠",
-    "robot2":      "🤖",
-    "magic":       "🪄",
-    "sparkles":    "✨",
-    "chart-line":  "📈",
-    "megaphone":   "📢",
-    "puzzle":      "🧩",
-    "help-circle": "❓",
-    "web":         "🌐",
-    "book":        "📚",
-    "database":    "🗄️",
-    "package":     "📦",
-    "type":        "✍️",
-    "format-list-checks": "📋",
-    "text-box-search": "🔍",
+    "robot":       "AI",
+    "brain":       "AI",
+    "robot2":      "AI",
+    "magic":       "魔法",
+    "sparkles":    "特效",
+    "chart-line":  "图表",
+    "megaphone":   "喇叭",
+    "puzzle":      "插件",
+    "help-circle": "帮助",
+    "web":         "网页",
+    "book":        "资料",
+    "database":    "资料",
+    "package":     "包裹",
+    "type":        "文本",
+    "format-list-checks": "清单",
+    "text-box-search": "搜索",
     # 状态
-    "star":        "⭐",
-    "heart":       "❤️",
-    "info":        "ℹ️",
-    "warning":     "⚠️",
-    "error":       "🚫",
-    "success":     "✅",
-    "question":    "❓",
-    "hourglass":   "⏳",
-    "clock":       "🕐",
-    "eye":         "👁️",
-    "eyes":        "👀",
+    "star":        "收藏",
+    "heart":       "喜欢",
+    "info":        "信息",
+    "warning":     "警告",
+    "error":       "错误",
+    "success":     "成功",
+    "question":    "帮助",
+    "hourglass":   "时间",
+    "clock":       "时间",
+    "eye":         "查看",
+    "eyes":        "查看",
     # 系统
-    "home":        "🏠",
-    "menu":        "☰",
-    "server":      "🖥️",
-    "link":        "🔗",
-    "download2":   "📥",
-    "upload2":     "📤",
-    "fullscreen":  "🖥️",
-    "restore":     "🪟",
-    "layers":      "📚",
-    "select_all":      "☑️",
-    "deselect_all":    "☐",
-    "sort":        "↕️",
-    "filter":      "🔍",
-    "autofix":     "🔧",
-    "projector":   "📽️",
-    "celebration": "🎉",
-    "balance-scale": "⚖️",
-    "volume":      "🔊",
-    "mute":        "🔇",
+    "home":        "首页",
+    "menu":        "菜单",
+    "server":      "服务器",
+    "link":        "链接",
+    "download2":   "下载",
+    "upload2":     "上传",
+    "fullscreen":  "服务器",
+    "restore":     "还原",
+    "layers":      "资料",
+    "select_all":      "全选",
+    "deselect_all":    "取消",
+    "sort":        "排序",
+    "filter":      "筛选",
+    "autofix":     "修复",
+    "projector":   "投影",
+    "celebration": "庆祝",
+    "balance-scale": "平衡",
+    "volume":      "音量",
+    "mute":        "静音",
     # 复选框
-    "checkbox_marked": "☑️",
-    "checkbox_blank":  "☐",
+    "checkbox_marked": "全选",
+    "checkbox_blank":  "取消",
 }
 
 # qtawesome 作为增强（可选，未安装也不影响使用）
@@ -143,7 +140,7 @@ except ImportError:
 
 
 def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
-    """获取图标。优先 qtawesome，回退 emoji。"""
+    """获取图标。优先 qtawesome，回退空图标（文字由按钮文本提供）。"""
     if _HAS_QTA:
         # 部分别名：历史代码用了非标准 mdi 图标名，这里统一映射到有效名，
         # 避免逐个改各页面调用点。映射不命中则原样加 mdi. 前缀。
@@ -164,39 +161,40 @@ def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
             # 图标名在当前字体版本不存在（如 magic 已被新版 MDI 移除）：
             # 回退空图标，避免异常穿透导致页面构建崩溃（懒加载失败后页面永久空白）
             pass
-    # emoji fallback — 创建空图标（文字由按钮文本提供）
     return QIcon()
 
 
 def mdi_button(text: str, icon_name: str = "", parent=None,
                color: str = "#8b90a3", size: int = 18) -> QPushButton:
-    """创建带图标的按钮。qtawesome 可用时用 MDI 图标，否则回退 Emoji。"""
+    """创建带图标的按钮。qtawesome 可用时用 MDI 图标，否则回退为文字标签前缀。"""
+    label = ICON_LABEL.get(icon_name, "")
     if icon_name:
         if _HAS_QTA:
-            # qtawesome 可用 → 用 MDI 图标，不加 emoji
             btn = QPushButton(text, parent)
             icon = mdi_icon(icon_name, color)
-            if icon.isNull() and icon_name in EMOJI:
-                # 图标名无效回退后，用 Emoji 补前缀保持图标可见性
-                text = EMOJI[icon_name] + " " + text
+            if icon.isNull() and label:
+                # 图标名无效回退后，用文字标签补前缀保持可识别性
+                if not text.startswith(label):
+                    text = label + " " + text
                 btn = QPushButton(text, parent)
             else:
                 btn.setIcon(icon)
                 btn.setIconSize(QSize(size, size))
             return btn
-        elif icon_name in EMOJI:
-            # qtawesome 不可用 → Emoji 回退
-            text = EMOJI[icon_name] + " " + text
+        elif label:
+            # qtawesome 不可用 → 文字标签回退
+            if not text.startswith(label):
+                text = label + " " + text
     return QPushButton(text, parent)
 
 
 def emoji_icon(name: str) -> str:
-    """直接返回 emoji 字符，用于 QLabel 等。"""
-    return EMOJI.get(name, "❓")
+    """返回图标名对应的文字标签，用于 QLabel 等。"""
+    return ICON_LABEL.get(name, "")
 
 
 def emoji_button(text: str, emoji: str = "", parent=None) -> QPushButton:
-    """创建纯 Emoji 按钮（不依赖 qtawesome）。"""
+    """创建纯文字标签按钮（不依赖 qtawesome）。"""
     if emoji:
         text = emoji + " " + text
     return QPushButton(text, parent)
@@ -204,7 +202,7 @@ def emoji_button(text: str, emoji: str = "", parent=None) -> QPushButton:
 
 def table_action_button(text: str, tooltip: str = "", parent=None) -> QPushButton:
     """表格操作列专用扁平按钮（无边框，icon+文字，不挤压行高）。
-    用法: btn = table_action_button('🗑', '删除')
+    用法: btn = table_action_button('删除', '删除')
     """
     btn = QPushButton(text, parent)
     if tooltip:

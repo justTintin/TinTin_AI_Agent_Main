@@ -65,7 +65,7 @@ class ScheduledTasksMgmtPage(QWidget):
         root.setSpacing(10)
 
         hdr = QHBoxLayout()
-        heading = QLabel("⏰ 定时任务")
+        heading = QLabel("定时任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         sub = QLabel("本地定时任务（如热点采集，不依赖服务端智能体）与云端智能体（到点提交服务端自动分解执行）的统一管理。")
@@ -171,7 +171,7 @@ class ScheduledTasksMgmtPage(QWidget):
         list_card = QFrame(); list_card.setObjectName("card")
         ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
         list_header = QHBoxLayout()
-        list_header.addWidget(QLabel("📋 已注册任务（Windows 任务计划程序）"))
+        list_header.addWidget(QLabel(" 已注册任务（Windows 任务计划程序）"))
         list_header.addStretch()
         btn_capture = mdi_button("立即采集今日热点", "broadcast")
         btn_capture.setObjectName("secondary_button")
@@ -225,7 +225,7 @@ class ScheduledTasksMgmtPage(QWidget):
 
         list_card = QFrame(); list_card.setObjectName("card")
         ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
-        ll.addWidget(QLabel("📋 最近编排任务（服务端 /agent/tasks，等待确认的节点可在此继续）"))
+        ll.addWidget(QLabel(" 最近编排任务（服务端 /agent/tasks，等待确认的节点可在此继续）"))
         self.agent_table = QTableWidget(0, 5)
         self.agent_table.setHorizontalHeaderLabels(["目标", "状态", "进度", "创建时间", "操作"])
         self.agent_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -259,7 +259,7 @@ class ScheduledTasksMgmtPage(QWidget):
             QMessageBox.warning(self, "参数不完整", "请先填写任务描述，再拆解任务。")
             return
         self.btn_split.setEnabled(False)
-        self.plan_preview.setText("⏳ 正在调用云端 LLM 拆解任务...")
+        self.plan_preview.setText("正在调用云端 LLM 拆解任务...")
         from utils.thread_worker import TaskWorker as Worker
 
         def _do():
@@ -381,10 +381,10 @@ class ScheduledTasksMgmtPage(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
         if t.get("registered"):
-            btn_run = table_action_button("▶", "立即运行一次")
+            btn_run = table_action_button("播放", "立即运行一次")
             btn_run.clicked.connect(lambda _=False, tn=t.get("task_name"): self._on_run_now(tn))
             lay.addWidget(btn_run)
-        btn_del = table_action_button("🗑", "取消定时")
+        btn_del = table_action_button("", "取消定时")
         btn_del.clicked.connect(lambda _=False, n=t.get("name"): self._on_delete(n))
         lay.addWidget(btn_del)
         return w
@@ -469,7 +469,7 @@ class ScheduledTasksMgmtPage(QWidget):
         tid = t.get("id", "")
         st = t.get("status") or t.get("derived_status") or ""
         if st == "waiting_user_input":
-            btn = table_action_button("✔", "人工确认，继续执行")
+            btn = table_action_button("已", "人工确认，继续执行")
             btn.clicked.connect(lambda _=False, i=tid: self._on_agent_confirm(i))
             lay.addWidget(btn)
         else:

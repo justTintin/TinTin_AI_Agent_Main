@@ -1,0 +1,23 @@
+{
+  "kitType": "dashboard",
+  "corePreviewComponents": [
+    { "slug": "button", "name": "Button", "slot": "actions" },
+    { "slug": "card", "name": "Card", "slot": "content" },
+    { "slug": "input", "name": "Input", "slot": "forms" },
+    { "slug": "navigation", "name": "Navigation", "slot": "sidebar" },
+    { "slug": "table", "name": "Table", "slot": "data" },
+    { "slug": "badge", "name": "Badge", "slot": "status" }
+  ],
+  "supportEvidenceComponents": [],
+  "allowedComponents": ["button", "card", "input", "navigation", "table", "badge"],
+  "selectionPolicy": "fixed-slots-first",
+  "layout": {
+    "sidebarColumnWidth": "240px",
+    "contentMaxWidth": "1184px"
+  },
+  "screens": [
+    { "id": "overview", "name": "工作台概览", "description": "展示数据卡片、快捷操作、最近任务" },
+    { "id": "tasks", "name": "成片任务", "description": "任务列表表格与状态徽章" },
+    { "id": "settings", "name": "系统设置", "description": "设置卡片与表单输入" }
+  ]
+}

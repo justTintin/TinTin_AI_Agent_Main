@@ -48,7 +48,7 @@ class ReadOnlyDoubleClickLineEdit(QLineEdit):
         # Show full text in a read-only popup dialog
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel, QHBoxLayout
         dlg = QDialog(self)
-        dlg.setWindowTitle("📝 原文 - 完整内容")
+        dlg.setWindowTitle(" 原文 - 完整内容")
         dlg.setMinimumSize(500, 300)
         dlg.resize(580, 350)
         dlg.setStyleSheet("""
@@ -76,7 +76,7 @@ class ReadOnlyDoubleClickLineEdit(QLineEdit):
         v = QVBoxLayout(dlg)
         v.setContentsMargins(16, 16, 16, 16)
         v.setSpacing(10)
-        v.addWidget(QLabel("📝 原始视频文案（只读）:"))
+        v.addWidget(QLabel(" 原始视频文案（只读）:"))
         te = QPlainTextEdit()
         te.setPlainText(self._full_text)
         te.setReadOnly(True)

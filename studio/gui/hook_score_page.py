@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📈 视频评价预测页（由「开头黄金3秒评分」升级而来）。
+ 视频评价预测页（由「开头黄金3秒评分」升级而来）。
 
 选择投放平台 → 上传视频 → 抽取覆盖全片的关键帧 → 用视觉大模型按该平台的推荐逻辑
 预测这条视频的表现（综合分 + 预测量级 + 多维度评分 + 建议）。
@@ -65,9 +65,9 @@ class VisionModelTestWorker(BaseWorker):
         from utils.llm_proxy import llm_chat
         try:
             llm_chat("", "Hi", model=self.model, max_tokens=5, timeout=8)
-            self.finished.emit(True, "🟢 连接成功")
+            self.finished.emit(True, " 连接成功")
         except Exception:
-            self.finished.emit(False, "❌ 无法连接")
+            self.finished.emit(False, " 无法连接")
 
 
 class DimScoreCard(QFrame):
@@ -248,7 +248,7 @@ class HookScorePage(BasePage):
         root.setSpacing(12)
 
         hdr = QHBoxLayout()
-        heading = QLabel("📈 视频评价预测")
+        heading = QLabel(" 视频评价预测")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         sub = QLabel("选投放平台 → 上传视频 → 视觉模型按该平台推荐逻辑预测表现（综合分 + 预测量级 + 多维评分）。"
@@ -259,7 +259,7 @@ class HookScorePage(BasePage):
         hdr.addStretch()
         root.addLayout(hdr)
 
-        warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
+        warning_lbl = QLabel("注意： 说明：此为根据大模型预测，实验功能，不一定完全准确。")
         warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
         root.addWidget(warning_lbl)
 
@@ -270,7 +270,7 @@ class HookScorePage(BasePage):
         self.lbl_model_info = QLabel("视频大模型：正在加载配置...")
         self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")
         m.addWidget(self.lbl_model_info)
-        self.lbl_model_status = QLabel("🔴 未检测"); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")
+        self.lbl_model_status = QLabel(" 未检测"); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")
         m.addWidget(self.lbl_model_status); m.addStretch()
         self.btn_test_model = QPushButton("测试连接"); self.btn_test_model.setObjectName("secondary_button")
         self.btn_test_model.setFixedHeight(30); self.btn_test_model.clicked.connect(self._test_vision_model)
@@ -287,7 +287,7 @@ class HookScorePage(BasePage):
         h.addWidget(self.in_video, 1)
         b = mdi_button("浏览…", "folder"); b.setObjectName("secondary_button"); b.clicked.connect(self._browse)
         h.addWidget(b)
-        self.btn_run = QPushButton("📈 开始预测"); self.btn_run.setObjectName("primary_button")
+        self.btn_run = QPushButton(" 开始预测"); self.btn_run.setObjectName("primary_button")
         self.btn_run.clicked.connect(self._run); h.addWidget(self.btn_run)
         self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(120)
         h.addWidget(self.pbar)
@@ -337,7 +337,7 @@ class HookScorePage(BasePage):
         # 反馈数据（发布后回填，紧跟在预测结果下方；用于校准下次预测）
         self.feedback_card = QFrame(); self.feedback_card.setObjectName("card")
         fc = QVBoxLayout(self.feedback_card); fc.setContentsMargins(24, 14, 24, 14); fc.setSpacing(8)
-        fc.addWidget(QLabel("📊 反馈数据（发布后回填，模型据此校准下次预测）"))
+        fc.addWidget(QLabel(" 反馈数据（发布后回填，模型据此校准下次预测）"))
         frow = QHBoxLayout()
         frow.addWidget(QLabel("真实播放量"))
         self.fb_play = QLineEdit(); self.fb_play.setPlaceholderText("如 12.5万 / 8000"); frow.addWidget(self.fb_play, 1)
@@ -360,19 +360,19 @@ class HookScorePage(BasePage):
         server_url = ai.get("compute_server_url", "")
         if server_url:
             self.lbl_model_info.setText("视频大模型：由服务端自动选择")
-            self.lbl_model_status.setText("🟢 已配置")
+            self.lbl_model_status.setText(" 已配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#2ecc71;")
             self.btn_test_model.setEnabled(True)
         else:
             self.lbl_model_info.setText("视频大模型：未配置服务端地址")
-            self.lbl_model_status.setText("🔴 未配置")
+            self.lbl_model_status.setText(" 未配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#e74c3c;")
             self.btn_test_model.setEnabled(False)
 
     def _test_vision_model(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
         self.btn_test_model.setEnabled(False)
-        self.lbl_model_status.setText("🟡 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
+        self.lbl_model_status.setText(" 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
         self.test_worker = VisionModelTestWorker(None)
 
         def on_finished(success, message):
@@ -449,7 +449,7 @@ class HookScorePage(BasePage):
         self.lbl_level.setText(f"预测表现：{level}" if level else "")
         self.lbl_level.setStyleSheet(f"font-size:18px; font-weight:bold; color:{lv_color};")
         g = data.get("golden3s")
-        self.lbl_golden.setText("✅ 前3秒合格" if g else "⚠️ 前3秒待加强")
+        self.lbl_golden.setText("完成： 前3秒合格" if g else "注意： 前3秒待加强")
         dims = data.get("dims", {}) or {}
         for d, card in self.dim_cards.items():
             card.set_score(dims.get(d, "—"))
@@ -474,4 +474,4 @@ class HookScorePage(BasePage):
             self.fb_status.setText("请填写真实播放量。")
             return
         ok = self.manager.set_feedback(pid, play, self.fb_eval.text())
-        self.fb_status.setText("✅ 已保存，将用于该平台下次预测校准。" if ok else "保存失败。")
+        self.fb_status.setText(" 已保存，将用于该平台下次预测校准。" if ok else "保存失败。")

@@ -56,7 +56,7 @@ def _make_audio_icon():
     f = p.font()
     f.setPointSize(16)
     p.setFont(f)
-    p.drawText(pm.rect(), Qt.AlignCenter, "🎵")
+    p.drawText(pm.rect(), Qt.AlignCenter, "")
     p.end()
     return pm
 
@@ -209,7 +209,7 @@ class AudioMaterialPage(BasePage):
         root.setSpacing(10)
 
         # ── 标题 ──
-        title = QLabel("🎵 音频素材")
+        title = QLabel(" 音频素材")
         title.setObjectName("heading")
         title.setFixedHeight(28)
         title.setStyleSheet("font-size: 15px; font-weight: bold; background: transparent;")
@@ -222,7 +222,7 @@ class AudioMaterialPage(BasePage):
         self.search_input.setClearButtonEnabled(True)
         self.search_input.returnPressed.connect(self._do_search)
         search_row.addWidget(self.search_input, 1)
-        self.btn_search = QPushButton("🔍 搜索")
+        self.btn_search = QPushButton(" 搜索")
         self.btn_search.setObjectName("primary_button")
         self.btn_search.clicked.connect(self._do_search)
         search_row.addWidget(self.btn_search)
@@ -287,16 +287,16 @@ class AudioMaterialPage(BasePage):
 
         # ── 全选 / 取消全选 ──
         sel_row = QHBoxLayout()
-        self.btn_select_all = QPushButton("☑ 全选")
+        self.btn_select_all = QPushButton(" 全选")
         self.btn_select_all.setObjectName("secondary_button")
         self.btn_select_all.clicked.connect(self._select_all)
         sel_row.addWidget(self.btn_select_all)
-        self.btn_deselect_all = QPushButton("☐ 取消全选")
+        self.btn_deselect_all = QPushButton(" 取消全选")
         self.btn_deselect_all.setObjectName("secondary_button")
         self.btn_deselect_all.clicked.connect(self._deselect_all)
         sel_row.addWidget(self.btn_deselect_all)
         sel_row.addStretch(1)
-        self.lbl_hint = QLabel("💡 双击试听 · 勾选后可发送到卡点成片")
+        self.lbl_hint = QLabel(" 双击试听 · 勾选后可发送到卡点成片")
         self.lbl_hint.setObjectName("muted_text")
         sel_row.addWidget(self.lbl_hint)
         root.addLayout(sel_row)
@@ -304,14 +304,14 @@ class AudioMaterialPage(BasePage):
         # ── 播放控制条 ──
         play_row = QHBoxLayout()
         play_row.setSpacing(6)
-        self.btn_play_pause = QPushButton("▶")
+        self.btn_play_pause = QPushButton("播放")
         self.btn_play_pause.setObjectName("secondary_button")
         self.btn_play_pause.setFixedWidth(40)
         self.btn_play_pause.setEnabled(False)
         self.btn_play_pause.setToolTip("播放 / 暂停")
         self.btn_play_pause.clicked.connect(self._toggle_play_pause)
         play_row.addWidget(self.btn_play_pause)
-        self.btn_stop = QPushButton("⏹")
+        self.btn_stop = QPushButton("停止")
         self.btn_stop.setObjectName("secondary_button")
         self.btn_stop.setFixedWidth(40)
         self.btn_stop.setEnabled(False)
@@ -327,7 +327,7 @@ class AudioMaterialPage(BasePage):
         self.lbl_time.setObjectName("muted_text")
         self.lbl_time.setMinimumWidth(84)
         play_row.addWidget(self.lbl_time)
-        self.btn_beat = QPushButton("🎵 卡点成片")
+        self.btn_beat = QPushButton(" 卡点成片")
         self.btn_beat.setObjectName("primary_button")
         self.btn_beat.clicked.connect(self._send_to_beat_montage)
         play_row.addWidget(self.btn_beat)
@@ -347,7 +347,7 @@ class AudioMaterialPage(BasePage):
         self.lbl_page = QLabel("")
         self.lbl_page.setObjectName("muted_text")
         page_row.addWidget(self.lbl_page)
-        self.btn_next = QPushButton("下一页 ▶")
+        self.btn_next = QPushButton("下一页 播放")
         self.btn_next.setObjectName("secondary_button")
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
@@ -409,7 +409,7 @@ class AudioMaterialPage(BasePage):
         friendly = msg
         if "Connection" in msg or "timed out" in msg or "Max retries" in msg:
             friendly = "无法连接服务端，请检查服务端是否在线"
-        self.lbl_stat.setText(f"❌ {friendly}")
+        self.lbl_stat.setText(f"失败： {friendly}")
         self.table.setRowCount(0)
         self._results = []
         self._total = 0
@@ -439,7 +439,7 @@ class AudioMaterialPage(BasePage):
             tags = item.get("tags") or []
             tags_str = ", ".join(str(t) for t in tags[:3]) if tags else ""
             score = item.get("score")
-            tip_parts = [f"🎵 {fname}", f"分类: {kind_name}",
+            tip_parts = [f" {fname}", f"分类: {kind_name}",
                          f"时长: {dur_str}", f"大小: {size_str}"]
             if use_case:
                 tip_parts.append(f"用途: {use_case}")
@@ -555,7 +555,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = mid
         self._playing_name = data.get("filename", mid)
         self._preview_mid = mid
-        self.lbl_now_playing.setText(f"⏳ 加载中: {self._playing_name}…")
+        self.lbl_now_playing.setText(f"加载中: {self._playing_name}…")
         self._update_play_button()
         self._preview_worker = _AudioPreviewWorker(_serve_url(mid), mid)
         self._preview_worker.finished.connect(self._on_preview_ready)
@@ -572,7 +572,7 @@ class AudioMaterialPage(BasePage):
             self._pending_play = False
             player.play()
             self.lbl_now_playing.setText(
-                f"▶ 播放中: {self._playing_name or ''}")
+                f"播放 播放中: {self._playing_name or ''}")
         self.btn_stop.setEnabled(True)
         self.slider_progress.setEnabled(True)
 
@@ -581,7 +581,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self.lbl_now_playing.setText(
-            f"❌ 播放失败（服务端不可达？）：{msg}")
+            f"失败： 播放失败（服务端不可达？）：{msg}")
         self._update_play_button()
 
     def _stop_preview(self):
@@ -623,22 +623,22 @@ class AudioMaterialPage(BasePage):
 
     def _update_play_button(self):
         if self._player is None or self._playing_mid is None:
-            self.btn_play_pause.setText("▶")
+            self.btn_play_pause.setText("播放")
             self.btn_play_pause.setEnabled(False)
             return
         self.btn_play_pause.setEnabled(True)
         state = self._player.playbackState()
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.btn_play_pause.setText("⏸")
+            self.btn_play_pause.setText("暂停")
             name = self._playing_name or ''
-            self.lbl_now_playing.setText(f"▶ 播放中: {name}")
+            self.lbl_now_playing.setText(f"播放 播放中: {name}")
         else:
-            self.btn_play_pause.setText("▶")
+            self.btn_play_pause.setText("播放")
             name = self._playing_name or ''
             if self._pending_play:
-                self.lbl_now_playing.setText(f"⏳ 加载中: {name}…")
+                self.lbl_now_playing.setText(f"加载中: {name}…")
             else:
-                self.lbl_now_playing.setText(f"⏸ 已暂停: {name}")
+                self.lbl_now_playing.setText(f"暂停 已暂停: {name}")
 
     def _on_media_status(self, status):
         if (status == QMediaPlayer.MediaStatus.LoadedMedia
@@ -647,18 +647,18 @@ class AudioMaterialPage(BasePage):
             if self._player is not None:
                 self._player.play()
                 self.lbl_now_playing.setText(
-                    f"▶ 播放中: {self._playing_name or ''}")
+                    f"播放 播放中: {self._playing_name or ''}")
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             self._pending_play = False
             self.slider_progress.setValue(0)
             name = self._playing_name or ''
-            self.lbl_now_playing.setText(f"⏹ 播放结束: {name}")
+            self.lbl_now_playing.setText(f"停止 播放结束: {name}")
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self._playing_mid = None
             self._playing_name = ""
             self._pending_play = False
             self.lbl_now_playing.setText(
-                "❌ 无法播放该音频（格式不支持或文件损坏）")
+                " 无法播放该音频（格式不支持或文件损坏）")
             self._update_play_button()
 
     def _on_player_error(self, error, error_string):
@@ -666,7 +666,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self._pending_play = False
-        self.lbl_now_playing.setText(f"❌ 播放失败：{error_string}")
+        self.lbl_now_playing.setText(f"失败： 播放失败：{error_string}")
         self._update_play_button()
 
     # ── 卡点成片 ──
@@ -694,7 +694,7 @@ class AudioMaterialPage(BasePage):
         mid = first["mid"]
         fname = first.get("filename", mid)
         self._beat_pending = checked
-        self.lbl_now_playing.setText(f"⏳ 正在下载 {fname} 以用于卡点成片…")
+        self.lbl_now_playing.setText(f"正在下载 {fname} 以用于卡点成片…")
         self._beat_worker = _AudioPreviewWorker(_serve_url(mid), mid)
         self._beat_worker.finished.connect(self._on_beat_download_done)
         self._beat_worker.error.connect(self._on_beat_download_error)
@@ -709,7 +709,7 @@ class AudioMaterialPage(BasePage):
             tool = getattr(mw, "compile_video_tool", None)
             if tool is None:
                 mw.switch_page(45)
-                self.lbl_now_playing.setText("❌ 一键成片页未加载")
+                self.lbl_now_playing.setText("失败： 一键成片页未加载")
                 return
             bc = getattr(tool, "beat_controller", None)
             if bc is not None:
@@ -731,12 +731,12 @@ class AudioMaterialPage(BasePage):
                 if hasattr(bc, "step_beat"):
                     bc.step_beat.load_music(path)
             self.lbl_now_playing.setText(
-                f"✅ 已跳转到卡点成片: {os.path.basename(path)}")
+                f" 已跳转到卡点成片: {os.path.basename(path)}")
         except Exception as e:
-            self.lbl_now_playing.setText(f"❌ 跳转失败: {e}")
+            self.lbl_now_playing.setText(f"失败： 跳转失败: {e}")
 
     def _on_beat_download_error(self, msg):
-        self.lbl_now_playing.setText(f"❌ 下载音频失败: {msg}")
+        self.lbl_now_playing.setText(f"失败： 下载音频失败: {msg}")
 
     # ── 分页 ──
     def _update_page_label(self):

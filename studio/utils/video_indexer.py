@@ -469,9 +469,9 @@ class VideoIndexWorker(BaseWorker):
                 obj_key = remote_prefix + os.path.basename(fp)
                 client.upload_file(fp, bucket, obj_key)
                 frame_count += 1
-                self._log(f"  ✓ 上传 {os.path.basename(fp)}")
+                self._log(f"  已 上传 {os.path.basename(fp)}")
         except Exception as e:
-            self._log(f"  ⚠ RustFS 上传失败（继续建索引）: {e}")
+            self._log(f"  注意： RustFS 上传失败（继续建索引）: {e}")
 
         # ── 4. AI 标签（视觉 LLM）────────────────────────────────
         self._log("[4/5] 视觉模型提取语义标签")
@@ -520,7 +520,7 @@ class VideoIndexWorker(BaseWorker):
             "file_size":       os.path.getsize(vpath) if os.path.exists(vpath) else 0,
         }
         saved = mgr.upsert(entry)
-        self._log(f"✅ 索引完成 video_id={video_id}")
+        self._log(f"完成： 索引完成 video_id={video_id}")
         self.finished.emit(saved)
 
 

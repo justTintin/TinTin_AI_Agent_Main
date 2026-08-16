@@ -87,18 +87,18 @@ class VideoConcatWorker(BaseWorker):
         name = os.path.basename(clip)
         # 1) 完整性快检
         if not os.path.isfile(clip_abspath) or os.path.getsize(clip_abspath) < 1024:
-            raise _TranscodeSkip(f"⚠ 跳过损坏/过小文件: {name}")
+            raise _TranscodeSkip(f"注意： 跳过损坏/过小文件: {name}")
         probe_cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
                      "-of", "csv=p=0", clip_abspath]
         try:
             probe_r = _run_proc(probe_cmd, capture_output=True, text=True, timeout=15,
                                      creationflags=subprocess.CREATE_NO_WINDOW)
             if probe_r.returncode != 0 or not probe_r.stdout.strip():
-                raise _TranscodeSkip(f"⚠ 跳过无法读取的文件: {name}")
+                raise _TranscodeSkip(f"注意： 跳过无法读取的文件: {name}")
         except _TranscodeSkip:
             raise
         except Exception:
-            raise _TranscodeSkip(f"⚠ 跳过探测失败的文件: {name}")
+            raise _TranscodeSkip(f"注意： 跳过探测失败的文件: {name}")
 
         # 2) 转码：缩放/填充黑边/统一 30fps，强制软编 libx264 superfast crf23
         # 标准化转码阶段必须强制软编，避免 GPU 编码器驱动/并发会话在后台线程中
@@ -127,10 +127,10 @@ class VideoConcatWorker(BaseWorker):
             r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=encode_timeout)
         except subprocess.TimeoutExpired:
             log.warning(f"标准化转码单镜头超时({encode_timeout}s): {name}")
-            raise _TranscodeSkip(f"⚠ 转码超时，跳过: {name}")
+            raise _TranscodeSkip(f"注意： 转码超时，跳过: {name}")
         if r.returncode != 0:
             log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
-            raise _TranscodeSkip(f"⚠ 转码失败，跳过: {name}")
+            raise _TranscodeSkip(f"注意： 转码失败，跳过: {name}")
         return norm_out
 
     # ffmpeg xfade 转场类型映射
@@ -476,7 +476,7 @@ class VideoConcatWorker(BaseWorker):
                         # 未预期错误也按跳过处理，避免整个合成失败
                         log.warning(f"标准化转码异常，跳过: {clip}\n{e}", exc_info=True)
                         skipped_clips.append(clip)
-                        self.stage.emit(f"⚠ 转码失败，跳过: {os.path.basename(clip)}")
+                        self.stage.emit(f"注意： 转码失败，跳过: {os.path.basename(clip)}")
                         norm_out = None
 
                     if norm_out:
@@ -498,11 +498,11 @@ class VideoConcatWorker(BaseWorker):
             if not normalized_list:
                 raise RuntimeError("所有镜头文件均损坏或转码失败，无法合成视频。请重新进行镜头分割。")
             if skipped_clips:
-                self.stage.emit(f"⚠ 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(normalized_list)} 个镜头")
+                self.stage.emit(f"注意： 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(normalized_list)} 个镜头")
 
             # ── 音乐卡点模式：按节拍裁剪镜头 + 叠加音乐片段，生成单个卡点视频 ──
             if self.recombine_mode == "beat" and self.beat_times:
-                self.stage.emit("🎵 正在按音乐节拍合成卡点视频...")
+                self.stage.emit(" 正在按音乐节拍合成卡点视频...")
                 out_file = os.path.join(
                     self.output_dir, f"montage_beat_{random.randint(1000, 9999)}.mp4")
                 self._compose_beat_video(ffmpeg_path, normalized_list, out_file, temp_dir)
@@ -518,7 +518,7 @@ class VideoConcatWorker(BaseWorker):
                     shutil.rmtree(temp_dir)
                 except Exception:
                     pass
-                self.stage.emit("🎵 音乐卡点视频合成完成！")
+                self.stage.emit(" 音乐卡点视频合成完成！")
                 self.progress.emit(100)
                 self.finished.emit([out_file])
                 return

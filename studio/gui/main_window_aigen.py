@@ -67,11 +67,11 @@ class AIGenMixin:
             return
         local = comfy.ComfyUILocal.get()
         if not local.is_present():
-            txt = "本地引擎：⚪ 未安装（apps/comfyui 缺源码）"
+            txt = "本地引擎： 未安装（apps/comfyui 缺源码）"
         elif local.is_running():
-            txt = "本地引擎：✅ 运行中（127.0.0.1:8188）"
+            txt = "本地引擎：完成： 运行中（127.0.0.1:8188）"
         else:
-            txt = "本地引擎：🟡 已就位（未运行，提交任务/打开编辑器时自动启动）"
+            txt = "本地引擎： 已就位（未运行，提交任务/打开编辑器时自动启动）"
         self.comfyui_local_status.setText(txt)
 
     def open_comfyui_editor(self):
@@ -127,9 +127,9 @@ class AIGenMixin:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 self.vt_current_workflow_data = json.load(f)
-            self.vt_workflow_status.setText(f"✅ 已加载: {os.path.basename(file_path)}")
+            self.vt_workflow_status.setText(f" 已加载: {os.path.basename(file_path)}")
         except Exception as e:
-            self.vt_workflow_status.setText(f"❌ 加载失败: {str(e)}")
+            self.vt_workflow_status.setText(f"失败： 加载失败: {str(e)}")
 
     def select_vt_video(self):
         path, _ = pick_file(self, "选择视频", "", "Video Files (*.mp4 *.avi *.mov *.mkv)")
@@ -146,7 +146,7 @@ class AIGenMixin:
             QMessageBox.warning(self.parent_widget, "错误", "请先选择视频文件。")
             return
 
-        self.workflow_status.setText("⏳ 正在上传视频并提交任务...")
+        self.workflow_status.setText("正在上传视频并提交任务...")
 
         def run_task():
             try:
@@ -196,12 +196,12 @@ class AIGenMixin:
             try:
                 with open(default_wf, 'r', encoding='utf-8') as f:
                     self.current_workflow_data = json.load(f)
-                self.workflow_status.setText(f"✅ 已自动加载: {os.path.basename(default_wf)}")
+                self.workflow_status.setText(f" 已自动加载: {os.path.basename(default_wf)}")
                 if hasattr(self, 'btn_run_workflow'):
                     self.btn_run_workflow.setEnabled(True)
             except Exception as e:
                 log.error(f"Failed to auto-load DH workflow: {e}")
-                self.workflow_status.setText(f"❌ 自动加载失败: {str(e)}")
+                self.workflow_status.setText(f"失败： 自动加载失败: {str(e)}")
 
 
 
@@ -223,11 +223,11 @@ class AIGenMixin:
             return
         wf_id = self.rh_workflow_id_input.text().strip()
         if not wf_id:
-            self.rh_workflow_info.setText("❌ 请先填写 RunningHub 工作流 ID")
+            self.rh_workflow_info.setText("失败： 请先填写 RunningHub 工作流 ID")
             self._reset_rh_node_list()
             return
 
-        self.rh_workflow_info.setText("⏳ 正在获取工作流节点...")
+        self.rh_workflow_info.setText("正在获取工作流节点...")
         self._reset_rh_node_list()
 
         def fetch():
@@ -240,7 +240,7 @@ class AIGenMixin:
 
         def on_done(wf):
             if not wf or not isinstance(wf, dict):
-                err = "❌ 无法获取工作流 JSON。可能原因：1) 工作流 ID 不正确；2) 未发布为 API；3) API Key 无权限；4) 网络连接问题。"
+                err = " 无法获取工作流 JSON。可能原因：1) 工作流 ID 不正确；2) 未发布为 API；3) API Key 无权限；4) 网络连接问题。"
                 self.rh_workflow_info.setText(err)
                 return
 
@@ -273,7 +273,7 @@ class AIGenMixin:
 
             self._refresh_rh_input_panel()
             summary = f"图片节点 {len(self.rh_image_nodes)} 个，音频节点 {len(self.rh_audio_nodes)} 个；默认全部勾选。"
-            self.rh_workflow_info.setText(f"✅ 已获取 {len(self.rh_image_nodes) + len(self.rh_audio_nodes)} 个输入节点，{summary}")
+            self.rh_workflow_info.setText(f" 已获取 {len(self.rh_image_nodes) + len(self.rh_audio_nodes)} 个输入节点，{summary}")
             if self.backend_selector.currentIndex() == 1:
                 self.btn_run_workflow.setEnabled(self.rh_audio_list.rowCount() > 0)
 
@@ -453,7 +453,7 @@ class AIGenMixin:
         try:
             with open(workflow_path, 'r', encoding='utf-8') as f:
                 self.current_workflow_data = json.load(f)
-            self.workflow_status.setText("✅ 已加载: 数字人-上传图片和声音")
+            self.workflow_status.setText(" 已加载: 数字人-上传图片和声音")
             self.btn_run_workflow.setEnabled(True)
             log.info(f"Successfully loaded workflow: {workflow_path}")
         except Exception as e:
@@ -478,7 +478,7 @@ class AIGenMixin:
                     QMessageBox.warning(self.parent_widget, "参数缺失", f"请填写必填项：{inp.get('label', inp.get('key'))}")
                     return
 
-        self.workflow_status.setText(f"⏳ 正在执行「{app_name}」...")
+        self.workflow_status.setText(f"正在执行「{app_name}」...")
         self.btn_run_workflow.setEnabled(False)
 
         def run_task():
@@ -503,11 +503,11 @@ class AIGenMixin:
             self.btn_run_workflow.setEnabled(True)
             success, info = result
             if success:
-                self.workflow_status.setText(f"✅ 「{app_name}」任务已提交")
+                self.workflow_status.setText(f"完成： 「{app_name}」任务已提交")
                 self.add_task_to_list(info)
                 QMessageBox.information(self.parent_widget, "成功", f"任务已提交！\n应用：{app_name}\nID: {info}")
             else:
-                self.workflow_status.setText("❌ 失败")
+                self.workflow_status.setText(" 失败")
                 QMessageBox.critical(self.parent_widget, "错误", f"任务启动失败: {info}")
 
         self.worker = Worker(run_task)
@@ -544,22 +544,22 @@ class AIGenMixin:
     def _test_runninghub_config(self):
         """在 AI 设置页测试 RunningHub API Key 是否可用。"""
         if not self.runninghub:
-            self.rh_config_status.setText("❌ RunningHub 模块未初始化")
+            self.rh_config_status.setText("失败： RunningHub 模块未初始化")
             return
         api_key = self.runninghub_api_key_input.text().strip()
         base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
         if not api_key:
-            self.rh_config_status.setText("❌ 请先填写 API Key")
+            self.rh_config_status.setText("失败： 请先填写 API Key")
             return
-        self.rh_config_status.setText("⏳ 正在测试...")
+        self.rh_config_status.setText("正在测试...")
         def run():
             self.runninghub.update_config(api_key=api_key, base_url=base_url)
             return self.runninghub.test_connection()
         def on_done(info):
             if info:
-                self.rh_config_status.setText(f"✅ 连接成功 (类型: {info.get('apiType', '-')}, 余额: {info.get('remainCoins', '-')})")
+                self.rh_config_status.setText(f"完成： 连接成功 (类型: {info.get('apiType', '-')}, 余额: {info.get('remainCoins', '-')})")
             else:
-                self.rh_config_status.setText("❌ 连接失败，请检查 API Key 和基础地址")
+                self.rh_config_status.setText("失败： 连接失败，请检查 API Key 和基础地址")
         self.start_worker(run, on_done)
 
     def _test_runninghub_comfy_protocol(self):
@@ -570,10 +570,10 @@ class AIGenMixin:
         identify = self.runninghub_comfy_identify_input.text().strip()
         access_token = self.runninghub_access_token_input.text().strip()
         if not comfy_auth or not identify:
-            self.rh_comfy_status.setText("❌ 请先填写 Rh-Comfy-Auth 和 Rh-Identify（登录 RunningHub 后在浏览器 localStorage 中查看）")
+            self.rh_comfy_status.setText("失败： 请先填写 Rh-Comfy-Auth 和 Rh-Identify（登录 RunningHub 后在浏览器 localStorage 中查看）")
             return
         client = RunningHubComfyClient(base_url=base_url, comfy_auth=comfy_auth, identify=identify, access_token=access_token)
-        self.rh_comfy_status.setText("⏳ 正在检测 RunningHub ComfyUI 协议接口...")
+        self.rh_comfy_status.setText("正在检测 RunningHub ComfyUI 协议接口...")
 
         def run():
             ok = client.is_alive()
@@ -586,13 +586,13 @@ class AIGenMixin:
             ok, has_info, missing = result
             if ok and has_info:
                 if missing:
-                    self.rh_comfy_status.setText(f"✅ 协议可用，但缺少节点: {', '.join(missing)}")
+                    self.rh_comfy_status.setText(f"完成： 协议可用，但缺少节点: {', '.join(missing)}")
                 else:
-                    self.rh_comfy_status.setText("✅ ComfyUI 协议可用，所需节点齐全")
+                    self.rh_comfy_status.setText("完成： ComfyUI 协议可用，所需节点齐全")
             elif ok:
-                self.rh_comfy_status.setText("✅ /system_stats 可用，但 /object_info 未返回节点")
+                self.rh_comfy_status.setText("完成： /system_stats 可用，但 /object_info 未返回节点")
             else:
-                self.rh_comfy_status.setText("❌ ComfyUI 协议不可用，请检查会话凭证")
+                self.rh_comfy_status.setText("失败： ComfyUI 协议不可用，请检查会话凭证")
 
         self.start_worker(run, on_done)
 
@@ -607,7 +607,7 @@ class AIGenMixin:
             QMessageBox.warning(self, "输入缺失", "请选择人物图片和驱动语音。")
             return
 
-        self.workflow_status.setText("⏳ 正在上传文件并提交 ComfyUI 任务...")
+        self.workflow_status.setText("正在上传文件并提交 ComfyUI 任务...")
         self.btn_run_workflow.setEnabled(False)
 
         def run_task():
@@ -635,11 +635,11 @@ class AIGenMixin:
             self.btn_run_workflow.setEnabled(True)
             success, info = result
             if success:
-                self.workflow_status.setText(f"✅ 任务已提交: {info}")
+                self.workflow_status.setText(f"完成： 任务已提交: {info}")
                 self.add_task_to_list(info, status="正在运行")
                 QMessageBox.information(self, "成功", f"ComfyUI 任务已提交！ID: {info}")
             else:
-                self.workflow_status.setText("❌ 失败")
+                self.workflow_status.setText(" 失败")
                 QMessageBox.critical(self, "错误", f"任务启动失败: {info}")
 
         self.start_worker(run_task, on_finished)
@@ -833,7 +833,7 @@ class AIGenMixin:
                 }
                 self.add_task_to_list(
                     info,
-                    status="⏳ 排队中",
+                    status="排队中",
                     task_type="RunningHub",
                     source="云端",
                     extra={"wf_id": wf_id, "aud_file": aud_file, "img_file": img_file, "rh_meta": True}
@@ -1025,15 +1025,15 @@ class AIGenMixin:
             if item.text() == task_id[:12] or t.get("id") == task_id or t.get("task_id") == task_id:
                 status_text = status
                 if status == "QUEUED":
-                    status_text = "⏳ 排队中"
+                    status_text = "排队中"
                 elif status == "RUNNING":
-                    status_text = "⏳ 运行中"
+                    status_text = "运行中"
                 elif status == "SUCCESS":
-                    status_text = "✅ 完成"
+                    status_text = " 完成"
                 elif status == "FAILED":
-                    status_text = "❌ 失败"
+                    status_text = " 失败"
                 elif status == "PAUSED":
-                    status_text = "⏸ 已暂停"
+                    status_text = "暂停 已暂停"
                 self.task_table.item(row, 3).setText(status_text)
                 p_bar = self.task_table.cellWidget(row, 4)
                 if p_bar and isinstance(p_bar, QProgressBar):

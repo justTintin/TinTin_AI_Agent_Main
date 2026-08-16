@@ -81,7 +81,7 @@ class VoiceSamplesPage(BasePage):
         main_layout.setSpacing(20)
 
         # Title
-        heading = QLabel("🎭 声音样本库管理")
+        heading = QLabel(" 声音样本库管理")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -143,7 +143,7 @@ class VoiceSamplesPage(BasePage):
 
         # Form action buttons row
         row_form_actions = QHBoxLayout()
-        self.btn_add_sample = QPushButton("➕ 添加声音样本")
+        self.btn_add_sample = QPushButton(" 添加声音样本")
         self.btn_add_sample.setObjectName("primary_button")
         self.btn_add_sample.clicked.connect(self._add_voice_sample)
         row_form_actions.addWidget(self.btn_add_sample)
@@ -252,11 +252,11 @@ class VoiceSamplesPage(BasePage):
             self.ref_text_input.clear()
 
             self._load_table_data()
-            self.status_label.setText("✅ 成功添加声音样本库！")
+            self.status_label.setText(" 成功添加声音样本库！")
             QMessageBox.information(self.parent_widget, "成功", f"人声样本 '{name}' 已成功导入样本库！")
         except Exception as e:
             log.error(f"添加人声样本失败: {e}")
-            self.status_label.setText("❌ 添加失败")
+            self.status_label.setText("失败： 添加失败")
             QMessageBox.critical(self.parent_widget, "错误", f"添加失败: {e}")
         finally:
             self.btn_add_sample.setEnabled(True)
@@ -301,7 +301,7 @@ class VoiceSamplesPage(BasePage):
             sample_id = s.get("id")
             path = s.get("path")
 
-            btn_play = QPushButton("🔊")
+            btn_play = QPushButton("")
             btn_play.setToolTip("播放")
             btn_play.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_play.setFixedWidth(28)
@@ -309,21 +309,21 @@ class VoiceSamplesPage(BasePage):
             h_layout.addWidget(btn_play)
 
             # Transcribe/generate text button (always visible)
-            btn_asr = QPushButton("📝")
+            btn_asr = QPushButton("")
             btn_asr.setToolTip("根据音频生成/更新参考文案")
             btn_asr.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_asr.setFixedWidth(28)
             btn_asr.clicked.connect(lambda checked=False, p=path, sid=sample_id: self._generate_ref_text(p, sid))
             h_layout.addWidget(btn_asr)
 
-            btn_rename = QPushButton("✏️")
+            btn_rename = QPushButton("")
             btn_rename.setToolTip("重命名")
             btn_rename.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_rename.setFixedWidth(28)
             btn_rename.clicked.connect(lambda checked=False, idx=i, sid=sample_id: self._rename_sample(idx, sid))
             h_layout.addWidget(btn_rename)
 
-            btn_delete = QPushButton("🗑️")
+            btn_delete = QPushButton("")
             btn_delete.setToolTip("删除")
             btn_delete.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_delete.setFixedWidth(28)
@@ -421,7 +421,7 @@ class VoiceSamplesPage(BasePage):
         if target_row != -1:
             item = self.samples_table.item(target_row, 2)
             if item:
-                item.setText("⏳ 正在生成文案...")
+                item.setText("正在生成文案...")
                 item.setBackground(QColor(46, 204, 113, 80))  # Soft green
 
         self.status_label.setText(f"正在识别样本音频文本 (ID: {sample_id})...")
@@ -450,13 +450,13 @@ class VoiceSamplesPage(BasePage):
         self.transcribe_workers[sample_id] = worker
 
         def on_finished(segments):
-            self.status_label.setText("✅ 识别参考音频文本完成")
+            self.status_label.setText("完成： 识别参考音频文本完成")
             from utils.asr_client import segments_to_plain
             plain_text = segments_to_plain(segments)
 
             # 识别结果为空（音频无人声 / 服务端未返回内容）：给出提示，不静默保存空文案
             if not plain_text.strip():
-                self.status_label.setText("⚠️ 未识别到文字")
+                self.status_label.setText("注意： 未识别到文字")
                 if sample_id in self.transcribe_workers:
                     del self.transcribe_workers[sample_id]
                 self._load_table_data()
@@ -483,7 +483,7 @@ class VoiceSamplesPage(BasePage):
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
             if llm_model and plain_text.strip():
-                self.status_label.setText("⏳ 正在使用 AI 模型自动优化断句与标点...")
+                self.status_label.setText("正在使用 AI 模型自动优化断句与标点...")
                 self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
 
                 def on_punc_done(punctuated_text):
@@ -500,7 +500,7 @@ class VoiceSamplesPage(BasePage):
                 save_text(plain_text)
 
         def on_error(err):
-            self.status_label.setText("❌ 识别文本失败")
+            self.status_label.setText("失败： 识别文本失败")
             if sample_id in self.transcribe_workers:
                 del self.transcribe_workers[sample_id]
             self._load_table_data()

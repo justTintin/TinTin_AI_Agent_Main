@@ -26,7 +26,7 @@ class Step3VoiceView(BaseStepView):
         # 1. Video Directory Row
         row_vid_dir = QHBoxLayout()
         row_vid_dir.setAlignment(Qt.AlignVCenter)
-        row_vid_dir.addWidget(QLabel("📹 视频输入目录:"))
+        row_vid_dir.addWidget(QLabel(" 视频输入目录:"))
         self.main_page.voice_video_dir_input = QLineEdit()
         self.main_page.voice_video_dir_input.setPlaceholderText("选择包含排列视频的目录...")
         self.main_page.voice_video_dir_input.textChanged.connect(self.main_page._on_voice_video_dir_changed)
@@ -55,7 +55,7 @@ class Step3VoiceView(BaseStepView):
         row_voice = QHBoxLayout()
         row_voice.setSpacing(8)
         row_voice.setAlignment(Qt.AlignVCenter)
-        row_voice.addWidget(QLabel("🗣️ 参考声音:"))
+        row_voice.addWidget(QLabel(" 参考声音:"))
         
         self.main_page.ref_audio_combo = SearchableComboBox(placeholder="输入声音名称搜索…")
         self.main_page.ref_audio_combo.setView(QListView())
@@ -85,7 +85,7 @@ class Step3VoiceView(BaseStepView):
         row_ref_text = QHBoxLayout()
         row_ref_text.setSpacing(8)
         row_ref_text.setAlignment(Qt.AlignVCenter)
-        row_ref_text.addWidget(QLabel("📝 参考文案:"))
+        row_ref_text.addWidget(QLabel(" 参考文案:"))
         self.main_page.ref_text_input = QLineEdit()
         self.main_page.ref_text_input.setPlaceholderText("可选，填入样本台词...")
         self.main_page.ref_text_input.setStyleSheet("""
@@ -104,7 +104,7 @@ class Step3VoiceView(BaseStepView):
         row_server = QHBoxLayout()
         row_server.setSpacing(10)
         row_server.setAlignment(Qt.AlignVCenter)
-        row_server.addWidget(QLabel("🌐 TTS API:"))
+        row_server.addWidget(QLabel(" TTS API:"))
         row_server.addWidget(self.main_page.api_url_input, 1)
 
         row_server.addSpacing(12)
@@ -166,7 +166,7 @@ class Step3VoiceView(BaseStepView):
         # Videos and script table mapping
         row_table_title = QHBoxLayout()
         row_table_title.setContentsMargins(0, 4, 0, 4)
-        lbl_title = QLabel("📹 待合成视频列表与配音文案映射 (在配音文案栏直接输入):")
+        lbl_title = QLabel(" 待合成视频列表与配音文案映射 (在配音文案栏直接输入):")
         lbl_title.setObjectName("card_title")
         row_table_title.addWidget(lbl_title)
         row_table_title.addStretch()

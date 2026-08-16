@@ -46,59 +46,9 @@ const btnClearDownloads = document.getElementById('btn-clear-downloads');
 const btnOpenDir = document.getElementById('btn-open-dir');
 const downloadPathDisplay = document.getElementById('download-path-display');
 const btnChangePath = document.getElementById('btn-change-path');
-const proxyUrlInput = document.getElementById('proxy-url-input');
-const btnSaveProxy = document.getElementById('btn-save-proxy');
-
-// ── 代理配置弹窗 ──
-const proxyOverlay = document.getElementById('proxy-config-overlay');
-const btnProxyConfig = document.getElementById('btn-proxy-config');
-const btnProxyClose = document.getElementById('btn-proxy-close');
-const proxyStatusDot = document.getElementById('proxy-status-dot');
-const proxyInputField = document.getElementById('proxy-input-field');
-const btnProxyParse = document.getElementById('btn-proxy-parse');
-const proxyNodeList = document.getElementById('proxy-node-list');
-const proxyNodeCount = document.getElementById('proxy-node-count');
-const btnProxyStart = document.getElementById('btn-proxy-start');
-const btnProxyStop = document.getElementById('btn-proxy-stop');
-const btnProxyUpdateSub = document.getElementById('btn-proxy-update-sub');
-const btnProxyCopyLog = document.getElementById('btn-proxy-copy-log');
-const proxyPanelStatus = document.getElementById('proxy-panel-status');
-const proxyInputTabs = document.querySelectorAll('.proxy-input-tab');
-
-let proxyNodes = [];       // 当前解析到的节点列表
-let proxyRunning = false;  // 代理是否运行中
-
-// 节点列表持久化（localStorage 跨进程/重启不丢失）
-const PROXY_NODES_KEY = 'tintin_proxy_nodes';
-function saveProxyNodes() {
-  try { localStorage.setItem(PROXY_NODES_KEY, JSON.stringify(proxyNodes)); } catch(e){}
-}
-function loadProxyNodes() {
-  try {
-    const saved = localStorage.getItem(PROXY_NODES_KEY);
-    if (saved) { const arr = JSON.parse(saved); if (Array.isArray(arr) && arr.length > 0) proxyNodes = arr; }
-  } catch(e){}
-}
-
-// 显示可复制的错误信息（取代 alert）
-function showProxyError(msg) {
-  const box = document.getElementById('proxy-error-box');
-  if (!box) return;
-  box.textContent = msg;
-  box.style.display = 'block';
-  // 自动选中方便复制
-  setTimeout(() => {
-    const range = document.createRange();
-    range.selectNodeContents(box);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }, 100);
-}
-function clearProxyError() {
-  const box = document.getElementById('proxy-error-box');
-  if (box) { box.style.display = 'none'; box.textContent = ''; }
-}
+const cookieOverlay = document.getElementById('proxy-config-overlay');
+const btnCookieConfig = document.getElementById('btn-proxy-config');
+const btnCookieClose = document.getElementById('btn-proxy-close');
 
 // Knowledge Base DOMs
 const browserView = document.getElementById('browser-view');
@@ -206,9 +156,6 @@ async function init() {
 async function loadSettings() {
   currentSettings = await window.api.getSettings();
   downloadPathDisplay.textContent = currentSettings.downloadPath || '未选择';
-  if (proxyUrlInput && currentSettings.proxyUrl) {
-    proxyUrlInput.value = currentSettings.proxyUrl;
-  }
 }
 
 // Load and render downloads
@@ -256,14 +203,14 @@ function renderDownloads() {
     
     let actionHtml = '';
     if (task.status === 'downloading') {
-      actionHtml = `<button class="download-action-btn pause" onclick="pauseDownload('${task.id}')">⏸ 暂停</button>`;
+      actionHtml = `<button class="download-action-btn pause" onclick="pauseDownload('${task.id}')">暂停</button>`;
     } else if (task.status === 'paused') {
-      actionHtml = `<button class="download-action-btn resume" onclick="resumeDownload('${task.id}')">↻ 重新下载</button>`;
+      actionHtml = `<button class="download-action-btn resume" onclick="resumeDownload('${task.id}')">重新下载</button>`;
     } else {
       // 失败时显示日志按钮 + 打开文件
       const openBtn = `<button class="download-action-btn" onclick="openFileFolder('${task.path.replace(/\\/g, '\\\\')}')">打开文件</button>`;
       const logBtn = task.status === 'failed' && task.log
-        ? `<button class="download-action-btn log" onclick="showDownloadLog('${task.id}')">📋 日志</button>`
+        ? `<button class="download-action-btn log" onclick="showDownloadLog('${task.id}')">日志</button>`
         : '';
       actionHtml = logBtn + openBtn;
     }
@@ -312,18 +259,18 @@ function showDownloadContextMenu(x, y, task) {
   menu.id = 'download-context-menu';
   menu.style.cssText = `
     position: fixed; left: ${x}px; top: ${y}px; z-index: 9999;
-    background: #2a2a2a; border: 1px solid #444; border-radius: 6px;
+    background: var(--color-surface-container); border: 1px solid var(--color-border); border-radius: 6px;
     padding: 4px 0; min-width: 120px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.4);
   `;
 
   const cancelItem = document.createElement('div');
-  cancelItem.textContent = '🗑 取消下载';
+  cancelItem.textContent = '取消下载';
   cancelItem.style.cssText = `
-    padding: 8px 16px; cursor: pointer; color: #ef4444; font-size: 0.8rem;
+    padding: 8px 16px; cursor: pointer; color: var(--color-error); font-size: 0.8rem;
     display: flex; align-items: center; gap: 6px;
   `;
-  cancelItem.addEventListener('mouseenter', () => { cancelItem.style.background = '#333'; });
+  cancelItem.addEventListener('mouseenter', () => { cancelItem.style.background = 'var(--color-surface-container-high)'; });
   cancelItem.addEventListener('mouseleave', () => { cancelItem.style.background = 'transparent'; });
   cancelItem.addEventListener('click', () => {
     cancelDownloadItem(task.id);
@@ -366,7 +313,7 @@ function showDownloadLog(id) {
 
   const panel = document.createElement('div');
   panel.style.cssText = `
-    background: #1a1a2e; border: 1px solid #444; border-radius: 10px;
+    background: var(--color-surface-container); border: 1px solid var(--color-border); border-radius: 10px;
     width: 80%; max-width: 800px; max-height: 80vh;
     display: flex; flex-direction: column;
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
@@ -375,19 +322,19 @@ function showDownloadLog(id) {
   const header = document.createElement('div');
   header.style.cssText = `
     display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 18px; border-bottom: 1px solid #333;
+    padding: 14px 18px; border-bottom: 1px solid var(--color-border);
   `;
-  header.innerHTML = `<span style="font-weight:700;color:#fca5a5;">📋 下载日志 - ${task.filename}</span>
+  header.innerHTML = `<span style="font-weight:700;color:var(--color-error);">下载日志 - ${task.filename}</span>
     <div style="display:flex;gap:8px;align-items:center;">
-      <span style="cursor:pointer;color:#888;font-size:0.75rem;" id="dl-log-copy">📋 复制</span>
-      <span style="cursor:pointer;color:#888;font-size:1.2rem;" id="dl-log-close">✕</span>
+      <span style="cursor:pointer;color:var(--color-muted-foreground);font-size:0.75rem;" id="dl-log-copy">复制</span>
+      <span style="cursor:pointer;color:var(--color-muted-foreground);font-size:1.2rem;" id="dl-log-close">关闭</span>
     </div>`;
 
   const body = document.createElement('pre');
   body.style.cssText = `
     margin: 0; padding: 16px 18px; overflow: auto; flex: 1;
     font-family: 'Consolas', 'Courier New', monospace; font-size: 0.75rem;
-    color: #d1d5db; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+    color: var(--color-on-surface-variant); line-height: 1.5; white-space: pre-wrap; word-break: break-all;
     user-select: text; cursor: text;
   `;
   body.textContent = task.log;
@@ -401,8 +348,8 @@ function showDownloadLog(id) {
   header.querySelector('#dl-log-close').onclick = close;
   header.querySelector('#dl-log-copy').onclick = () => {
     navigator.clipboard.writeText(task.log).then(() => {
-      header.querySelector('#dl-log-copy').textContent = '✅ 已复制';
-      setTimeout(() => { header.querySelector('#dl-log-copy').textContent = '📋 复制'; }, 2000);
+      header.querySelector('#dl-log-copy').textContent = '已复制';
+      setTimeout(() => { header.querySelector('#dl-log-copy').textContent = '复制'; }, 2000);
     });
   };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
@@ -812,252 +759,13 @@ function setupEventListeners() {
     }
   });
 
-  btnSaveProxy.addEventListener('click', async () => {
-    const proxyUrl = proxyUrlInput.value.trim();
-    currentSettings = await window.api.saveSettings({ proxyUrl });
-    proxyUrlInput.style.borderColor = proxyUrl ? 'var(--color-primary)' : 'var(--border-color)';
-    setTimeout(() => { proxyUrlInput.style.borderColor = 'var(--border-color)'; }, 1500);
-  });
-
-  // ── 代理配置弹窗 ──
-
-  // 更新状态指示（左侧按钮小圆点 + 弹窗底部文字）
-  async function refreshProxyStatus() {
-    const st = await window.api.v2rayStatus();
-    proxyRunning = st.running;
-    if (st.running) {
-      proxyStatusDot.style.background = '#34d399';
-      proxyPanelStatus.textContent = `▶️ 运行中 (${st.proxyUrl})`;
-      proxyPanelStatus.style.color = '#34d399';
-      btnProxyStop.style.display = '';
-      btnProxyStart.textContent = '▶ 重启代理';
-      // 自动填入代理地址到手动代理设置
-      if (!proxyUrlInput.value.trim()) {
-        proxyUrlInput.value = st.proxyUrl;
-        await window.api.saveSettings({ proxyUrl: st.proxyUrl });
-      }
-    } else {
-      proxyStatusDot.style.background = '#6b7280';
-      proxyPanelStatus.textContent = '⏹ 未启动';
-      proxyPanelStatus.style.color = 'var(--text-muted)';
-      btnProxyStop.style.display = 'none';
-      btnProxyStart.textContent = '▶ 启动代理';
-    }
-  }
-
-  // 打开/关闭弹窗
-  btnProxyConfig.addEventListener('click', () => {
-    proxyOverlay.style.display = 'flex';
-    refreshProxyStatus();
+  // ── Cookie 状态弹窗（原代理弹窗仅保留 Cookie 面板）──
+  btnCookieConfig.addEventListener('click', () => {
+    cookieOverlay.style.display = 'flex';
     refreshCookieStatus();
-    // 从 localStorage 恢复节点（重启也不丢失）
-    if (proxyNodes.length === 0) loadProxyNodes();
-    renderProxyNodes();
   });
-  btnProxyClose.addEventListener('click', () => { proxyOverlay.style.display = 'none'; });
-  proxyOverlay.addEventListener('click', (e) => { if (e.target === proxyOverlay) proxyOverlay.style.display = 'none'; });
-
-  // 协议标签切换
-  proxyInputTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      proxyInputTabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const proto = tab.dataset.proto;
-      if (proto === 'sub') {
-        proxyInputField.placeholder = '粘贴订阅地址...';
-      } else {
-        proxyInputField.placeholder = `粘贴 ${proto}:// 链接...`;
-      }
-    });
-  });
-
-  // 渲染节点列表
-  function renderProxyNodes() {
-    proxyNodeList.innerHTML = '';
-    proxyNodeCount.textContent = `${proxyNodes.length} 个节点`;
-
-    if (proxyNodes.length === 0) {
-      proxyNodeList.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;text-align:center;padding:20px 0;">请先输入订阅地址或分享链接</div>';
-      return;
-    }
-
-    // 找出当前启用的节点索引（从 localStorage 读取）
-    const activeIdx = (() => { try { return parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){ return -1; } })();
-
-    proxyNodes.forEach((node, i) => {
-      const div = document.createElement('div');
-      div.className = 'proxy-node-item';
-      if (i === activeIdx) div.classList.add('selected');
-      const proto = node.protocol || '?';
-      const name = node.remark || node.host || `节点 ${i+1}`;
-      const activeBadge = i === activeIdx ? '<span style="color:#34d399;font-weight:700;font-size:0.65rem;margin-right:4px;">▶</span>' : '';
-      div.innerHTML = `
-        <span style="font-weight:600;color:var(--color-primary);font-size:0.7rem;min-width:32px;">${proto}</span>
-        ${activeBadge}
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
-        <span class="node-latency" id="nlat-${i}">—</span>
-      `;
-      div.addEventListener('click', async () => {
-        // 设为活动节点
-        document.querySelectorAll('.proxy-node-item').forEach(el => el.classList.remove('selected'));
-        div.classList.add('selected');
-        try { localStorage.setItem('tintin_active_node', String(i)); } catch(e){}
-        // 重新渲染以更新 ▶ 标记
-        renderProxyNodes();
-        // TCP 测速（不启动 xray，不占端口）
-        const latSpan = document.getElementById(`nlat-${i}`);
-        if (!latSpan) return;
-        latSpan.textContent = '测试中...';
-        latSpan.className = 'node-latency testing';
-        const result = await window.api.v2rayTestLatency(node);
-        if (result.ok && result.latency >= 0) {
-          latSpan.textContent = `${result.latency}ms`;
-          latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
-        } else {
-          // TCP 直连超时不代表节点不能用（防火墙拦直连但 v2ray 协议加密后可通）
-          latSpan.textContent = '⚠ 直连超时';
-          latSpan.className = 'node-latency bad';
-          latSpan.title = 'TCP 直连被拦，但通过 v2ray 协议仍可能正常使用';
-        }
-      });
-      proxyNodeList.appendChild(div);
-    });
-  }
-
-	  // 自动测试所有节点延迟（逐条，间隔 300ms 避免并发）
-	  async function testAllNodesLatency() {
-	    for (let i = 0; i < proxyNodes.length; i++) {
-	      const latSpan = document.getElementById(`nlat-${i}`);
-	      if (!latSpan) continue;
-	      latSpan.textContent = '测试中...';
-	      latSpan.className = 'node-latency testing';
-	      const result = await window.api.v2rayTestLatency(proxyNodes[i]);
-	      if (result.ok && result.latency >= 0) {
-	        latSpan.textContent = `${result.latency}ms`;
-	        latSpan.className = `node-latency ${result.latency < 500 ? 'good' : 'bad'}`;
-	      } else {
-	        latSpan.textContent = '不通';
-	        latSpan.className = 'node-latency bad';
-	      }
-	      await new Promise(r => setTimeout(r, 300));
-	    }
-	  }
-
-	  // 解析按钮
-  btnProxyParse.addEventListener('click', async () => {
-    clearProxyError();
-    const input = proxyInputField.value.trim();
-    if (!input) return;
-
-    btnProxyParse.textContent = '解析中...';
-    btnProxyParse.disabled = true;
-
-    try {
-      // 判断当前激活的协议标签
-      const activeTab = document.querySelector('.proxy-input-tab.active');
-      const proto = activeTab ? activeTab.dataset.proto : 'sub';
-
-      if (proto === 'sub' || input.startsWith('http://') || input.startsWith('https://')) {
-        // 订阅地址
-        const result = await window.api.v2rayFetchSubscription(input);
-        if (!result.ok) throw new Error(result.error);
-        if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
-        proxyNodes = result.nodes;
-      } else {
-        // 分享链接
-        const node = await window.api.v2rayParseLink(input);
-        if (!node) throw new Error('无法解析该链接');
-        proxyNodes = [node];
-      }
-
-      saveProxyNodes();
-      renderProxyNodes();
-      // 自动测试所有节点的延迟
-      testAllNodesLatency();
-    } catch (e) {
-      showProxyError('解析失败:\n' + e.message);
-    }
-
-    btnProxyParse.textContent = '解析';
-    btnProxyParse.disabled = false;
-  });
-
-  // 启动代理
-  btnProxyStart.addEventListener('click', async () => {
-    clearProxyError();
-    if (proxyNodes.length === 0) { showProxyError('请先解析节点'); return; }
-    // 取活动节点（点击列表选中），没有则用第一个
-    let activeIdx = -1;
-    try { activeIdx = parseInt(localStorage.getItem('tintin_active_node') || '-1', 10); } catch(e){}
-    if (activeIdx < 0 || activeIdx >= proxyNodes.length) activeIdx = 0;
-    // 保存活动节点
-    try { localStorage.setItem('tintin_active_node', String(activeIdx)); } catch(e){}
-    const nodesToUse = [proxyNodes[activeIdx]];
-
-    btnProxyStart.textContent = '启动中...';
-    btnProxyStart.disabled = true;
-
-    try {
-      const result = await window.api.v2rayStart(nodesToUse);
-      if (!result.ok) throw new Error(result.error);
-      await refreshProxyStatus();
-    } catch (e) {
-      showProxyError('启动失败:\n' + e.message);
-    }
-
-    btnProxyStart.textContent = '▶ 重启代理';
-    btnProxyStart.disabled = false;
-  });
-
-  // 停止代理
-  btnProxyStop.addEventListener('click', async () => {
-    clearProxyError();
-    await window.api.v2rayStop();
-    await refreshProxyStatus();
-  });
-
-  // 复制日志到剪贴板
-  btnProxyCopyLog.addEventListener('click', () => {
-    const box = document.getElementById('proxy-error-box');
-    const status = document.getElementById('proxy-panel-status');
-    const text = [
-      status ? status.textContent : '',
-      box && box.style.display !== 'none' ? '\n' + box.textContent : '',
-      '\n节点列表:',
-      ...proxyNodes.map(n => `  ${n.protocol}://${n.host}:${n.port}  # ${n.remark || ''}`),
-    ].join('\n').trim();
-    if (text) {
-      navigator.clipboard.writeText(text).then(() => {
-        btnProxyCopyLog.textContent = '✅ 已复制';
-        setTimeout(() => { btnProxyCopyLog.textContent = '📋 复制日志'; }, 2000);
-      });
-    }
-  });
-
-  // 更新订阅
-  btnProxyUpdateSub.addEventListener('click', async () => {
-    clearProxyError();
-    const subUrl = proxyInputField.value.trim();
-    if (!subUrl.startsWith('http')) { showProxyError('请在输入框中粘贴有效的订阅地址'); return; }
-
-    btnProxyUpdateSub.textContent = '更新中...';
-    btnProxyUpdateSub.disabled = true;
-
-    try {
-      const result = await window.api.v2rayFetchSubscription(subUrl);
-      if (!result.ok) throw new Error(result.error);
-      if (!result.nodes || result.nodes.length === 0) throw new Error('订阅返回 0 个有效节点');
-      proxyNodes = result.nodes;
-      saveProxyNodes();
-      renderProxyNodes();
-      testAllNodesLatency();
-    } catch (e) {
-      showProxyError('更新订阅失败:\n' + e.message);
-    }
-
-    btnProxyUpdateSub.textContent = '🔄 更新订阅';
-    btnProxyUpdateSub.disabled = false;
-  });
+  btnCookieClose.addEventListener('click', () => { cookieOverlay.style.display = 'none'; });
+  cookieOverlay.addEventListener('click', (e) => { if (e.target === cookieOverlay) cookieOverlay.style.display = 'none'; });
 
   // Cookie 状态刷新
   async function refreshCookieStatus() {
@@ -1067,23 +775,19 @@ function setupEventListeners() {
       const st = await window.api.checkCookieStatus();
       if (display) {
         display.innerHTML = Object.entries(st).map(([name, info]) => {
-          const color = info.count > 0 ? '#34d399' : '#f87171';
+          const color = info.count > 0 ? 'var(--color-success)' : 'var(--color-error)';
           const detail = info.count > 0 ? `${info.count}条` : '未登录';
           return `<span style="color:${color}">${name}: ${detail}</span>`;
         }).join('');
       }
       // 侧边栏小点：至少一个平台有 cookie 就变绿
       const anyOk = Object.values(st).some(v => v.count > 0);
-      if (dot) dot.style.background = anyOk ? '#34d399' : '#6b7280';
+      if (dot) dot.style.background = anyOk ? 'var(--color-success)' : 'var(--color-muted-foreground)';
     } catch (e) {
       if (display) display.textContent = '获取失败';
     }
   }
   document.getElementById('btn-sync-cookies')?.addEventListener('click', refreshCookieStatus);
-
-  // 初始化状态 + 恢复节点
-  loadProxyNodes();
-  setTimeout(refreshProxyStatus, 1000);
 
   // --- IPC Listeners (Download Events) ---
   window.api.onDownloadListUpdated((list) => {
@@ -1586,13 +1290,13 @@ async function collectAllFromCreator() {
   }
 
   if (!profileUrl) {
-    alert(`未能确定「${creatorName}」的主页地址。请手动在浏览器中打开其主页后，点工具栏「⬇️ 自动加载到底」。`);
+    alert(`未能确定「${creatorName}」的主页地址。请手动在浏览器中打开其主页后，点工具栏「自动加载到底」。`);
     return;
   }
 
   const confirmed = confirm(
     `即将前往「${creatorName}」主页：\n${profileUrl}\n\n打开后会自动滚动到底加载全部内容。` +
-    `\n如果跳转到搜索页，请手动点击该创作者的主页后再点「⬇️ 自动加载到底」。\n\n确认前往？`
+    `\n如果跳转到搜索页，请手动点击该创作者的主页后再点「自动加载到底」。\n\n确认前往？`
   );
   if (!confirmed) return;
 
@@ -1859,11 +1563,11 @@ function renderSniffedAssets() {
 
     let previewHtml = '';
     if (asset.type === 'image') {
-      previewHtml = `<img class="sniffed-preview" src="${asset.url}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%23475569%22><path d=%22M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z%22/></svg>'">`;
+      previewHtml = `<img class="sniffed-preview" src="${asset.url}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%235f6475%22><path d=%22M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z%22/></svg>'">`;
     } else {
       // Video/Audio placeholder icon
       previewHtml = `
-        <div class="sniffed-preview" style="display:flex;align-items:center;justify-content:center;background:#1e293b;">
+        <div class="sniffed-preview" style="display:flex;align-items:center;justify-content:center;background:var(--color-surface-container);">
           <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary);"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
         </div>
       `;
@@ -2012,14 +1716,14 @@ function renderLoginStatusBadges() {
     badge.style.border = '1px solid';
     
     if (loggedIn) {
-      badge.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-      badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-      badge.style.color = '#34d399';
+      badge.style.backgroundColor = 'rgba(52, 211, 153, 0.1)';
+      badge.style.borderColor = 'rgba(52, 211, 153, 0.3)';
+      badge.style.color = 'var(--color-success)';
       badge.textContent = `${p.name}: 已登录`;
     } else {
-      badge.style.backgroundColor = 'rgba(239, 68, 68, 0.05)';
-      badge.style.borderColor = 'rgba(239, 68, 68, 0.15)';
-      badge.style.color = '#f87171';
+      badge.style.backgroundColor = 'rgba(248, 113, 113, 0.05)';
+      badge.style.borderColor = 'rgba(248, 113, 113, 0.15)';
+      badge.style.color = 'var(--color-error)';
       badge.textContent = `${p.name}: 未登录`;
     }
     loginStatusContainer.appendChild(badge);
@@ -2046,7 +1750,7 @@ async function syncKnowledgeBase() {
   // 边采集边显示（先清空并显示空表）
   kbEmptyState.style.display = 'none';
   kbTable.style.display = 'table';
-  kbTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">正在采集，请稍候...</td></tr>';
+  kbTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--color-muted-foreground);">正在采集，请稍候...</td></tr>';
 
   try {
     // 每 3 秒刷新一次表格，让用户看到逐步增加的数据
@@ -2092,12 +1796,12 @@ async function syncKnowledgeBase() {
       const pn = { bilibili: 'B站', xiaohongshu: '小红书', douyin: '抖音', tiktok: 'TikTok' };
       const loggedIn = Object.keys(activeLoginStatus || {}).filter(k => activeLoginStatus[k]).map(k => pn[k] || k);
       const loginLine = loggedIn.length
-        ? `<p style="color:#34d399;font-weight:bold;">✅ 已登录：${loggedIn.join('、')}</p>`
-        : `<p style="color:#f87171;font-weight:bold;">⚠️ 未检测到任何已登录平台，请先在左侧平台登录。</p>`;
+        ? `<p style="color:var(--color-success);font-weight:bold;">已登录：${loggedIn.join('、')}</p>`
+        : `<p style="color:var(--color-error);font-weight:bold;">未检测到任何已登录平台，请先在左侧平台登录。</p>`;
       kbEmptyState.innerHTML = `
         <div style="text-align: left; padding: 10px 20px; line-height: 1.6;">
           ${loginLine}
-          <p style="color: var(--text-secondary);">进入你的「我的收藏 / 点赞」页，点工具栏「⬇️ 自动加载到底」，样本会自动出现在这里，可直接下载。</p>
+          <p style="color: var(--color-on-surface-variant);">进入你的「我的收藏 / 点赞」页，点工具栏「自动加载到底」，样本会自动出现在这里，可直接下载。</p>
         </div>
       `;
     }
@@ -2217,11 +1921,11 @@ function renderKnowledgeBaseTable() {
     tr.innerHTML = `
       <td style="text-align: center;"><input type="checkbox" class="kb-item-check" data-index="${idx}" style="cursor: pointer;"></td>
       <td>
-        <img class="kb-cover-img" loading="lazy" decoding="async" src="${item.cover || 'avatar-placeholder.png'}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%231e293b%22><rect width=%22100%25%22 height=%22100%25%22/><path d=%22M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z%22 fill=%22%23475569%22/></svg>'">
+        <img class="kb-cover-img" loading="lazy" decoding="async" src="${item.cover || 'avatar-placeholder.png'}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%231e212b%22><rect width=%22100%25%22 height=%22100%25%22/><path d=%22M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z%22 fill=%22%235f6475%22/></svg>'">
       </td>
       <td>
         <div class="kb-creator-wrap">
-          <img class="kb-creator-avatar" loading="lazy" decoding="async" src="${item.creatorAvatar || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%2364748b%22><circle cx=%2212%22 cy=%228%22 r=%224%22/><path d=%22M12 14c-6.1 0-8 4-8 4v2h16v-2s-1.9-4-8-4z%22/></svg>'">
+          <img class="kb-creator-avatar" loading="lazy" decoding="async" src="${item.creatorAvatar || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%235f6475%22><circle cx=%2212%22 cy=%228%22 r=%224%22/><path d=%22M12 14c-6.1 0-8 4-8 4v2h16v-2s-1.9-4-8-4z%22/></svg>'">
           <div style="display:flex; flex-direction:column; gap:3px; overflow:hidden;">
             <span class="kb-creator-name" title="${item.creatorName}">${item.creatorName}</span>
             <span class="kb-badge-platform ${item.platform}">${platformLabel}</span>
@@ -2236,10 +1940,10 @@ function renderKnowledgeBaseTable() {
         <span class="kb-badge ${typeClass}">${typeLabel}</span>
         ${collectBadge}
       </td>
-      <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">
+      <td style="text-align: center; color: var(--color-on-surface-variant); font-weight: 600;">
         ${item.heat || '--'}
       </td>
-      <td style="text-align: center; color: var(--text-muted);">
+      <td style="text-align: center; color: var(--color-muted-foreground);">
         ${item.date}
       </td>
     `;
@@ -2425,14 +2129,14 @@ async function downloadKnowledgeBaseItem(item, subDir) {
             <meta charset="utf-8">
             <title>${cleanTitle}</title>
             <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #f8fafc; background-color: #0b0f19; }
-              h1 { border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; font-size: 1.8em; }
-              .meta { color: #94a3b8; font-size: 0.9em; margin-bottom: 20px; }
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #f0f1f7; background-color: #0b0c10; }
+              h1 { border-bottom: 1px solid rgba(240,241,247,0.08); padding-bottom: 12px; font-size: 1.8em; }
+              .meta { color: #9ca1b1; font-size: 0.9em; margin-bottom: 20px; }
               .meta a { color: #6366f1; text-decoration: none; }
               .content { font-size: 1.05em; line-height: 1.8; }
-              img { max-width: 100%; height: auto; display: block; margin: 20px 0; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); }
-              blockquote { border-left: 4px solid #6366f1; padding-left: 16px; color: #94a3b8; margin: 20px 0; }
-              pre { background-color: #121826; padding: 15px; border-radius: 6px; overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); }
+              img { max-width: 100%; height: auto; display: block; margin: 20px 0; border-radius: 6px; border: 1px solid rgba(240,241,247,0.08); }
+              blockquote { border-left: 4px solid #6366f1; padding-left: 16px; color: #9ca1b1; margin: 20px 0; }
+              pre { background-color: #151722; padding: 15px; border-radius: 6px; overflow-x: auto; border: 1px solid rgba(240,241,247,0.08); }
             </style>
           </head>
           <body>
@@ -2628,9 +2332,9 @@ function _buildMaterialPreviewHtml(file, groupFiles) {
     return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-primary);"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
   }
   if (file.type === 'text') {
-    return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+    return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-success);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
   }
-  return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+  return `<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--color-muted-foreground);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
 }
 
 function renderDailyMaterials() {
@@ -2640,7 +2344,7 @@ function renderDailyMaterials() {
   if (!data || data.length === 0) {
     const emptyEl = document.createElement('div');
     emptyEl.className = 'empty-state';
-    emptyEl.style.cssText = 'padding:80px 20px;text-align:center;color:var(--text-muted);font-size:0.82rem;line-height:1.6;';
+    emptyEl.style.cssText = 'padding:80px 20px;text-align:center;color:var(--color-muted-foreground);font-size:0.82rem;line-height:1.6;';
     emptyEl.innerHTML = '暂无符合筛选条件的素材';
     materialsContainer.appendChild(emptyEl);
     updateMaterialsSelectedCount();
@@ -2654,7 +2358,7 @@ function renderDailyMaterials() {
     const headerEl = document.createElement('div');
     headerEl.className = 'materials-date-header';
     headerEl.innerHTML = `
-      <span>📅 ${group.date}</span>
+      <span>${group.date}</span>
       <span class="materials-group-count">${group.files.length} 个文件</span>
     `;
     groupEl.appendChild(headerEl);
@@ -2742,8 +2446,8 @@ function refreshMaterialsDateFilter() {
 
 async function loadDailyMaterials() {
   materialsContainer.innerHTML = `
-    <div style="padding:50px 20px;text-align:center;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
-      <div class="loader" style="border:2px solid var(--border-color);border-top:2px solid var(--color-primary);border-radius:50%;width:20px;height:20px;animation:spin 0.8s linear infinite;"></div>
+    <div style="padding:50px 20px;text-align:center;color:var(--color-on-surface-variant);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;">
+      <div class="loader" style="border:2px solid var(--color-border);border-top:2px solid var(--color-primary);border-radius:50%;width:20px;height:20px;animation:spin 0.8s linear infinite;"></div>
       <span>正在加载本地素材...</span>
     </div>
   `;
@@ -2756,7 +2460,7 @@ async function loadDailyMaterials() {
   } catch (err) {
     console.error('加载本地素材失败:', err);
     materialsContainer.innerHTML = `
-      <div class="empty-state" style="padding:100px 20px;text-align:center;color:var(--color-danger);font-size:0.82rem;line-height:1.6;">
+      <div class="empty-state" style="padding:100px 20px;text-align:center;color:var(--color-error);font-size:0.82rem;line-height:1.6;">
         加载本地素材失败，请检查控制台错误信息，或点击右上角“刷新列表”重试
       </div>
     `;

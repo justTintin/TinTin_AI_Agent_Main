@@ -98,7 +98,7 @@ class TerminalPage(BasePage):
 
         # ── 标题行 ──────────────────────────────────────────────────────────
         hdr = QHBoxLayout()
-        title = QLabel("💻 Python 终端")
+        title = QLabel(" Python 终端")
         title.setObjectName("heading")
         hdr.addWidget(title)
         hdr.addStretch()
@@ -131,7 +131,7 @@ class TerminalPage(BasePage):
             btn.clicked.connect(lambda checked=False, c=cmd: self._fill_cmd(c))
             quick_lay.addWidget(btn)
         quick_lay.addStretch()
-        btn_clear = QPushButton("🗑 清空")
+        btn_clear = QPushButton(" 清空")
         btn_clear.setObjectName("secondary_button")
         btn_clear.setFixedHeight(30)
         btn_clear.clicked.connect(self._clear)
@@ -171,12 +171,12 @@ class TerminalPage(BasePage):
         self.cmd_input.installEventFilter(self._hist_filter)
         inp_lay.addWidget(self.cmd_input, 1)
 
-        self.btn_run = QPushButton("▶ 执行")
+        self.btn_run = QPushButton("播放 执行")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.clicked.connect(self._run_cmd)
         inp_lay.addWidget(self.btn_run)
 
-        self.btn_kill = QPushButton("⏹ 终止")
+        self.btn_kill = QPushButton("停止 终止")
         self.btn_kill.setObjectName("secondary_button")
         self.btn_kill.setEnabled(False)
         self.btn_kill.clicked.connect(self._kill_process)
@@ -262,7 +262,7 @@ class TerminalPage(BasePage):
         self.cmd_input.setEnabled(False)
         self.btn_run.setEnabled(False)
         self.btn_kill.setEnabled(True)
-        self.prompt_lbl.setText("⏳")
+        self.prompt_lbl.setText("…")
 
     def _on_stdout(self):
         raw = bytes(self._process.readAllStandardOutput())

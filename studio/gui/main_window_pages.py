@@ -119,17 +119,17 @@ class PageSetupMixin:
         p1 = QWidget(); p1.setObjectName("tab_page")
         from gui.voice_samples_page import VoiceSamplesPage
         self.voice_samples_tool = VoiceSamplesPage(p1, self); self.voice_samples_tool.setup()
-        tabs.addTab(p1, "🎭 声音样本")
+        tabs.addTab(p1, " 声音样本")
 
         # Tab 2: 视频配置（LUT 还原）
         p2 = QWidget(); p2.setObjectName("tab_page")
         self._setup_video_config_tab(p2)
-        tabs.addTab(p2, "🎬 视频配置")
+        tabs.addTab(p2, " 视频配置")
 
         # Tab 3: 本地配置（缓存目录）
         p3 = QWidget(); p3.setObjectName("tab_page")
         self._setup_local_config_tab(p3)
-        tabs.addTab(p3, "📁 本地配置")
+        tabs.addTab(p3, " 本地配置")
 
         layout.addWidget(tabs, 1)
 
@@ -175,9 +175,28 @@ class PageSetupMixin:
 
 
     def setup_vector_search_page(self):
+        """素材检索页：Tab1 素材库（默认）+ Tab2 即梦素材（由独立菜单移入）。"""
         from gui.vector_search_page import VectorSearchPage
-        self.vector_search_tool = VectorSearchPage(self.page_vector_search, self)
+        layout = QVBoxLayout(self.page_vector_search)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+
+        # Tab 1: 素材库（默认）
+        p1 = QWidget(); p1.setObjectName("tab_page")
+        self.vector_search_tool = VectorSearchPage(p1, self)
         self.vector_search_tool.setup()
+        tabs.addTab(p1, " 素材库")
+
+        # Tab 2: 即梦素材（原独立菜单页，移入本页）
+        from gui.dreamina_assets_page import DreaminaAssetsPage
+        p2 = QWidget(); p2.setObjectName("tab_page")
+        self.dreamina_assets_tool = DreaminaAssetsPage(p2, self)
+        self.dreamina_assets_tool.setup()
+        tabs.addTab(p2, " 即梦素材")
+
+        layout.addWidget(tabs)
 
     def setup_terminal_page(self):
         from gui.terminal_page import TerminalPage
@@ -194,13 +213,13 @@ class PageSetupMixin:
         from gui.dreamina_page import DreaminaPage
         p1 = QWidget(); p1.setObjectName("tab_page")
         self.dreamina_tool = DreaminaPage(p1, self); self.dreamina_tool.setup()
-        tabs.addTab(p1, "🎨 即梦生成")
+        tabs.addTab(p1, " 即梦生成")
 
         # Tab 2: 产品生图
         from gui.product_image_page import ProductImagePage
         p2 = QWidget(); p2.setObjectName("tab_page")
         self.product_image_tool = ProductImagePage(p2, self); self.product_image_tool.setup()
-        tabs.addTab(p2, "🆕 产品生图")
+        tabs.addTab(p2, " 产品生图")
 
         # Tab 3: 数字人（外层滚动容器：音频列表加高后窗口偏矮时也能滚动查看）
         p3 = QWidget(); p3.setObjectName("tab_page")
@@ -209,21 +228,23 @@ class PageSetupMixin:
         dh_scroll.setWidgetResizable(True)
         dh_scroll.setWidget(p3)
         dh_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        tabs.addTab(dh_scroll, "🤖 数字人")
+        tabs.addTab(dh_scroll, " 数字人")
 
         # Tab 4: MG 动画
         p4 = QWidget(); p4.setObjectName("tab_page")
         from gui.mg_animation_page import MGAnimationPage
         self.mg_animation_tool = MGAnimationPage(p4, self)
         self.mg_animation_tool.setup()
-        tabs.addTab(p4, "🪄 MG 动画")
+        tabs.addTab(p4, " MG 动画")
 
         layout.addWidget(tabs)
 
     def setup_dreamina_assets_page(self):
-        from gui.dreamina_assets_page import DreaminaAssetsPage
-        self.dreamina_assets_tool = DreaminaAssetsPage(self.page_dreamina_assets, self)
-        self.dreamina_assets_tool.setup()
+        """即梦素材已并入素材检索页（index 38 Tab2），本容器仅保留占位。
+
+        dreamina_assets_tool 由 setup_vector_search_page 挂载到 (38, 1)。
+        """
+        pass
 
     def setup_cover_maker_page(self):
         from gui.cover_maker_page import CoverMakerPage
@@ -431,7 +452,7 @@ class PageSetupMixin:
 
             right_header = QHBoxLayout()
             right_header.setSpacing(10)
-            right_header.addWidget(QLabel("📥 已加入下载队列"))
+            right_header.addWidget(QLabel(" 已加入下载队列"))
             right_header.addStretch()
             self.cg_queue_count = QLabel("0")
             self.cg_queue_count.setObjectName("muted_text")
@@ -467,7 +488,7 @@ class PageSetupMixin:
             heading.setObjectName("heading")
             layout.addWidget(heading)
         
-            notice = QLabel("⚠️ 注意：此处登录的账号将作为系统抓取任务的默认全局身份。")
+            notice = QLabel("注意： 注意：此处登录的账号将作为系统抓取任务的默认全局身份。")
             notice.setStyleSheet("color: #e67e22; font-size: 13px; margin-bottom: 20px;")
             layout.addWidget(notice)
         
@@ -496,12 +517,12 @@ class PageSetupMixin:
         
             # Action Buttons Layout
             btn_layout = QHBoxLayout()
-            self.btn_open_default_browser = QPushButton("🌐 打开独立登录窗口")
+            self.btn_open_default_browser = QPushButton(" 打开独立登录窗口")
             self.btn_open_default_browser.setObjectName("primary_button")
             self.btn_open_default_browser.clicked.connect(self.open_system_default_browser)
             btn_layout.addWidget(self.btn_open_default_browser)
         
-            self.btn_sync_default_cookie = QPushButton("🍪 提取并同步 Cookie")
+            self.btn_sync_default_cookie = QPushButton(" 提取并同步 Cookie")
             self.btn_sync_default_cookie.clicked.connect(self.sync_system_default_cookie)
             btn_layout.addWidget(self.btn_sync_default_cookie)
             btn_layout.addStretch()
@@ -515,18 +536,18 @@ class PageSetupMixin:
             QTimer.singleShot(200, self.update_system_default_login_status)
 
     # ═══════════════════════════════════════════════════════════════
-    #  ⚙️ 系统设置 — 多 Tab，每 Tab 一个模块
+    #   系统设置 — 多 Tab，每 Tab 一个模块
     # ═══════════════════════════════════════════════════════════════
     def setup_ai_settings_page(self):
         layout = QVBoxLayout(self.page_ai_settings)
         layout.setContentsMargins(20, 20, 20, 20)
-        heading = QLabel("⚙️ 模型配置"); heading.setObjectName("heading")
+        heading = QLabel(" 模型配置"); heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
         # ── 统一服务端地址（各Tab独立API地址可基于此派生或单独填写）──
         server_row = QHBoxLayout()
         server_row.setSpacing(8)
-        server_lbl = QLabel("🌐 服务端地址（统一配置）:")
+        server_lbl = QLabel(" 服务端地址（统一配置）:")
         server_lbl.setObjectName("muted_text")
         server_row.addWidget(server_lbl)
         self.compute_server_input = QLineEdit()
@@ -552,7 +573,7 @@ class PageSetupMixin:
         def _row(w): r = QHBoxLayout(); w(r); return r
         def _inp(l, p, a, ph): e = QLineEdit(); e.setPlaceholderText(ph); setattr(self,a,e); _rl(l, p, lambda r: r.addWidget(e))
         # ───── LLM ─────
-        g1 = QGroupBox("🤖 LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
+        g1 = QGroupBox(" LLM 大语言模型"); g1.setObjectName("model_groupbox"); g1.setProperty("section", "llm"); lg1 = QVBoxLayout(g1); lg1.setSpacing(10)
         _rl(lg1, "提供商:", lambda r: (setattr(self,'llm_provider_combo',QComboBox()), self.llm_provider_combo.setView(QListView()),
             self.llm_provider_combo.addItem("DeepSeek (推荐)","deepseek"),
             self.llm_provider_combo.addItem("OpenAI 兼容接口","openai"),
@@ -574,7 +595,7 @@ class PageSetupMixin:
         scroll_layout.addWidget(g1)
 
         # ───── VoxCPM ─────
-        g3 = QGroupBox("🗣️ 声音克隆 VoxCPM（远程）"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
+        g3 = QGroupBox(" 声音克隆 VoxCPM（远程）"); g3.setObjectName("model_groupbox"); g3.setProperty("section", "vox"); lg3 = QVBoxLayout(g3); lg3.setSpacing(10)
         _rl(lg3, "API 地址:", lambda r: (setattr(self,'vox_api_url_input',QLineEdit()), self.vox_api_url_input.setPlaceholderText("http://远程服务器IP:7861/v1/tts"), r.addWidget(self.vox_api_url_input)))
         lg3.addLayout(_row(lambda r: (r.addWidget(QLabel("推理步数:")), setattr(self,'vox_timesteps_spin',QSpinBox()), self.vox_timesteps_spin.setRange(5,100), self.vox_timesteps_spin.setValue(20), self.vox_timesteps_spin.setFixedWidth(70), r.addWidget(self.vox_timesteps_spin), r.addSpacing(20),
             r.addWidget(QLabel("CFG:")), setattr(self,'vox_cfg_spin',QDoubleSpinBox()), self.vox_cfg_spin.setRange(0.5,10.0), self.vox_cfg_spin.setSingleStep(0.1), self.vox_cfg_spin.setValue(2.0), self.vox_cfg_spin.setFixedWidth(70), r.addWidget(self.vox_cfg_spin), r.addStretch())))
@@ -586,7 +607,7 @@ class PageSetupMixin:
         scroll_layout.addWidget(g3)
 
         # ───── 视觉模型（Ollama 托管）—— 合并原「Ollama 远程视觉服务」与「当前视觉模型」两个分组 ─────
-        g4 = QGroupBox("👁️ 视觉模型（Ollama）"); g4.setObjectName("model_groupbox"); g4.setProperty("section", "vision"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
+        g4 = QGroupBox(" 视觉模型（Ollama）"); g4.setObjectName("model_groupbox"); g4.setProperty("section", "vision"); lg4 = QVBoxLayout(g4); lg4.setSpacing(10)
         # 状态行：连通状态 + 已下载模型列表 + 刷新按钮
         lg4.addLayout(_row(lambda r: (setattr(self,'ollama_status_lbl',QLabel("● 未检测")), self.ollama_status_lbl.setObjectName("ollama_status_lbl"),
             setattr(self,'ollama_models_lbl',QLabel("已下载模型: (未检测)")), self.ollama_models_lbl.setObjectName("ollama_models_lbl"), self.ollama_models_lbl.setWordWrap(True), r.addWidget(self.ollama_models_lbl),
@@ -602,7 +623,7 @@ class PageSetupMixin:
         scroll_layout.addWidget(g4)
 
         # ───── Whisper ─────
-        g5 = QGroupBox("🎙️ Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
+        g5 = QGroupBox(" Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
         whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
         lg5.addLayout(_row(lambda r: (r.addStretch(),
@@ -613,7 +634,7 @@ class PageSetupMixin:
         scroll_layout.addWidget(g5)
 
         # ───── PaddleOCR（服务端 OCR，与 Whisper/CLIP 一致的远程配置样式）─────
-        g6 = QGroupBox("🔍 PaddleOCR 文本识别（服务端 OCR）"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
+        g6 = QGroupBox(" PaddleOCR 文本识别（服务端 OCR）"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
         paddle_desc = QLabel("OCR 已切换为纯服务端模式，由算力服务端 POST /material/ocr 完成识别，无需本地模型或专属环境。"); paddle_desc.setObjectName("muted_text"); paddle_desc.setWordWrap(True); lg6.addWidget(paddle_desc)
         _rl(lg6, "OCR 服务地址:", lambda r: (setattr(self,'ocr_api_url_input',QLineEdit()), self.ocr_api_url_input.setPlaceholderText("http://192.168.x.x:8000（与统一服务端地址同步）"), r.addWidget(self.ocr_api_url_input)))
         lg6.addLayout(_row(lambda r: (r.addStretch(),
@@ -627,7 +648,7 @@ class PageSetupMixin:
         scroll_layout.addWidget(g6)
 
         # ───── CLIP ─────
-        g7 = QGroupBox("🖼️ CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
+        g7 = QGroupBox(" CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
         clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
         _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
         lg7.addLayout(_row(lambda r: (r.addStretch(),
@@ -695,11 +716,11 @@ class PageSetupMixin:
         self.comfyui_local_status = QLabel(); self.comfyui_local_status.setObjectName("comfyui_local_status"); l1.addWidget(self.comfyui_local_status)
         try: self.refresh_comfyui_local_status()
         except Exception: pass
-        self.btn_open_comfyui_editor = QPushButton("🎨 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)
+        self.btn_open_comfyui_editor = QPushButton(" 打开 ComfyUI 节点编辑器（调试工作流）"); self.btn_open_comfyui_editor.clicked.connect(self.open_comfyui_editor); l1.addWidget(self.btn_open_comfyui_editor)
         r1 = QHBoxLayout(); r1.addStretch()
         b_save_comfy = mdi_button("保存 ComfyUI 配置", "save"); b_save_comfy.setObjectName("primary_button"); b_save_comfy.clicked.connect(self.save_ai_config); r1.addWidget(b_save_comfy)
         l1.addLayout(r1)
-        l1.addStretch(); tabs.addTab(p1, "🎨 ComfyUI")
+        l1.addStretch(); tabs.addTab(p1, " ComfyUI")
         # ── Tab 2: RunningHub ──
         # 配置项较多：外层包滚动容器，窗口偏矮时也能完整查看不截断
         p2 = QWidget(); l2_outer = QVBoxLayout(p2); l2_outer.setContentsMargins(0, 0, 0, 0)
@@ -728,7 +749,7 @@ class PageSetupMixin:
 
         # ── RunningHub 工作流管理 ──
         l2.addSpacing(20)
-        wf_group = QGroupBox("☁️ 工作流管理"); wf_group.setObjectName("model_groupbox")
+        wf_group = QGroupBox(" 工作流管理"); wf_group.setObjectName("model_groupbox")
         wf_layout = QVBoxLayout(wf_group); wf_layout.setSpacing(10)
 
         wf_layout.addWidget(QLabel("工作流列表（带类型，可编辑。点击「刷新」尝试从 RunningHub 读取）："))
@@ -788,7 +809,7 @@ class PageSetupMixin:
         # 加载已保存的工作流列表
         if hasattr(self, "_rh_load_workflow_list"):
             self._rh_load_workflow_list()
-        l2.addStretch(); tabs.addTab(p2, "☁️ RunningHub")
+        l2.addStretch(); tabs.addTab(p2, " RunningHub")
 
 
         # ── Tab 2: 飞书（已隐藏，代码保留）──
@@ -809,20 +830,20 @@ class PageSetupMixin:
         l3.addLayout(r3)
         self.fs_test_status = QLabel(""); self.fs_test_status.setObjectName("muted_text"); l3.addWidget(self.fs_test_status)
         l3.addStretch()
-        tabs.addTab(p3, "✈️ 飞书")
+        tabs.addTab(p3, " 飞书")
 
         # ── Tab 4: 即梦 ──
         p4 = QWidget(); l4 = QVBoxLayout(p4); l4.setContentsMargins(30,30,30,30)
         l4.addWidget(QLabel("即梦 (Dreamina) AI 图片生成"))
         l4.addWidget(QLabel(f"输出目录: {DREAMINA_OUTPUT_DIR}"))
-        has = "✅ 已就位" if os.path.isfile(DREAMINA_EXE) else f"❌ 未找到 ({DREAMINA_EXE})"
+        has = " 已就位" if os.path.isfile(DREAMINA_EXE) else f"失败： 未找到 ({DREAMINA_EXE})"
         l4.addWidget(QLabel(f"引擎: {has}"))
         self.dr_status = QLabel(""); self.dr_status.setObjectName("muted_text"); l4.addWidget(self.dr_status)
         r4 = QHBoxLayout()
-        b_login = QPushButton("🔑 登录"); b_login.setObjectName("primary_button"); b_login.clicked.connect(self._dreamina_login); r4.addWidget(b_login)
+        b_login = QPushButton(" 登录"); b_login.setObjectName("primary_button"); b_login.clicked.connect(self._dreamina_login); r4.addWidget(b_login)
         b_check = mdi_button("检测状态", "link"); b_check.setObjectName("secondary_button"); b_check.clicked.connect(self._dreamina_check); r4.addWidget(b_check)
         r4.addStretch(); l4.addLayout(r4)
-        l4.addStretch(); tabs.addTab(p4, "🌈 即梦")
+        l4.addStretch(); tabs.addTab(p4, " 即梦")
 
         # ── Tab 5: 旺店通 ERP（已移除，ERP 配置由服务端统一管理）──
 
@@ -1140,7 +1161,7 @@ class PageSetupMixin:
             layout.setContentsMargins(30, 30, 30, 30)
 
             # 统一标题
-            heading = QLabel("📋 任务队列")
+            heading = QLabel(" 任务队列")
             heading.setObjectName("heading")
             layout.addWidget(heading)
 
@@ -1196,7 +1217,7 @@ class PageSetupMixin:
             # ── 任务详情（点击选中任务行时显示）────────────────────────────
             detail_card = QFrame(); detail_card.setObjectName("card")
             dl = QVBoxLayout(detail_card); dl.setContentsMargins(12, 10, 12, 10); dl.setSpacing(6)
-            dl.addWidget(QLabel("🔍 任务详情（点击上方任务行查看）"))
+            dl.addWidget(QLabel(" 任务详情（点击上方任务行查看）"))
             self.task_detail = QTextBrowser()
             self.task_detail.setMinimumHeight(120)
             self.task_detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
@@ -1302,7 +1323,7 @@ class PageSetupMixin:
                 source_item.setForeground(QColor("#60a5fa"))
                 self.task_table.setItem(row, 2, source_item)
                 status = t.get("status", "unknown")
-                status_map = {"completed": "✅ 完成", "processing": "⏳ 处理中", "pending": "⏳ 排队中", "failed": "❌ 失败", "error": "❌ 错误"}
+                status_map = {"completed": " 完成", "processing": "处理中", "pending": "排队中", "failed": " 失败", "error": " 错误"}
                 self.task_table.setItem(row, 3, QTableWidgetItem(status_map.get(status, status)))
                 p_bar = QProgressBar()
                 p_bar.setValue(t.get("progress", 0) if status == "processing" else (100 if status == "completed" else 0))
@@ -1314,7 +1335,7 @@ class PageSetupMixin:
                 added += 1
 
             if added > 0:
-                self.lbl_task_status.setText(f"✅ 已同步 {added} 条本机任务")
+                self.lbl_task_status.setText(f" 已同步 {added} 条本机任务")
 
         self._sync_worker = Worker(_fetch)
         self._sync_worker.finished.connect(_on_done)
@@ -1502,7 +1523,7 @@ class PageSetupMixin:
         brand_layout.setContentsMargins(20, 20, 20, 20)
         brand_layout.setSpacing(10)
 
-        app_title = QLabel("🔩 螺丝钉-电商智能体矩阵")
+        app_title = QLabel(" 螺丝钉-电商智能体矩阵")
         app_title.setObjectName("about_app_title")
         brand_layout.addWidget(app_title)
 
@@ -1510,7 +1531,7 @@ class PageSetupMixin:
         dev_info.setObjectName("about_dev_info")
         brand_layout.addWidget(dev_info)
 
-        contact_info = QLabel("📞 联系电话：<span style='color: #3b82f6; font-weight: bold;'>17361907260</span>（微信同号）")
+        contact_info = QLabel(" 联系电话：<span style='color: #3b82f6; font-weight: bold;'>17361907260</span>（微信同号）")
         contact_info.setObjectName("about_contact")
         brand_layout.addWidget(contact_info)
         
@@ -1531,7 +1552,7 @@ class PageSetupMixin:
         license_layout.setContentsMargins(20, 16, 20, 16)
         license_layout.setSpacing(10)
 
-        license_title = QLabel("🔑 软件授权与激活")
+        license_title = QLabel(" 软件授权与激活")
         license_title.setObjectName("about_license_title")
         license_layout.addWidget(license_title)
 
@@ -1544,7 +1565,7 @@ class PageSetupMixin:
         mac_val.setReadOnly(True)
         mac_val.setObjectName("about_machine_id")
         
-        btn_copy = QPushButton("📋 复制机器码")
+        btn_copy = QPushButton(" 复制机器码")
         btn_copy.setFixedWidth(100)
         btn_copy.setObjectName("about_copy_btn")
         
@@ -1606,7 +1627,7 @@ class PageSetupMixin:
         version_layout.setContentsMargins(20, 16, 20, 16)
         version_layout.setSpacing(8)
 
-        version_title = QLabel("📋 系统与版本信息")
+        version_title = QLabel(" 系统与版本信息")
         version_title.setObjectName("about_version_title")
         version_layout.addWidget(version_title)
 
@@ -1641,12 +1662,12 @@ class PageSetupMixin:
     def _build_theme_tab(self, parent):
         """外观主题 Tab。"""
         l4 = QVBoxLayout(parent); l4.setContentsMargins(30, 30, 30, 30)
-        l4.addWidget(QLabel("🎨 界面主题"))
+        l4.addWidget(QLabel(" 界面主题"))
         l4.addWidget(QLabel("选择应用程序的外观配色方案："))
         self.theme_combo = QComboBox()
-        self.theme_combo.addItem("🌓 跟随系统", "system")
-        self.theme_combo.addItem("🌙 暗黑主题", "dark")
-        self.theme_combo.addItem("☀️ 炫白主题", "light")
+        self.theme_combo.addItem(" 跟随系统", "system")
+        self.theme_combo.addItem(" 暗黑主题", "dark")
+        self.theme_combo.addItem(" 炫白主题", "light")
         self.theme_combo.setFixedWidth(200)
         from utils.theme_manager import get_saved_theme
         current = get_saved_theme()
@@ -1670,15 +1691,15 @@ class PageSetupMixin:
 
         p1 = QWidget(); p1.setObjectName("tab_page")
         self._build_sysinfo_tab(p1)
-        tabs.addTab(p1, "🖥️ 系统信息")
+        tabs.addTab(p1, " 系统信息")
 
         p2 = QWidget(); p2.setObjectName("tab_page")
         self._build_about_tab(p2)
-        tabs.addTab(p2, "ℹ️ 关于与版本")
+        tabs.addTab(p2, "ℹ 关于与版本")
 
         p3 = QWidget(); p3.setObjectName("tab_page")
         self._build_theme_tab(p3)
-        tabs.addTab(p3, "🎨 外观")
+        tabs.addTab(p3, " 外观")
 
         layout.addWidget(tabs, 1)
 
@@ -1728,30 +1749,30 @@ class PageSetupMixin:
         # Tab 1: 系统日志
         p0 = QWidget(); p0.setObjectName("tab_page")
         self._build_log_tab(p0)
-        tabs.addTab(p0, "📋 系统日志")
+        tabs.addTab(p0, " 系统日志")
 
         # Tab 2: 运行环境
         p1 = QWidget(); p1.setObjectName("tab_page")
         from gui.env_config_page import EnvConfigPage
         self.env_config_tool = EnvConfigPage(p1, self); self.env_config_tool.setup()
-        tabs.addTab(p1, "🖥️ 运行环境")
+        tabs.addTab(p1, " 运行环境")
 
         # Tab 3: 终端
         p2 = QWidget(); p2.setObjectName("tab_page")
         from gui.terminal_page import TerminalPage
         self.terminal_tool = TerminalPage(p2, self); self.terminal_tool.setup()
-        tabs.addTab(p2, "💻 终端")
+        tabs.addTab(p2, " 终端")
 
         # Tab 4: 备份管理
         p3 = QWidget(); p3.setObjectName("tab_page")
         from gui.backup_page import BackupPage
         self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
-        tabs.addTab(p3, "💾 备份管理")
+        tabs.addTab(p3, " 备份管理")
 
         # Tab 5: 系统配置
         p4 = QWidget(); p4.setObjectName("tab_page")
         self._setup_system_tab(p4)
-        tabs.addTab(p4, "⚙️ 系统配置")
+        tabs.addTab(p4, " 系统配置")
 
         layout.addWidget(tabs)
 
@@ -1765,7 +1786,7 @@ class PageSetupMixin:
         layout.setSpacing(12)
 
         hdr = QHBoxLayout()
-        title = QLabel("⚙️ 系统配置")
+        title = QLabel(" 系统配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
         hint = QLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。")
@@ -1777,7 +1798,7 @@ class PageSetupMixin:
         layout.addLayout(hdr)
 
         # 开机自动运行（默认开启）
-        self.autostart_chk = QCheckBox("🚀 开机自动运行（登录 Windows 后自动启动本程序）")
+        self.autostart_chk = QCheckBox(" 开机自动运行（登录 Windows 后自动启动本程序）")
         self.autostart_chk.setChecked(True)
         layout.addWidget(self.autostart_chk)
 
@@ -1790,13 +1811,13 @@ class PageSetupMixin:
 
         def _on_autostart_toggled(checked):
             if not _cm.set_setting("local_config", "auto_start", bool(checked)):
-                self.autostart_status.setText("❌ 配置保存失败")
+                self.autostart_status.setText("失败： 配置保存失败")
                 return
             ok = _autostart.set_enabled(checked)
             self.autostart_status.setText(
-                "✅ 已开启开机自启" if (checked and ok)
+                " 已开启开机自启" if (checked and ok)
                 else "已关闭开机自启" if not checked
-                else "❌ 注册表写入失败")
+                else "失败： 注册表写入失败")
 
         self.autostart_chk.toggled.connect(_on_autostart_toggled)
 
@@ -1814,7 +1835,7 @@ class PageSetupMixin:
         layout.setSpacing(12)
 
         hdr = QHBoxLayout()
-        title = QLabel("📁 本地缓存配置")
+        title = QLabel(" 本地缓存配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
         hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
@@ -1845,7 +1866,7 @@ class PageSetupMixin:
             self.local_cache_dir_input.setText(cache_dir)
             self.local_cache_status.setText("已加载配置")
 
-        btn_save = QPushButton("💾 保存")
+        btn_save = QPushButton(" 保存")
         btn_save.setObjectName("primary_button")
         btn_save.setFixedWidth(90)
         btn_save.clicked.connect(lambda: self._save_local_config())
@@ -1866,9 +1887,9 @@ class PageSetupMixin:
         cache_dir = self.local_cache_dir_input.text().strip()
         try:
             _cm.set_setting("local_config", "cache_dir", cache_dir)
-            self.local_cache_status.setText("✅ 已保存")
+            self.local_cache_status.setText(" 已保存")
         except Exception as e:
-            self.local_cache_status.setText(f"❌ 保存失败: {e}")
+            self.local_cache_status.setText(f"失败： 保存失败: {e}")
 
     def get_local_cache_dir(self):
         """获取配置的本地缓存目录，未配置返回空。"""
@@ -1891,7 +1912,7 @@ class PageSetupMixin:
         layout.setSpacing(12)
 
         hdr = QHBoxLayout()
-        title = QLabel("🎬 视频 LUT 还原配置")
+        title = QLabel(" 视频 LUT 还原配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
         hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用；格式支持：.cube / .3dl / .lut")
@@ -1913,7 +1934,7 @@ class PageSetupMixin:
         btn_add.clicked.connect(self._add_lut_entry)
         btn_row.addWidget(btn_add)
 
-        btn_del = QPushButton("🗑 删除选中")
+        btn_del = QPushButton(" 删除选中")
         btn_del.setObjectName("secondary_button")
         btn_del.clicked.connect(self._del_lut_entry)
         btn_row.addWidget(btn_del)

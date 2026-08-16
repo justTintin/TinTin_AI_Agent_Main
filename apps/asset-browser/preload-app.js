@@ -70,13 +70,6 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('handoff-updated', (event, handoff) => callback(handoff));
   },
 
-  // v2ray 代理
-  v2rayParseLink: (link) => ipcRenderer.invoke('v2ray-parse-link', link),
-  v2rayFetchSubscription: (subUrl) => ipcRenderer.invoke('v2ray-fetch-subscription', subUrl),
-  v2rayStart: (nodes) => ipcRenderer.invoke('v2ray-start', nodes),
-  v2rayStop: () => ipcRenderer.invoke('v2ray-stop'),
-  v2rayStatus: () => ipcRenderer.invoke('v2ray-status'),
-  v2rayTestLatency: (node) => ipcRenderer.invoke('v2ray-test-latency', node),
   checkCookieStatus: () => ipcRenderer.invoke('check-cookie-status'),
   exportCookiesFile: (platform) => ipcRenderer.invoke('export-cookies-file', platform),
   writeDebugLog: (filename, content) => ipcRenderer.invoke('write-debug-log', filename, content),

@@ -24,7 +24,7 @@ class Step4FinalView(BaseStepView):
 
         # 1. BGM input
         row_bgm = QHBoxLayout()
-        row_bgm.addWidget(QLabel("🎵 背景音乐 (BGM):"))
+        row_bgm.addWidget(QLabel(" 背景音乐 (BGM):"))
         self.main_page.bgm_input = QLineEdit()
         self.main_page.bgm_input.setPlaceholderText("选择混剪背景音乐 (mp3/wav)，选空则无BGM...")
         self.main_page.bgm_input.setReadOnly(True)
@@ -164,7 +164,7 @@ class Step4FinalView(BaseStepView):
         right_vbox.setContentsMargins(4, 4, 4, 4)
         right_vbox.setSpacing(4)
 
-        self.main_page.final_preview_title = QLabel("🎥 视频预览")
+        self.main_page.final_preview_title = QLabel(" 视频预览")
         self.main_page.final_preview_title.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold;")
         right_vbox.addWidget(self.main_page.final_preview_title)
 

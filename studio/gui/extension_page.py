@@ -143,7 +143,7 @@ class ExtensionPage(BasePage):
         root.setSpacing(12)
 
         hdr = QHBoxLayout()
-        title = QLabel("🧩 扩展插件")
+        title = QLabel(" 扩展插件")
         title.setObjectName("heading")
         hdr.addWidget(title)
         desc = QLabel("浏览器素材采集扩展（仿 Billfish 采集插件）")
@@ -164,7 +164,7 @@ class ExtensionPage(BasePage):
 
         from gui.auto_listing_tab import AutoListingTab
         self.auto_listing_tab = AutoListingTab(self)
-        self.tabs.addTab(self.auto_listing_tab, "🚀 自动上架")
+        self.tabs.addTab(self.auto_listing_tab, " 自动上架")
 
         self._refresh_browsers()
         self._refresh_bridge_status()
@@ -310,7 +310,7 @@ class ExtensionPage(BasePage):
         lay.addLayout(row2e)
 
         row2d = QHBoxLayout()
-        self.chk_auto_subtitle = QCheckBox("📝 视频下载后自动生成字幕（调用服务端 Whisper，与视频同目录保存 .srt 并同步 NAS）")
+        self.chk_auto_subtitle = QCheckBox(" 视频下载后自动生成字幕（调用服务端 Whisper，与视频同目录保存 .srt 并同步 NAS）")
         self.chk_auto_subtitle.setChecked(bool(self.bridge.config.get("auto_subtitle", False)))
         row2d.addWidget(self.chk_auto_subtitle)
         row2d.addStretch()
@@ -349,7 +349,7 @@ class ExtensionPage(BasePage):
         btn_clear_done.setToolTip("删除已下载成功（含已同步 NAS）的记录，保留失败记录")
         btn_clear_done.clicked.connect(self._clear_done_records)
         head.addWidget(btn_clear_done)
-        btn_clear_all = QPushButton("🗑️ 清空全部")
+        btn_clear_all = QPushButton(" 清空全部")
         btn_clear_all.setObjectName("secondary_button")
         btn_clear_all.setToolTip("删除所有记录（成功和失败），服务器重启后记录会重现")
         btn_clear_all.clicked.connect(self._clear_all_records)
@@ -382,7 +382,7 @@ class ExtensionPage(BasePage):
         first_installed = -1
         for i, b in enumerate(self._browsers):
             installed = bool(b["exe"])
-            item = QListWidgetItem(f"{'✅' if installed else '✖'} {b['name']}  {b['exe'] or '（未安装）'}")
+            item = QListWidgetItem(f"{'完成：' if installed else '移除'} {b['name']}  {b['exe'] or '（未安装）'}")
             item.setData(Qt.UserRole, i)
             if not installed:
                 item.setFlags(Qt.NoItemFlags)
@@ -424,8 +424,8 @@ class ExtensionPage(BasePage):
             "1. 在扩展管理页右上角打开「开发者模式」\n"
             "2. 点击「加载已解压的扩展程序」\n"
             f"3. 粘贴路径 {ext_dir} 并确认\n\n"
-            "⚠ 重要：每次客户端更新扩展后，需要在扩展管理页找到「螺丝钉下载器」，"
-            "点击其卡片上的「🔄 刷新」按钮重新加载，否则浏览器仍运行旧版本。\n\n"
+            "注意： 重要：每次客户端更新扩展后，需要在扩展管理页找到「螺丝钉下载器」，"
+            "点击其卡片上的「 刷新」按钮重新加载，否则浏览器仍运行旧版本。\n\n"
             "说明：新版 Chrome/Edge 已禁止启用任何非商店来源的 .crx 扩展，"
             "开发者模式加载是目前唯一的本地持久安装方式（启动时顶部会有一条开发者模式提示，属正常现象）。")
 
@@ -570,7 +570,7 @@ class ExtensionPage(BasePage):
             try:
                 cfg_port = int(config_port) if config_port else DEFAULT_PORT
                 if cfg_port != port:
-                    port_note = f"⚠ 配置端口({cfg_port}) 与运行端口({port})不一致，请在桥接配置中更新配置到运行端口({port})以免连接失败"
+                    port_note = f"注意： 配置端口({cfg_port}) 与运行端口({port})不一致，请在桥接配置中更新配置到运行端口({port})以免连接失败"
             except Exception:
                 pass
 
@@ -592,9 +592,9 @@ class ExtensionPage(BasePage):
         self.records_table.setRowCount(len(records))
         for r, rec in enumerate(records):
             if rec.get("status") == "ok":
-                status = "✅ 成功" + (" ⇢NAS" if rec.get("synced") else "")
+                status = " 成功" + (" ⇢NAS" if rec.get("synced") else "")
             else:
-                status = f"❌ {rec.get('error', '')[:40]}"
+                status = f"失败： {rec.get('error', '')[:40]}"
             for c, val in enumerate([
                 rec.get("time", ""), rec.get("media_type", ""),
                 rec.get("filename") or rec.get("url", "")[-60:], status,

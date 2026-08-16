@@ -44,7 +44,7 @@ class EnvInstallWorker(BaseWorker):
             self.finished.emit(True, "系统环境配置一键修复成功！已成功为您安装 CUDA 版 PyTorch。")
         except Exception as e:
             self.busy.emit(False)
-            self.stage.emit("❌ 修复失败")
+            self.stage.emit("失败： 修复失败")
             self.finished.emit(False, f"环境修复失败：\n{str(e)}")
 
     def run_command(self, cmd):
@@ -103,7 +103,7 @@ class EnvConfigPage(BasePage):
         layout.setSpacing(16)
 
         # Title
-        heading = QLabel("⚙️ 系统环境配置与参数设置")
+        heading = QLabel(" 系统环境配置与参数设置")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
@@ -129,7 +129,7 @@ class EnvConfigPage(BasePage):
         scroll_layout.setSpacing(16)
 
         # Group 1: Python & GPU 基础运行环境
-        group_py_gpu = QGroupBox("🐍 Python & GPU 基础运行环境")
+        group_py_gpu = QGroupBox(" Python & GPU 基础运行环境")
         group_py_gpu.setStyleSheet("""
             QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
             QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #3b82f6; }
@@ -137,12 +137,12 @@ class EnvConfigPage(BasePage):
         layout_py_gpu = QVBoxLayout(group_py_gpu)
         layout_py_gpu.setContentsMargins(16, 20, 16, 16)
         layout_py_gpu.setSpacing(10)
-        self._add_status_row(layout_py_gpu, "python", "🐍 Python 运行环境")
-        self._add_status_row(layout_py_gpu, "gpu", "🎮 显卡 (NVIDIA GPU) 硬件")
-        self._add_status_row(layout_py_gpu, "cuda", "⚡ CUDA (PyTorch) 开启状态")
+        self._add_status_row(layout_py_gpu, "python", " Python 运行环境")
+        self._add_status_row(layout_py_gpu, "gpu", " 显卡 (NVIDIA GPU) 硬件")
+        self._add_status_row(layout_py_gpu, "cuda", " CUDA (PyTorch) 开启状态")
         
         # Add local refresh button for Python & GPU
-        self.btn_refresh_py_gpu = QPushButton("🔄 刷新 Python & GPU 检测")
+        self.btn_refresh_py_gpu = QPushButton(" 刷新 Python & GPU 检测")
         self.btn_refresh_py_gpu.setObjectName("secondary_button")
         self.btn_refresh_py_gpu.setFixedWidth(200)
         self.btn_refresh_py_gpu.clicked.connect(self.refresh_python_gpu)
@@ -151,7 +151,7 @@ class EnvConfigPage(BasePage):
         scroll_layout.addWidget(group_py_gpu)
 
         # Group 1.5: 系统硬件与版本信息
-        group_sys_info = QGroupBox("💻 系统硬件与版本信息")
+        group_sys_info = QGroupBox(" 系统硬件与版本信息")
         group_sys_info.setStyleSheet("""
             QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
             QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #3b82f6; }
@@ -159,12 +159,12 @@ class EnvConfigPage(BasePage):
         layout_sys_info = QVBoxLayout(group_sys_info)
         layout_sys_info.setContentsMargins(16, 20, 16, 16)
         layout_sys_info.setSpacing(10)
-        self._add_status_row(layout_sys_info, "os_ver", "🖥️ 操作系统版本")
-        self._add_status_row(layout_sys_info, "cpu_info", "🧠 处理器 (CPU)")
-        self._add_status_row(layout_sys_info, "ram_info", "💾 运行内存 (RAM)")
-        self._add_status_row(layout_sys_info, "gpu_info", "🎮 显卡 (GPU) 与显存")
+        self._add_status_row(layout_sys_info, "os_ver", " 操作系统版本")
+        self._add_status_row(layout_sys_info, "cpu_info", " 处理器 (CPU)")
+        self._add_status_row(layout_sys_info, "ram_info", " 运行内存 (RAM)")
+        self._add_status_row(layout_sys_info, "gpu_info", " 显卡 (GPU) 与显存")
         
-        self.btn_auto_optimize = QPushButton("⚡ 根据硬件自动优化 AI 并行配置")
+        self.btn_auto_optimize = QPushButton(" 根据硬件自动优化 AI 并行配置")
         self.btn_auto_optimize.setObjectName("primary_button")
         self.btn_auto_optimize.setFixedWidth(240)
         self.btn_auto_optimize.clicked.connect(self.auto_optimize_hardware)
@@ -173,7 +173,7 @@ class EnvConfigPage(BasePage):
         scroll_layout.addWidget(group_sys_info)
 
         # Group 4: 其他音视频编解码与去水印算法环境
-        group_other = QGroupBox("🎞️ 其他音视频编解码与去水印算法环境")
+        group_other = QGroupBox(" 其他音视频编解码与去水印算法环境")
         group_other.setStyleSheet("""
             QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
             QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #f97316; }
@@ -181,11 +181,11 @@ class EnvConfigPage(BasePage):
         layout_other = QVBoxLayout(group_other)
         layout_other.setContentsMargins(16, 20, 16, 16)
         layout_other.setSpacing(10)
-        self._add_status_row(layout_other, "ffmpeg", "🎞️ FFmpeg 编解码器")
-        self._add_status_row(layout_other, "vsr", "✂️ VSR 去字幕算法组件")
+        self._add_status_row(layout_other, "ffmpeg", " FFmpeg 编解码器")
+        self._add_status_row(layout_other, "vsr", " VSR 去字幕算法组件")
         
         # Add local refresh button for codecs
-        self.btn_refresh_codecs = QPushButton("🔄 刷新音视频编解码检测")
+        self.btn_refresh_codecs = QPushButton(" 刷新音视频编解码检测")
         self.btn_refresh_codecs.setObjectName("secondary_button")
         self.btn_refresh_codecs.setFixedWidth(200)
         self.btn_refresh_codecs.clicked.connect(self.refresh_codecs)
@@ -194,7 +194,7 @@ class EnvConfigPage(BasePage):
         scroll_layout.addWidget(group_other)
 
         # Group 5: 素材存储目录配置
-        group_mat = QGroupBox("📁 素材存储目录配置")
+        group_mat = QGroupBox(" 素材存储目录配置")
         group_mat.setStyleSheet("""
             QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
             QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #10b981; }
@@ -221,7 +221,7 @@ class EnvConfigPage(BasePage):
         btn_choose_mat.setObjectName("secondary_button")
         btn_choose_mat.clicked.connect(self._choose_materials_dir)
         mat_row.addWidget(btn_choose_mat)
-        btn_reset_mat = QPushButton("🔄 恢复默认")
+        btn_reset_mat = QPushButton(" 恢复默认")
         btn_reset_mat.setObjectName("secondary_button")
         btn_reset_mat.clicked.connect(self._reset_materials_dir)
         mat_row.addWidget(btn_reset_mat)
@@ -230,7 +230,7 @@ class EnvConfigPage(BasePage):
         scroll_layout.addWidget(group_mat)
 
         # Group 7: RustFS 对象存储配置
-        group_rustfs = QGroupBox("🗄️ RustFS 对象存储配置")
+        group_rustfs = QGroupBox(" RustFS 对象存储配置")
         group_rustfs.setStyleSheet("""
             QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
             QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #0ea5e9; }
@@ -274,11 +274,11 @@ class EnvConfigPage(BasePage):
         self.lbl_rustfs_status = QLabel("")
         self.lbl_rustfs_status.setObjectName("muted_text")
         row_rustfs3.addWidget(self.lbl_rustfs_status, 1)
-        btn_test_rustfs = QPushButton("🔌 测试连接")
+        btn_test_rustfs = QPushButton(" 测试连接")
         btn_test_rustfs.setObjectName("secondary_button")
         btn_test_rustfs.clicked.connect(self._test_rustfs_connection)
         row_rustfs3.addWidget(btn_test_rustfs)
-        btn_save_rustfs = QPushButton("💾 保存 RustFS 配置")
+        btn_save_rustfs = QPushButton(" 保存 RustFS 配置")
         btn_save_rustfs.setObjectName("secondary_button")
         btn_save_rustfs.clicked.connect(self._save_rustfs_config)
         row_rustfs3.addWidget(btn_save_rustfs)
@@ -287,9 +287,9 @@ class EnvConfigPage(BasePage):
         # RustFS 配置组暂时隐藏，尚未接入对象存储
         # scroll_layout.addWidget(group_rustfs)
 
-        # 注：素材向量库 PostgreSQL 数据库配置已移至「平台接入」→「🗄️ 数据库」标签页，此处不再重复。
+        # 注：素材向量库 PostgreSQL 数据库配置已移至「平台接入」→「 数据库」标签页，此处不再重复。
         # CLIP 向量检索已切换为纯远程 embedding 服务模式，
-        # 服务地址请在「AI 模型配置」→「🖼️ CLIP」标签页中填写。
+        # 服务地址请在「AI 模型配置」→「 CLIP」标签页中填写。
 
         scroll_layout.addWidget(scroll_widget)
 
@@ -513,12 +513,12 @@ class EnvConfigPage(BasePage):
     def update_ui_with_info(self, info):
         try:
             if "python" in self.status_labels:
-                py_status = f"<font color='#16a34a'><b>✅ 独立嵌入式环境</b></font> (位置: {info['python_path']})"
+                py_status = f"<font color='#16a34a'><b>完成： 独立嵌入式环境</b></font> (位置: {info['python_path']})"
                 self.status_labels["python"].setText(py_status)
 
             if "gpu" in self.status_labels:
                 if info.get("cuda_available", False):
-                    gpu_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('cuda_device', '无')})"
+                    gpu_status = f"<font color='#16a34a'><b> 已就绪</b></font> ({info.get('cuda_device', '无')})"
                 else:
                     from gui_main import HAS_NVML
                     if HAS_NVML:
@@ -529,32 +529,32 @@ class EnvConfigPage(BasePage):
                             name = pynvml.nvmlDeviceGetName(handle)
                             if isinstance(name, bytes):
                                 name = name.decode("utf-8")
-                            gpu_status = f"<font color='#d97706'><b>⚠️ 硬件已连接，但 PyTorch 未加载</b></font> ({name})"
+                            gpu_status = f"<font color='#d97706'><b>注意： 硬件已连接，但 PyTorch 未加载</b></font> ({name})"
                         except Exception:
-                            gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
+                            gpu_status = "<font color='#dc2626'><b>失败： 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
                     else:
-                        gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
+                        gpu_status = "<font color='#dc2626'><b>失败： 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
                 self.status_labels["gpu"].setText(gpu_status)
 
             if "cuda" in self.status_labels:
                 if info.get("cuda_available", False):
-                    cuda_status = f"<font color='#16a34a'><b>✅ 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"
+                    cuda_status = f"<font color='#16a34a'><b>完成： 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"
                 else:
-                    cuda_status = f"<font color='#dc2626'><b>❌ 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"
+                    cuda_status = f"<font color='#dc2626'><b>失败： 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"
                 self.status_labels["cuda"].setText(cuda_status)
 
             if "ffmpeg" in self.status_labels:
                 if info.get("ffmpeg_ok", False):
-                    ffmpeg_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"
+                    ffmpeg_status = f"<font color='#16a34a'><b> 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"
                 else:
-                    ffmpeg_status = f"<font color='#dc2626'><b>❌ {info.get('ffmpeg_path', '')}</b></font>"
+                    ffmpeg_status = f"<font color='#dc2626'><b>失败： {info.get('ffmpeg_path', '')}</b></font>"
                 self.status_labels["ffmpeg"].setText(ffmpeg_status)
 
             if "vsr" in self.status_labels:
                 if info.get("vsr_ok", False):
-                    vsr_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('vsr_status', '')})"
+                    vsr_status = f"<font color='#16a34a'><b> 已就绪</b></font> ({info.get('vsr_status', '')})"
                 else:
-                    vsr_status = f"<font color='#dc2626'><b>❌ 未就绪</b></font> ({info.get('vsr_status', '')})"
+                    vsr_status = f"<font color='#dc2626'><b>失败： 未就绪</b></font> ({info.get('vsr_status', '')})"
                 self.status_labels["vsr"].setText(vsr_status)
 
             if "os_ver" in self.status_labels:
@@ -576,9 +576,9 @@ class EnvConfigPage(BasePage):
             msg = (
                 f"系统硬件优化完成！已根据您的配置进行了以下参数优化调整：\n\n"
                 f"优化级别：{res['level']}\n"
-                f"1. 本地 Ollama 并行数 (ollama_num_parallel) ➔ {res['ollama_num_parallel']} 并发\n"
-                f"2. 多线程视觉分析数 (vision_concurrency) ➔ {res['vision_concurrency']} 并发\n"
-                f"3. 向量编码批处理大小 (batch_size) ➔ {res['clip_batch_size']} 批处理\n\n"
+                f"1. 本地 Ollama 并行数 (ollama_num_parallel)  {res['ollama_num_parallel']} 并发\n"
+                f"2. 多线程视觉分析数 (vision_concurrency)  {res['vision_concurrency']} 并发\n"
+                f"3. 向量编码批处理大小 (batch_size)  {res['clip_batch_size']} 批处理\n\n"
                 f"配置已写入 ai_config.json 和 material_index_config.json (已移除)。\n"
                 f"（注：若 Ollama 已经在运行，需要重启应用或重启 Ollama 才能使并发限制生效）"
             )
@@ -616,9 +616,9 @@ class EnvConfigPage(BasePage):
             self.edit_rustfs_bucket.text(),
         )
         if ok:
-            self.lbl_rustfs_status.setText("✅ 配置已保存")
+            self.lbl_rustfs_status.setText("完成： 配置已保存")
         else:
-            self.lbl_rustfs_status.setText("❌ 保存失败，请检查日志")
+            self.lbl_rustfs_status.setText("失败： 保存失败，请检查日志")
 
     def _test_rustfs_connection(self):
         self._save_rustfs_config()
@@ -626,6 +626,6 @@ class EnvConfigPage(BasePage):
         from utils.rustfs_manager import test_connection
         ok, msg = test_connection()
         color = "#16a34a" if ok else "#dc2626"
-        icon = "✅" if ok else "❌"
+        icon = "完成：" if ok else "失败："
         self.lbl_rustfs_status.setText(f"<font color='{color}'>{icon} {msg}</font>")
 

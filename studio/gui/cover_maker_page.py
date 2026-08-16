@@ -223,7 +223,7 @@ class CoverMakerPage(BasePage):
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(12)
 
-        heading = QLabel("🖼️ 封面制作（分层）")
+        heading = QLabel(" 封面制作（分层）")
         heading.setObjectName("heading")
         root.addWidget(heading)
 
@@ -287,7 +287,7 @@ class CoverMakerPage(BasePage):
         lay.addLayout(r1)
         r2 = QHBoxLayout()
         for txt, fn in (("↑", lambda: self._move_layer(-1)), ("↓", lambda: self._move_layer(1)),
-                        ("🗑", self._delete_layer)):
+                        ("", self._delete_layer)):
             b = QPushButton(txt); b.setObjectName("secondary_button"); b.setFixedWidth(40); b.clicked.connect(fn)
             r2.addWidget(b)
         self.chk_visible = QCheckBox("显示"); self.chk_visible.setChecked(True)
@@ -356,8 +356,8 @@ class CoverMakerPage(BasePage):
         # 图片图层控件
         self.img_box = QWidget(); ib = QVBoxLayout(self.img_box); ib.setContentsMargins(0, 0, 0, 0); ib.setSpacing(6)
         ib.addWidget(QLabel("图片来源"))
-        for txt, fn in (("📁 上传图片", self._src_upload),
-                        ("✂️ 抠图去背景", self._src_matting), ("🎨 即梦生成", self._src_dreamina)):
+        for txt, fn in ((" 上传图片", self._src_upload),
+                        (" 抠图去背景", self._src_matting), (" 即梦生成", self._src_dreamina)):
             b = QPushButton(txt); b.setObjectName("secondary_button"); b.clicked.connect(fn)
             ib.addWidget(b)
         ib.addWidget(QLabel("缩放"))
@@ -505,7 +505,7 @@ class CoverMakerPage(BasePage):
         self.layer_list.blockSignals(True)
         self.layer_list.clear()
         for ly in self.layers:
-            icon = "🖼️" if ly["type"] == "image" else "🅣"
+            icon = "" if ly["type"] == "image" else ""
             self.layer_list.addItem(QListWidgetItem(f"{icon} {ly['name']}"))
         self.layer_list.blockSignals(False)
 
@@ -951,11 +951,11 @@ class CoverMakerPage(BasePage):
         left_lay = QVBoxLayout(left)
         left_lay.setContentsMargins(12, 12, 12, 12)
         left_lay.setSpacing(8)
-        left_lay.addWidget(QLabel("🎬 模板库"))
+        left_lay.addWidget(QLabel(" 模板库"))
         self.list_templates = QListWidget()
         self.list_templates.currentItemChanged.connect(self._on_template_selected)
         left_lay.addWidget(self.list_templates, 1)
-        btn_refresh = QPushButton("🔄 刷新")
+        btn_refresh = QPushButton(" 刷新")
         btn_refresh.setObjectName("secondary_button")
         btn_refresh.clicked.connect(self._load_templates)
         left_lay.addWidget(btn_refresh)
@@ -980,7 +980,7 @@ class CoverMakerPage(BasePage):
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(12, 12, 12, 12)
         right_lay.setSpacing(8)
-        right_lay.addWidget(QLabel("🎛 封面参数"))
+        right_lay.addWidget(QLabel(" 封面参数"))
 
         ratio_row = QHBoxLayout()
         ratio_row.addWidget(QLabel("比例"))
@@ -1005,7 +1005,7 @@ class CoverMakerPage(BasePage):
         self.template_params_group.setVisible(False)
 
         btn_row = QHBoxLayout()
-        btn_preview = QPushButton("🔍 预览")
+        btn_preview = QPushButton(" 预览")
         btn_preview.setObjectName("secondary_button")
         btn_preview.clicked.connect(self._preview_template)
         btn_row.addWidget(btn_preview)
@@ -1032,7 +1032,7 @@ class CoverMakerPage(BasePage):
 
     def _on_templates_loaded(self, server_templates):
         if not server_templates:
-            self.status.setText("⚠ 未从服务端加载到模板，使用内置模板")
+            self.status.setText(" 未从服务端加载到模板，使用内置模板")
         self._templates = merge_templates(server_templates, COVER_FALLBACK_TEMPLATES)
         current_id = self._current_template.get("id") if self._current_template else None
         fill_template_list(self.list_templates, self._templates, current_id=current_id)

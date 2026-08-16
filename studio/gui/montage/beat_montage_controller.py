@@ -171,7 +171,7 @@ class BeatMontageController(QObject):
                 if self.beat_aspect_combo.itemData(i) == target:
                     self.beat_aspect_combo.setCurrentIndex(i)
                     break
-            self.beat_status_lbl.setText(f"📐 已自动识别画面比例：{target}")
+            self.beat_status_lbl.setText(f" 已自动识别画面比例：{target}")
         else:
             QMessageBox.warning(
                 self.parent_widget, "画面比例不一致",
@@ -230,7 +230,7 @@ class BeatMontageController(QObject):
         self.btn_beat_confirm.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.beat_status_lbl.setText("🎵 正在上传音乐并检测卡点...")
+        self.beat_status_lbl.setText(" 正在上传音乐并检测卡点...")
 
         # 视频个数(count) 与 每段时长(segment_duration)
         count = 0
@@ -261,7 +261,7 @@ class BeatMontageController(QObject):
         self.progress_bar.setVisible(False)
 
         if not beats or len(beats) < 2:
-            self.beat_status_lbl.setText("❌ 节拍点不足，无法卡点")
+            self.beat_status_lbl.setText("失败： 节拍点不足，无法卡点")
             QMessageBox.warning(self.parent_widget, "节拍不足",
                                 "服务端返回的节拍点少于 2 个，无法进行卡点成片。")
             return
@@ -331,7 +331,7 @@ class BeatMontageController(QObject):
 
         self.btn_beat_confirm.setEnabled(False)
         self.beat_status_lbl.setText(
-            f"✅ 检测到 {len(segments)} 个卡点片段，正在提交服务端生成 {len(segments)} 个视频...")
+            f"完成： 检测到 {len(segments)} 个卡点片段，正在提交服务端生成 {len(segments)} 个视频...")
 
     def _beat_build_single_card(self):
         """单片段模式：用全曲节拍构建一张整体预览卡片（仅音乐试听）。"""
@@ -339,7 +339,7 @@ class BeatMontageController(QObject):
         duration = getattr(self, "_beat_full_duration", 0.0)
         if len(beats) < 2:
             self.btn_beat_confirm.setEnabled(False)
-            self.beat_status_lbl.setText("⚠️ 节拍不足 2 个，无法卡点")
+            self.beat_status_lbl.setText("注意： 节拍不足 2 个，无法卡点")
             return
         seg_end = duration if duration > 0 else beats[-1] + 1.0
         segments = [{"start": 0.0, "end": seg_end, "beats": beats, "slot_start": 0,
@@ -353,14 +353,14 @@ class BeatMontageController(QObject):
             peaks = getattr(self.step_beat, "_full_peaks", [])
             self.step_beat.build_segment_cards(segments, peaks, duration)
         self.btn_beat_confirm.setEnabled(False)
-        self.beat_status_lbl.setText(f"✅ 全曲 {len(beats)} 拍（单片段，仅音乐预览）")
+        self.beat_status_lbl.setText(f"完成： 全曲 {len(beats)} 拍（单片段，仅音乐预览）")
 
     def _beat_on_detect_error(self, err):
         self.btn_beat_detect.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
-        self.beat_status_lbl.setText("❌ 卡点检测失败")
+        self.beat_status_lbl.setText("失败： 卡点检测失败")
         QMessageBox.critical(self.parent_widget, "卡点检测失败",
                              f"服务端节拍检测失败：\n{err}\n\n"
                              f"可能原因：\n"
@@ -419,7 +419,7 @@ class BeatMontageController(QObject):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.beat_status_lbl.setText(f"🎬 正在上传素材并生成 {n_variants} 个卡点视频...")
+        self.beat_status_lbl.setText(f" 正在上传素材并生成 {n_variants} 个卡点视频...")
         log.info(f"[卡点成片] 提交 1 个 /montage/beat 任务, variant_count={n_variants}, "
                  f"转场={transition}, time_limit={time_limit}")
 
@@ -434,7 +434,7 @@ class BeatMontageController(QObject):
         if hasattr(self, "progress_bar"):
             self.progress_bar.setValue(int(pct))
         if msg and hasattr(self, "beat_status_lbl"):
-            self.beat_status_lbl.setText(f"🎬 {msg}")
+            self.beat_status_lbl.setText(f" {msg}")
 
     def _beat_on_video_ready(self, variant_index, local_path):
         """某个变体视频下载完成：挂到对应卡片并准备播放。"""
@@ -456,10 +456,10 @@ class BeatMontageController(QObject):
         if ok > 0:
             self.btn_beat_confirm.setEnabled(True)
             self.beat_status_lbl.setText(
-                f"✅ 已生成 {ok}/{len(results)} 个卡点视频，播放片段即可预览，点击「导出视频」保存")
+                f" 已生成 {ok}/{len(results)} 个卡点视频，播放片段即可预览，点击「导出视频」保存")
         else:
             # 全失败：弹出对话框，显示每个变体的失败原因（含接口URL+参数+错误）
-            self.beat_status_lbl.setText("❌ 卡点视频生成失败")
+            self.beat_status_lbl.setText("失败： 卡点视频生成失败")
             failed = [r for r in results if not r.get("ok")]
             detail = "\n\n".join(
                 f"· 变体{r.get('index', 0) + 1}：{r.get('error', '未知错误') or '未知错误'}"
@@ -474,7 +474,7 @@ class BeatMontageController(QObject):
         if hasattr(self, "progress_bar"):
             self.progress_bar.setVisible(False)
         self.btn_beat_detect.setEnabled(True)
-        self.beat_status_lbl.setText(f"❌ 卡点视频生成失败: {err[:80]}")
+        self.beat_status_lbl.setText(f"失败： 卡点视频生成失败: {err[:80]}")
         log.error(f"[卡点成片] 生成失败: {err}")
         from gui.error_dialog import show_error_dialog
         show_error_dialog(self.parent_widget, "卡点成片失败", f"卡点视频生成失败：\n\n{err}")
@@ -490,11 +490,11 @@ class BeatMontageController(QObject):
         if not hasattr(self, "beat_preview_title"):
             return
         if getattr(card, "is_full_track", False):
-            self.beat_preview_title.setText("▶ 预览：整体卡点（全曲）")
+            self.beat_preview_title.setText("播放 预览：整体卡点（全曲）")
         elif getattr(card, "_in_video_mode", False):
-            self.beat_preview_title.setText(f"▶ 预览：片段 {card.index + 1}（卡点视频）")
+            self.beat_preview_title.setText(f"播放 预览：片段 {card.index + 1}（卡点视频）")
         else:
-            self.beat_preview_title.setText(f"▶ 预览：片段 {card.index + 1}（仅音乐）")
+            self.beat_preview_title.setText(f"播放 预览：片段 {card.index + 1}（仅音乐）")
 
     def _beat_on_card_position(self, card, abs_sec):
         """播放进度回调：视频即预览，无需额外处理（卡片自行更新游标/时间）。"""
@@ -532,7 +532,7 @@ class BeatMontageController(QObject):
                 log.warning(f"[卡点成片] 导出复制失败 {v}: {e}")
 
         if copied:
-            self.beat_status_lbl.setText(f"✅ 已导出 {len(copied)} 个视频到 {out_dir}")
+            self.beat_status_lbl.setText(f" 已导出 {len(copied)} 个视频到 {out_dir}")
             QMessageBox.information(self.parent_widget, "导出完成",
                                     f"已导出 {len(copied)} 个卡点视频到：\n{out_dir}")
             try:

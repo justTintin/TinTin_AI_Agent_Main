@@ -284,7 +284,7 @@ class SystemStatusOverlay(QWidget):
         layout.setSpacing(8)
 
         # 服务器入口
-        self.server_lbl = QLabel("🖥️ 服务器")
+        self.server_lbl = QLabel(" 服务器")
         self.server_lbl.setObjectName("ov_server")
         layout.addWidget(self.server_lbl)
 
@@ -307,9 +307,9 @@ class SystemStatusOverlay(QWidget):
             layout.addWidget(chip)
             return value_lbl
 
-        self.cpu_lbl = metric("⚡", "CPU")
-        self.ram_lbl = metric("🧠", "内存")
-        self.vram_lbl = metric("🎮", "显存")
+        self.cpu_lbl = metric("", "CPU")
+        self.ram_lbl = metric("", "内存")
+        self.vram_lbl = metric("", "显存")
 
         def create_sep():
             sep = QFrame()
@@ -328,15 +328,15 @@ class SystemStatusOverlay(QWidget):
             layout.addWidget(lbl)
             return lbl
 
-        self.ollama_lbl = service("🤖", "Ollama")
+        self.ollama_lbl = service("", "Ollama")
         layout.addWidget(create_sep())
-        self.vision_lbl = service("👁️", "视觉")
+        self.vision_lbl = service("", "视觉")
         layout.addWidget(create_sep())
-        self.whisper_lbl = service("🎤", "语音")
+        self.whisper_lbl = service("", "语音")
         layout.addWidget(create_sep())
-        self.clip_lbl = service("🧲", "向量")
+        self.clip_lbl = service("", "向量")
         layout.addWidget(create_sep())
-        self.clone_lbl = service("🎭", "克隆")
+        self.clone_lbl = service("", "克隆")
 
         # 兼容别名（旧代码可能引用）
         self.gpu_lbl = self.server_lbl
@@ -534,7 +534,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         app = QApplication.instance()
         if app is not None:
             apply_theme(app)
-        self.theme_hint.setText(f"✅ 已切换到「{self.theme_combo.currentText()}」，立即生效")
+        self.theme_hint.setText(f" 已切换到「{self.theme_combo.currentText()}」，立即生效")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1012,24 +1012,23 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         elif index == 40: # Marketing Video Detection
             if hasattr(self, "marketing_detect_tool"):
                 self.marketing_detect_tool.update_vision_model_display()
-        elif index == 41: # 即梦素材
-            if hasattr(self, "dreamina_assets_tool"):
-                try:
-                    self.dreamina_assets_tool._scan_local_files()
-                except Exception as e:
-                    log.error(f"刷新即梦素材列表失败: {e}")
         elif index == 43: # 扩展插件
             if hasattr(self, "extension_tool"):
                 self.extension_tool.refresh()
         elif index == 44:  # 音频素材
             if hasattr(self, "audio_material_tool"):
                 self.audio_material_tool.refresh()
-        elif index == 38:  # 素材检索（进入页面时若上次加载失败自动重试）
+        elif index == 38:  # 素材检索（进入页面时若上次加载失败自动重试；Tab2 即梦素材一并刷新）
             if hasattr(self, "vector_search_tool"):
                 try:
                     self.vector_search_tool.refresh()
                 except Exception as e:
                     log.error(f"刷新素材检索失败: {e}")
+            if hasattr(self, "dreamina_assets_tool"):
+                try:
+                    self.dreamina_assets_tool._scan_local_files()
+                except Exception as e:
+                    log.error(f"刷新即梦素材列表失败: {e}")
         elif index == 37: # Storyboard
             if hasattr(self, "storyboard_tool"):
                 self.storyboard_tool.reload_sources()
@@ -1550,9 +1549,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         """系统日志右键菜单：清空 / 复制 / 全选"""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
-        act_clear = menu.addAction("🗑️ 清空日志")
-        act_copy = menu.addAction("📋 复制选中")
-        act_select_all = menu.addAction("✅ 全选")
+        act_clear = menu.addAction(" 清空日志")
+        act_copy = menu.addAction(" 复制选中")
+        act_select_all = menu.addAction("完成： 全选")
         chosen = menu.exec(self.log_viewer.mapToGlobal(pos))
         if chosen == act_clear:
             self.log_viewer.clear()

@@ -37,6 +37,7 @@ FEATURES = [
     ("样本数据有效性", ["TestSampleFiles"]),
     ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
     ("智能混剪服务端拼接 Worker（离线 mock）", ["TestMontageConcatWorker"]),
+    ("仿爆款客户端（viral_clone_client，离线 mock）", ["TestViralCloneAnalyze", "TestViralClonePlan", "TestViralCloneFlow", "TestViralCloneSource", "TestViralCloneAssetBrowser", "TestViralCloneRun", "TestViralClonePlaceholders"]),
     ("智能混剪镜头分割（在线 /montage/split）", ["TestMontageSplitOnline"]),
     ("Ollama 图片识别（在线）", ["TestOllamaImageRecognition"]),
     ("Ollama 视频分析（在线）", ["TestOllamaVideo"]),

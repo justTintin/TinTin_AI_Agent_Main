@@ -68,7 +68,7 @@ class TextEditDialog(QDialog):
 class ScriptCompareDialog(QDialog):
     def __init__(self, original_text, current_text, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚖️ 配音文案对比")
+        self.setWindowTitle(" 配音文案对比")
         self.setMinimumSize(700, 400)
         self.resize(800, 480)
         
@@ -87,7 +87,7 @@ class ScriptCompareDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         
-        title_lbl = QLabel("📖 左右对比：左侧为原视频文案，右侧为AI修改/当前配音文案")
+        title_lbl = QLabel(" 左右对比：左侧为原视频文案，右侧为AI修改/当前配音文案")
         title_lbl.setStyleSheet("font-size: 14px; color: #60a5fa; font-weight: bold;")
         layout.addWidget(title_lbl)
         
@@ -100,7 +100,7 @@ class ScriptCompareDialog(QDialog):
         left_vbox = QVBoxLayout(left_widget)
         left_vbox.setContentsMargins(0, 0, 0, 0)
         left_vbox.setSpacing(6)
-        left_vbox.addWidget(QLabel("📝 原始文案 (原视频内容):"))
+        left_vbox.addWidget(QLabel(" 原始文案 (原视频内容):"))
         self.original_edit = QPlainTextEdit()
         self.original_edit.setPlainText(original_text)
         self.original_edit.setReadOnly(True)
@@ -112,7 +112,7 @@ class ScriptCompareDialog(QDialog):
         right_vbox = QVBoxLayout(right_widget)
         right_vbox.setContentsMargins(0, 0, 0, 0)
         right_vbox.setSpacing(6)
-        right_vbox.addWidget(QLabel("✨ AI修改后 / 当前文案:"))
+        right_vbox.addWidget(QLabel(" AI修改后 / 当前文案:"))
         self.current_edit = QPlainTextEdit()
         self.current_edit.setPlainText(current_text)
         right_vbox.addWidget(self.current_edit)
@@ -151,7 +151,7 @@ class ScriptCompareDialog(QDialog):
 class DubbedVideosDialog(QDialog):
     def __init__(self, parent, results):
         super().__init__(parent)
-        self.setWindowTitle("🎉 配音替换完成")
+        self.setWindowTitle(" 配音替换完成")
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
@@ -159,14 +159,14 @@ class DubbedVideosDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
 
-        header_lbl = QLabel("✨ <b>所有视频配音替换完毕！已成功为您生成以下配音文件：</b>")
+        header_lbl = QLabel(" <b>所有视频配音替换完毕！已成功为您生成以下配音文件：</b>")
         header_lbl.setStyleSheet("font-size: 14px; color: #2ecc71;")
         layout.addWidget(header_lbl)
 
         if results:
             first_path = list(results.values())[0]
             out_dir = os.path.dirname(first_path)
-            dir_lbl = QLabel(f"📂 <b>保存目录：</b> <font color='#3498db'>{out_dir}</font>")
+            dir_lbl = QLabel(f" <b>保存目录：</b> <font color='#3498db'>{out_dir}</font>")
             dir_lbl.setWordWrap(True)
             dir_lbl.setStyleSheet("font-size: 12px;")
             layout.addWidget(dir_lbl)
@@ -239,7 +239,7 @@ class DubbedVideosDialog(QDialog):
 class FinalMixedVideosDialog(QDialog):
     def __init__(self, parent, paths):
         super().__init__(parent)
-        self.setWindowTitle("🎉 最终合成视频列表")
+        self.setWindowTitle(" 最终合成视频列表")
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
         
@@ -247,13 +247,13 @@ class FinalMixedVideosDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
 
-        header_lbl = QLabel("✨ <b>批量音视频及配乐合成完毕！已成功为您生成以下视频文件：</b>")
+        header_lbl = QLabel(" <b>批量音视频及配乐合成完毕！已成功为您生成以下视频文件：</b>")
         header_lbl.setStyleSheet("font-size: 14px; color: #2ecc71;")
         layout.addWidget(header_lbl)
 
         if paths:
             out_dir = os.path.dirname(paths[0])
-            dir_lbl = QLabel(f"📂 <b>保存目录：</b> <font color='#3498db'>{out_dir}</font>")
+            dir_lbl = QLabel(f" <b>保存目录：</b> <font color='#3498db'>{out_dir}</font>")
             dir_lbl.setWordWrap(True)
             dir_lbl.setStyleSheet("font-size: 12px;")
             layout.addWidget(dir_lbl)
@@ -332,7 +332,7 @@ class ProductCopyInputDialog(QDialog):
     """输入品牌/产品/型号/补充卖点，用于生成口播文案。"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("✍ 生成口播文案")
+        self.setWindowTitle(" 生成口播文案")
         self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -387,7 +387,7 @@ class VoiceRowDetailWidget(QWidget):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(4)
         
-        lbl_video = QLabel(f"🎥 视频: {basename}")
+        lbl_video = QLabel(f" 视频: {basename}")
         lbl_video.setObjectName("card_title")
         lbl_video.setToolTip(filepath)
         top_layout.addWidget(lbl_video)
@@ -408,7 +408,7 @@ class VoiceRowDetailWidget(QWidget):
         # Line 2: Original script + video duration
         row_original = QHBoxLayout()
         row_original.setContentsMargins(0, 0, 0, 0)
-        lbl_orig_tag = QLabel("📝 原文: ")
+        lbl_orig_tag = QLabel(" 原文: ")
         lbl_orig_tag.setObjectName("muted_text")
         lbl_orig_tag.setFixedWidth(48)
         orig_val = ReadOnlyDoubleClickLineEdit(original_text if original_text else "(无)")
@@ -416,7 +416,7 @@ class VoiceRowDetailWidget(QWidget):
         row_original.addWidget(orig_val, 1)
         if video_duration_sec > 0:
             vid_dur_str = f"{int(video_duration_sec // 60)}:{int(video_duration_sec % 60):02d}"
-            lbl_vid_dur = QLabel(f"⏱ {vid_dur_str}")
+            lbl_vid_dur = QLabel(f"{vid_dur_str}")
             lbl_vid_dur.setStyleSheet("color: #f1c40f; font-size: 11px; font-weight: bold;")
             lbl_vid_dur.setFixedWidth(60)
             row_original.addWidget(lbl_vid_dur)
@@ -425,7 +425,7 @@ class VoiceRowDetailWidget(QWidget):
         # Line 3: AI-modified script + voice duration
         row_edit = QHBoxLayout()
         row_edit.setContentsMargins(0, 0, 0, 0)
-        lbl_edit_tag = QLabel("✨ 修改后: ")
+        lbl_edit_tag = QLabel(" 修改后: ")
         lbl_edit_tag.setObjectName("accent_text")
         row_edit.addWidget(lbl_edit_tag)
         row_edit.addWidget(edit, 1)
@@ -436,7 +436,7 @@ class VoiceRowDetailWidget(QWidget):
         else:
             voice_dur_str = "--:--"
             voice_dur_style = "color: #7f8c8d; font-size: 11px;"
-        self.lbl_voice_duration = QLabel(f"⏱ {voice_dur_str}")
+        self.lbl_voice_duration = QLabel(f"{voice_dur_str}")
         self.lbl_voice_duration.setStyleSheet(voice_dur_style)
         self.lbl_voice_duration.setFixedWidth(60)
         row_edit.addWidget(self.lbl_voice_duration)
@@ -617,7 +617,7 @@ class ArrangeMaterialsDialog(QDialog):
     """
     def __init__(self, parent, paths):
         super().__init__(parent)
-        self.setWindowTitle("🗂 整理已选镜头素材")
+        self.setWindowTitle(" 整理已选镜头素材")
         self.setMinimumSize(560, 380)
         self.resize(640, 480)
 
@@ -732,7 +732,7 @@ class ArrangeMaterialsDialog(QDialog):
 
     def _refresh_counts(self):
         n = len(self._paths)
-        self.header_lbl.setText(f"✨ 当前已选 <b>{n}</b> 个素材，可在下方删除或调整")
+        self.header_lbl.setText(f" 当前已选 <b>{n}</b> 个素材，可在下方删除或调整")
         self.count_lbl.setText(f"剩余 {n} 个素材")
 
     def get_result_paths(self):

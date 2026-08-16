@@ -50,12 +50,12 @@ class VideoPlayerWidget(QWidget):
         ctrl.setContentsMargins(0, 0, 0, 0)
         ctrl.setSpacing(6)
 
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = QPushButton("播放 播放")
         self.btn_play.setFixedWidth(78)
         self.btn_play.setToolTip("播放 / 暂停")
         self.btn_play.clicked.connect(self.toggle_play)
 
-        self.btn_stop = QPushButton("⏹ 停止")
+        self.btn_stop = QPushButton("停止 停止")
         self.btn_stop.setFixedWidth(72)
         self.btn_stop.setToolTip("停止并回到头")
         self.btn_stop.clicked.connect(self.stop)
@@ -111,7 +111,7 @@ class VideoPlayerWidget(QWidget):
         self.player.stop()
         self.slider.setValue(0)
         self.slider.setEnabled(False)
-        self.btn_play.setText("▶ 播放")
+        self.btn_play.setText("播放 播放")
         self.lbl_time.setText("00:00 / 00:00")
 
     def toggle_play(self):
@@ -137,7 +137,7 @@ class VideoPlayerWidget(QWidget):
     # ── 内部槽 ──
     def _on_state(self, state):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self.btn_play.setText("⏸ 暂停" if playing else "▶ 播放")
+        self.btn_play.setText("暂停 暂停" if playing else "播放 播放")
 
     def _on_position(self, pos):
         if self._dragging:
@@ -165,15 +165,15 @@ class VideoPlayerWidget(QWidget):
                 # 播放完毕后回到头并停止，等待下次播放
                 self.player.stop()
                 self.slider.setValue(0)
-                self.btn_play.setText("▶ 播放")
+                self.btn_play.setText("播放 播放")
                 self.lbl_time.setText(f"00:00 / {format_ms(self.player.duration())}")
             elif status == QMediaPlayer.MediaStatus.InvalidMedia:
-                self.lbl_time.setText("❌ 无法播放该视频")
+                self.lbl_time.setText(" 无法播放该视频")
         except Exception:
             pass
 
     def _on_error(self, _err, err_str):
-        self.lbl_time.setText(f"❌ {err_str or '播放失败'}")
+        self.lbl_time.setText(f"失败： {err_str or '播放失败'}")
 
 
 class VideoPreviewDialog(QDialog):

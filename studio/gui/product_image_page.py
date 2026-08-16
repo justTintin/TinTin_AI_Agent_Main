@@ -86,11 +86,11 @@ class ServerCheckWorker(BaseWorker):
                 data = r.json()
                 if data.get("online"):
                     ver = data.get("version", "?")
-                    self.finished.emit(f"✅ ComfyUI 在线 (v{ver})")
+                    self.finished.emit(f"完成： ComfyUI 在线 (v{ver})")
                     return
-            self.finished.emit("❌ ComfyUI 离线")
+            self.finished.emit("失败： ComfyUI 离线")
         except Exception:
-            self.finished.emit("❌ 服务端不可达")
+            self.finished.emit("失败： 服务端不可达")
 
 
 class UploadAndRunWorker(BaseWorker):
@@ -254,7 +254,7 @@ class ProductImagePage(BasePage):
 
         # 标题行：标题 + 服务端状态（介绍放标题后）
         title_row = QHBoxLayout()
-        heading = QLabel("🖼️ 产品生图")
+        heading = QLabel(" 产品生图")
         heading.setObjectName("heading")
         title_row.addWidget(heading)
         self.lbl_server_status = QLabel("检测服务端…")
@@ -267,7 +267,7 @@ class ProductImagePage(BasePage):
 
         # 刷新按钮独立一行（避免被右上角资源监控遮挡）
         status_row = QHBoxLayout()
-        btn_refresh = QPushButton("🔄 刷新")
+        btn_refresh = QPushButton(" 刷新")
         btn_refresh.setObjectName("secondary_button")
         btn_refresh.clicked.connect(self._refresh_all)
         status_row.addWidget(btn_refresh)
@@ -296,7 +296,7 @@ class ProductImagePage(BasePage):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
 
-        lay.addWidget(QLabel("📦 产品选择"))
+        lay.addWidget(QLabel(" 产品选择"))
 
         # 产品下拉
         self.combo_product = SearchableComboBox(placeholder="输入品牌/型号搜索产品…")
@@ -343,7 +343,7 @@ class ProductImagePage(BasePage):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
 
-        lay.addWidget(QLabel("🎨 生成配置"))
+        lay.addWidget(QLabel(" 生成配置"))
 
         # 工作流选择
         wf_row = QHBoxLayout()
@@ -351,7 +351,7 @@ class ProductImagePage(BasePage):
         self.combo_workflow = SearchableComboBox(placeholder="输入工作流名称搜索…")
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_selected)
         wf_row.addWidget(self.combo_workflow, 1)
-        btn_reload_wf = QPushButton("🔄")
+        btn_reload_wf = QPushButton("")
         btn_reload_wf.setFixedWidth(36)
         btn_reload_wf.clicked.connect(self._load_workflows)
         wf_row.addWidget(btn_reload_wf)
@@ -369,12 +369,12 @@ class ProductImagePage(BasePage):
 
         # 生成按钮
         gen_row = QHBoxLayout()
-        self.btn_generate = QPushButton("🚀 开始生图")
+        self.btn_generate = QPushButton(" 开始生图")
         self.btn_generate.setObjectName("primary_button")
         self.btn_generate.setMinimumHeight(38)
         self.btn_generate.clicked.connect(self._start_generate)
         gen_row.addWidget(self.btn_generate)
-        self.btn_open_output = QPushButton("📂 打开输出目录")
+        self.btn_open_output = QPushButton(" 打开输出目录")
         self.btn_open_output.setObjectName("secondary_button")
         self.btn_open_output.clicked.connect(self._open_output_dir)
         gen_row.addWidget(self.btn_open_output)
@@ -583,13 +583,13 @@ class ProductImagePage(BasePage):
         self.btn_generate.setEnabled(True)
         self.progress_bar.setVisible(False)
         self._result_files = files
-        self.lbl_status.setText(f"✅ 生成完成，共 {len(files)} 张图片")
+        self.lbl_status.setText(f"完成： 生成完成，共 {len(files)} 张图片")
         self._show_results(files)
 
     def _on_generate_error(self, err):
         self.btn_generate.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.lbl_status.setText(f"❌ 生成失败")
+        self.lbl_status.setText(f"失败： 生成失败")
         self.show_error(f"产品生图失败：\n{err}")
 
     def _show_results(self, files):

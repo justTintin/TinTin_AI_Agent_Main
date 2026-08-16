@@ -45,7 +45,7 @@ class LoginDialog(QDialog):
 
         # Instructions
         self.info_label = QLabel(
-            "🤖 已经为您在外部打开了一个独立的 Chromium 浏览器 (CEF) 窗口。\n\n"
+            " 已经为您在外部打开了一个独立的 Chromium 浏览器 (CEF) 窗口。\n\n"
             "1. 请在弹出的浏览器窗口中扫码或短信登录您的抖音账号。\n"
             "2. 登录成功后，返回此界面，点击下方的「完成并同步账户」按钮。\n\n"
             "提示：如果浏览器窗口被关闭，可以点击下方按钮重新打开。"
@@ -57,16 +57,16 @@ class LoginDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
         
-        self.btn_reopen = QPushButton("🌐 重新打开浏览器")
+        self.btn_reopen = QPushButton(" 重新打开浏览器")
         self.btn_reopen.clicked.connect(self.start_login_browser)
         btn_layout.addWidget(self.btn_reopen)
 
-        self.btn_save = QPushButton("✅ 完成并同步账户")
+        self.btn_save = QPushButton(" 完成并同步账户")
         self.btn_save.setObjectName("primary_button")
         self.btn_save.clicked.connect(self.save_and_sync)
         btn_layout.addWidget(self.btn_save)
 
-        self.btn_cancel = QPushButton("❌ 取消")
+        self.btn_cancel = QPushButton(" 取消")
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
 
@@ -175,7 +175,7 @@ class StartupSplash(QWidget):
         self.card_layout.setContentsMargins(30, 35, 30, 35)
         self.card_layout.setSpacing(16)
         
-        title_lbl = QLabel("🤖 <b>螺丝钉-电商智能体矩阵</b>")
+        title_lbl = QLabel(" <b>螺丝钉-电商智能体矩阵</b>")
         title_lbl.setObjectName("splash_title")
         title_lbl.setAlignment(Qt.AlignCenter)
         self.card_layout.addWidget(title_lbl)
@@ -216,7 +216,7 @@ class CloseSplash(QDialog):
         layout.setContentsMargins(20, 30, 20, 30)
         layout.setSpacing(16)
 
-        title = QLabel("🔒 <b>正在安全关闭系统，请稍候...</b>")
+        title = QLabel(" <b>正在安全关闭系统，请稍候...</b>")
         title.setObjectName("close_splash_title")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
@@ -312,7 +312,7 @@ class ActivationDialog(QDialog):
         layout.setSpacing(16)
 
         # 标题区域
-        title = QLabel("🔑 软件激活")
+        title = QLabel(" 软件激活")
         title.setObjectName("activation_title")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
@@ -332,7 +332,7 @@ class ActivationDialog(QDialog):
         self.mid_lbl.setObjectName("activation_machine_id")
         self.mid_lbl.setToolTip("可拖动选中后 Ctrl+C 复制，或点右侧按钮")
         mid_row.addWidget(self.mid_lbl, 1)
-        btn_copy_mid = QPushButton("📋 复制")
+        btn_copy_mid = QPushButton(" 复制")
         btn_copy_mid.setObjectName("secondary_button")
         btn_copy_mid.setCursor(Qt.PointingHandCursor)
         btn_copy_mid.setToolTip("复制机器码到剪贴板")
@@ -358,7 +358,7 @@ class ActivationDialog(QDialog):
         # 按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_activate = QPushButton("✅ 激活")
+        btn_activate = QPushButton("完成： 激活")
         btn_activate.setObjectName("primary_button")
         btn_activate.clicked.connect(self._do_activate)
         btn_row.addWidget(btn_activate)
@@ -375,7 +375,7 @@ class ActivationDialog(QDialog):
         """复制文本到剪贴板，并在按钮上短暂提示「已复制」。"""
         QApplication.clipboard().setText(text)
         orig = btn.text()
-        btn.setText("✅ 已复制")
+        btn.setText(" 已复制")
         btn.setEnabled(False)
         QTimer.singleShot(1200, lambda: (btn.setText(orig), btn.setEnabled(True)))
 
@@ -383,12 +383,12 @@ class ActivationDialog(QDialog):
         from utils.license import verify_activation_code, save_activation_cache
         code = self.code_edit.toPlainText().strip()
         if not code:
-            self.status_label.setText("⚠️ 请输入激活码")
+            self.status_label.setText("注意： 请输入激活码")
             self.status_label.setStyleSheet("color: #f87171; font-size: 13px;")
             return
         info = verify_activation_code(code)
         if info is None:
-            self.status_label.setText("❌ 激活码无效，请检查后重试")
+            self.status_label.setText("失败： 激活码无效，请检查后重试")
             self.status_label.setStyleSheet("color: #f87171; font-size: 13px;")
             return
         # 激活成功

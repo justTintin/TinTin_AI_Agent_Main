@@ -393,7 +393,7 @@ class VoiceCloneWorker(BaseWorker):
                     self.row_progress.emit(row_idx, 0)
                     log.exception(f"第 {row_idx + 1} 个声音克隆失败")
                     self.failures.append((row_idx, video_path, str(e)))
-                    self.stage.emit(f"⚠ 第 {row_idx + 1} 个声音克隆失败，已跳过继续...")
+                    self.stage.emit(f"注意： 第 {row_idx + 1} 个声音克隆失败，已跳过继续...")
 
                 # Brief pause between tasks to let server reset GPU state
                 time.sleep(0.3)

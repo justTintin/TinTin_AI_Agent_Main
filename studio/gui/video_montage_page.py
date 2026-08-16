@@ -160,7 +160,7 @@ class VideoMontagePage(BasePage):
         layout.setSpacing(12)
 
         # Title
-        heading = QLabel("🎬 智能混剪与批量视频制作")
+        heading = QLabel(" 智能混剪与批量视频制作")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
@@ -190,7 +190,7 @@ class VideoMontagePage(BasePage):
             self.step_labels.append(lbl)
 
             if i < len(steps_text) - 1:
-                arrow = QLabel("➔")
+                arrow = QLabel("")
                 arrow.setStyleSheet("color: rgba(255,255,255,0.2); font-weight: bold;")
                 arrow.setAlignment(Qt.AlignCenter)
                 step_layout.addWidget(arrow)
@@ -402,7 +402,7 @@ class VideoMontagePage(BasePage):
         if not item:
             return
         menu = QMenu()
-        act = QAction("🗑 从素材列表移除", menu)
+        act = QAction(" 从素材列表移除", menu)
         act.triggered.connect(lambda: self._remove_source_video_item(item))
         menu.addAction(act)
         menu.exec_(self.video_list.viewport().mapToGlobal(pos))
@@ -1225,7 +1225,7 @@ class VideoMontagePage(BasePage):
         if pending:
             title, detail = pending
             self._pending_dialog = None
-            self.stage_label.setText(f"✅ {title}")
+            self.stage_label.setText(f"完成： {title}")
             QMessageBox.information(self.parent_widget, title, detail)
         self.btn_next_to_step_2.setEnabled(True)
     def _on_rate_all_done(self):
@@ -2150,7 +2150,7 @@ class VideoMontagePage(BasePage):
         if self._merged_fail_msgs:
             detail += "\n\n失败明细：\n" + "\n".join(self._merged_fail_msgs[:8])
 
-        self.stage_label.setText("✅ " + msg)
+        self.stage_label.setText("完成： " + msg)
         self.progress_bar.setRange(0, 0)
         self._pending_dialog = ("智能镜头分割完成", detail)
         self._check_split_clips_exist()
@@ -2208,7 +2208,7 @@ class VideoMontagePage(BasePage):
         self._check_split_clips_exist()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 运行失败")
+        self.stage_label.setText("失败： 运行失败")
         self._show_long_error("运行错误", f"处理过程中发生错误：\n{err}")
 
     # --- Step 1 batch "pick best N seconds" highlights ---
@@ -2359,7 +2359,7 @@ class VideoMontagePage(BasePage):
         if self._hl_fail_msgs:
             detail += "\n\n失败明细：\n" + "\n".join(self._hl_fail_msgs[:8])
 
-        self.stage_label.setText("✅ " + msg + " 正在评分...")
+        self.stage_label.setText("完成： " + msg + " 正在评分...")
         self.progress_bar.setRange(0, 0)
         self._pending_dialog = ("批量挑精华完成", detail)
 
@@ -2412,7 +2412,7 @@ class VideoMontagePage(BasePage):
                     except Exception:
                         pass
 
-        status_msg = f"🤖 正在使用服务端视觉AI分析{source_label}画面内容..."
+        status_msg = f" 正在使用服务端视觉AI分析{source_label}画面内容..."
         if srt_segments:
             status_msg += "（结合字幕）"
         self.stage_label.setText(status_msg)
@@ -2445,7 +2445,7 @@ class VideoMontagePage(BasePage):
 
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ 画面文案描述生成完毕！（服务端视觉AI）")
+        self.stage_label.setText("完成： 画面文案描述生成完毕！（服务端视觉AI）")
 
         splits_dir = getattr(self, "_trigger_splits_dir", "")
         scenes = getattr(self, "_trigger_scenes", [])
@@ -2459,7 +2459,7 @@ class VideoMontagePage(BasePage):
     def _on_desc_error(self, err):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 画面描述生成失败")
+        self.stage_label.setText("失败： 画面描述生成失败")
         log.warning(f"大模型批量画面描述生成失败: {err}")
         video_path = getattr(self, "processing_video_path", "")
         if not video_path:
@@ -2584,7 +2584,7 @@ class VideoMontagePage(BasePage):
             self.btn_transcribe_raw.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # 不确定进度（远程转写无逐帧进度）
-        self.stage_label.setText("⏳ 正在调用远程 ASR 转写视频音频...")
+        self.stage_label.setText("正在调用远程 ASR 转写视频音频...")
 
         # 远程 ASR worker：transcribe_remote → segments → 写 SRT
         class RemoteTranscribeWorker(BaseWorker):
@@ -2623,7 +2623,7 @@ class VideoMontagePage(BasePage):
         self.raw_unpunctuated_srt = srt_content
 
         if llm_model and srt_content.strip():
-            self.stage_label.setText("🎙️ 正在使用 AI 模型自动优化字幕标点符号...")
+            self.stage_label.setText(" 正在使用 AI 模型自动优化字幕标点符号...")
             self.progress_bar.setRange(0, 0) # Infinite spinner
             
             self.punc_srt_worker = PunctuationSRTLLMWorker(llm_model, srt_content)
@@ -2652,7 +2652,7 @@ class VideoMontagePage(BasePage):
             self.btn_transcribe_raw.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.stage_label.setText(f"✅ 字幕生成完成{info_msg}")
+        self.stage_label.setText(f"完成： 字幕生成完成{info_msg}")
         if hasattr(self, "raw_srt_display"):
             self.raw_srt_display.setPlainText(srt_content)
         QMessageBox.information(
@@ -2671,7 +2671,7 @@ class VideoMontagePage(BasePage):
             self.btn_transcribe_raw.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 字幕生成失败")
+        self.stage_label.setText("失败： 字幕生成失败")
         self._show_long_error(
             "字幕生成错误",
             f"处理过程中发生错误：\n{err}")
@@ -2708,7 +2708,7 @@ class VideoMontagePage(BasePage):
 
         logic = self.logic_combo.currentData() if hasattr(self, "logic_combo") else "random"
 
-        # ── 🎯 按文案智能匹配：先用 LLM 为每行文案匹配最贴合的镜头，再按行序拼接 ──
+        # ──  按文案智能匹配：先用 LLM 为每行文案匹配最贴合的镜头，再按行序拼接 ──
         if logic == "script":
             script_text = self.match_script_edit.toPlainText().strip() if hasattr(self, "match_script_edit") else ""
             if not script_text:
@@ -2734,7 +2734,7 @@ class VideoMontagePage(BasePage):
             self.btn_assemble_video.setEnabled(False)
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)
-            self.stage_label.setText("🎯 正在用大模型为每句文案匹配最贴合的镜头...")
+            self.stage_label.setText(" 正在用大模型为每句文案匹配最贴合的镜头...")
 
             self.script_match_worker = ScriptMatchLLMWorker(
                 model=llm_model,
@@ -2764,7 +2764,7 @@ class VideoMontagePage(BasePage):
             QMessageBox.warning(self.parent_widget, "未生成方案", "未能生成预合成方案，请检查是否已勾选镜头。")
             return
         self._load_precompose_plans(plan_clips_list, out_montage_dir)
-        self.stage_label.setText(f"✅ 预合成方案已生成：{len(plan_clips_list)} 条，请检查后确认合成")
+        self.stage_label.setText(f"完成： 预合成方案已生成：{len(plan_clips_list)} 条，请检查后确认合成")
         self.progress_bar.setVisible(False)
         QMessageBox.information(
             self.parent_widget,
@@ -2783,14 +2783,14 @@ class VideoMontagePage(BasePage):
             "mode": "script",
         }]
         self._load_precompose_plans(plan, out_montage_dir)
-        self.stage_label.setText(f"🎯 匹配完成：{len(matched_paths)} 句文案已配齐，请确认合成")
+        self.stage_label.setText(f" 匹配完成：{len(matched_paths)} 句文案已配齐，请确认合成")
         self.progress_bar.setVisible(False)
     # [4·文案脚本]  _on_script_match_error
     def _on_script_match_error(self, err):
         self.btn_assemble_video.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 文案镜头匹配失败")
+        self.stage_label.setText("失败： 文案镜头匹配失败")
         self._show_long_error("智能匹配失败",
                              f"大模型匹配文案与镜头时出错：\n{err}\n\n可切换回「随机洗牌」模式继续。")
     # [5·拼接合成]  _launch_concat_worker
@@ -2947,7 +2947,7 @@ class VideoMontagePage(BasePage):
         selected_clips, _dropped = self._dedup_concat_clips(selected_clips)
         if _dropped:
             log.info(f"[montage_concat] 已过滤 {_dropped} 个重复镜头，剩余 {len(selected_clips)} 个")
-            self.stage_label.setText(f"⚠ 已过滤 {_dropped} 个重复镜头，剩余 {len(selected_clips)} 个")
+            self.stage_label.setText(f"注意： 已过滤 {_dropped} 个重复镜头，剩余 {len(selected_clips)} 个")
 
         # 构建输出文件名
         filename = f"montage_concat_server_{random.randint(1000, 9999)}_{batch_count}.mp4"
@@ -2996,7 +2996,7 @@ class VideoMontagePage(BasePage):
 
         # 卡点 / LUT 当前服务端接口不支持，回退本地处理
         if recombine_mode == "beat" and beat_times:
-            self.stage_label.setText("⚠ 卡点模式暂不支持服务端合成，回退到本地合成")
+            self.stage_label.setText("注意： 卡点模式暂不支持服务端合成，回退到本地合成")
             self._launch_local_concat_worker(
                 selected_clips=selected_clips,
                 out_montage_dir=out_montage_dir,
@@ -3012,7 +3012,7 @@ class VideoMontagePage(BasePage):
             return
 
         if not stc._server_url():
-            self.stage_label.setText("⚠ 未配置服务端地址，回退到本地合成")
+            self.stage_label.setText(" 未配置服务端地址，回退到本地合成")
             self._launch_local_concat_worker(
                 selected_clips=selected_clips,
                 out_montage_dir=out_montage_dir,
@@ -3027,11 +3027,11 @@ class VideoMontagePage(BasePage):
             )
             return
 
-        self.stage_label.setText("🌐 正在上传镜头并提交服务端合成...")
+        self.stage_label.setText(" 正在上传镜头并提交服务端合成...")
         # 素材清单（manifest）是唯一数据源：server 条目提供 clip_urls（material://）
         clip_urls = self._manifest_clip_urls()
         if clip_urls:
-            self.stage_label.setText(f"🌐 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")
+            self.stage_label.setText(f" 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")
         self.concat_worker = MontageConcatServerWorker(
             local_output_path=local_output_path,
             clips=list(selected_clips),
@@ -3127,7 +3127,7 @@ class VideoMontagePage(BasePage):
 
         # 禁用按钮防止重复点击
         self.btn_gen_script.setEnabled(False)
-        self.stage_label.setText(f"🤖 正在根据 {len(clip_descriptions)} 个镜头素材生成口播文案（时长限制 {duration_limit} 秒）...")
+        self.stage_label.setText(f" 正在根据 {len(clip_descriptions)} 个镜头素材生成口播文案（时长限制 {duration_limit} 秒）...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
 
@@ -3146,7 +3146,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ AI 文案生成完成，可编辑后点击「镜头重组」进行智能匹配")
+        self.stage_label.setText("完成： AI 文案生成完成，可编辑后点击「镜头重组」进行智能匹配")
 
         if hasattr(self, "match_script_edit"):
             self.match_script_edit.setPlainText(script_text)
@@ -3162,7 +3162,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ AI 文案生成失败")
+        self.stage_label.setText("失败： AI 文案生成失败")
         self._show_long_error("文案生成失败",
                              f"调用大模型生成文案时出错：\n{err}")
     # [5·拼接合成]  _on_concat_task_id
@@ -3193,16 +3193,16 @@ class VideoMontagePage(BasePage):
                 plan = self.precompose_plans[idx]
                 plan["output_path"] = out_path
                 plan["confirmed"] = True
-                self.stage_label.setText(f"✅ 预合成 {idx + 1} 已确认合成")
+                self.stage_label.setText(f"完成： 预合成 {idx + 1} 已确认合成")
                 # 只更新该条列表项文字，避免整表刷新触发预览重载/卡死
                 item = self.assembled_clips_list_widget.item(idx)
                 if item is not None:
                     clip_count = len(plan.get("clips") or [])
                     confirmed = plan.get("confirmed") and bool(out_path)
-                    status_txt = "✅已合成" if confirmed else "⏳待确认"
+                    status_txt = "已合成" if confirmed else "待确认"
                     file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
                     copy_preview = self._assembled_copy_preview(out_path) if out_path else ""
-                    copy_mark = f"  📝{copy_preview}" if copy_preview else ""
+                    copy_mark = f"  {copy_preview}" if copy_preview else ""
                     item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
                     item.setData(Qt.UserRole + 1, int(confirmed))
                 self.current_precompose_index = idx
@@ -3221,7 +3221,7 @@ class VideoMontagePage(BasePage):
                     )
             return
 
-        self.stage_label.setText(f"✅ 批量排列完成，共生成 {len(paths)} 个视频！")
+        self.stage_label.setText(f"完成： 批量排列完成，共生成 {len(paths)} 个视频！")
         self.assembled_clips_list_widget.clear()
         self.precompose_plans = []
         if hasattr(self, "btn_batch_scene_copy"):
@@ -3256,7 +3256,7 @@ class VideoMontagePage(BasePage):
         self._confirm_queue = []
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 排列失败")
+        self.stage_label.setText("失败： 排列失败")
         self._show_long_error("排列错误", f"处理过程中发生错误：\n{err}")
 
 
@@ -3408,7 +3408,7 @@ class VideoMontagePage(BasePage):
         self.btn_batch_ai_rewrite.setEnabled(True)
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
-        self.stage_label.setText("✅ 一键AI修改全部文案完成！")
+        self.stage_label.setText("完成： 一键AI修改全部文案完成！")
         QMessageBox.information(self.parent_widget, "成功", "批量AI文案修改润色完成！")
     # [4·文案脚本]  _on_batch_rewrite_error
     def _on_batch_rewrite_error(self, err):
@@ -3416,7 +3416,7 @@ class VideoMontagePage(BasePage):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ AI修改文案失败")
+        self.stage_label.setText("失败： AI修改文案失败")
         self._show_long_error("AI修改失败", f"批量修改失败：\n{err}")
     # [6·配音]  _start_synthesize_voice
     def _start_synthesize_voice(self):
@@ -3508,7 +3508,7 @@ class VideoMontagePage(BasePage):
         self.btn_synthesize_voice.setEnabled(True)
         self.btn_dub_videos.setEnabled(True)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ 克隆人声音频生成完成！")
+        self.stage_label.setText("完成： 克隆人声音频生成完成！")
 
         # Merge results to self.generated_voice_paths
         for vid, wav in results.items():
@@ -3528,7 +3528,7 @@ class VideoMontagePage(BasePage):
         failures = list(getattr(self.voice_worker, "failures", []) or [])
         if failures:
             self.stage_label.setText(
-                f"⚠ 合成完成：成功 {len(results)} 个，失败 {len(failures)} 个（已跳过）")
+                f"注意： 合成完成：成功 {len(results)} 个，失败 {len(failures)} 个（已跳过）")
             detail = "\n".join(f"· 第 {r + 1} 个：{m}" for r, _v, m in failures[:8])
             more = "" if len(failures) <= 8 else f"\n…… 等共 {len(failures)} 个失败"
             QMessageBox.warning(
@@ -3550,7 +3550,7 @@ class VideoMontagePage(BasePage):
         self.btn_next_to_step_4.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 合成失败")
+        self.stage_label.setText("失败： 合成失败")
         self._show_long_error("人声合成错误", f"处理过程中发生错误：\n{err}")
     # [7·混音导出]  _start_dubbing_videos
     def _start_dubbing_videos(self):
@@ -3619,7 +3619,7 @@ class VideoMontagePage(BasePage):
         self.btn_dub_videos.setEnabled(True)
         self.btn_next_to_step_4.setEnabled(True)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ 替换视频原声配音完成！")
+        self.stage_label.setText("完成： 替换视频原声配音完成！")
         
         for vid, dubbed in results.items():
             self.dubbed_video_paths[vid] = dubbed
@@ -3637,7 +3637,7 @@ class VideoMontagePage(BasePage):
         self.btn_next_to_step_4.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 配音替换失败")
+        self.stage_label.setText("失败： 配音替换失败")
         self._show_long_error("配音替换错误", f"替换配音过程中发生错误：\n{err}")
 
 
@@ -4015,7 +4015,7 @@ class VideoMontagePage(BasePage):
         self.btn_export_jianying.setEnabled(True)
         self.btn_export_jianying_all.setEnabled(True)
         self.progress_bar.setValue(100)
-        self.stage_label.setText("✅ 最终合成视频完成！")
+        self.stage_label.setText("完成： 最终合成视频完成！")
         
         self.final_video_list.clear()
         if paths:
@@ -4030,7 +4030,7 @@ class VideoMontagePage(BasePage):
         self.btn_final_assemble.setEnabled(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.stage_label.setText("❌ 合成失败")
+        self.stage_label.setText("失败： 合成失败")
         self._show_long_error("合成错误", f"处理过程中发生错误：\n{err}")
     # [9·其他]  _open_output_dir
     def _open_output_dir(self):
@@ -4188,7 +4188,7 @@ class VideoMontagePage(BasePage):
         try:
             self.final_preview_player.stop()
             self.final_preview_player.setSource(QUrl())  # 先清空，释放上一个资源
-            self.final_preview_title.setText(f"🎥 {os.path.basename(path)}")
+            self.final_preview_title.setText(f" {os.path.basename(path)}")
             self.final_preview_player.setSource(QUrl.fromLocalFile(path))
             self.final_preview_player.play()
         except Exception as e:
@@ -4270,7 +4270,7 @@ class VideoMontagePage(BasePage):
                 log.warning(f"解析批量画面描述失败: {e}")
             self.progress_bar.setValue(100)
             self._check_split_clips_exist()
-            self.stage_label.setText("✅ 画面描述生成完成")
+            self.stage_label.setText("完成： 画面描述生成完成")
             QMessageBox.information(
                 self.parent_widget, "描述生成完成",
                 f"已为 {len(clip_paths)} 个镜头生成画面描述。")
@@ -4278,7 +4278,7 @@ class VideoMontagePage(BasePage):
         def on_desc_err(msg):
             log.warning(f"批量画面描述生成失败: {msg}")
             self.progress_bar.setValue(100)
-            self.stage_label.setText("❌ 画面描述生成失败")
+            self.stage_label.setText("失败： 画面描述生成失败")
             QMessageBox.warning(self.parent_widget, "生成失败",
                                 f"画面描述生成失败：\n{msg}")
 
@@ -4379,7 +4379,7 @@ class VideoMontagePage(BasePage):
             self.stage_label.setText(f"字幕匹配完成，{len(missing_clips)} 个镜头未匹配到字幕，正在用视觉AI分析...")
             self._run_batch_vision_descriptions(splits_dir, files, missing_clips)
         else:
-            self.stage_label.setText(f"✅ 已为全部 {len(files)} 个镜头匹配字幕文案描述")
+            self.stage_label.setText(f" 已为全部 {len(files)} 个镜头匹配字幕文案描述")
             QMessageBox.information(
                 self.parent_widget, "描述生成完成",
                 f"已从字幕匹配到 {updated_count} 个镜头的文案描述。")
@@ -5057,11 +5057,11 @@ class VideoMontagePage(BasePage):
         clip_count = len(plan.get("clips") or [])
         out_path = (plan.get("output_path") or path or "").strip()
         confirmed = plan.get("confirmed") and bool(out_path)
-        status_txt = "✅已合成" if confirmed else "⏳待确认"
+        status_txt = "已合成" if confirmed else "待确认"
         file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
         # 文案状态：用文字而非图标
         copy_preview = self._assembled_copy_preview(out_path) if out_path else ""
-        copy_mark = f"  📝{copy_preview}" if copy_preview else ""
+        copy_mark = f"  {copy_preview}" if copy_preview else ""
         plan_id = plan.get("_plan_id")
         if plan_id is None:
             plan_id = index
@@ -5080,10 +5080,10 @@ class VideoMontagePage(BasePage):
         if idx is None:
             return
         menu = QMenu()
-        act_confirm = QAction("✅ 确认合成视频", menu)
+        act_confirm = QAction("完成： 确认合成视频", menu)
         act_confirm.triggered.connect(lambda: self._confirm_precompose(idx))
         menu.addAction(act_confirm)
-        act_copy = QAction("✍ 生成口播文案", menu)
+        act_copy = QAction(" 生成口播文案", menu)
         act_copy.triggered.connect(lambda: self._gen_copy_for_plan(idx))
         menu.addAction(act_copy)
         plan = self.precompose_plans[idx] if 0 <= idx < len(self.precompose_plans) else None
@@ -5091,7 +5091,7 @@ class VideoMontagePage(BasePage):
             out_path = (plan.get("output_path") or "").strip()
             has_copy = bool(out_path and self._assembled_has_copy(out_path))
             if has_copy:
-                act_view = QAction("📄 查看文案", menu)
+                act_view = QAction(" 查看文案", menu)
                 act_view.triggered.connect(lambda: self._view_assembled_copy(idx))
                 menu.addAction(act_view)
         menu.exec_(self.assembled_clips_list_widget.viewport().mapToGlobal(pos))
@@ -5214,11 +5214,11 @@ class VideoMontagePage(BasePage):
             clip_count = len(plan.get("clips") or [])
             confirmed = plan.get("confirmed") and bool(out_path)
             has_copy = bool(out_path and self._assembled_has_copy(out_path))
-            status_txt = "✅已合成" if confirmed else "⏳待确认"
+            status_txt = "已合成" if confirmed else "待确认"
             # 文案预览：统一用 _assembled_copy_preview（和 _add_assembled_row 一致）
             # 已生成显示前30字，未生成显示占位，避免刷新后文字预览丢失
             copy_preview = self._assembled_copy_preview(out_path) if out_path else "未生成口播文案"
-            copy_mark = f"  📝{copy_preview}" if copy_preview else ""
+            copy_mark = f"  {copy_preview}" if copy_preview else ""
             file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
             item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
             if has_copy:
@@ -5345,7 +5345,7 @@ class VideoMontagePage(BasePage):
             music_range=plan.get("music_range") if plan.get("mode") == "beat" else None,
         )
         remaining = len(getattr(self, "_confirm_queue", []) or [])
-        self.stage_label.setText(f"🎬 正在确认合成预合成 {index + 1}... (剩余 {remaining} 条待确认)")
+        self.stage_label.setText(f" 正在确认合成预合成 {index + 1}... (剩余 {remaining} 条待确认)")
     # [2·基础设施]  _srt_ts_to_seconds
     @staticmethod
     def _srt_ts_to_seconds(ts):
@@ -5500,7 +5500,7 @@ class VideoMontagePage(BasePage):
         if is_deleted:
             act_restore = menu.addAction("↩ 恢复镜头")
         else:
-            act_delete = menu.addAction("🗑 标记删除（不参与合成和预览）")
+            act_delete = menu.addAction(" 标记删除（不参与合成和预览）")
         action = menu.exec(self.sources_detail_widget.viewport().mapToGlobal(pos))
         if action:
             self._toggle_source_deleted(row)
@@ -5765,7 +5765,7 @@ class VideoMontagePage(BasePage):
             # 保存关联元数据
             clips = self._get_video_scene_sources(pth)
             self._save_script_meta(pth, clips, brand, product, model_name, extra)
-            self.stage_label.setText("✅ 口播文案已按画面生成并保存")
+            self.stage_label.setText("完成： 口播文案已按画面生成并保存")
             self._refresh_assembled_copy_buttons()
             QMessageBox.information(
                 self.parent_widget, "文案已生成",
@@ -5773,7 +5773,7 @@ class VideoMontagePage(BasePage):
                 f"——\n{content}\n——\n\n进入下一步「口播配音」会自动载入。")
 
         def on_err(msg):
-            self.stage_label.setText("❌ 文案生成失败")
+            self.stage_label.setText("失败： 文案生成失败")
             self._show_long_error("生成失败", f"调用大模型失败：\n{msg}")
 
         self._scene_copy_worker.finished.connect(on_ok)
@@ -5922,14 +5922,14 @@ class VideoMontagePage(BasePage):
             fails = self._batch_copy_failures
             ok_count = self._batch_copy_total - len(fails)
             if fails:
-                self.stage_label.setText(f"⚠ 批量文案生成完成：成功 {ok_count}，失败 {len(fails)}")
+                self.stage_label.setText(f"注意： 批量文案生成完成：成功 {ok_count}，失败 {len(fails)}")
                 detail = "\n".join(f"· {os.path.basename(p)}：{m}" for p, m in fails[:10])
                 more = "" if len(fails) <= 10 else f"\n…… 等共 {len(fails)} 个失败"
                 QMessageBox.warning(
                     self.parent_widget, "部分失败",
                     f"批量按画面生成文案完成。\n成功 {ok_count} 个，失败 {len(fails)} 个：\n\n{detail}{more}")
             else:
-                self.stage_label.setText(f"✅ 已为全部 {ok_count} 个视频按画面生成口播文案")
+                self.stage_label.setText(f" 已为全部 {ok_count} 个视频按画面生成口播文案")
                 QMessageBox.information(
                     self.parent_widget, "全部完成",
                     f"已根据画面为全部 {ok_count} 个组合视频生成口播文案并保存。\n"

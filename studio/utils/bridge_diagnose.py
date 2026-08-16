@@ -67,7 +67,7 @@ def main():
         if listening:
             listened.append(p)
         code, body = _ping(p) if listening else (None, "端口未监听")
-        flag = "✅" if (listening and code == 200) else ("⚠️" if listening else "❌")
+        flag = "完成：" if (listening and code == 200) else ("注意：" if listening else "失败：")
         print(f"    {flag} 端口 {p}: 监听={'是' if listening else '否'} "
               f"/ping={'HTTP '+str(code) if code else '失败'}")
         if code == 200:
@@ -75,19 +75,19 @@ def main():
 
     print("\n[3] 结论:")
     if not listened:
-        print("    ❌ 没有任何候选端口在监听 → 客户端桥接服务实际未启动成功。")
+        print("    失败： 没有任何候选端口在监听 → 客户端桥接服务实际未启动成功。")
         print("       可能原因：端口被占用、start() 抛异常但状态显示错误、")
         print("       或 auto_start 关闭且未手动点'启动服务'。")
         print("       建议：在客户端'扩展采集'页点'启动服务'，看是否报错。")
     elif cfg_port and cfg_port not in listened:
-        print(f"    ⚠️ 配置端口 {cfg_port} 未监听，但其它端口在监听: {listened}")
+        print(f"    注意： 配置端口 {cfg_port} 未监听，但其它端口在监听: {listened}")
         print(f"       → 客户端可能因端口冲突换了端口，但插件还连旧端口。")
         print(f"       建议：把插件端口改为 {listened[0]}，或在客户端把端口改回 {cfg_port} 重启。")
     elif cfg_port in listened:
         p = cfg_port
         code, _ = _ping(p)
         if code == 200:
-            print(f"    ✅ 端口 {p} 正常监听且 /ping 返回 200。")
+            print(f"    完成： 端口 {p} 正常监听且 /ping 返回 200。")
             print("       服务端没问题 → 问题在浏览器扩展侧：")
             print("       - 确认插件 host_permissions 含 <all_urls>（已含）")
             print("       - Chrome 地址栏访问 chrome://extensions → 点插件'详细信息'")
@@ -96,7 +96,7 @@ def main():
             print("       - 浏览器 F12 → 扩展 service worker 控制台看 fetch 报错")
             print("       - 杀毒/防火墙是否拦了浏览器对 127.0.0.1 的访问")
         else:
-            print(f"    ⚠️ 端口 {p} 在监听但 /ping 异常 (HTTP {code}) → 服务异常。")
+            print(f"    注意： 端口 {p} 在监听但 /ping 异常 (HTTP {code}) → 服务异常。")
     input("\n按回车关闭...")
 
 

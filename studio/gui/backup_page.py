@@ -67,7 +67,7 @@ class BackupPage(BasePage):
         root.setSpacing(14)
 
         hdr = QHBoxLayout()
-        heading = QLabel("💾 数据备份 / 还原 / 迁移")
+        heading = QLabel(" 数据备份 / 还原 / 迁移")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         sub = QLabel("配置(密钥) + 业务数据(产品资料/我的知识库/素材索引/账号/声音样本) 一键备份还原；素材外部目录支持迁移重定位。")
@@ -80,7 +80,7 @@ class BackupPage(BasePage):
         # 数据盘点
         inv = QFrame(); inv.setObjectName("card")
         il = QVBoxLayout(inv); il.setContentsMargins(20, 14, 20, 14)
-        il.addWidget(QLabel("📋 当前数据盘点"))
+        il.addWidget(QLabel(" 当前数据盘点"))
         self.inv_text = QTextEdit(); self.inv_text.setReadOnly(True); self.inv_text.setFixedHeight(170)
         il.addWidget(self.inv_text)
         root.addWidget(inv)
@@ -88,7 +88,7 @@ class BackupPage(BasePage):
         # 备份
         bk = QFrame(); bk.setObjectName("card")
         bl = QVBoxLayout(bk); bl.setContentsMargins(20, 14, 20, 14); bl.setSpacing(8)
-        bl.addWidget(QLabel("📦 备份"))
+        bl.addWidget(QLabel(" 备份"))
         opt = QHBoxLayout()
         self.chk_secrets = QCheckBox("包含密钥/登录态(换自己机器勾选；给别人请取消)"); self.chk_secrets.setChecked(True)
         opt.addWidget(self.chk_secrets)
@@ -96,7 +96,7 @@ class BackupPage(BasePage):
         opt.addWidget(self.chk_outputs); opt.addStretch()
         bl.addLayout(opt)
         brow = QHBoxLayout()
-        self.btn_backup = QPushButton("📦 立即备份"); self.btn_backup.setObjectName("primary_button")
+        self.btn_backup = QPushButton(" 立即备份"); self.btn_backup.setObjectName("primary_button")
         self.btn_backup.clicked.connect(self._backup)
         brow.addWidget(self.btn_backup)
         btn_dir = QPushButton("打开备份目录"); btn_dir.setObjectName("secondary_button")
@@ -108,13 +108,13 @@ class BackupPage(BasePage):
         # 还原
         rs = QFrame(); rs.setObjectName("card")
         rl = QVBoxLayout(rs); rl.setContentsMargins(20, 14, 20, 14); rl.setSpacing(8)
-        rl.addWidget(QLabel("♻️ 还原（会先自动安全备份当前数据，再用所选 zip 覆盖）"))
+        rl.addWidget(QLabel(" 还原（会先自动安全备份当前数据，再用所选 zip 覆盖）"))
         rr = QHBoxLayout()
         self.in_zip = QLineEdit(); self.in_zip.setPlaceholderText("选择备份 zip…")
         rr.addWidget(self.in_zip, 1)
         btn_br = mdi_button("浏览…", "folder"); btn_br.setObjectName("secondary_button"); btn_br.clicked.connect(self._browse_zip)
         rr.addWidget(btn_br)
-        self.btn_restore = QPushButton("♻️ 还原"); self.btn_restore.setObjectName("secondary_button")
+        self.btn_restore = QPushButton(" 还原"); self.btn_restore.setObjectName("secondary_button")
         self.btn_restore.clicked.connect(self._restore)
         rr.addWidget(self.btn_restore)
         rl.addLayout(rr)
@@ -123,7 +123,7 @@ class BackupPage(BasePage):
         # 素材路径重定位
         rc = QFrame(); rc.setObjectName("card")
         cl = QVBoxLayout(rc); cl.setContentsMargins(20, 14, 20, 14); cl.setSpacing(8)
-        cl.addWidget(QLabel("📁 素材根路径重定位（迁移到新机器/换盘符后，把挂载目录旧前缀换成新前缀）"))
+        cl.addWidget(QLabel(" 素材根路径重定位（迁移到新机器/换盘符后，把挂载目录旧前缀换成新前缀）"))
         cr = QHBoxLayout()
         self.in_old = QLineEdit(); self.in_old.setPlaceholderText(r"旧前缀，如 D:\素材")
         cr.addWidget(self.in_old, 1)
@@ -148,8 +148,8 @@ class BackupPage(BasePage):
     def _refresh_inventory(self):
         lines = []
         for it in summarize():
-            mark = "🔑" if it["sensitive"] else "  "
-            ok = "✅" if it["exists"] else "—"
+            mark = "" if it["sensitive"] else "  "
+            ok = "完成：" if it["exists"] else "—"
             lines.append(f"{ok} {mark} [{it['category']:8}] {it['label']}： {_fmt(it['size'])}")
         self.inv_text.setPlainText("\n".join(lines))
 
@@ -165,7 +165,7 @@ class BackupPage(BasePage):
 
     def _backup_done(self, path):
         self.btn_backup.setEnabled(True); self.pbar.setVisible(False)
-        self.status.setText(f"✅ 已备份：{path}")
+        self.status.setText(f" 已备份：{path}")
         self.show_info(f"备份完成：\n{path}")
 
     def _open_backup_dir(self):
@@ -199,7 +199,7 @@ class BackupPage(BasePage):
     def _restore_done(self, n, safe):
         self.btn_restore.setEnabled(True); self.pbar.setVisible(False)
         self._refresh_inventory()
-        self.status.setText(f"✅ 已还原 {n} 个文件")
+        self.status.setText(f" 已还原 {n} 个文件")
         self.show_info(f"还原完成，恢复 {n} 个文件。\n当前数据已安全备份到：\n{safe}\n\n建议重启软件以加载新数据。")
 
     # ---------- 素材重定位 ----------

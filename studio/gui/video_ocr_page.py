@@ -187,7 +187,7 @@ class VideoOcrPage(BasePage):
         main_layout.setSpacing(16)
 
         # Title Header
-        heading = QLabel("🔍 视频框选 OCR 扫描识别")
+        heading = QLabel(" 视频框选 OCR 扫描识别")
         heading.setObjectName("heading")
         main_layout.addWidget(heading, 0)
 
@@ -229,7 +229,7 @@ class VideoOcrPage(BasePage):
         p_layout.setContentsMargins(16, 16, 16, 16)
         p_layout.setSpacing(10)
 
-        p_title = QLabel("🖼️ 实时预览画面 (在画面上拖拽选择需要 OCR 的框):")
+        p_title = QLabel(" 实时预览画面 (在画面上拖拽选择需要 OCR 的框):")
         p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         p_layout.addWidget(p_title, 0)
 
@@ -305,7 +305,7 @@ class VideoOcrPage(BasePage):
         """)
         seek_row.addWidget(self.seek_slider)
         
-        self.btn_next_frame = QPushButton("▶")
+        self.btn_next_frame = QPushButton("播放")
         self.btn_next_frame.setFixedWidth(30)
         self.btn_next_frame.setStyleSheet(button_style)
         self.btn_next_frame.clicked.connect(self._step_next_frame)
@@ -347,7 +347,7 @@ class VideoOcrPage(BasePage):
         controls_layout.setSpacing(14)
 
         # Title
-        c_title = QLabel("📦 OCR 模板识别选区及设置")
+        c_title = QLabel(" OCR 模板识别选区及设置")
         c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
         controls_layout.addWidget(c_title)
 
@@ -462,12 +462,12 @@ class VideoOcrPage(BasePage):
 
         # Start / Stop Buttons
         btn_action_layout = QHBoxLayout()
-        self.btn_start = QPushButton("🚀 开始 OCR 扫描")
+        self.btn_start = QPushButton(" 开始 OCR 扫描")
         self.btn_start.setObjectName("primary_button")
         self.btn_start.clicked.connect(self.start_ocr_scan)
         btn_action_layout.addWidget(self.btn_start)
 
-        self.btn_stop = QPushButton("⏹️ 停止运行")
+        self.btn_stop = QPushButton("停止 停止运行")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_ocr_scan)
         btn_action_layout.addWidget(self.btn_stop)
@@ -484,7 +484,7 @@ class VideoOcrPage(BasePage):
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
 
-        log_layout.addWidget(QLabel("📝 OCR 扫描引擎实时日志与识别数据:"))
+        log_layout.addWidget(QLabel(" OCR 扫描引擎实时日志与识别数据:"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)
@@ -498,10 +498,10 @@ class VideoOcrPage(BasePage):
         help_layout = QVBoxLayout(help_card)
         help_card.setContentsMargins(16, 12, 16, 12)
         help_lbl = QLabel(
-            "💡 **大模型与本地 OCR 提示**:\n"
+            " **大模型与本地 OCR 提示**:\n"
             "PaddleOCR 使用本地内置的深度学习模型进行文本提取，完全免费且离线运行，**不需要下载大语言模型 (LLM)**。 "
             "权重会自动从百度官方国内镜像下载。\n"
-            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「🤖 大模型配置」** 页面来接入国内主流大模型 API 服务。"
+            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「 大模型配置」** 页面来接入国内主流大模型 API 服务。"
         )
         help_lbl.setWordWrap(True)
         help_lbl.setStyleSheet("font-size: 11px; line-height: 16px; color: #a1a1aa;")

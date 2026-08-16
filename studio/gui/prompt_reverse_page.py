@@ -502,7 +502,7 @@ class ImagePromptReversePage(BasePage):
         root.setContentsMargins(20, 14, 20, 14)
         root.setSpacing(12)
 
-        title = QLabel("🖼️ 图片反推提示词")
+        title = QLabel(" 图片反推提示词")
         title.setObjectName("heading")
         root.addWidget(title)
 
@@ -524,12 +524,12 @@ class ImagePromptReversePage(BasePage):
 
         right = QVBoxLayout()
         btn_row = QHBoxLayout()
-        self.btn_run = QPushButton("✨ 反推提示词")
+        self.btn_run = QPushButton(" 反推提示词")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.setEnabled(False)
         self.btn_run.clicked.connect(self._run)
         btn_row.addWidget(self.btn_run)
-        self.btn_copy = QPushButton("📋 复制")
+        self.btn_copy = QPushButton(" 复制")
         self.btn_copy.setObjectName("secondary_button")
         self.btn_copy.setEnabled(False)
         self.btn_copy.clicked.connect(self._copy_result)
@@ -582,12 +582,12 @@ class ImagePromptReversePage(BasePage):
         self.btn_run.setEnabled(True)
         self.btn_copy.setEnabled(True)
         self.result.setPlainText(text)
-        self.lbl_status.setText("✅ 完成")
+        self.lbl_status.setText(" 完成")
 
     def _on_error(self, msg):
         self.progress.setVisible(False)
         self.btn_run.setEnabled(True)
-        self.lbl_status.setText(f"❌ {msg}")
+        self.lbl_status.setText(f"失败： {msg}")
 
     def _copy_result(self):
         from PySide6.QtWidgets import QApplication
@@ -608,7 +608,7 @@ class VideoPromptReversePage(BasePage):
         root.setContentsMargins(20, 14, 20, 14)
         root.setSpacing(12)
 
-        title = QLabel("🎬 视频反推提示词")
+        title = QLabel(" 视频反推提示词")
         title.setObjectName("heading")
         root.addWidget(title)
 
@@ -617,7 +617,7 @@ class VideoPromptReversePage(BasePage):
         self.drop.setMaximumHeight(80)
         root.addWidget(self.drop)
 
-        tl_label = QLabel("⏱️ 拖动把手选择片段（最长 30 秒）")
+        tl_label = QLabel("拖动把手选择片段（最长 30 秒）")
         tl_label.setObjectName("muted_text")
         root.addWidget(tl_label)
         self.timeline = _VideoTimeline(self.parent_widget)
@@ -628,12 +628,12 @@ class VideoPromptReversePage(BasePage):
         root.addWidget(self.lbl_range)
 
         btn_row = QHBoxLayout()
-        self.btn_run = QPushButton("✨ 反推提示词")
+        self.btn_run = QPushButton(" 反推提示词")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.setEnabled(False)
         self.btn_run.clicked.connect(self._run)
         btn_row.addWidget(self.btn_run)
-        self.btn_copy = QPushButton("📋 复制")
+        self.btn_copy = QPushButton(" 复制")
         self.btn_copy.setObjectName("secondary_button")
         self.btn_copy.setEnabled(False)
         self.btn_copy.clicked.connect(self._copy_result)
@@ -659,7 +659,7 @@ class VideoPromptReversePage(BasePage):
         self._video_path = path
         self._duration = _probe_duration(path)
         if self._duration <= 0:
-            self.lbl_status.setText("⚠️ 无法读取视频时长")
+            self.lbl_status.setText("注意： 无法读取视频时长")
             return
         self.timeline.set_video(path, self._duration)
         self.btn_run.setEnabled(True)
@@ -705,12 +705,12 @@ class VideoPromptReversePage(BasePage):
         self.btn_run.setEnabled(True)
         self.btn_copy.setEnabled(True)
         self.result.setPlainText(text)
-        self.lbl_status.setText("✅ 完成")
+        self.lbl_status.setText(" 完成")
 
     def _on_error(self, msg):
         self.progress.setVisible(False)
         self.btn_run.setEnabled(True)
-        self.lbl_status.setText(f"❌ {msg}")
+        self.lbl_status.setText(f"失败： {msg}")
 
     def _copy_result(self):
         from PySide6.QtWidgets import QApplication

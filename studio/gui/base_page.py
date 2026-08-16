@@ -41,7 +41,7 @@ def _show_dev_only(parent_widget):
     card_layout = QVBoxLayout(card)
     card_layout.setContentsMargins(0, 0, 0, 0)
     card_layout.setSpacing(12)
-    icon = QLabel("🚧")
+    icon = QLabel("")
     icon.setAlignment(Qt.AlignCenter)
     icon.setObjectName("dev_icon")
     card_layout.addWidget(icon)

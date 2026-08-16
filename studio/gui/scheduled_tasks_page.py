@@ -32,7 +32,7 @@ class _VideoPlayerDialog(QDialog):
 
     def __init__(self, url, title="", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"▶ 播放成片 - {title[:40]}")
+        self.setWindowTitle(f"播放 播放成片 - {title[:40]}")
         self.resize(960, 600)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10); lay.setSpacing(8)
@@ -45,7 +45,7 @@ class _VideoPlayerDialog(QDialog):
         self._player.setVideoOutput(self._video)
 
         ctl = QHBoxLayout(); ctl.setSpacing(8)
-        self._btn_toggle = QPushButton("⏸ 暂停")
+        self._btn_toggle = QPushButton("暂停 暂停")
         self._btn_toggle.setObjectName("secondary_button")
         self._btn_toggle.setFixedWidth(90)
         self._btn_toggle.clicked.connect(self._toggle_play)
@@ -78,7 +78,7 @@ class _VideoPlayerDialog(QDialog):
 
     def _on_state(self, state):
         playing = state == QMediaPlayer.PlayingState
-        self._btn_toggle.setText("⏸ 暂停" if playing else "▶ 播放")
+        self._btn_toggle.setText("暂停 暂停" if playing else "播放 播放")
 
     def _on_duration(self, ms):
         if ms > 0:
@@ -118,7 +118,7 @@ class ScheduledTasksPage(BasePage):
         root.setSpacing(12)
 
         hdr = QHBoxLayout()
-        heading = QLabel("⏰ 成片任务")
+        heading = QLabel("成片任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
         sub = QLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。")
@@ -133,7 +133,7 @@ class ScheduledTasksPage(BasePage):
         ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
 
         list_header = QHBoxLayout()
-        list_header.addWidget(QLabel("📋 成片任务列表（来自服务端）"))
+        list_header.addWidget(QLabel(" 成片任务列表（来自服务端）"))
         list_header.addStretch()
         from PySide6.QtWidgets import QCheckBox
         self.chk_autorefresh = QCheckBox("自动刷新")
@@ -148,13 +148,13 @@ class ScheduledTasksPage(BasePage):
 
         self.table = QTableWidget(0, 10)
         self.table.setHorizontalHeaderLabels(
-            ["☑", "task_id", "标题", "类型", "状态", "进度", "播放", "下载", "创建时间", "操作"])
+            ["", "task_id", "标题", "类型", "状态", "进度", "播放", "下载", "创建时间", "操作"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self._on_row_clicked)
         h = self.table.horizontalHeader()
-        h.setSectionResizeMode(0, QHeaderView.ResizeToContents)   # ☑ 勾选
+        h.setSectionResizeMode(0, QHeaderView.ResizeToContents)   #  勾选
         h.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # ID
         h.setSectionResizeMode(2, QHeaderView.Interactive)        # 标题（收窄，可拖动）
         self.table.setColumnWidth(2, 320)
@@ -173,7 +173,7 @@ class ScheduledTasksPage(BasePage):
         # ── 选中任务详情 ───────────────────────────────────────────────────
         detail_card = QFrame(); detail_card.setObjectName("card")
         dl = QVBoxLayout(detail_card); dl.setContentsMargins(12, 10, 12, 10); dl.setSpacing(6)
-        dl.addWidget(QLabel("🔍 任务详情（参数 / 结果）"))
+        dl.addWidget(QLabel(" 任务详情（参数 / 结果）"))
         self.detail = QTextBrowser()
         self.detail.setOpenExternalLinks(False)
         self.detail.setMinimumHeight(100)
@@ -182,9 +182,9 @@ class ScheduledTasksPage(BasePage):
 
         # 底部操作行：全选/取消全选 + 下载所选（播放/下载单条操作在表格列内）
         log_row = QHBoxLayout()
-        self.btn_select_all = QPushButton("☑ 全选")
+        self.btn_select_all = QPushButton(" 全选")
         self.btn_select_all.setObjectName("secondary_button")
-        self.btn_select_all.setToolTip("勾选 / 取消勾选列表全部任务（表格第一列 ☑）")
+        self.btn_select_all.setToolTip("勾选 / 取消勾选列表全部任务（表格第一列 ）")
         self.btn_select_all.clicked.connect(self._toggle_select_all)
         log_row.addWidget(self.btn_select_all)
         self.btn_download_selected = QPushButton("⬇ 下载所选")
@@ -192,14 +192,14 @@ class ScheduledTasksPage(BasePage):
         self.btn_download_selected.setToolTip("下载所有已勾选任务的成片视频到指定目录")
         self.btn_download_selected.clicked.connect(self._download_selected)
         log_row.addWidget(self.btn_download_selected)
-        self.btn_download_selected_pkg = QPushButton("🗜 打包所选")
+        self.btn_download_selected_pkg = QPushButton(" 打包所选")
         self.btn_download_selected_pkg.setObjectName("secondary_button")
         self.btn_download_selected_pkg.setToolTip(
             "下载所有已勾选且支持打包任务（成片+全部素材+manifest.json）")
         self.btn_download_selected_pkg.clicked.connect(self._download_selected_package)
         log_row.addWidget(self.btn_download_selected_pkg)
         log_row.addStretch()
-        self.btn_view_log = QPushButton("📜 查看日志")
+        self.btn_view_log = QPushButton(" 查看日志")
         self.btn_view_log.setObjectName("secondary_button")
         self.btn_view_log.setToolTip("查看该任务的服务端执行日志（logs）")
         self.btn_view_log.clicked.connect(self._view_task_log)
@@ -208,7 +208,7 @@ class ScheduledTasksPage(BasePage):
         dl.addLayout(log_row)
 
         # 变体打分区（仅当任务已完成且有 all_variants 时显示）
-        self.variants_title = QLabel("🎯 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
+        self.variants_title = QLabel(" 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
         self.variants_title.setStyleSheet("font-weight:bold; color:#3b82f6;")
         self.variants_title.setVisible(False)
         dl.addWidget(self.variants_title)
@@ -339,7 +339,7 @@ class ScheduledTasksPage(BasePage):
         for i, t in enumerate(items):
             tid = t.get("id", "")
             status = t.get("status", "")
-            # ☑ 勾选
+            #  勾选
             check_item = QTableWidgetItem()
             check_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             check_item.setCheckState(Qt.Unchecked)
@@ -368,7 +368,7 @@ class ScheduledTasksPage(BasePage):
             # 播放/下载列（completed 且有视频结果才显示）
             url = self._resolve_video_url(t)
             if status == "completed" and url:
-                btn_play = table_action_button("▶", "播放成片")
+                btn_play = table_action_button("播放", "播放成片")
                 btn_play.clicked.connect(lambda _=False, u=url: self._play_video(u))
                 self.table.setCellWidget(i, 6, btn_play)
                 self.table.setCellWidget(i, 7, self._make_download_cell(t))
@@ -388,7 +388,7 @@ class ScheduledTasksPage(BasePage):
         # 列表刷新后重置全选状态
         self._all_checked = False
         if hasattr(self, "btn_select_all"):
-            self.btn_select_all.setText("☑ 全选")
+            self.btn_select_all.setText(" 全选")
         # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
         if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
             self._poll_timer.start()
@@ -397,7 +397,7 @@ class ScheduledTasksPage(BasePage):
 
     def _on_row_clicked(self, row, col):
         if col == 0:
-            return   # ☑ 勾选列：只切换勾选，不加载详情
+            return   #  勾选列：只切换勾选，不加载详情
         name_item = self.table.item(row, 2)
         if not name_item:
             return
@@ -444,9 +444,9 @@ class ScheduledTasksPage(BasePage):
             agent_tid2 = self._agent_link.get(str(t.get("id")))
             ev = self._agent_eval.get(agent_tid2) if agent_tid2 else None
         if isinstance(ev, dict):
-            verdict_map = {"pass": "✅ 通过", "rejected": "❌ 不通过",
-                           "excellent": "🏆 优秀", "marginal": "⚠️ 边缘"}
-            lines += ["", "#### 🎬 成片评审（服务端深度评审）"]
+            verdict_map = {"pass": "完成： 通过", "rejected": "失败： 不通过",
+                           "excellent": " 优秀", "marginal": "注意： 边缘"}
+            lines += ["", "####  成片评审（服务端深度评审）"]
             lines.append(f"- **总分**：**{ev.get('total')}** / 10　**结论**："
                          f"{verdict_map.get(ev.get('verdict'), ev.get('verdict') or '—')}"
                          f"（置信度 {ev.get('confidence')}，引擎：{ev.get('engine') or '—'}）")
@@ -461,13 +461,13 @@ class ScheduledTasksPage(BasePage):
             if vetoes:
                 vs = "；".join(
                     str(v.get("detail") or v.get("reason") or v) for v in vetoes[:3])
-                lines.append(f"- ⛔ 否决项：{vs}")
+                lines.append(f"-  否决项：{vs}")
             if ev.get("comment"):
-                lines.append(f"- 💬 总评：{ev.get('comment')}")
+                lines.append(f"-  总评：{ev.get('comment')}")
         # ── 评审信息：成片质量评分（storyboard_montage result.quality_score）──
         qs = result.get("quality_score") if isinstance(result, dict) else None
         if isinstance(qs, dict):
-            lines += ["", "#### 📊 评审评分（成片质量评分）"]
+            lines += ["", "####  评审评分（成片质量评分）"]
             lines.append(f"- **总分**：**{qs.get('total')}** / 10（评分引擎：{qs.get('engine') or '—'}）")
             for k, label in (("clarity", "清晰度"), ("texture", "质感"), ("aesthetics", "美学"),
                              ("composition", "构图"), ("color_quality", "色彩质量"),
@@ -565,28 +565,28 @@ class ScheduledTasksPage(BasePage):
         self.variants_title.setVisible(True)
         self.variants_container.setVisible(True)
         self.variants_title.setText(
-            f"🎯 变体打分（任务 {self._current_task_id}：对成片好/坏反馈，供服务端进化）　"
+            f" 变体打分（任务 {self._current_task_id}：对成片好/坏反馈，供服务端进化）　"
             f"最优变体：{best or '—'}")
 
-        # 每个变体一行：变体名/风格/节奏/评分 + 👍👍 + 👎
+        # 每个变体一行：变体名/风格/节奏/评分 +  + 
         for v in variants:
             row = QWidget()
             rl = QHBoxLayout(row)
             rl.setContentsMargins(2, 2, 2, 2); rl.setSpacing(8)
             name = v.get("variant", "")
             is_best = (name == best)
-            tag = "🏆" if is_best else "  "
+            tag = "" if is_best else "  "
             rl.addWidget(QLabel(f"{tag} 变体 {name}"))
             rl.addWidget(QLabel(f"风格：{v.get('style','—')}"))
             rl.addWidget(QLabel(f"节奏：{v.get('pacing','—')}"))
             rl.addWidget(QLabel(f"评分：{v.get('score','—')}"))
             rl.addStretch()
-            btn_good = QPushButton("👍 好")
+            btn_good = QPushButton(" 好")
             btn_good.setObjectName("secondary_button")
             btn_good.setFixedWidth(64)
             btn_good.clicked.connect(lambda _=False, fb="good": self._on_variant_feedback(fb))
             rl.addWidget(btn_good)
-            btn_bad = QPushButton("👎 差")
+            btn_bad = QPushButton(" 差")
             btn_bad.setFixedWidth(64)
             btn_bad.clicked.connect(lambda _=False, fb="bad": self._on_variant_feedback(fb))
             rl.addWidget(btn_bad)
@@ -626,7 +626,7 @@ class ScheduledTasksPage(BasePage):
         w = QWidget()
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(6)
-        btn_del = table_action_button("🗑", "删除")
+        btn_del = table_action_button("", "删除")
         btn_del.clicked.connect(lambda _=False, tid=t.get("id"): self._delete(tid))
         lay.addWidget(btn_del)
         return w
@@ -642,7 +642,7 @@ class ScheduledTasksPage(BasePage):
         lay.addWidget(btn_video)
         if _resolve_package_url(task):
             btn_pkg = table_action_button(
-                "🗜 打包", "打包下载：成片+素材+manifest.json")
+                " 打包", "打包下载：成片+素材+manifest.json")
             btn_pkg.clicked.connect(
                 lambda _=False, t=task: self._download_package(t))
             lay.addWidget(btn_pkg)
@@ -679,7 +679,7 @@ class ScheduledTasksPage(BasePage):
         from utils.thread_worker import TaskWorker as Worker
         self._dl_worker = Worker(lambda: _download_to_file(url, path))
         self._dl_worker.finished.connect(
-            lambda p: self.show_info(f"✅ 成片视频已保存：{p}"))
+            lambda p: self.show_info(f"完成： 成片视频已保存：{p}"))
         self._dl_worker.error.connect(lambda e: self.show_error(f"下载失败：{e}", "错误"))
         self.track_worker(self._dl_worker)
         self._dl_worker.start()
@@ -702,7 +702,7 @@ class ScheduledTasksPage(BasePage):
         from utils.thread_worker import TaskWorker as Worker
         self._dl_worker = Worker(lambda: _download_to_file(package_url, path))
         self._dl_worker.finished.connect(
-            lambda p: self.show_info(f"✅ 成片+素材包已保存：{p}"))
+            lambda p: self.show_info(f"完成： 成片+素材包已保存：{p}"))
         self._dl_worker.error.connect(
             lambda e: self.show_error(f"下载失败：{e}", "错误"))
         self.track_worker(self._dl_worker)
@@ -710,14 +710,14 @@ class ScheduledTasksPage(BasePage):
         self.show_info("开始下载成片+素材包，请稍候…")
 
     def _toggle_select_all(self):
-        """全选 / 取消全选表格任务（☑ 列）。"""
+        """全选 / 取消全选表格任务（ 列）。"""
         state = Qt.Unchecked if self._all_checked else Qt.Checked
         for i in range(self.table.rowCount()):
             it = self.table.item(i, 0)
             if it:
                 it.setCheckState(state)
         self._all_checked = not self._all_checked
-        self.btn_select_all.setText("☐ 取消全选" if self._all_checked else "☑ 全选")
+        self.btn_select_all.setText(" 取消全选" if self._all_checked else " 全选")
 
     def _download_selected(self):
         """批量下载所有已勾选任务的成片视频到所选目录。"""
@@ -729,7 +729,7 @@ class ScheduledTasksPage(BasePage):
                 if self._resolve_video_url(task):
                     rows.append(task)
         if not rows:
-            self.show_warning("请先勾选要下载的任务（表格第一列 ☑）。")
+            self.show_warning("请先勾选要下载的任务（表格第一列 ）。")
             return
         save_dir = QFileDialog.getExistingDirectory(self.parent_widget, "选择保存目录")
         if not save_dir:
@@ -752,7 +752,7 @@ class ScheduledTasksPage(BasePage):
                 if _resolve_package_url(task):
                     rows.append(task)
         if not rows:
-            self.show_warning("请先勾选支持打包下载的任务（表格第一列 ☑）。")
+            self.show_warning("请先勾选支持打包下载的任务（表格第一列 ）。")
             return
         save_dir = QFileDialog.getExistingDirectory(self.parent_widget, "选择保存目录")
         if not save_dir:
@@ -883,7 +883,7 @@ def _download_many(tasks, save_dir):
             ok += 1
         except Exception as e:
             fail.append(f"{tid}: {e}")
-    msg = f"✅ 已下载 {ok} 个成片视频到：{save_dir}"
+    msg = f" 已下载 {ok} 个成片视频到：{save_dir}"
     if fail:
         msg += f"\n\n失败（{len(fail)} 个）：\n" + "\n".join(fail)
     return msg
@@ -903,7 +903,7 @@ def _download_many_packages(tasks, save_dir):
             ok += 1
         except Exception as e:
             fail.append(f"{tid}: {e}")
-    msg = f"✅ 已下载 {ok} 个成片包到：{save_dir}"
+    msg = f" 已下载 {ok} 个成片包到：{save_dir}"
     if fail:
         msg += f"\n\n失败（{len(fail)} 个）：\n" + "\n".join(fail)
     return msg

@@ -137,7 +137,7 @@ class MontageConcatServerWorker(BaseWorker):
                     raise RuntimeError("服务端合成完成，但结果中未返回 video_url/url/output_url")
                 self._download(video_url)
                 self._write_sources_file()
-                self.stage.emit(f"✅ 服务端合成完成：{os.path.basename(self.local_output_path)}")
+                self.stage.emit(f"完成： 服务端合成完成：{os.path.basename(self.local_output_path)}")
                 self.progress.emit(100)
                 self.concat_finished.emit(self.local_output_path)
                 return

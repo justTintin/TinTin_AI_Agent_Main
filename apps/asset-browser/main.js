@@ -5,8 +5,6 @@ const https = require('https');
 const http = require('http');
 const { URL } = require('url');
 const { exec, spawn } = require('child_process');
-const proxyManager = require('./proxy-manager');
-const v2rayManager = require('./v2ray-manager');
 
 // 捕获未捕获的异常，防止因为 Electron/Chromium 内部的 WebFrameMain 销毁竞争等底层问题弹出 JavaScript 错误弹窗
 process.on('uncaughtException', (err) => {
@@ -337,9 +335,6 @@ app.whenReady().then(() => {
     if (input.key === 'F12') { mainWindow.webContents.toggleDevTools(); }
   });
 
-  // 应用初始代理设置
-  const db = getDatabase();
-  proxyManager.applyProxy(db.settings);
 
   // 获取 Webview 使用的独立分区 Session，必须在此 Session 上挂载网络拦截器
   const webviewSession = session.fromPartition('persist:tintin-browser');
@@ -473,10 +468,6 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// 应用程序退出时，关闭代理进程
-app.on('will-quit', () => {
-  proxyManager.shutdown();
-});
 
 // 拦截非 http/https 协议（例如 bytedance://, snssdk://, tbopen:// 等原生客户端跳转链接），防止 Windows 弹出“寻找关联应用”的系统对话框
 app.on('web-contents-created', (event, contents) => {
@@ -606,8 +597,6 @@ ipcMain.handle('db-save-settings', (event, settings) => {
     }
   }
   saveDatabase(db);
-  // 动态应用更新后的代理设置
-  proxyManager.applyProxy(db.settings);
   return db.settings;
 });
 
@@ -1228,9 +1217,6 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
     if (cookieArg.length === 0 && (urlToDownload.includes('youtube.com') || urlToDownload.includes('douyin.com'))) {
       cookieArg = ['--cookies-from-browser', 'chrome'];
     }
-    // 代理：仅国外平台需要（YouTube、TikTok、Twitter 等）
-    const needsProxy = /(youtube\.com|youtu\.be|tiktok\.com|twitter\.com|x\.com|instagram\.com|facebook\.com)/.test(urlToDownload);
-    const proxyArgArr = needsProxy ? proxyManager.getYtDlpProxyArgv(db.settings) : [];
 
     // 尝试多种格式，依次降级
 	    const formatList = ['bv+ba/b', 'best', 'bestvideo+bestaudio/best', 'worst'];
@@ -1244,7 +1230,6 @@ ipcMain.handle('start-download', async (event, { id, url: fileUrl, audioUrl, fil
       const allArgs = [
         ...ytdlpBaseArgs,
         ...cookieArg,
-        ...proxyArgArr,
         '--no-warnings',
         '--extractor-retries', '3',
         '--retries', '5',
@@ -1585,7 +1570,6 @@ ipcMain.handle('resume-download', (event, id) => {
       if (cookieArg.length === 0 && (referer.includes('youtube.com') || referer.includes('douyin.com'))) {
         cookieArg = ['--cookies-from-browser', 'chrome'];
       }
-      const proxyArgArr = proxyManager.getYtDlpProxyArgv(db.settings);
 
       let lastLog = '';
       for (const fmt of formatList) {
@@ -1593,7 +1577,7 @@ ipcMain.handle('resume-download', (event, id) => {
         updateTaskProgress(id, 5, `正在重新下载 (格式: ${fmt})...`, 0);
 
 	        const allArgs = [
-	          ...ytdlpBaseArgs, ...cookieArg, ...proxyArgArr,
+	          ...ytdlpBaseArgs, ...cookieArg,
 	          '--no-warnings', '--extractor-retries', '3', '--retries', '5',
           ...(referer.includes('youtube.com') ? [
             '--extractor-args', 'youtube:player_client=tv_embedded',
@@ -1706,92 +1690,6 @@ function updateTaskStatus(id, status, progress, size, errorMsg = '', log = '') {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  v2ray 代理 IPC
-// ═══════════════════════════════════════════════════════════════
-
-// 设置 Electron 浏览器 webview 的代理（让浏览器走 v2ray）
-async function setWebviewProxy(proxyUrl) {
-  try {
-    const sess = session.fromPartition('persist:tintin-browser');
-    if (proxyUrl) {
-      // 把 http://127.0.0.1:10809 转为 proxyRules 格式
-      const url = new URL(proxyUrl);
-      const rules = `http=${url.protocol}//${url.host};https=${url.protocol}//${url.host}`;
-      await sess.setProxy({ proxyRules: rules, proxyBypassRules: '<local>' });
-      console.log('webview 代理已设置为:', rules);
-    } else {
-      await sess.setProxy({ proxyRules: 'direct://' });
-      console.log('webview 代理已清除');
-    }
-  } catch (e) {
-    console.warn('设置 webview 代理失败:', e.message);
-  }
-}
-
-// 解析分享链接（用于 UI 预览）
-ipcMain.handle('v2ray-parse-link', (event, link) => {
-  return v2rayManager.parseShareLink(link);
-});
-
-// 下载订阅并解析节点列表
-ipcMain.handle('v2ray-fetch-subscription', async (event, subUrl) => {
-  try {
-    const text = await v2rayManager.downloadSubscription(subUrl);
-    const nodes = v2rayManager.parseSubscription(text);
-    return { ok: true, nodes };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-});
-
-// 启动 v2ray（传入节点列表）
-ipcMain.handle('v2ray-start', async (event, nodes) => {
-  try {
-    const proxyUrl = await v2rayManager.start(nodes);
-    // 启动后自动设置代理（yt-dlp + webview）
-    const db = getDatabase();
-    db.settings = { ...db.settings, proxyUrl };
-    saveDatabase(db);
-    proxyManager.applyProxy(db.settings);
-    await setWebviewProxy(proxyUrl);  // webview 也走代理
-    return { ok: true, proxyUrl };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-});
-
-// 停止 v2ray
-ipcMain.handle('v2ray-stop', async () => {
-  const stopped = v2rayManager.stop();
-  // 清除代理设置
-  const db = getDatabase();
-  if (db.settings && db.settings.proxyUrl && db.settings.proxyUrl.includes('127.0.0.1')) {
-    delete db.settings.proxyUrl;
-    saveDatabase(db);
-    proxyManager.applyProxy(db.settings);
-  }
-  await setWebviewProxy('');  // 清除 webview 代理
-  return { ok: true, stopped };
-});
-
-// 检查 v2ray 运行状态
-ipcMain.handle('v2ray-status', () => {
-  return {
-    running: v2rayManager.isRunning(),
-    proxyUrl: v2rayManager.getProxyUrl(),
-  };
-});
-
-// 测试节点延迟（TCP ping，不启动 xray）
-ipcMain.handle('v2ray-test-latency', async (event, node) => {
-  try {
-    const ms = await v2rayManager.testLatency(node);
-    return { ok: true, latency: ms };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-});
 
 // 检查各平台 cookie 状态 + 强制同步
 ipcMain.handle('check-cookie-status', async () => {

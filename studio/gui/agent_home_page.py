@@ -33,8 +33,8 @@ _TASK_CARDS = [
     ("直播切片", "video", "从直播回放自动切出精彩片段配字幕", 18, "#f97316"),
     ("封面制作", "camera", "输入标题卖点，自动生成视频封面", 32, "#06b6d4"),
     ("视频去字幕", "closed-caption", "AI 擦除视频字幕/水印，服务端智能识别选区", 17, "#10b981"),
-    ("视频评价", "film", "预测成片数据表现，给出优化建议", 34, "#f59e0b"),
     ("成片任务", "folder", "查看所有成片/混剪任务进度", 42, "#64748b"),
+    ("爆款仿制", "fire", "给爆款视频链接，自动拆解结构并生成复刻脚本", None, "#ef4444"),
 ]
 
 # 通用对话模式的首条系统提示词（智能体模式由服务端内置助手提示词接管）
@@ -262,7 +262,7 @@ class _SlashPopup(QListWidget):
                 continue
             self._match.append(a)
             item = QListWidgetItem(
-                f"🧩 {name}" if a.get("source") == "skill" else f"🤖 {name}")
+                f" {name}" if a.get("source") == "skill" else f" {name}")
             item.setToolTip(desc)
             self.addItem(item)
         if not self._match:
@@ -399,7 +399,7 @@ class _ChatBubble(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
 
-        avatar = QLabel("🙂" if is_user else "🤖")
+        avatar = QLabel("" if is_user else "")
         avatar.setFixedSize(34, 34)
         avatar.setAlignment(Qt.AlignCenter)
         avatar.setStyleSheet("background:#1d212b; border-radius:17px; font-size:18px;")
@@ -442,20 +442,20 @@ class _ChatBubble(QWidget):
                 " border-radius:12px; color:#9aa3b2; padding:2px 12px; font-size:12px; }"
                 " QPushButton:hover { background:#2d3344; color:#e2e6ef;"
                 " border-color:#5b8ef0; }")
-            self._btn_copy = QPushButton("📋 复制")
+            self._btn_copy = QPushButton(" 复制")
             self._btn_copy.setCursor(Qt.PointingHandCursor)
             self._btn_copy.setToolTip("复制本条回复原文（纯文本）到剪贴板")
             self._btn_copy.setStyleSheet(_act_style)
             self._btn_copy.clicked.connect(self._copy_text)
             ah.addWidget(self._btn_copy)
-            self._btn_quote = QPushButton("❝ 引用")
+            self._btn_quote = QPushButton(" 引用")
             self._btn_quote.setCursor(Qt.PointingHandCursor)
             self._btn_quote.setToolTip("把本条回复引用到输入框，补充指令后再发送")
             self._btn_quote.setStyleSheet(_act_style)
             self._btn_quote.clicked.connect(
                 lambda: self.quoteRequested.emit(self._raw_text))
             ah.addWidget(self._btn_quote)
-            self._btn_regen = QPushButton("🔄 重新生成")
+            self._btn_regen = QPushButton(" 重新生成")
             self._btn_regen.setCursor(Qt.PointingHandCursor)
             self._btn_regen.setToolTip(
                 "用上一条问题重新生成回答（服务端无重生成接口，以新一轮对话重发，"
@@ -493,10 +493,10 @@ class _ChatBubble(QWidget):
             self._asset_tid = ""
 
     def _copy_text(self):
-        """复制回复原文到剪贴板；按钮短暂变「✓ 已复制」反馈（2s 后还原）。"""
+        """复制回复原文到剪贴板；按钮短暂变「已 已复制」反馈（2s 后还原）。"""
         QApplication.clipboard().setText(self._raw_text)
-        self._btn_copy.setText("✓ 已复制")
-        QTimer.singleShot(2000, lambda: self._btn_copy.setText("📋 复制"))
+        self._btn_copy.setText("已 已复制")
+        QTimer.singleShot(2000, lambda: self._btn_copy.setText(" 复制"))
 
     # ── 成片资产操作（播放/下载）──────────────────────────────────────
     def set_asset_actions(self, url, title="", tid=""):
@@ -510,7 +510,7 @@ class _ChatBubble(QWidget):
         style = ("QPushButton { background:#232838; border:1px solid #2f6fed;"
                  " border-radius:12px; color:#5b8ef0; padding:2px 14px; font-size:12px; }"
                  " QPushButton:hover { background:#2f6fed; color:#ffffff; }")
-        btn_play = QPushButton("▶ 播放成片")
+        btn_play = QPushButton("播放 播放成片")
         btn_play.setStyleSheet(style)
         btn_play.setToolTip(title or "播放对话生成的成片视频")
         btn_play.clicked.connect(self._play_asset)
@@ -546,7 +546,7 @@ class _ChatBubble(QWidget):
         url = self._asset_url
         worker = Worker(lambda: _download_to_file(url, path))
         worker.finished.connect(
-            lambda p: QMessageBox.information(self, "下载完成", f"✅ 成片已保存：\n{p}"))
+            lambda p: QMessageBox.information(self, "下载完成", f"完成： 成片已保存：\n{p}"))
         worker.error.connect(
             lambda e: QMessageBox.warning(self, "下载失败", f"下载成片失败：{e}"))
         self._dl_worker = worker   # 持有引用防 QThread GC
@@ -697,7 +697,7 @@ class _AgentBar(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        lbl = QLabel("🤖 智能体")
+        lbl = QLabel(" 智能体")
         lbl.setStyleSheet("color:#8b93a3; font-size:12px; font-weight:600;")
         lbl.setAlignment(Qt.AlignTop)
         row.addWidget(lbl)
@@ -996,7 +996,7 @@ class _ChatPanel(QWidget):
     """AI 对话面板：模式/模型切换 + 多轮气泡 + 输入发送 + 智能体快捷条。
 
     附件/产品/素材/脚本选择后显示在输入框上方的「上下文」区（不插入输入框），
-    不删除则每次发送都作为背景信息携带；点胶囊 ✕ 移除。
+    不删除则每次发送都作为背景信息携带；点胶囊 移除 移除。
     """
 
     def __init__(self, parent=None):
@@ -1030,12 +1030,12 @@ class _ChatPanel(QWidget):
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        title = QLabel("💬 AI 对话")
+        title = QLabel(" AI 对话")
         title.setStyleSheet("font-size:15px; font-weight:700;")
         top.addWidget(title)
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("🤖 智能体对话", "agent")
-        self.mode_combo.addItem("💬 通用对话", "llm")
+        self.mode_combo.addItem(" 智能体对话", "agent")
+        self.mode_combo.addItem(" 通用对话", "llm")
         self.mode_combo.setToolTip(
             "智能体对话：服务端智能体循环执行，可调用已注册能力；\n"
             "通用对话：纯大模型多轮问答（DeepSeek 代理）。")
@@ -1067,40 +1067,40 @@ class _ChatPanel(QWidget):
         # 工具行：选择的产品/素材/脚本/附件加入对话上下文（显示在输入框上方，不删除持续携带）
         tool_row = QHBoxLayout()
         tool_row.setSpacing(8)
-        self.btn_attach = QPushButton("📎 附件")
+        self.btn_attach = QPushButton(" 附件")
         self.btn_attach.setObjectName("secondary_button")
         self.btn_attach.setFixedHeight(30)
         self.btn_attach.setCursor(Qt.PointingHandCursor)
-        self.btn_attach.setToolTip("选择本地文件加入会话素材池（上传后贯穿后续所有轮次，服务端自动注入；点胶囊 ✕ 删除）")
+        self.btn_attach.setToolTip("选择本地文件加入会话素材池（上传后贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")
         self.btn_attach.clicked.connect(self._pick_attachments)
         tool_row.addWidget(self.btn_attach)
-        self.btn_product = QPushButton("📦 产品")
+        self.btn_product = QPushButton(" 产品")
         self.btn_product.setObjectName("secondary_button")
         self.btn_product.setFixedHeight(30)
         self.btn_product.setCursor(Qt.PointingHandCursor)
         self.btn_product.setToolTip("从产品资料库选择产品加入对话上下文（不删除则每次对话都携带）")
         self.btn_product.clicked.connect(self._pick_product)
         tool_row.addWidget(self.btn_product)
-        self.btn_material = QPushButton("📁 素材")
+        self.btn_material = QPushButton(" 素材")
         self.btn_material.setObjectName("secondary_button")
         self.btn_material.setFixedHeight(30)
         self.btn_material.setCursor(Qt.PointingHandCursor)
-        self.btn_material.setToolTip("从服务端素材库选择素材加入会话素材池（贯穿后续所有轮次，服务端自动注入；点胶囊 ✕ 删除）")
+        self.btn_material.setToolTip("从服务端素材库选择素材加入会话素材池（贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")
         self.btn_material.clicked.connect(self._pick_material)
         tool_row.addWidget(self.btn_material)
-        self.btn_script = QPushButton("📜 脚本")
+        self.btn_script = QPushButton(" 脚本")
         self.btn_script.setObjectName("secondary_button")
         self.btn_script.setFixedHeight(30)
         self.btn_script.setCursor(Qt.PointingHandCursor)
         self.btn_script.setToolTip("从服务端分镜脚本库选择脚本加入对话上下文（不删除则每次对话都携带）")
         self.btn_script.clicked.connect(self._pick_script)
         tool_row.addWidget(self.btn_script)
-        self.chk_plan = QCheckBox("🧭 转编排任务")
+        self.chk_plan = QCheckBox(" 转编排任务")
         self.chk_plan.setCursor(Qt.PointingHandCursor)
         self.chk_plan.setToolTip("开启后：智能体对话以编排任务方式提交（mode=plan），"
                                  "服务端先拆解为 plan 再自动执行，回复返回任务 ID")
         tool_row.addWidget(self.chk_plan)
-        self.btn_skills = QPushButton("🧩 技能")
+        self.btn_skills = QPushButton(" 技能")
         self.btn_skills.setObjectName("secondary_button")
         self.btn_skills.setFixedHeight(30)
         self.btn_skills.setCursor(Qt.PointingHandCursor)
@@ -1110,10 +1110,10 @@ class _ChatPanel(QWidget):
         tool_row.addStretch()
         v.addLayout(tool_row)
 
-        # 对话上下文条：选择项显示区（不随发送清空，点击胶囊 ✕ 移除）
+        # 对话上下文条：选择项显示区（不随发送清空，点击胶囊 移除 移除）
         ctx_row = QHBoxLayout()
         ctx_row.setSpacing(8)
-        ctx_label = QLabel("📌 上下文")
+        ctx_label = QLabel(" 上下文")
         ctx_label.setStyleSheet("color:#8b93a3; font-size:12px; font-weight:600;")
         ctx_row.addWidget(ctx_label)
         self._ctx_scroll = QScrollArea()
@@ -1161,11 +1161,11 @@ class _ChatPanel(QWidget):
 
         self.append_bubble(
             "assistant",
-            "你好，我是 TinTin 智能体助手 🤖\n\n"
+            "你好，我是 TinTin 智能体助手 \n\n"
             "可以问我电商短视频运营的问题，也可以直接说需求，我会拆解并帮你执行；\n"
-            "选择 📎附件 / 📦产品 / 📁素材 / 📜脚本会加入对话上下文（显示在输入框上方，"
+            "选择 附件 / 产品 / 素材 / 脚本会加入对话上下文（显示在输入框上方，"
             "不删除则每次对话都携带），点「发送」交给智能体执行；输入 / 可快速唤起智能体；\n"
-            "勾选 🧭转编排任务 后，对话会先转为编排任务提交服务端自动执行（回复返回任务 ID）。")
+            "勾选 转编排任务 后，对话会先转为编排任务提交服务端自动执行（回复返回任务 ID）。")
 
     # ── 消息渲染 ─────────────────────────────────────────
     def append_bubble(self, role, text):
@@ -1223,10 +1223,10 @@ class _ChatPanel(QWidget):
         self._busy_timer.start(120000)
         # 重新生成：旧助手气泡直接转占位；普通发送：新建占位气泡
         if regen_bubble is not None:
-            regen_bubble.set_text("⏳ 思考中…")
+            regen_bubble.set_text("思考中…")
             self._pending = regen_bubble
         else:
-            self._pending = self.append_bubble("assistant", "⏳ 思考中…")
+            self._pending = self.append_bubble("assistant", "思考中…")
         # 智能体模式：素材/附件走服务端会话素材池（多轮自动注入）
         #   - 已有会话 → 选择时已入池；无会话（未发送过）→ 随本次发送由 worker 建会话并入池
         # 通用模式（无服务端会话）：保持文本拼接兼容路径
@@ -1399,7 +1399,7 @@ class _ChatPanel(QWidget):
             self._busy_timer = None
         self._set_busy(False)
         if self._pending is not None:
-            self._pending.set_text(f"⚠️ 出错了：{err}")
+            self._pending.set_text(f"注意： 出错了：{err}")
             self._pending = None
 
     def _on_busy_timeout(self):
@@ -1409,7 +1409,7 @@ class _ChatPanel(QWidget):
             self._set_busy(False)
             if self._pending is not None:
                 self._pending.set_text(
-                    "⏳ 请求超过 120 秒未返回，已恢复输入；回复稍后到达会直接显示。")
+                    "请求超过 120 秒未返回，已恢复输入；回复稍后到达会直接显示。")
 
     def _set_busy(self, busy):
         self.send_btn.setEnabled(not busy)
@@ -1513,7 +1513,7 @@ class _ChatPanel(QWidget):
     # ── 对话上下文（选择区显示，不随发送清空）────────────────────────
     def _make_chip(self, label, key):
         """上下文胶囊：显示选择项，点击移除。"""
-        chip = QPushButton(f"{label}  ✕")
+        chip = QPushButton(f"{label}  移除")
         chip.setFixedHeight(24)
         chip.setCursor(Qt.PointingHandCursor)
         chip.setToolTip("点击移除该上下文项（不删除则每次对话都携带）")
@@ -1539,19 +1539,19 @@ class _ChatPanel(QWidget):
             idx += 1
 
         if self._ctx_product:
-            add(f"📦 {self._ctx_product.get('brand', '')} / {self._ctx_product.get('model', '')}",
+            add(f" {self._ctx_product.get('brand', '')} / {self._ctx_product.get('model', '')}",
                 ("product",))
         for i, m in enumerate(self._ctx_materials):
             mid = str(m.get("id") or m.get("material_id") or "")
             name = m.get("filename") or mid or "未命名"
             mtype = _MEDIA_TYPE_LABEL.get((m.get("media_type") or "").lower(), "素材")
-            tag = " ⏳" if m.get("pending") else (" ❌入池失败" if m.get("pool_failed") else "")
-            add(f"📁 [{mtype}] {name}{tag}", ("material", i))
+            tag = " " if m.get("pending") else (" 失败：入池失败" if m.get("pool_failed") else "")
+            add(f" [{mtype}] {name}{tag}", ("material", i))
         for i, s in enumerate(self._ctx_scripts):
-            add(f"📜 [{s.get('topic', '')}] {s.get('shot_count', 0)}镜", ("script", i))
+            add(f" [{s.get('topic', '')}] {s.get('shot_count', 0)}镜", ("script", i))
         for i, a in enumerate(self._ctx_attachments):
-            tag = " ⏳" if a.get("pending") else (" ❌入池失败" if a.get("pool_failed") else "")
-            add(f"📎 {a['name']}{tag}", ("attachment", i))
+            tag = " " if a.get("pending") else (" 失败：入池失败" if a.get("pool_failed") else "")
+            add(f" {a['name']}{tag}", ("attachment", i))
         self._ctx_row_widget.setVisible(self._ctx_lay.count() > 1)
 
     def _remove_ctx(self, key):
@@ -1786,7 +1786,7 @@ class AgentHomePage:
         layout.setContentsMargins(30, 24, 30, 24)
         layout.setSpacing(14)
 
-        heading = QLabel("✨ 螺丝钉智能体工作台")
+        heading = QLabel(" 螺丝钉智能体工作台")
         heading.setStyleSheet("font-size: 22px; font-weight: 700;")
         layout.addWidget(heading)
         sub = QLabel("输入需求或点一个任务卡片——剩下的交给智能体。")
@@ -1801,13 +1801,29 @@ class AgentHomePage:
         grid.setSpacing(14)
         for i, (title, icon, desc, idx, accent) in enumerate(_TASK_CARDS):
             card = _TaskCard(title, icon, desc, accent)
-            card.clicked.connect(lambda checked=False, i=idx: self._goto(i))
+            card.clicked.connect(lambda checked=False, i=idx: self._open_task(i))
             grid.addWidget(card, i // 4, i % 4)
         layout.addLayout(grid)
 
         # AI 对话面板（占剩余空间）
         self._chat_panel = _ChatPanel()
         layout.addWidget(self._chat_panel, 1)
+
+    def _open_task(self, target):
+        """任务卡片点击：None = 打开爆款仿制对话框，否则跳转页面。"""
+        if target is None:
+            self._open_viral_clone()
+            return
+        self._goto(target)
+
+    def _open_viral_clone(self):
+        try:
+            from gui.viral_clone_dialog import ViralCloneDialog
+            dlg = ViralCloneDialog(self.main_window, self.main_window)
+            dlg.exec_()
+        except Exception as e:
+            log.exception(f"[工作台] 打开爆款仿制对话框失败: {e}")
+            QMessageBox.critical(self.main_window, "错误", f"打开爆款仿制失败：{e}")
 
     def _goto(self, page, tab=None):
         """跳转到指定页面，若目标页有 Tab 则自动切到对应 Tab。"""

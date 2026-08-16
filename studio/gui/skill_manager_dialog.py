@@ -38,15 +38,15 @@ class SkillManagerDialog(QDialog):
 
         row = QHBoxLayout()
         row.setSpacing(8)
-        btn_dir = QPushButton("📁 从文件夹安装")
+        btn_dir = QPushButton(" 从文件夹安装")
         btn_dir.setCursor(Qt.PointingHandCursor)
         btn_dir.clicked.connect(self._install_dir)
         row.addWidget(btn_dir)
-        btn_md = QPushButton("📄 从 .md 安装")
+        btn_md = QPushButton(" 从 .md 安装")
         btn_md.setCursor(Qt.PointingHandCursor)
         btn_md.clicked.connect(self._install_md)
         row.addWidget(btn_md)
-        btn_zip = QPushButton("🗜️ 从 ZIP 安装")
+        btn_zip = QPushButton(" 从 ZIP 安装")
         btn_zip.setCursor(Qt.PointingHandCursor)
         btn_zip.clicked.connect(self._install_zip)
         row.addWidget(btn_zip)
@@ -82,7 +82,7 @@ class SkillManagerDialog(QDialog):
             desc = s.get("description") or ""
             version = s.get("version") or ""
             label = f"{name}  v{version}" if version else name
-            item = QListWidgetItem(f"🧩 {label}")
+            item = QListWidgetItem(f" {label}")
             item.setToolTip(desc)
             item.setData(Qt.UserRole, s.get("id") or "")
             self.list_skills.addItem(item)
@@ -121,7 +121,7 @@ class SkillManagerDialog(QDialog):
 
     def _on_installed(self, entry):
         name = (entry or {}).get("name") or "技能"
-        QMessageBox.information(self, "安装完成", f"✅ 已安装技能：{name}")
+        QMessageBox.information(self, "安装完成", f" 已安装技能：{name}")
         self._reload()
         self.skillsChanged.emit()
 
@@ -134,7 +134,7 @@ class SkillManagerDialog(QDialog):
             QMessageBox.information(self, "提示", "请先选择一个技能。")
             return
         skill_id = item.data(Qt.UserRole) or ""
-        name = item.text().replace("🧩 ", "")
+        name = item.text().replace(" ", "")
         if not skill_id:
             return
         if QMessageBox.question(

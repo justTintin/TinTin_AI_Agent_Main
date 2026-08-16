@@ -222,14 +222,14 @@ class ImageMattingPage(BasePage):
         self.progress_bar.setVisible(False)
         left_layout.addWidget(self.progress_bar)
         
-        self.btn_run = QPushButton("⚡ 开始自动抠图")
+        self.btn_run = QPushButton(" 开始自动抠图")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.setCursor(Qt.PointingHandCursor)
         self.btn_run.setEnabled(False)
         self.btn_run.clicked.connect(self.run_matting)
         left_layout.addWidget(self.btn_run)
         
-        self.btn_save = QPushButton("💾 保存抠图结果")
+        self.btn_save = QPushButton(" 保存抠图结果")
         self.btn_save.setObjectName("action_button")
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setEnabled(False)
@@ -238,7 +238,7 @@ class ImageMattingPage(BasePage):
         
         left_layout.addStretch()
         
-        tips = QLabel("💡 提示：本功能基于深度学习，完全自动抠除背景。首次使用对应模型时会自动联网下载权重文件到用户主目录下的 .u2net 文件夹中，请保持网络畅通。")
+        tips = QLabel(" 提示：本功能基于深度学习，完全自动抠除背景。首次使用对应模型时会自动联网下载权重文件到用户主目录下的 .u2net 文件夹中，请保持网络畅通。")
         tips.setWordWrap(True)
         tips.setObjectName("muted_text")
         tips.setStyleSheet("font-size: 11px; line-height: 14px;")
@@ -255,13 +255,13 @@ class ImageMattingPage(BasePage):
         
         # Tab View Switcher
         view_tabs_layout = QHBoxLayout()
-        self.btn_view_orig = QPushButton("🎨 原始图像 (Original)")
+        self.btn_view_orig = QPushButton(" 原始图像 (Original)")
         self.btn_view_orig.setObjectName("pill_button")
         self.btn_view_orig.setCheckable(True)
         self.btn_view_orig.setChecked(True)
         self.btn_view_orig.setCursor(Qt.PointingHandCursor)
         
-        self.btn_view_result = QPushButton("🖼️ 抠图结果 (Cutout)")
+        self.btn_view_result = QPushButton(" 抠图结果 (Cutout)")
         self.btn_view_result.setObjectName("pill_button")
         self.btn_view_result.setCheckable(True)
         self.btn_view_result.setCursor(Qt.PointingHandCursor)

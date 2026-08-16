@@ -79,7 +79,7 @@ class VideoPreviewDialog(QDialog):
 
     def __init__(self, url, title="", material_id="", media_type="", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"▶ 视频预览 - {title}")
+        self.setWindowTitle(f"播放 视频预览 - {title}")
         self.resize(1120, 620)
         self.setObjectName("videoPreviewDialog")
 
@@ -215,9 +215,15 @@ class _GridRowsFilter(QObject):
         self.grid.setGridSize(new_size)
         self.grid.setIconSize(QSize(icon, icon))
         # IconMode 下 setGridSize/setIconSize 不保证重排已摆放的项（滚动条出现
-        # 使视口变窄后，旧行保持旧列宽 → 首页行间距异常）；尺寸变化时强制重排
-        if changed and self.grid.count():
+        # 使视口变窄后，旧行保持旧列宽 → 首页行间距异常）。翻页时网格会先 clear
+        # 再重新 addItem，因此只要当前有项目就强制重排，确保每页都按同一 gridSize
+        # 渲染，避免第一页和后续页间距不一致。
+        if self.grid.count():
             self.grid.doItemsLayout()
+            # 滚动条/视口宽度稳定后再校验一次，消除 setGridSize 与 scrollbar 出现
+            # 时机不一致导致的残影。
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(50, self.grid.doItemsLayout)
         # 布局诊断：帮助确认侧边栏/网格实际占用宽度
         try:
             from utils.logger_utils import log as _log
@@ -384,12 +390,12 @@ class PromptReversePanel(QFrame):
         lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(8)
 
-        title = QLabel("🤖 反推提示词")
+        title = QLabel("反推提示词")
         title.setObjectName("section_header")
         lay.addWidget(title)
 
         # 反推按钮放在提示词文本框上方
-        self.btn_reverse = QPushButton("🔮 反推提示词")
+        self.btn_reverse = QPushButton("反推提示词")
         self.btn_reverse.setObjectName("primary_button")
         self.btn_reverse.clicked.connect(self._reverse_prompt)
         lay.addWidget(self.btn_reverse)
@@ -400,7 +406,7 @@ class PromptReversePanel(QFrame):
         lbl_pos.setObjectName("muted_text")
         row_pos.addWidget(lbl_pos)
         row_pos.addStretch(1)
-        self.btn_copy_pos = QPushButton("📋 复制正向")
+        self.btn_copy_pos = QPushButton("复制正向")
         self.btn_copy_pos.setObjectName("secondary_button")
         self.btn_copy_pos.clicked.connect(self._copy_positive)
         row_pos.addWidget(self.btn_copy_pos)
@@ -418,7 +424,7 @@ class PromptReversePanel(QFrame):
         lbl_neg.setObjectName("muted_text")
         row_neg.addWidget(lbl_neg)
         row_neg.addStretch(1)
-        self.btn_copy_neg = QPushButton("📋 复制负向")
+        self.btn_copy_neg = QPushButton("复制负向")
         self.btn_copy_neg.setObjectName("secondary_button")
         self.btn_copy_neg.clicked.connect(self._copy_negative)
         row_neg.addWidget(self.btn_copy_neg)
@@ -432,10 +438,10 @@ class PromptReversePanel(QFrame):
 
     def _reverse_prompt(self):
         if not self._mid:
-            self.txt_prompt.setPlainText("⚠ 缺少素材ID")
+            self.txt_prompt.setPlainText("缺少素材ID")
             return
         self.btn_reverse.setEnabled(False)
-        self.txt_prompt.setPlainText("⏳ 正在反推提示词…")
+        self.txt_prompt.setPlainText("正在反推提示词…")
         self.txt_negative.clear()
         self._worker = _PromptWorker(self._mid, self._mtype)
         self._worker.finished.connect(self._on_prompt_done)
@@ -444,7 +450,7 @@ class PromptReversePanel(QFrame):
     def _on_prompt_done(self, prompt, neg, err):
         self.btn_reverse.setEnabled(True)
         if err:
-            self.txt_prompt.setPlainText(f"❌ 反推失败：{err}")
+            self.txt_prompt.setPlainText(f"反推失败：{err}")
             self.txt_negative.clear()
             return
         self.txt_prompt.setPlainText(prompt)
@@ -465,7 +471,7 @@ class VectorSearchPage(BasePage):
 
         # ── 顶部：标题 + 搜索栏 ──
         hdr = QHBoxLayout()
-        title = QLabel("🔍 素材检索")
+        title = QLabel("素材检索")
         title.setObjectName("heading")
         hdr.addWidget(title)
         # 素材库统计跟随标题，用当前小字（不再作为侧边栏大标题）
@@ -480,8 +486,8 @@ class VectorSearchPage(BasePage):
         # 类型（全部/图片/视频）移到搜索栏最前面
         self.type_combo = QComboBox()
         self.type_combo.addItem("全部", "")
-        self.type_combo.addItem("🖼 图片", "image")
-        self.type_combo.addItem("🎬 视频", "video")
+        self.type_combo.addItem("图片", "image")
+        self.type_combo.addItem("视频", "video")
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         search_row.addWidget(self.type_combo)
         # 背景类型：图片下的分类（白底/黑底/纯色/渐变/绿幕/蓝幕/透明/场景），支持多选，选图片时启用
@@ -491,9 +497,9 @@ class VectorSearchPage(BasePage):
         self.bg_menu_btn.setPopupMode(QToolButton.InstantPopup)
         self.bg_menu = QMenu(self.bg_menu_btn)
         self._bg_actions = []
-        for _txt, _val in [("⬜ 白底图", "white"), ("⬛ 黑底图", "black"), ("🎨 纯色", "solid"),
-                           ("🌫 渐变", "gradient"), ("🟢 绿幕", "green_screen"), ("🔵 蓝幕", "blue_screen"),
-                           ("🫧 透明", "transparent"), ("🏞 场景", "scene")]:
+        for _txt, _val in [("白底图", "white"), ("黑底图", "black"), ("纯色", "solid"),
+                           ("渐变", "gradient"), ("绿幕", "green_screen"), ("蓝幕", "blue_screen"),
+                           ("透明", "transparent"), ("场景", "scene")]:
             _act = QAction(_txt, self.bg_menu)
             _act.setCheckable(True)
             _act.setData(_val)
@@ -517,8 +523,7 @@ class VectorSearchPage(BasePage):
         splitter = QSplitter(Qt.Horizontal)
 
         sidebar = QFrame()
-        sidebar.setObjectName("card")
-        sidebar.setStyleSheet("QFrame#card { background-color: #151722; border: 1px solid #252938; border-right: none; border-top-left-radius: 12px; border-bottom-left-radius: 12px; border-top-right-radius: 0px; border-bottom-right-radius: 0px; }")
+        sidebar.setObjectName("search_sidebar")
         sidebar.setFixedWidth(160)  # 固定宽度，避免 QSplitter 初始/用户拖拽后变宽
         sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         sb_lay = QVBoxLayout(sidebar)
@@ -575,6 +580,7 @@ class VectorSearchPage(BasePage):
         self.grid.setSpacing(2)
         self.grid.setSelectionMode(QAbstractItemView.NoSelection)
         self.grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.grid.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.grid.setFrameShape(QFrame.NoFrame)
         self.grid.setLineWidth(0)
         self.grid.setUniformItemSizes(True)
@@ -594,12 +600,12 @@ class VectorSearchPage(BasePage):
 
         # 选择工具栏：全选/取消全选（仅对当前页生效）
         sel_row = QHBoxLayout()
-        btn_sel_all = QPushButton("☑ 全选本页")
+        btn_sel_all = QPushButton("全选本页")
         btn_sel_all.setObjectName("secondary_button")
         btn_sel_all.setFixedWidth(110)
         btn_sel_all.clicked.connect(self._select_all_page)
         sel_row.addWidget(btn_sel_all)
-        btn_sel_none = QPushButton("☐ 取消全选")
+        btn_sel_none = QPushButton("取消全选")
         btn_sel_none.setObjectName("secondary_button")
         btn_sel_none.setFixedWidth(110)
         btn_sel_none.clicked.connect(self._clear_all_page)
@@ -608,12 +614,12 @@ class VectorSearchPage(BasePage):
         self.lbl_sel_count.setObjectName("muted_text")
         sel_row.addWidget(self.lbl_sel_count, 1)
         sel_row.addStretch()
-        self.btn_copy_url = QPushButton("🚀 一键成片")
+        self.btn_copy_url = QPushButton("一键成片")
         self.btn_copy_url.setObjectName("primary_button")
         self.btn_copy_url.setToolTip("把选中的素材（图片/视频混合可多选）作为成片素材来源，跳转到「一键成片」自动填充。")
         self.btn_copy_url.clicked.connect(self._send_to_compile)
         sel_row.addWidget(self.btn_copy_url)
-        self.btn_montage = QPushButton("🎬 智能混剪")
+        self.btn_montage = QPushButton("智能混剪")
         self.btn_montage.setObjectName("primary_button")
         self.btn_montage.setToolTip("把选中的视频素材发送到「智能混剪」进行分镜/拼接（素材需在本地/NAS 可访问）。")
         self.btn_montage.clicked.connect(self._send_to_montage)
@@ -629,7 +635,7 @@ class VectorSearchPage(BasePage):
         self.lbl_page = QLabel("第 0 / 0 页")
         self.lbl_page.setObjectName("muted_text")
         page_row.addWidget(self.lbl_page)
-        self.btn_next = QPushButton("下一页 ▶")
+        self.btn_next = QPushButton("下一页 播放")
         self.btn_next.setObjectName("secondary_button")
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
@@ -672,8 +678,8 @@ class VectorSearchPage(BasePage):
 
         # 占位图标（图片加载前 / 视频 / 音频占位）
         self._pm_placeholder = _make_placeholder_pixmap("…")
-        self._pm_video = _make_placeholder_pixmap("🎬", "#243b55")
-        self._pm_audio = _make_placeholder_pixmap("🎵", "#3b2f5b")
+        self._pm_video = _make_placeholder_pixmap("", "#243b55")
+        self._pm_audio = _make_placeholder_pixmap("", "#3b2f5b")
 
         # 初始：加载统计 + 筛选选项 + 默认浏览全库
         QTimer.singleShot(100, self._init_load)
@@ -901,7 +907,7 @@ class VectorSearchPage(BasePage):
         friendly = msg
         if "Connection" in msg or "timed out" in msg or "Max retries" in msg:
             friendly = "无法连接服务端，请检查服务端是否在线"
-        self.lbl_stat.setText(f"❌ {friendly}")
+        self.lbl_stat.setText(f"失败： {friendly}")
         self.grid.clear()
         self._total = 0
         self._update_page_label()
@@ -967,7 +973,7 @@ class VectorSearchPage(BasePage):
 
             # tooltip：完整信息
             type_name = {"video": "视频", "audio": "音频", "image": "图片"}.get(mtype, mtype)
-            tip = (f"📁 {fname}\n品牌: {brand}\n型号: {model}\n"
+            tip = (f" {fname}\n品牌: {brand}\n型号: {model}\n"
                    f"分类: {category}\n类型: {type_name}\n大小: {size_str}")
             if score is not None:
                 tip += f"\n相关度: {float(score):.3f}"
@@ -1058,7 +1064,7 @@ class VectorSearchPage(BasePage):
     def _copy_selected_url(self):
         mid, _ = self._selected_mid()
         if not mid:
-            self.lbl_stat.setText("⚠ 请先选中一个素材")
+            self.lbl_stat.setText("注意： 请先选中一个素材")
             return
         url = _serve_url(mid)
         QGuiApplication.clipboard().setText(url)
@@ -1068,7 +1074,7 @@ class VectorSearchPage(BasePage):
         """收集当前选中的素材为统一 dict 列表；无有效素材返回 None。"""
         items = self._selected_items()
         if not items:
-            self.lbl_stat.setText("⚠ 请先在缩略图右上角方框选择素材")
+            self.lbl_stat.setText("注意： 请先在缩略图右上角方框选择素材")
             return None
         materials = []
         for it in items:
@@ -1099,7 +1105,7 @@ class VectorSearchPage(BasePage):
                 "ai_confidence": raw.get("ai_confidence"),
             })
         if not materials:
-            self.lbl_stat.setText("⚠ 未选择到有效素材")
+            self.lbl_stat.setText(" 未选择到有效素材")
             return None
         return materials
 
@@ -1110,7 +1116,7 @@ class VectorSearchPage(BasePage):
             return
         mw = getattr(self, "main_window", None)
         if mw is None:
-            self.lbl_stat.setText("❌ 无法访问主窗口")
+            self.lbl_stat.setText(" 无法访问主窗口")
             return
         # 切换到一键成片页（第 34 页）并填充素材列表
         try:
@@ -1119,11 +1125,11 @@ class VectorSearchPage(BasePage):
             if tool is None:
                 # 恢复当前页面
                 mw.switch_page(38)
-                self.lbl_stat.setText("❌ 一键成片页未加载")
+                self.lbl_stat.setText("失败： 一键成片页未加载")
                 return
             tool.import_materials(materials)
         except Exception as e:
-            self.lbl_stat.setText(f"❌ 跳转失败: {e}")
+            self.lbl_stat.setText(f"失败： 跳转失败: {e}")
 
     def _send_to_montage(self):
         """把选中的视频素材发送到「智能混剪」（支持多选，需本地/NAS 可访问路径）。"""
@@ -1132,18 +1138,18 @@ class VectorSearchPage(BasePage):
             return
         mw = getattr(self, "main_window", None)
         if mw is None:
-            self.lbl_stat.setText("❌ 无法访问主窗口")
+            self.lbl_stat.setText(" 无法访问主窗口")
             return
         try:
             mw.switch_page(14)
             tool = getattr(mw, "video_montage_tool", None)
             if tool is None:
                 mw.switch_page(38)
-                self.lbl_stat.setText("❌ 智能混剪页未加载")
+                self.lbl_stat.setText("失败： 智能混剪页未加载")
                 return
             tool.set_external_materials(materials)
         except Exception as e:
-            self.lbl_stat.setText(f"❌ 跳转失败: {e}")
+            self.lbl_stat.setText(f"失败： 跳转失败: {e}")
 
     def _on_item_double_clicked(self, item):
         """双击卡片：图片弹大图预览（右侧反推提示词），视频弹播放器预览。"""

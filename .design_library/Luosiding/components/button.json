@@ -1,0 +1,62 @@
+{
+  "name": "Button",
+  "slug": "button",
+  "description": "按钮组件，用于触发操作或导航。支持多种类型、尺寸和状态。",
+  "tags": ["action", "control", "interactive"],
+  "variants": [
+    {
+      "name": "Primary",
+      "slug": "primary",
+      "description": "主要按钮，用于页面中的核心操作。",
+      "tokens": ["--color-primary", "--color-on-primary", "--radius-md"]
+    },
+    {
+      "name": "Secondary",
+      "slug": "secondary",
+      "description": "次要按钮，用于非核心操作或辅助操作。",
+      "tokens": ["--color-secondary", "--color-on-secondary-container", "--color-border", "--radius-md"]
+    },
+    {
+      "name": "Ghost",
+      "slug": "ghost",
+      "description": "幽灵按钮，用于低强调场景。",
+      "tokens": ["--color-surface", "--color-on-surface", "--color-border", "--radius-md"]
+    },
+    {
+      "name": "Danger",
+      "slug": "danger",
+      "description": "危险按钮，用于删除、清空等破坏性操作。",
+      "tokens": ["--color-error", "--color-on-error", "--radius-md"]
+    },
+    {
+      "name": "Icon",
+      "slug": "icon",
+      "description": "图标按钮，仅包含图标，用于工具栏等紧凑场景。",
+      "tokens": ["--color-surface", "--color-on-surface-variant", "--radius-md", "--size-icon-md"]
+    }
+  ],
+  "sizes": [
+    { "name": "Small", "slug": "sm", "height": "28px", "padding": "0 10px", "fontSize": "12px" },
+    { "name": "Medium", "slug": "md", "height": "36px", "padding": "0 14px", "fontSize": "13px" },
+    { "name": "Large", "slug": "lg", "height": "44px", "padding": "0 18px", "fontSize": "14px" }
+  ],
+  "states": [
+    { "name": "Default", "slug": "default" },
+    { "name": "Hover", "slug": "hover" },
+    { "name": "Active", "slug": "active" },
+    { "name": "Disabled", "slug": "disabled" },
+    { "name": "Loading", "slug": "loading" }
+  ],
+  "usage": {
+    "dos": [
+      "每个页面核心操作区最多使用一个 Primary 按钮",
+      "成对出现时，Primary 在右，Secondary 在左",
+      "按钮文案使用动词开头，如“创建任务”、“保存设置”"
+    ],
+    "donts": [
+      "避免在同一区域使用多个 Primary 按钮",
+      "禁止使用 Emoji 作为按钮图标",
+      "避免按钮文案过长，建议不超过 6 个汉字"
+    ]
+  }
+}

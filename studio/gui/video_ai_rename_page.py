@@ -359,7 +359,7 @@ class VideoAnalyzeWorker(BaseWorker):
                 self.video_analyzed.emit(idx, result)
             except Exception as e:
                 log.warning(f"Analyze video failed [{fname}]: {e}")
-                self._emit_log(f"  ✗ 未捕获异常: {type(e).__name__}: {e}")
+                self._emit_log(f"   未捕获异常: {type(e).__name__}: {e}")
                 result = self._fallback_result(fpath, str(e))
                 self.video_analyzed.emit(idx, result)
 
@@ -413,7 +413,7 @@ class VideoAnalyzeWorker(BaseWorker):
                                 f"品牌={r['brand']}  品类={r['category']}  型号={r['model']}"
                             )
                         except Exception as e:
-                            self._emit_log(f"  帧{i+1:02d} ✗ {type(e).__name__}: {e}")
+                            self._emit_log(f"  帧{i+1:02d}  {type(e).__name__}: {e}")
                     if frame_results:
                         ai_info, conf_info = _aggregate_frame_results(frame_results)
                         vision_ok = any(v.lower() != 'unknown' for v in ai_info.values())
@@ -434,13 +434,13 @@ class VideoAnalyzeWorker(BaseWorker):
                                                sorted(votes.items(), key=lambda x: -x[1]))
                             self._emit_log(f"    {field}分布: {detail}")
                     else:
-                        self._emit_log("  ✗ 所有帧分析均失败")
+                        self._emit_log("   所有帧分析均失败")
                 else:
                     log.warning(f"[{fname}] 抽帧返回空列表")
-                    self._emit_log("  ✗ 抽帧返回空列表，跳过视觉分析")
+                    self._emit_log("   抽帧返回空列表，跳过视觉分析")
             except Exception as e:
                 log.warning(f"[{fname}] 视觉分析异常: {type(e).__name__}: {e}")
-                self._emit_log(f"  ✗ 视觉分析异常: {type(e).__name__}: {e}")
+                self._emit_log(f"   视觉分析异常: {type(e).__name__}: {e}")
 
             if not vision_ok:
                 self._emit_log("  视觉未识别，结果为 unknown")
@@ -452,9 +452,9 @@ class VideoAnalyzeWorker(BaseWorker):
         orientation = meta.get('orientation') or parsed.get('orientation') or 'unknown'
 
         ai_ok = any(v.lower() != 'unknown' for v in ai_info.values())
-        status_text = '已分析 ✓' if ai_ok else '未识别 ⚠'
+        status_text = '已分析 已' if ai_ok else '未识别 注意：'
         self._emit_log(
-            f"  ✔ 最终: 品牌={ai_info.get('brand','?')}  品类={ai_info.get('category','?')}  "
+            f"  已 最终: 品牌={ai_info.get('brand','?')}  品类={ai_info.get('category','?')}  "
             f"型号={ai_info.get('model','?')}  → {new_name}"
         )
 
@@ -498,7 +498,7 @@ class VideoAnalyzeWorker(BaseWorker):
             'resolution':    meta.get('resolution', 'unknown'),
             'orientation':   meta.get('orientation','unknown'),
             'date':          date_s,
-            'status':        f'⚠ 失败: {err_msg[:50]}',
+            'status':        f' 失败: {err_msg[:50]}',
             'error':         True,
             'brand_conf':    0.0,
             'category_conf': 0.0,
@@ -647,7 +647,7 @@ class FrameAnalysisThread(BaseWorker):
 class BatchFindReplaceDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🔄 批量查找替换（新文件名）")
+        self.setWindowTitle(" 批量查找替换（新文件名）")
         self.setMinimumWidth(420)
         self.setObjectName("batchReplaceDialog")
         layout = QVBoxLayout(self)
@@ -672,7 +672,7 @@ class BatchFindReplaceDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_ok = QPushButton("✅ 应用替换")
+        btn_ok = QPushButton("完成： 应用替换")
         btn_ok.clicked.connect(self.accept)
         btn_row.addWidget(btn_ok)
         btn_cancel = QPushButton("取消")
@@ -737,7 +737,7 @@ class VideoPlayerDialog(QDialog):
 
         ctrl_h = QHBoxLayout()
         ctrl_h.setContentsMargins(12, 0, 12, 0)
-        self.btn_play = QPushButton("▶ 播放")
+        self.btn_play = QPushButton("播放 播放")
         self.btn_play.setFixedWidth(90)
         self.btn_play.clicked.connect(self._toggle_play)
         ctrl_h.addWidget(self.btn_play)
@@ -768,7 +768,7 @@ class VideoPlayerDialog(QDialog):
         hint.setObjectName("videoPlayerHint")
         right_v.addWidget(hint)
 
-        self.btn_analyze_frame = QPushButton("🔍 分析这一帧")
+        self.btn_analyze_frame = QPushButton(" 分析这一帧")
         self.btn_analyze_frame.setEnabled(True)
         self.btn_analyze_frame.clicked.connect(self._analyze_current_frame)
         right_v.addWidget(self.btn_analyze_frame)
@@ -813,7 +813,7 @@ class VideoPlayerDialog(QDialog):
 
         right_v.addStretch()
 
-        self.btn_apply_rename = QPushButton("✅ 确认重命名")
+        self.btn_apply_rename = QPushButton("完成： 确认重命名")
         self.btn_apply_rename.setEnabled(False)
         self.btn_apply_rename.clicked.connect(self._apply_rename)
         right_v.addWidget(self.btn_apply_rename)
@@ -858,9 +858,9 @@ class VideoPlayerDialog(QDialog):
 
     def _on_playback_state_changed(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.btn_play.setText("⏸ 暂停")
+            self.btn_play.setText("暂停 暂停")
         else:
-            self.btn_play.setText("▶ 播放")
+            self.btn_play.setText("播放 播放")
 
     def _on_duration_changed(self, duration: int):
         self._duration = duration
@@ -909,9 +909,9 @@ class VideoPlayerDialog(QDialog):
     def _on_frame_analyzed(self, result: dict):
         self.btn_analyze_frame.setEnabled(True)
         if 'error' in result:
-            self.lbl_frame_status.setText(f"✗ {result['error']}")
+            self.lbl_frame_status.setText(f" {result['error']}")
             return
-        self.lbl_frame_status.setText("✓ 分析完成")
+        self.lbl_frame_status.setText("已 分析完成")
         self.edit_brand.setText(result.get('brand', 'unknown'))
         self.edit_category.setText(result.get('category', 'unknown'))
         self.edit_model.setText(result.get('model', 'unknown'))
@@ -966,7 +966,7 @@ class VideoPlayerDialog(QDialog):
         self.page_ref._apply_rename_from_dialog(self.row_idx, actual_name, ai_info)
         self.fpath = new_path
         self.setWindowTitle(f"视频预览 — {actual_name}")
-        self.lbl_frame_status.setText(f"✅ 已重命名: {actual_name}")
+        self.lbl_frame_status.setText(f" 已重命名: {actual_name}")
         self.btn_apply_rename.setEnabled(False)
 
 
@@ -999,7 +999,7 @@ class VideoAiRenamePage(BasePage):
         layout.setSpacing(10)
 
         # 标题
-        heading = QLabel("🏷️ 视频AI智能重命名")
+        heading = QLabel(" 视频AI智能重命名")
         heading.setObjectName("heading")
         layout.addWidget(heading)
 
@@ -1013,7 +1013,7 @@ class VideoAiRenamePage(BasePage):
         # ── 文件夹选择行 ──
         row_folder = QHBoxLayout()
         row_folder.setSpacing(8)
-        lbl_folder = QLabel("📁 视频文件夹:")
+        lbl_folder = QLabel(" 视频文件夹:")
         lbl_folder.setFixedWidth(90)
         self.folder_input = QLineEdit()
         self.folder_input.setPlaceholderText("选择包含视频文件的文件夹...")
@@ -1059,27 +1059,27 @@ class VideoAiRenamePage(BasePage):
         row_actions = QHBoxLayout()
         row_actions.setSpacing(8)
 
-        self.btn_analyze = QPushButton("🔍 分析并预览")
+        self.btn_analyze = QPushButton(" 分析并预览")
         self.btn_analyze.setObjectName("primary_button")
         self.btn_analyze.setToolTip("分析视频内容，预览重命名结果（不修改文件）")
         self.btn_analyze.setEnabled(False)
         self.btn_analyze.clicked.connect(self._start_analyze)
         row_actions.addWidget(self.btn_analyze)
 
-        self.btn_stop = QPushButton("⏹ 停止")
+        self.btn_stop = QPushButton("停止 停止")
         self.btn_stop.setObjectName("secondary_button")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._stop_analyze)
         row_actions.addWidget(self.btn_stop)
 
-        self.btn_rename = QPushButton("✅ 执行重命名")
+        self.btn_rename = QPushButton("完成： 执行重命名")
         self.btn_rename.setObjectName("action_button")
         self.btn_rename.setToolTip("将勾选的视频按预览的新文件名重命名")
         self.btn_rename.setEnabled(False)
         self.btn_rename.clicked.connect(self._do_rename)
         row_actions.addWidget(self.btn_rename)
 
-        self.btn_undo = QPushButton("↩️ 撤销上次重命名")
+        self.btn_undo = QPushButton("↩ 撤销上次重命名")
         self.btn_undo.setObjectName("secondary_button")
         self.btn_undo.setEnabled(False)
         self.btn_undo.clicked.connect(self._undo_rename)
@@ -1087,20 +1087,20 @@ class VideoAiRenamePage(BasePage):
 
         row_actions.addStretch(1)
 
-        self.btn_batch_replace = QPushButton("🔄 批量查找替换")
+        self.btn_batch_replace = QPushButton(" 批量查找替换")
         self.btn_batch_replace.setObjectName("secondary_button")
         self.btn_batch_replace.setToolTip("在新文件名列中批量查找并替换文字")
         self.btn_batch_replace.setEnabled(False)
         self.btn_batch_replace.clicked.connect(self._batch_find_replace)
         row_actions.addWidget(self.btn_batch_replace)
 
-        btn_check_all = QPushButton("☑ 全选")
+        btn_check_all = QPushButton(" 全选")
         btn_check_all.setObjectName("secondary_button")
         btn_check_all.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         btn_check_all.clicked.connect(lambda: self._set_all_checked(True))
         row_actions.addWidget(btn_check_all)
 
-        btn_uncheck = QPushButton("☐ 全不选")
+        btn_uncheck = QPushButton(" 全不选")
         btn_uncheck.setObjectName("secondary_button")
         btn_uncheck.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         btn_uncheck.clicked.connect(lambda: self._set_all_checked(False))
@@ -1111,7 +1111,7 @@ class VideoAiRenamePage(BasePage):
         # ── 批量设置字段 ──
         row_batch_fix = QHBoxLayout()
         row_batch_fix.setSpacing(8)
-        row_batch_fix.addWidget(QLabel("🔧 批量设置:"))
+        row_batch_fix.addWidget(QLabel(" 批量设置:"))
         self.combo_batch_field = QComboBox()
         self.combo_batch_field.addItems(["品牌(AI)", "品类(AI)", "型号(AI)"])
         self.combo_batch_field.setFixedWidth(80)
@@ -1134,7 +1134,7 @@ class VideoAiRenamePage(BasePage):
         self.table = QTableWidget()
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            "☑", "#", "原文件名", "新文件名（双击编辑）",
+            "", "#", "原文件名", "新文件名（双击编辑）",
             "分辨率/方向", "日期", "状态", "分析结果", "重分析", "播放"
         ])
         hdr = self.table.horizontalHeader()
@@ -1171,7 +1171,7 @@ class VideoAiRenamePage(BasePage):
 
         # ── 实时日志面板 ──
         log_header_row = QHBoxLayout()
-        lbl_log_title = QLabel("📋 实时日志")
+        lbl_log_title = QLabel(" 实时日志")
         lbl_log_title.setObjectName("aiRenameLogTitle")
         log_header_row.addWidget(lbl_log_title)
         log_header_row.addStretch()
@@ -1198,12 +1198,12 @@ class VideoAiRenamePage(BasePage):
         try:
             cfg = self.main_win.ai_config
             self._model          = cfg.get("llm_model",          "").strip()
-            self.lbl_model_info.setText(f"🤖 文本: {self._model}" if self._model else "⚠ 未配置文本模型")
+            self.lbl_model_info.setText(f" 文本: {self._model}" if self._model else " 未配置文本模型")
             self.lbl_model_info.setProperty("status", "" if self._model else "error")
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
             self.lbl_model_info.style().polish(self.lbl_model_info)
         except Exception:
-            self.lbl_model_info.setText("⚠ 无法读取 AI 配置")
+            self.lbl_model_info.setText(" 无法读取 AI 配置")
             self.lbl_model_info.setProperty("status", "error")
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
             self.lbl_model_info.style().polish(self.lbl_model_info)
@@ -1367,7 +1367,7 @@ class VideoAiRenamePage(BasePage):
             self.table.setItem(row, 7, ai_result_item)
 
             # Col 8: 重分析按钮
-            btn_reanalyze = QPushButton("🔄")
+            btn_reanalyze = QPushButton("")
             btn_reanalyze.setToolTip("单独重新分析该视频")
             btn_reanalyze.setStyleSheet("padding: 0px; font-size: 11px;")
             btn_reanalyze.setFixedWidth(30)
@@ -1377,7 +1377,7 @@ class VideoAiRenamePage(BasePage):
             self.table.setCellWidget(row, 8, btn_reanalyze)
 
             # Col 9: 播放按钮（随时可用，打开 VideoPlayerDialog）
-            btn_play_row = QPushButton("▶")
+            btn_play_row = QPushButton("播放")
             btn_play_row.setToolTip("播放视频，拖拽到任意帧后可分析命名")
             btn_play_row.setObjectName("aiRenamePlayBtn")
             btn_play_row.setFixedWidth(30)
@@ -1467,7 +1467,7 @@ class VideoAiRenamePage(BasePage):
                     result = self.worker._analyze_one(self.fpath)
                     self.result_ready.emit(-1, result)
                 except Exception as e:
-                    self.result_ready.emit(-1, {'status': f'⚠ {str(e)[:50]}', 'error': True,
+                    self.result_ready.emit(-1, {'status': f'注意： {str(e)[:50]}', 'error': True,
                         'brand':'unknown','category':'unknown','model':'unknown',
                         'new_name':'','resolution':'','orientation':'','date':'','model_name':'unknown'})
 
@@ -1541,12 +1541,12 @@ class VideoAiRenamePage(BasePage):
         self.progress_bar.setVisible(False)
 
         # 残留的"分析中..."说明该行根本没收到结果（线程中途异常/被中止），
-        # 不能伪装成"已分析 ✓"，标记为未完成。
+        # 不能伪装成"已分析 已"，标记为未完成。
         incomplete = 0
         for row in range(self.table.rowCount()):
             status_item = self.table.item(row, 6)
             if status_item and status_item.text() == "分析中...":
-                status_item.setText("未完成 ⚠")
+                status_item.setText("未完成 注意：")
                 status_item.setForeground(QColor("#f87171"))
                 incomplete += 1
 
@@ -1557,12 +1557,12 @@ class VideoAiRenamePage(BasePage):
 
         if incomplete or failed:
             self.status_lbl.setText(
-                f"⚠ 分析结束：成功 {ok} 个，失败 {failed} 个，未完成 {incomplete} 个（共 {total}）。"
-                "失败/未完成的行可点「🔄」单独重分析；详情见日志。"
+                f"注意： 分析结束：成功 {ok} 个，失败 {failed} 个，未完成 {incomplete} 个（共 {total}）。"
+                "失败/未完成的行可点「」单独重分析；详情见日志。"
             )
         else:
             self.status_lbl.setText(
-                f"✅ 分析完成！共 {total} 个视频，成功 {ok} 个。"
+                f"完成： 分析完成！共 {total} 个视频，成功 {ok} 个。"
                 "可直接双击「新文件名」列进行编辑，或点击「批量查找替换」，"
                 "确认后点击「执行重命名」。"
             )
@@ -1609,7 +1609,7 @@ class VideoAiRenamePage(BasePage):
             new_item.setForeground(QColor("#34d399"))
         status_item = self.table.item(row_idx, 6)
         if status_item:
-            status_item.setText("已重命名 ✓")
+            status_item.setText("已重命名 已")
             status_item.setForeground(QColor("#34d399"))
         ai_result_item = self.table.item(row_idx, 7)
         if ai_result_item:
@@ -1630,7 +1630,7 @@ class VideoAiRenamePage(BasePage):
                 'brand':         ai_info.get('brand', 'unknown'),
                 'category':      ai_info.get('category', 'unknown'),
                 'model_name':    ai_info.get('model', 'unknown'),
-                'status':        '已重命名 ✓',
+                'status':        '已重命名 已',
             })
 
     # ──────────────────────── 批量设置字段 ────────────────────────
@@ -1661,7 +1661,7 @@ class VideoAiRenamePage(BasePage):
                 new_name_item.setText(new_name)
                 count += 1
 
-        self.status_lbl.setText(f"✅ 已批量设置 {field} = {value}，共更新 {count} 个文件")
+        self.status_lbl.setText(f" 已批量设置 {field} = {value}，共更新 {count} 个文件")
 
     # ──────────────────────── 批量查找替换 ────────────────────────
     def _batch_find_replace(self):
@@ -1679,7 +1679,7 @@ class VideoAiRenamePage(BasePage):
                 item.setText(item.text().replace(find_text, replace_text))
                 count += 1
 
-        self.status_lbl.setText(f"✅ 批量替换完成：共修改了 {count} 行的新文件名。")
+        self.status_lbl.setText(f"完成： 批量替换完成：共修改了 {count} 行的新文件名。")
 
     # ──────────────────────── 全选/全不选 ────────────────────────
     def _set_all_checked(self, checked: bool):
@@ -1751,13 +1751,13 @@ class VideoAiRenamePage(BasePage):
                     new_item.setForeground(QColor("#34d399"))
                 status_item = self.table.item(row, 6)
                 if status_item:
-                    status_item.setText("已重命名 ✓")
+                    status_item.setText("已重命名 已")
                     status_item.setForeground(QColor("#34d399"))
             except Exception as e:
                 fail_msgs.append(f"{orig_name}: {e}")
                 status_item = self.table.item(row, 6)
                 if status_item:
-                    status_item.setText("失败 ✗")
+                    status_item.setText("失败 ")
                     status_item.setForeground(QColor("#f87171"))
 
         # 保存撤销历史
@@ -1774,9 +1774,9 @@ class VideoAiRenamePage(BasePage):
                 log.warning(f"Save rename history failed: {e}")
 
         self.btn_undo.setEnabled(bool(history_entries))
-        msg = f"✅ 重命名完成：成功 {success_count} 个。"
+        msg = f"完成： 重命名完成：成功 {success_count} 个。"
         if fail_msgs:
-            msg += f"\n⚠ 失败 {len(fail_msgs)} 个：\n" + "\n".join(fail_msgs[:5])
+            msg += f"\n 失败 {len(fail_msgs)} 个：\n" + "\n".join(fail_msgs[:5])
         self.status_lbl.setText(msg)
 
     # ──────────────────────── 撤销 ────────────────────────
@@ -1840,9 +1840,9 @@ class VideoAiRenamePage(BasePage):
             pass
 
         self.btn_undo.setEnabled(False)
-        msg = f"✅ 撤销完成：还原 {success_count} 个文件。"
+        msg = f"完成： 撤销完成：还原 {success_count} 个文件。"
         if fail_msgs:
-            msg += "\n⚠ 部分失败：\n" + "\n".join(fail_msgs[:5])
+            msg += "\n注意： 部分失败：\n" + "\n".join(fail_msgs[:5])
         self.status_lbl.setText(msg)
 
         # 重新扫描文件夹刷新列表

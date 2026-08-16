@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-"""
+# -*- coding: utf-8 -*-
+"""
 MG 动画页（服务端渲染版，按 OpenAPI /mg/* 实现）。
 业务流：
   1. 左侧展示内置模板 + 服务端模板。
@@ -221,7 +222,7 @@ class MGAnimationPage(BasePage):
         root.setSpacing(12)
 
         hdr = QHBoxLayout()
-        heading = QLabel("🎬 MG 动画")
+        heading = QLabel(" MG 动画")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
@@ -262,7 +263,7 @@ class MGAnimationPage(BasePage):
 
         # 工具栏
         toolbar = QHBoxLayout()
-        self.btn_refresh = QPushButton("🔄 刷新")
+        self.btn_refresh = QPushButton(" 刷新")
         self.btn_refresh.setObjectName("secondary_button")
         self.btn_refresh.setToolTip("从服务端重新加载模板列表")
         self.btn_refresh.clicked.connect(self._load_templates)
@@ -376,10 +377,10 @@ class MGAnimationPage(BasePage):
         self.spin_scene_duration.setValue(2.0)
         scenes_btn_row.addWidget(QLabel("时长"))
         scenes_btn_row.addWidget(self.spin_scene_duration)
-        self.btn_add_scene = QPushButton("➕ 添加")
+        self.btn_add_scene = QPushButton(" 添加")
         self.btn_add_scene.clicked.connect(self._add_scene)
         scenes_btn_row.addWidget(self.btn_add_scene)
-        self.btn_del_scene = QPushButton("🗑 删除")
+        self.btn_del_scene = QPushButton(" 删除")
         self.btn_del_scene.clicked.connect(self._del_scene)
         scenes_btn_row.addWidget(self.btn_del_scene)
         sgl.addLayout(scenes_btn_row)
@@ -390,12 +391,12 @@ class MGAnimationPage(BasePage):
         self.edit_ai_prompt = QLineEdit()
         self.edit_ai_prompt.setPlaceholderText("输入原始文案，让 AI 生成参数...")
         action_row.addWidget(self.edit_ai_prompt, 1)
-        self.btn_ai = QPushButton("🤖 AI 生成参数")
+        self.btn_ai = QPushButton(" AI 生成参数")
         self.btn_ai.setObjectName("secondary_button")
         self.btn_ai.clicked.connect(self._generate_script)
         action_row.addWidget(self.btn_ai)
 
-        self.btn_render = QPushButton("🎬 提交渲染")
+        self.btn_render = QPushButton(" 提交渲染")
         self.btn_render.setObjectName("primary_button")
         self.btn_render.clicked.connect(self._on_render)
         action_row.addWidget(self.btn_render)
@@ -433,7 +434,7 @@ class MGAnimationPage(BasePage):
         h.setSpacing(6)
         edit.setFixedWidth(120)
         h.addWidget(edit)
-        btn = QPushButton("🎨")
+        btn = QPushButton("")
         btn.setObjectName("secondary_button")
         btn.setFixedWidth(40)
         btn.clicked.connect(lambda: self._pick_color(edit))
@@ -832,7 +833,7 @@ class MGAnimationPage(BasePage):
         self.btn_render.setEnabled(True)
         self.btn_ai.setEnabled(True)
         self.pbar.setVisible(False)
-        self.status.setText(f"✅ MG 素材已生成: {os.path.basename(local_path)}")
+        self.status.setText(f"完成： MG 素材已生成: {os.path.basename(local_path)}")
         self.lbl_result.setText(f"成片路径: {local_path}")
         template_id = self._current_template.get("id", "") if self._current_template else ""
         self._add_task_record(
@@ -849,7 +850,7 @@ class MGAnimationPage(BasePage):
         self.btn_ai.setEnabled(True)
         self.btn_render.setEnabled(True)
         self.pbar.setVisible(False)
-        self.status.setText("❌ 失败")
+        self.status.setText(" 失败")
         self.show_error(str(e), "MG 处理失败")
 
     def _add_task_record(self, task_id, template, ratio, status, progress, local_path=""):

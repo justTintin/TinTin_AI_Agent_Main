@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-📢 视频营销检测页。
+ 视频营销检测页。
 
 通过对视频进行关键帧提取，使用配置的视觉大模型对关键帧内容进行综合研判，
 判断该视频是否为营销/广告视频，并分析推广的品类、提取营销特征线索，提供相关的改进建议。
@@ -52,9 +52,9 @@ class VisionModelTestWorker(BaseWorker):
         from utils.llm_proxy import llm_chat
         try:
             llm_chat("", "Hi", model=self.model, max_tokens=5, timeout=8)
-            self.finished.emit(True, "🟢 连接成功")
+            self.finished.emit(True, " 连接成功")
         except Exception:
-            self.finished.emit(False, "❌ 无法连接")
+            self.finished.emit(False, " 无法连接")
 
 
 class MarketingDetectWorker(BaseWorker):
@@ -165,7 +165,7 @@ class MarketingDetectPage(BasePage):
         root.setSpacing(12)
 
         # 1. 标题与说明（介绍独立一行，暂不并排标题）
-        heading = QLabel("📢 视频营销检测")
+        heading = QLabel(" 视频营销检测")
         heading.setObjectName("heading")
         root.addWidget(heading)
 
@@ -174,7 +174,7 @@ class MarketingDetectPage(BasePage):
         sub.setWordWrap(True)
         root.addWidget(sub)
 
-        warning_lbl = QLabel("⚠️ 说明：此为根据大模型预测，实验功能，不一定完全准确。")
+        warning_lbl = QLabel("注意： 说明：此为根据大模型预测，实验功能，不一定完全准确。")
         warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
         root.addWidget(warning_lbl)
 
@@ -189,7 +189,7 @@ class MarketingDetectPage(BasePage):
         self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")
         m_layout.addWidget(self.lbl_model_info)
         
-        self.lbl_model_status = QLabel("🔴 未检测")
+        self.lbl_model_status = QLabel(" 未检测")
         self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")
         m_layout.addWidget(self.lbl_model_status)
         m_layout.addStretch()
@@ -217,7 +217,7 @@ class MarketingDetectPage(BasePage):
         btn_browse.clicked.connect(self._browse)
         h_layout.addWidget(btn_browse)
         
-        self.btn_run = QPushButton("📢 开始检测")
+        self.btn_run = QPushButton(" 开始检测")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.clicked.connect(self._run)
         h_layout.addWidget(self.btn_run)
@@ -264,33 +264,33 @@ class MarketingDetectPage(BasePage):
         # 属性网格
         grid = QGridLayout()
         grid.setSpacing(10)
-        grid.addWidget(QLabel("📂 推广分类："), 0, 0)
+        grid.addWidget(QLabel(" 推广分类："), 0, 0)
         self.lbl_category = QLabel("—")
         self.lbl_category.setStyleSheet("font-weight:bold; color:#ffffff;")
         grid.addWidget(self.lbl_category, 0, 1)
 
-        grid.addWidget(QLabel("🏷️ 涉及品牌/商品："), 0, 2)
+        grid.addWidget(QLabel(" 涉及品牌/商品："), 0, 2)
         self.lbl_product = QLabel("—")
         self.lbl_product.setStyleSheet("font-weight:bold; color:#ffffff;")
         grid.addWidget(self.lbl_product, 0, 3)
         rc_layout.addLayout(grid)
 
         # 营销线索
-        rc_layout.addWidget(QLabel("🔍 提取到的营销线索："))
+        rc_layout.addWidget(QLabel(" 提取到的营销线索："))
         self.txt_clues = QTextEdit()
         self.txt_clues.setReadOnly(True)
         self.txt_clues.setFixedHeight(70)
         rc_layout.addWidget(self.txt_clues)
 
         # 详细研判分析
-        rc_layout.addWidget(QLabel("📝 详细研判分析："))
+        rc_layout.addWidget(QLabel(" 详细研判分析："))
         self.txt_analysis = QTextEdit()
         self.txt_analysis.setReadOnly(True)
         self.txt_analysis.setFixedHeight(90)
         rc_layout.addWidget(self.txt_analysis)
 
         # 优化/合规建议
-        rc_layout.addWidget(QLabel("💡 优化与改进建议："))
+        rc_layout.addWidget(QLabel(" 优化与改进建议："))
         self.txt_suggestions = QTextEdit()
         self.txt_suggestions.setReadOnly(True)
         self.txt_suggestions.setFixedHeight(90)
@@ -312,18 +312,18 @@ class MarketingDetectPage(BasePage):
         server_url = ai.get("compute_server_url", "") or ai.get("llm_vision_api_url", "")
         if server_url:
             self.lbl_model_info.setText("视频大模型：由服务端选择")
-            self.lbl_model_status.setText("🟢 已配置")
+            self.lbl_model_status.setText(" 已配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#2ecc71;")
             self.btn_test_model.setEnabled(True)
         else:
             self.lbl_model_info.setText("视频大模型：未配置服务端地址")
-            self.lbl_model_status.setText("🔴 未配置")
+            self.lbl_model_status.setText(" 未配置")
             self.lbl_model_status.setStyleSheet("font-weight:bold; color:#e74c3c;")
             self.btn_test_model.setEnabled(False)
 
     def _test_vision_model(self):
         self.btn_test_model.setEnabled(False)
-        self.lbl_model_status.setText("🟡 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
+        self.lbl_model_status.setText(" 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
         self.test_worker = VisionModelTestWorker()
 
         def on_finished(success, message):
@@ -387,10 +387,10 @@ class MarketingDetectPage(BasePage):
         conf = data.get("confidence", 0)
         
         if is_m:
-            self.lbl_verdict.setText("⚠️ 检测结论：营销/商业推广视频")
+            self.lbl_verdict.setText("注意： 检测结论：营销/商业推广视频")
             self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#e74c3c;")
         else:
-            self.lbl_verdict.setText("✅ 检测结论：原创内容/非营销视频")
+            self.lbl_verdict.setText("完成： 检测结论：原创内容/非营销视频")
             self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#2ecc71;")
             
         self.lbl_confidence.setText(f"（置信度: {conf}%）")

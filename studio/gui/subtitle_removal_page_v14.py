@@ -581,7 +581,7 @@ class SubtitleRemovalPageV14(BasePage):
         p_layout.setContentsMargins(16, 16, 16, 16)
         p_layout.setSpacing(10)
 
-        p_title = QLabel("🖼️ 实时预览画面 (多选区: 绿框为当前选中，蓝框为其他选区):")
+        p_title = QLabel(" 实时预览画面 (多选区: 绿框为当前选中，蓝框为其他选区):")
         p_title.setStyleSheet("font-weight: bold; font-size: 13px;")
         p_layout.addWidget(p_title)
 
@@ -658,7 +658,7 @@ class SubtitleRemovalPageV14(BasePage):
         """)
         seek_row.addWidget(self.seek_slider)
         
-        self.btn_next_frame = QPushButton("▶")
+        self.btn_next_frame = QPushButton("播放")
         self.btn_next_frame.setFixedWidth(30)
         self.btn_next_frame.setStyleSheet(button_style)
         self.btn_next_frame.clicked.connect(self._step_next_frame)
@@ -705,15 +705,15 @@ class SubtitleRemovalPageV14(BasePage):
         mode_row.setSpacing(10)
         mode_row.addWidget(QLabel("用途:"))
         self.purpose_combo = QComboBox()
-        self.purpose_combo.addItem("📝 去字幕", "subtitle")
-        self.purpose_combo.addItem("🏷️ 去水印", "watermark")
+        self.purpose_combo.addItem(" 去字幕", "subtitle")
+        self.purpose_combo.addItem(" 去水印", "watermark")
         self.purpose_combo.setToolTip("去字幕：擦除视频中的字幕文字。\n去水印：擦除台标/LOGO 等水印。可填写水印文字帮助服务端精准定位要去除的水印。")
         mode_row.addWidget(self.purpose_combo)
         mode_row.addSpacing(12)
         mode_row.addWidget(QLabel("模式:"))
         self.mode_switch = QComboBox()
-        self.mode_switch.addItem("✏️ 标注选区（手画四边形选区）", "select")
-        self.mode_switch.addItem("🤖 智能识别（自动检测，无需画框）", "smart")
+        self.mode_switch.addItem(" 标注选区（手画四边形选区）", "select")
+        self.mode_switch.addItem(" 智能识别（自动检测，无需画框）", "smart")
         self.mode_switch.currentIndexChanged.connect(self._on_mode_switched)
         mode_row.addWidget(self.mode_switch, 1)
         controls_layout.addLayout(mode_row)
@@ -747,7 +747,7 @@ class SubtitleRemovalPageV14(BasePage):
         box_manage_layout.setSpacing(14)
 
         # Header: Title (uses standard style)
-        box_manage_title = QLabel("📦 字幕选区管理:")
+        box_manage_title = QLabel(" 字幕选区管理:")
         box_manage_title.setStyleSheet("font-weight: bold; color: #ffffff;")
         box_manage_layout.addWidget(box_manage_title)
 
@@ -778,12 +778,12 @@ class SubtitleRemovalPageV14(BasePage):
         btn_box_layout = QHBoxLayout()
         btn_box_layout.setSpacing(10)
 
-        self.btn_add_box = QPushButton("➕ 添加选区")
+        self.btn_add_box = QPushButton(" 添加选区")
         self.btn_add_box.setObjectName("secondary_button")
         self.btn_add_box.clicked.connect(self._add_box)
         btn_box_layout.addWidget(self.btn_add_box)
 
-        self.btn_delete_box = QPushButton("➖ 删除选区")
+        self.btn_delete_box = QPushButton(" 删除选区")
         self.btn_delete_box.setObjectName("secondary_button")
         self.btn_delete_box.clicked.connect(self._delete_box)
         btn_box_layout.addWidget(self.btn_delete_box)
@@ -877,12 +877,12 @@ class SubtitleRemovalPageV14(BasePage):
 
         # Run buttons
         btn_action_layout = QHBoxLayout()
-        self.btn_start = QPushButton("🚀 开始去除字幕")
+        self.btn_start = QPushButton(" 开始去除字幕")
         self.btn_start.setObjectName("primary_button")
         self.btn_start.clicked.connect(self.start_removal)
         btn_action_layout.addWidget(self.btn_start)
 
-        self.btn_stop = QPushButton("⏹️ 停止运行")
+        self.btn_stop = QPushButton("停止 停止运行")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.stop_removal)
         btn_action_layout.addWidget(self.btn_stop)
@@ -899,7 +899,7 @@ class SubtitleRemovalPageV14(BasePage):
         log_card.setContentsMargins(16, 12, 16, 12)
         log_layout.setSpacing(6)
 
-        log_layout.addWidget(QLabel("📝 处理日志:"))
+        log_layout.addWidget(QLabel(" 处理日志:"))
         self.log_view = QTextEdit()
         self.log_view.setObjectName("log_viewer")
         self.log_view.setReadOnly(True)

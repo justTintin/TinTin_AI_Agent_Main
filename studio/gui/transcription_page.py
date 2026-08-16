@@ -69,7 +69,7 @@ class TranscriptionToolPage(BasePage):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(12)
 
-        heading = QLabel("🎙️ 音频/视频转文字")
+        heading = QLabel(" 音频/视频转文字")
         heading.setObjectName("heading")
         layout.addWidget(heading, 0)
 
@@ -159,7 +159,7 @@ class TranscriptionToolPage(BasePage):
         self.btn_play_prev = QPushButton("⏮")
         self.btn_play_prev.clicked.connect(self._play_prev_file)
         play_row.addWidget(self.btn_play_prev)
-        self.btn_play_toggle = QPushButton("⏸")
+        self.btn_play_toggle = QPushButton("暂停")
         self.btn_play_toggle.clicked.connect(self._toggle_play)
         play_row.addWidget(self.btn_play_toggle)
         self.btn_play_next = QPushButton("⏭")
@@ -238,10 +238,10 @@ class TranscriptionToolPage(BasePage):
     def _toggle_play(self):
         if self._player.playbackState() == QMediaPlayer.PlayingState:
             self._player.pause()
-            self.btn_play_toggle.setText("▶")
+            self.btn_play_toggle.setText("播放")
         else:
             self._player.play()
-            self.btn_play_toggle.setText("⏸")
+            self.btn_play_toggle.setText("暂停")
 
     def _play_prev_file(self):
         rows = self.file_table.selectedIndexes()
@@ -357,7 +357,7 @@ class TranscriptionToolPage(BasePage):
         self._ensure_playing_file(f["path"])
         self._player.setPosition(int(start * 1000))
         self._player.play()
-        self.btn_play_toggle.setText("⏸")
+        self.btn_play_toggle.setText("暂停")
         # 立即高亮被点击的位置（不等下一帧 positionChanged）
         try:
             si = int(anchor.split("_")[0][1:])
@@ -495,7 +495,7 @@ class TranscriptionToolPage(BasePage):
                         srt_text = fp.read()
                     segs = self._parse_srt(srt_text)
                     if segs:
-                        entry.update(status="✅ 完成", srt_text=srt_text, segments=segs)
+                        entry.update(status=" 完成", srt_text=srt_text, segments=segs)
                         log.info(f"[转写] 检测到已有字幕，直接加载: {sidecar}")
                 except Exception as e:
                     log.error(f"[转写] 读取已有字幕失败 {sidecar}: {e}")
@@ -531,8 +531,8 @@ class TranscriptionToolPage(BasePage):
             old.deleteLater()
             self.file_table.removeCellWidget(row, 3)
         # 已完成才显示按钮
-        if f["status"] == "✅ 完成" and f["srt_text"]:
-            btn = table_action_button("💾", "导出 SRT 字幕")
+        if f["status"] == " 完成" and f["srt_text"]:
+            btn = table_action_button("", "导出 SRT 字幕")
             btn.clicked.connect(lambda r=row: self._show_save_dialog(r))
             self.file_table.setCellWidget(row, 3, btn)
 
@@ -540,9 +540,9 @@ class TranscriptionToolPage(BasePage):
         from PySide6.QtGui import QColor
         colors = {
             "等待处理": QColor(60, 60, 70),
-            "⏳ 处理中": QColor(80, 70, 30),
-            "✅ 完成":   QColor(30, 70, 40),
-            "❌ 失败":   QColor(70, 35, 35),
+            "处理中": QColor(80, 70, 30),
+            " 完成":   QColor(30, 70, 40),
+            " 失败":   QColor(70, 35, 35),
         }
         bg = colors.get(status)
         if bg:
@@ -563,8 +563,8 @@ class TranscriptionToolPage(BasePage):
         row = idx.row()
         menu = self.file_table.createStandardContextMenu()
         menu.addSeparator()
-        if 0 <= row < len(self.files) and self.files[row]["status"] == "✅ 完成":
-            act_retry = QAction("🔄 重新转写", self.parent_widget)
+        if 0 <= row < len(self.files) and self.files[row]["status"] == " 完成":
+            act_retry = QAction(" 重新转写", self.parent_widget)
             act_retry.triggered.connect(lambda r=row: self._retry_transcribe(r))
             menu.addAction(act_retry)
         act = QAction("从列表移除", self.parent_widget)
@@ -588,7 +588,7 @@ class TranscriptionToolPage(BasePage):
         f = self.files[row]
 
         # 已完成且有关键结果 → 保存对话框（不管是点哪列）
-        if f["status"] == "✅ 完成" and f["srt_text"]:
+        if f["status"] == " 完成" and f["srt_text"]:
             self._show_save_dialog(row)
             return
 
@@ -619,12 +619,12 @@ class TranscriptionToolPage(BasePage):
         self._edit_mode = True
         self._edit_file_row = row
         self._player.pause()
-        self.btn_play_toggle.setText("▶")
+        self.btn_play_toggle.setText("播放")
         # 原地编辑：不替换内容（与播放态同一渲染），格式不跳动、滚动位置不变
         self.subtitle_editor.setExtraSelections([])
         self.subtitle_editor.setReadOnly(False)
         self.subtitle_editor.setFocus()
-        self.stage_label.setText("✏️ 字幕编辑中（修改自动保存，再按空格回到播放）")
+        self.stage_label.setText(" 字幕编辑中（修改自动保存，再按空格回到播放）")
 
     def _exit_edit_mode(self, resume=True):
         row = self._edit_file_row
@@ -648,7 +648,7 @@ class TranscriptionToolPage(BasePage):
         self.stage_label.setText("")
         if resume:
             self._player.play()
-            self.btn_play_toggle.setText("⏸")
+            self.btn_play_toggle.setText("暂停")
 
     # ── 实时保存 / 修改标记 ──
 
@@ -661,7 +661,7 @@ class TranscriptionToolPage(BasePage):
             return
         if self._apply_edits(self.files[row], self.subtitle_editor.toPlainText()):
             import time as _t
-            self.stage_label.setText(f"✏️ 编辑中 · 已自动保存 {_t.strftime('%H:%M:%S')}")
+            self.stage_label.setText(f" 编辑中 · 已自动保存 {_t.strftime('%H:%M:%S')}")
 
     def _apply_edits(self, f, text) -> bool:
         """把编辑后的字幕文本回写到文件记录：更新 segments/srt_text、
@@ -781,7 +781,7 @@ class TranscriptionToolPage(BasePage):
         self._video_widget.show()
         self._player.setVideoOutput(self._video_widget)
         self._player.play()
-        self.btn_play_toggle.setText("⏸")
+        self.btn_play_toggle.setText("暂停")
 
     # ══════════════════════════════════════════
     #  保存对话框
@@ -887,10 +887,10 @@ class TranscriptionToolPage(BasePage):
             self.show_warning(f"当前任务仍在处理中，请等待完成后再提交。\n\n当前状态：{cur}", "正在处理")
             return
 
-        pending = [i for i, f in enumerate(self.files) if f["status"] == "等待处理" or f["status"] == "❌ 失败"]
+        pending = [i for i, f in enumerate(self.files) if f["status"] == "等待处理" or f["status"] == " 失败"]
         if not pending:
             # 没有待处理文件：若存在已完成文件，询问是否全部重新转写
-            done = [i for i, f in enumerate(self.files) if f["status"] == "✅ 完成"]
+            done = [i for i, f in enumerate(self.files) if f["status"] == " 完成"]
             if done and self.confirm(f"没有待处理的文件。\n\n是否重新转写已完成的 {len(done)} 个文件？\n（原有字幕将被新结果覆盖）", "重新转写"):
                 for i in done:
                     self.files[i]["status"] = "等待处理"
@@ -899,7 +899,7 @@ class TranscriptionToolPage(BasePage):
                 pending = done
             else:
                 QMessageBox.warning(self.parent_widget, "无待处理文件",
-                                    "没有待处理的文件。\n如需重新生成字幕，请右键文件选择「🔄 重新转写」。")
+                                    "没有待处理的文件。\n如需重新生成字幕，请右键文件选择「 重新转写」。")
                 return
 
         language = self.lang_input.text().strip() or None
@@ -917,10 +917,10 @@ class TranscriptionToolPage(BasePage):
         if self._current_index >= len(self._current_pending):
             self.btn_process.setEnabled(True)
             self.progress_bar.setValue(self.progress_bar.maximum())
-            self.stage_label.setText("✅ 全部处理完成")
+            self.stage_label.setText("完成： 全部处理完成")
             # 默认展示第一个已完成文件的转写结果
             for i, f in enumerate(self.files):
-                if f["status"] == "✅ 完成" and f["srt_text"]:
+                if f["status"] == " 完成" and f["srt_text"]:
                     if self.file_table.currentRow() == i:
                         self._on_file_selection_changed()  # 已选中不会发信号，强制刷新显示
                     else:
@@ -930,7 +930,7 @@ class TranscriptionToolPage(BasePage):
 
         idx = self._current_pending[self._current_index]
         f = self.files[idx]
-        f["status"] = "⏳ 处理中"
+        f["status"] = "处理中"
         self._refresh_file_row(idx)
         self.stage_label.setText(f"正在处理: {os.path.basename(f['path'])}")
         self.progress_bar.setValue(self._current_index)
@@ -984,7 +984,7 @@ class TranscriptionToolPage(BasePage):
 
     def _on_file_done(self, file_idx, srt_text, segments):
         f = self.files[file_idx]
-        f["status"] = "✅ 完成"
+        f["status"] = " 完成"
         f["srt_text"] = srt_text
         f["segments"] = segments or []
         f.pop("orig_segments", None)  # 新结果成为修改标记的新基准
@@ -1010,7 +1010,7 @@ class TranscriptionToolPage(BasePage):
 
     def _on_file_error(self, file_idx, err):
         f = self.files[file_idx]
-        f["status"] = "❌ 失败"
+        f["status"] = " 失败"
         f["preview"] = ""
         self._refresh_file_row(file_idx)
 
@@ -1019,7 +1019,7 @@ class TranscriptionToolPage(BasePage):
             if line.strip():
                 summary = line.strip()
                 break
-        msg = f"❌ 处理失败: {os.path.basename(f['path'])}"
+        msg = f"失败： 处理失败: {os.path.basename(f['path'])}"
         if summary:
             msg += f"\n错误摘要：{summary}"
         QMessageBox.critical(self.parent_widget, "处理失败", msg)

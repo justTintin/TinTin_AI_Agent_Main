@@ -1,0 +1,11 @@
+{
+  "library": "Luosiding",
+  "components": [
+    { "name": "Button", "slug": "button", "path": "components/button.json" },
+    { "name": "Card", "slug": "card", "path": "components/card.json" },
+    { "name": "Input", "slug": "input", "path": "components/input.json" },
+    { "name": "Navigation", "slug": "navigation", "path": "components/navigation.json" },
+    { "name": "Table", "slug": "table", "path": "components/table.json" },
+    { "name": "Badge", "slug": "badge", "path": "components/badge.json" }
+  ]
+}

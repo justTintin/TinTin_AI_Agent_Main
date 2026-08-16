@@ -5,9 +5,35 @@
     btn = mdi_button("播放", "play")
     icon = mdi_icon("save")
 """
-from PySide6.QtWidgets import QPushButton, QLabel
+from PySide6.QtWidgets import QPushButton, QLabel, QApplication, QStyle
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
+
+# ── Qt 标准图标映射（不依赖 qtawesome，保证所有平台都有图标）──
+_STD_ICON_MAP = {
+    "play":     QStyle.SP_MediaPlay,
+    "pause":    QStyle.SP_MediaPause,
+    "stop":     QStyle.SP_MediaStop,
+    "previous": QStyle.SP_MediaSkipBackward,
+    "next":     QStyle.SP_MediaSkipForward,
+    "backward": QStyle.SP_MediaSeekBackward,
+    "forward":  QStyle.SP_MediaSeekForward,
+    "left":     QStyle.SP_ArrowLeft,
+    "right":    QStyle.SP_ArrowRight,
+    "up":       QStyle.SP_ArrowUp,
+    "down":     QStyle.SP_ArrowDown,
+}
+
+
+def std_icon(name: str) -> QIcon:
+    """返回 Qt 标准图标（名称大小写不敏感），未映射时返回空图标。"""
+    key = name.lower()
+    if key not in _STD_ICON_MAP:
+        return QIcon()
+    app = QApplication.instance()
+    if app is None:
+        return QIcon()
+    return app.style().standardIcon(_STD_ICON_MAP[key])
 
 # ── 文字标签映射（qtawesome 不可用时，作为按钮前缀提示）──
 ICON_LABEL = {
@@ -186,6 +212,30 @@ def mdi_button(text: str, icon_name: str = "", parent=None,
             if not text.startswith(label):
                 text = label + " " + text
     return QPushButton(text, parent)
+
+
+def icon_button(name: str, tooltip: str = "", parent=None, size: int = 20) -> QPushButton:
+    """创建纯图标按钮（无文字）。优先 Qt 标准图标，其次 MDI，最后回退文字标签。
+
+    用于播放/暂停/停止/翻页等空间受限的控件，避免中文标签被截断。
+    """
+    label = ICON_LABEL.get(name, "")
+    btn_size = max(32, size + 12)
+    btn = QPushButton(parent)
+    btn.setFixedSize(btn_size, btn_size)
+    btn.setObjectName("icon_only_button")
+
+    icon = std_icon(name)
+    if icon.isNull():
+        icon = mdi_icon(name)
+    if icon.isNull() and label:
+        btn.setText(label)
+    else:
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(size, size))
+
+    btn.setToolTip(tooltip or label)
+    return btn
 
 
 def emoji_icon(name: str) -> str:

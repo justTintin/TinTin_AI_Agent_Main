@@ -898,7 +898,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 37: Data Backup / Restore Page
         self.page_backup = QWidget()
-        self.setup_backup_page()
+        self.setup_env_maintenance_page()
         self.content_stack.addWidget(self.page_backup)
 
         # 38: Storyboard (分镜脚本) Page（原热点追踪页已彻底移除，功能并入素材浏览器）

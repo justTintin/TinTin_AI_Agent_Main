@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""语法/导入健康检查：全部 studio Python 文件可编译，关键模块可导入。"""
+﻿# -*- coding: utf-8 -*-
+"""璇硶/瀵煎叆鍋ュ悍妫€鏌ワ細鍏ㄩ儴 studio Python 鏂囦欢鍙紪璇戯紝鍏抽敭妯″潡鍙鍏ャ€?""
 import os
 import py_compile
 import sys
@@ -47,7 +47,7 @@ class TestSyntaxImports(unittest.TestCase):
                 py_compile.compile(fp, doraise=True)
             except py_compile.PyCompileError as e:
                 failed.append(str(e))
-        self.assertEqual(failed, [], "编译失败:\n" + "\n".join(failed[:20]))
+        self.assertEqual(failed, [], "缂栬瘧澶辫触:\n" + "\n".join(failed[:20]))
 
     def test_pure_modules_import(self):
         testutil.ensure_studio_on_path()
@@ -57,7 +57,7 @@ class TestSyntaxImports(unittest.TestCase):
                 __import__(f"{pkg}.{mod}")
             except Exception as e:
                 failed.append(f"{pkg}.{mod}: {type(e).__name__}: {e}")
-        self.assertEqual(failed, [], "导入失败:\n" + "\n".join(failed))
+        self.assertEqual(failed, [], "瀵煎叆澶辫触:\n" + "\n".join(failed))
 
     def test_http_client_interface(self):
         testutil.ensure_studio_on_path()
@@ -68,3 +68,4 @@ class TestSyntaxImports(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

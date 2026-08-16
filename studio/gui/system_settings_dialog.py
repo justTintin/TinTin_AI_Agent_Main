@@ -2,13 +2,15 @@
 """「系统设置」独立窗口：侧边栏底部「 系统设置」入口打开。
 
 主侧边栏不再直接展示系统配置菜单，统一收纳到本窗口的二级菜单：
-左侧菜单（模型配置/平台接入/本地配置/环境与维护/扩展插件/关于）+ 右侧页面区。
+左侧菜单（平台接入/本地配置/扩展插件/任务队列/关于）+ 右侧页面区。
+- 平台接入页为 Tabs：「平台接入」（LLM 设置）+「服务接入」（原模型配置界面）
+- 备份还原（环境与维护）已下线，不再展示
 页面对象仍由主窗口构建（self.page_xxx），首次打开时 reparent 到本窗口的
 stack 中，页面内部对 main_window 的引用不受影响；关闭窗口仅隐藏，页面常驻。
 """
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QVBoxLayout, QLabel, QStackedWidget, QFrame, QPushButton,
-    QWidget,
+    QTabWidget, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -17,10 +19,8 @@ from utils.gui_icons import mdi_button
 
 # 菜单项：(显示名, 图标, 主窗口页面索引)
 SETTINGS_MENUS = [
-    ("模型配置", "cog", 7),
     ("平台接入", "link", 22),
     ("本地配置", "download", 21),
-    ("环境与维护", "server", 36),
     ("扩展插件", "puzzle", 43),
     ("任务队列", "format-list-checks", 9),
     ("关于", "information", 6),
@@ -34,8 +34,8 @@ class SystemSettingsDialog(QDialog):
         super().__init__(parent)
         self.main_window = main_window
         self.setWindowTitle("系统设置")
-        self.resize(1200, 800)
-        self.setMinimumSize(980, 660)
+        self.resize(1440, 920)
+        self.setMinimumSize(1180, 760)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -77,6 +77,7 @@ class SystemSettingsDialog(QDialog):
 
         页面从主窗口 content_stack 迁出时，原位置先插入空占位再移除页面，
         保证主窗口其余页面索引（如工作台 46）不漂移；此后页面常驻本窗口。
+        平台接入（22）合并为 Tabs：LLM 设置 + 服务接入（原模型配置界面）。
         """
         # 关于页是懒加载页面：确保已构建
         if hasattr(main_window, "_ensure_page_built"):
@@ -85,26 +86,52 @@ class SystemSettingsDialog(QDialog):
             except Exception as e:
                 log.warning(f"[系统设置] 关于页构建失败: {e}")
         attr_map = {
-            7: "ai_settings", 22: "llm_settings", 21: "voice_samples",
-            36: "backup", 43: "extension", 9: "task_list", 6: "about",
+            22: "llm_settings", 21: "voice_samples",
+            43: "extension", 9: "task_list", 6: "about",
         }
         stack = main_window.content_stack
         self._page_index = {}
-        for _text, _icon, idx in SETTINGS_MENUS:
-            page = getattr(main_window, "page_" + attr_map[idx], None)
-            if page is None:
-                continue
-            # 从主窗口 stack 迁出：先用占位顶住原索引，再移除页面
+
+        def _detach(page):
+            """从主窗口 stack 迁出（占位顶住索引），返回页面。"""
             pos = stack.indexOf(page)
             if pos >= 0:
                 holder = QWidget()
                 holder.setObjectName("settings_placeholder")
                 stack.insertWidget(pos, holder)
                 stack.removeWidget(page)
+            return page
+
+        # 平台接入：Tabs（LLM 设置 + 服务接入=原模型配置 ai_settings）
+        page_llm = getattr(main_window, "page_llm_settings", None)
+        page_ai = getattr(main_window, "page_ai_settings", None)
+        if page_llm is not None or page_ai is not None:
+            wrap = QWidget()
+            wl = QVBoxLayout(wrap)
+            wl.setContentsMargins(0, 0, 0, 0)
+            wl.setSpacing(0)
+            tabs = QTabWidget()
+            tabs.setDocumentMode(True)
+            if page_llm is not None:
+                tabs.addTab(_detach(page_llm), " 平台接入")
+            if page_ai is not None:
+                tabs.addTab(_detach(page_ai), " 服务接入")
+            wl.addWidget(tabs)
+            self._stack.addWidget(wrap)
+            self._page_index[22] = self._stack.count() - 1
+
+        # 其余菜单页面
+        for _text, _icon, idx in SETTINGS_MENUS:
+            if idx == 22:
+                continue  # 已在上面合并
+            page = getattr(main_window, "page_" + attr_map[idx], None)
+            if page is None:
+                continue
+            _detach(page)
             self._stack.addWidget(page)
             self._page_index[idx] = self._stack.count() - 1
-        # 默认进入模型配置
-        self._switch(7)
+        # 默认进入平台接入
+        self._switch(22)
 
     # ──────────────────────────── 菜单切换 ────────────────────────────
     def _switch(self, idx):
@@ -133,13 +160,8 @@ class SystemSettingsDialog(QDialog):
             else:
                 if hasattr(mw, "refresh_timer"):
                     mw.refresh_timer.stop()
-            if idx == 7 and hasattr(mw, "refresh_llm_page_status"):
+            if idx == 22 and hasattr(mw, "refresh_llm_page_status"):
                 mw.refresh_llm_page_status()
-            elif idx == 36:
-                if hasattr(mw, "env_config_tool"):
-                    mw.env_config_tool.refresh_status()
-                if hasattr(mw, "refresh_logs"):
-                    mw.refresh_logs()
             elif idx == 21:
                 if hasattr(mw, "voice_samples_tool"):
                     mw.voice_samples_tool._load_table_data()

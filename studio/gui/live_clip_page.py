@@ -20,8 +20,16 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from utils.gui_icons import mdi_button, mdi_icon
+from utils.gui_icons import mdi_button, mdi_icon, icon_button, std_icon
 from utils.logger_utils import log
+
+
+def _set_button_icon(btn, name):
+    """优先使用 Qt 标准图标，缺失则回退到 mdi 图标。"""
+    icon = std_icon(name)
+    if icon.isNull():
+        icon = mdi_icon(name)
+    btn.setIcon(icon)
 from utils.hwaccel import get_video_encode_args
 from config.paths import OUTPUTS_DIR, TMP_DIR
 
@@ -700,9 +708,7 @@ class AudioPlayerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         
-        self.btn_play = mdi_button("播放", "play")
-        self.btn_play.setFixedWidth(70)
-        self.btn_play.setObjectName("secondary_button")
+        self.btn_play = icon_button("play", "播放 / 暂停")
         self.btn_play.clicked.connect(self.toggle_play)
         layout.addWidget(self.btn_play)
         
@@ -747,17 +753,17 @@ class AudioPlayerWidget(QWidget):
         self.audio_path = audio_path
         self.player.setSource(QUrl.fromLocalFile(audio_path))
         self.setEnabled(True)
-        self.btn_play.setText("播放")
+        _set_button_icon(self.btn_play, "play")
         self.lbl_time.setText("00:00 / 00:00")
         self.slider.setValue(0)
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放")
+            _set_button_icon(self.btn_play, "play")
         else:
             self.player.play()
-            self.btn_play.setText("暂停")
+            _set_button_icon(self.btn_play, "pause")
             
     def position_changed(self, position):
         if not self.slider.isSliderDown():
@@ -878,21 +884,7 @@ class CoverEditDialog(QDialog):
         ctrl_layout = QHBoxLayout()
         ctrl_layout.setSpacing(10)
         
-        self.btn_play = mdi_button("播放", "play")
-        self.btn_play.setStyleSheet("""
-            QPushButton {
-                background-color: #27272a;
-                color: #e4e4e7;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3f3f46;
-            }
-        """)
-        self.btn_play.setFixedWidth(80)
+        self.btn_play = icon_button("play", "播放 / 暂停")
         self.btn_play.clicked.connect(self.toggle_play)
         ctrl_layout.addWidget(self.btn_play)
         
@@ -1046,15 +1038,15 @@ class CoverEditDialog(QDialog):
     def on_slider_pressed(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放")
+            _set_button_icon(self.btn_play, "play")
         
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放")
+            _set_button_icon(self.btn_play, "play")
         else:
             self.player.play()
-            self.btn_play.setText("暂停")
+            _set_button_icon(self.btn_play, "pause")
             
     def set_position(self, position):
         self.pending_seek_pos = position
@@ -1092,8 +1084,8 @@ class CoverEditDialog(QDialog):
     def capture_current_frame(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放")
-            
+            _set_button_icon(self.btn_play, "play")
+
         time_sec = self.player.position() / 1000.0
         self.btn_capture.setEnabled(False)
         self.btn_capture.setText("正在截取中...")
@@ -1257,25 +1249,7 @@ class ClipListItemWidget(QFrame):
         play_layout = QHBoxLayout()
         play_layout.setSpacing(6)
         
-        self.btn_play = mdi_button("播放声音", "play")
-        self.btn_play.setStyleSheet("""
-            QPushButton {
-                background-color: #27272a;
-                color: #e4e4e7;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #3f3f46;
-            }
-            QPushButton:disabled {
-                color: #52525b;
-                border-color: #27272a;
-            }
-        """)
-        self.btn_play.setFixedWidth(80)
+        self.btn_play = icon_button("play", "播放声音")
         self.btn_play.setEnabled(False)
         play_layout.addWidget(self.btn_play)
         

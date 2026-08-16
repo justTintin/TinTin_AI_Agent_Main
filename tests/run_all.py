@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""统一测试入口 + 场景覆盖度报告。
+"""缁熶竴娴嬭瘯鍏ュ彛 + 鍦烘櫙瑕嗙洊搴︽姤鍛娿€?
 
-用法（推荐用应用同款 python_embeded 运行）:
-    python tests/run_all.py                 # 离线：单元 + 静态 + 样本
-    python tests/run_all.py --online        # 加上在线集成测试（服务端/Ollama）
-    python tests/run_all.py --category unit # 只跑某类
+鐢ㄦ硶锛堟帹鑽愮敤搴旂敤鍚屾 python_embeded 杩愯锛?
+    python tests/run_all.py                 # 绂荤嚎锛氬崟鍏?+ 闈欐€?+ 鏍锋湰
+    python tests/run_all.py --online        # 鍔犱笂鍦ㄧ嚎闆嗘垚娴嬭瘯锛堟湇鍔＄/Ollama锛?
+    python tests/run_all.py --category unit # 鍙窇鏌愮被
 
-输出:
-    控制台汇总 + tests/report/coverage_report.md（功能×测试覆盖矩阵）
+杈撳嚭:
+    鎺у埗鍙版眹鎬?+ tests/report/coverage_report.md锛堝姛鑳矫楁祴璇曡鐩栫煩闃碉級
 """
 import argparse
 import datetime
@@ -19,40 +19,40 @@ import unittest
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "lib"))
 
-# 功能 → 测试类名（用于覆盖度报告）
+# 鍔熻兘 鈫?娴嬭瘯绫诲悕锛堢敤浜庤鐩栧害鎶ュ憡锛?
 FEATURES = [
-    ("配置读写 (config_manager)", ["TestConfigManager"]),
-    ("品牌归一化 (brand_normalizer)", ["TestBrandNormalizer"]),
-    ("极限词检测 (extreme_words)", ["TestExtremeWords"]),
-    ("路径与目录结构 (config.paths)", ["TestPaths"]),
-    ("硬件编码参数 (hwaccel)", ["TestHwaccelArgs"]),
-    ("镜头分析缓存 (shot_analysis_cache)", ["TestShotAnalysisCache"]),
-    ("抖音视频解析 (douyin_parser)", ["TestDouyinParser"]),
-    ("数据备份 (backup_manager)", ["TestBackupManager"]),
-    ("本地技能安装 (skill_manager)", ["TestSkillManager"]),
-    ("自动上架数据包校验 (auto_listing)", ["TestAutoListingValidation"]),
-    ("语法/导入健康 (全部 studio)", ["TestSyntaxImports"]),
-    ("UI 静态回归 (就绪/布局/分镜JSON)", ["TestUIRegression"]),
-    ("未定义名静态检查 (AST, 全 studio)", ["TestUndefinedNames"]),
-    ("样本数据有效性", ["TestSampleFiles"]),
-    ("一键成片管线 (video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
-    ("智能混剪服务端拼接 Worker（离线 mock）", ["TestMontageConcatWorker"]),
-    ("仿爆款客户端（viral_clone_client，离线 mock）", ["TestViralCloneAnalyze", "TestViralClonePlan", "TestViralCloneFlow", "TestViralCloneSource", "TestViralCloneAssetBrowser", "TestViralCloneRun", "TestViralClonePlaceholders"]),
-    ("智能混剪镜头分割（在线 /montage/split）", ["TestMontageSplitOnline"]),
-    ("Ollama 图片识别（在线）", ["TestOllamaImageRecognition"]),
-    ("Ollama 视频分析（在线）", ["TestOllamaVideo"]),
-    ("服务端连通性（在线）", ["TestServerConnectivity"]),
+    ("閰嶇疆璇诲啓 (config_manager)", ["TestConfigManager"]),
+    ("鍝佺墝褰掍竴鍖?(brand_normalizer)", ["TestBrandNormalizer"]),
+    ("鏋侀檺璇嶆娴?(extreme_words)", ["TestExtremeWords"]),
+    ("璺緞涓庣洰褰曠粨鏋?(config.paths)", ["TestPaths"]),
+    ("纭欢缂栫爜鍙傛暟 (hwaccel)", ["TestHwaccelArgs"]),
+    ("闀滃ご鍒嗘瀽缂撳瓨 (shot_analysis_cache)", ["TestShotAnalysisCache"]),
+    ("鎶栭煶瑙嗛瑙ｆ瀽 (douyin_parser)", ["TestDouyinParser"]),
+    ("鏁版嵁澶囦唤 (backup_manager)", ["TestBackupManager"]),
+    ("鏈湴鎶€鑳藉畨瑁?(skill_manager)", ["TestSkillManager"]),
+    ("鑷姩涓婃灦鏁版嵁鍖呮牎楠?(auto_listing)", ["TestAutoListingValidation"]),
+    ("璇硶/瀵煎叆鍋ュ悍 (鍏ㄩ儴 studio)", ["TestSyntaxImports"]),
+    ("UI 闈欐€佸洖褰?(灏辩华/甯冨眬/鍒嗛暅JSON)", ["TestUIRegression"]),
+    ("鏈畾涔夊悕闈欐€佹鏌?(AST, 鍏?studio)", ["TestUndefinedNames"]),
+    ("鏍锋湰鏁版嵁鏈夋晥鎬?, ["TestSampleFiles"]),
+    ("涓€閿垚鐗囩绾?(video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
+    ("鏅鸿兘娣峰壀鏈嶅姟绔嫾鎺?Worker锛堢绾?mock锛?, ["TestMontageConcatWorker"]),
+    ("浠跨垎娆惧鎴风锛坴iral_clone_client锛岀绾?mock锛?, ["TestViralCloneAnalyze", "TestViralClonePlan", "TestViralCloneFlow", "TestViralCloneSource", "TestViralCloneAssetBrowser", "TestViralCloneRun", "TestViralClonePlaceholders"]),
+    ("鏅鸿兘娣峰壀闀滃ご鍒嗗壊锛堝湪绾?/montage/split锛?, ["TestMontageSplitOnline"]),
+    ("Ollama 鍥剧墖璇嗗埆锛堝湪绾匡級", ["TestOllamaImageRecognition"]),
+    ("Ollama 瑙嗛鍒嗘瀽锛堝湪绾匡級", ["TestOllamaVideo"]),
+    ("鏈嶅姟绔繛閫氭€э紙鍦ㄧ嚎锛?, ["TestServerConnectivity"]),
 ]
 
-# 有计划但尚未自动化的场景（来自 docs/TEST_PLAN.md）
+# 鏈夎鍒掍絾灏氭湭鑷姩鍖栫殑鍦烘櫙锛堟潵鑷?docs/TEST_PLAN.md锛?
 MANUAL_FEATURES = [
-    "智能混剪完整流程（真实多镜头拼接回归，需大样本+服务端，自动化仅覆盖 worker 与 /montage/split 冒烟）",
-    "去字幕/去水印与 OCR 服务端流程（依赖服务端可用）",
-    "素材检索/产品库服务端接口全量（/material/*）",
-    "一键成片/脚本成片端到端",
-    "LLM 压力测试 10并发×50（tests/stress_llm.py 手工执行）",
-    "资源占用/长时运行泄漏检查",
-    "UI 响应时间/卡顿",
+    "鏅鸿兘娣峰壀瀹屾暣娴佺▼锛堢湡瀹炲闀滃ご鎷兼帴鍥炲綊锛岄渶澶ф牱鏈?鏈嶅姟绔紝鑷姩鍖栦粎瑕嗙洊 worker 涓?/montage/split 鍐掔儫锛?,
+    "鍘诲瓧骞?鍘绘按鍗颁笌 OCR 鏈嶅姟绔祦绋嬶紙渚濊禆鏈嶅姟绔彲鐢級",
+    "绱犳潗妫€绱?浜у搧搴撴湇鍔＄鎺ュ彛鍏ㄩ噺锛?material/*锛?,
+    "涓€閿垚鐗?鑴氭湰鎴愮墖绔埌绔?,
+    "LLM 鍘嬪姏娴嬭瘯 10骞跺彂脳50锛坱ests/stress_llm.py 鎵嬪伐鎵ц锛?,
+    "璧勬簮鍗犵敤/闀挎椂杩愯娉勬紡妫€鏌?,
+    "UI 鍝嶅簲鏃堕棿/鍗￠】",
 ]
 
 
@@ -73,17 +73,17 @@ def _class_of(test_id):
 
 def _status(total, passed, failed, skipped, errors):
     if failed or errors:
-        return "失败"
+        return "澶辫触"
     if passed == total and total > 0:
-        return "通过"
+        return "閫氳繃"
     if skipped == total:
-        return "跳过"
-    return "部分"
+        return "璺宠繃"
+    return "閮ㄥ垎"
 
 
 def main():
-    ap = argparse.ArgumentParser(description="工程统一测试入口")
-    ap.add_argument("--online", action="store_true", help="包含在线集成测试")
+    ap = argparse.ArgumentParser(description="宸ョ▼缁熶竴娴嬭瘯鍏ュ彛")
+    ap.add_argument("--online", action="store_true", help="鍖呭惈鍦ㄧ嚎闆嗘垚娴嬭瘯")
     ap.add_argument("--category", choices=["unit", "static", "integration", "all"], default="all")
     args = ap.parse_args()
 
@@ -109,13 +109,13 @@ def main():
             suite.addTests(loader.loadTestsFromModule(mod))
 
     print("=" * 78)
-    print("TinTin_AI_Agent_Main 测试套件 | %s | 类别: %s%s" % (
-        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), args.category, " (+在线)" if args.online else ""))
+    print("TinTin_AI_Agent_Main 娴嬭瘯濂椾欢 | %s | 绫诲埆: %s%s" % (
+        datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), args.category, " (+鍦ㄧ嚎)" if args.online else ""))
     print("=" * 78)
     runner = unittest.TextTestRunner(resultclass=CollectResult, verbosity=1)
     result = runner.run(suite)
 
-    # ---- 覆盖度报告 ----
+    # ---- 瑕嗙洊搴︽姤鍛?----
     rows = []
     for feature, classes in FEATURES:
         ids = [t for t in result.passed + [t[0].id() for t in result.failures + result.errors] +
@@ -130,35 +130,36 @@ def main():
             total = 0
         rows.append((feature, total, passed, failed, skipped, _status(total, passed, failed, skipped, errors)))
 
-    covered = sum(1 for _, _, _, _, _, st in rows if st in ("通过", "部分"))
+    covered = sum(1 for _, _, _, _, _, st in rows if st in ("閫氳繃", "閮ㄥ垎"))
     report_path = os.path.join(TESTS_DIR, "report", "coverage_report.md")
     with open(report_path, "w", encoding="utf-8") as f:
-        f.write("# 测试场景覆盖度报告\n\n")
-        f.write("- 生成时间：%s\n" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        f.write("- 运行方式：%s\n\n" % ("--online（含在线集成）" if args.online else "离线（单元+静态+样本）"))
-        f.write("## 自动化覆盖矩阵\n\n")
-        f.write("| 场景 | 用例数 | 通过 | 失败 | 跳过 | 状态 |\n|---|---|---|---|---|---|\n")
+        f.write("# 娴嬭瘯鍦烘櫙瑕嗙洊搴︽姤鍛奬n\n")
+        f.write("- 鐢熸垚鏃堕棿锛?s\n" % datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        f.write("- 杩愯鏂瑰紡锛?s\n\n" % ("--online锛堝惈鍦ㄧ嚎闆嗘垚锛? if args.online else "绂荤嚎锛堝崟鍏?闈欐€?鏍锋湰锛?))
+        f.write("## 鑷姩鍖栬鐩栫煩闃礬n\n")
+        f.write("| 鍦烘櫙 | 鐢ㄤ緥鏁?| 閫氳繃 | 澶辫触 | 璺宠繃 | 鐘舵€?|\n|---|---|---|---|---|---|\n")
         for feature, total, passed, failed, skipped, st in rows:
             f.write("| %s | %d | %d | %d | %d | %s |\n" % (feature, total, passed, failed, skipped, st))
-        f.write("\n- 已自动化覆盖场景：%d / %d\n" % (covered, len(rows)))
-        f.write("\n## 尚未自动化的场景（来自 docs/TEST_PLAN.md，需手工/后续补）\n\n")
+        f.write("\n- 宸茶嚜鍔ㄥ寲瑕嗙洊鍦烘櫙锛?d / %d\n" % (covered, len(rows)))
+        f.write("\n## 灏氭湭鑷姩鍖栫殑鍦烘櫙锛堟潵鑷?docs/TEST_PLAN.md锛岄渶鎵嬪伐/鍚庣画琛ワ級\n\n")
         for mf in MANUAL_FEATURES:
             f.write("- %s\n" % mf)
-        f.write("\n## 汇总\n\n")
-        f.write("- 总用例：%d | 通过：%d | 失败：%d | 错误：%d | 跳过：%d\n" % (
+        f.write("\n## 姹囨€籠n\n")
+        f.write("- 鎬荤敤渚嬶細%d | 閫氳繃锛?d | 澶辫触锛?d | 閿欒锛?d | 璺宠繃锛?d\n" % (
             result.testsRun, len(result.passed), len(result.failures), len(result.errors), len(result.skipped)))
 
     print("\n" + "=" * 78)
-    print("覆盖度报告已生成: %s" % report_path)
-    print("%-42s %6s %6s %6s %6s %6s" % ("场景", "用例", "通过", "失败", "跳过", "状态"))
+    print("瑕嗙洊搴︽姤鍛婂凡鐢熸垚: %s" % report_path)
+    print("%-42s %6s %6s %6s %6s %6s" % ("鍦烘櫙", "鐢ㄤ緥", "閫氳繃", "澶辫触", "璺宠繃", "鐘舵€?))
     print("-" * 78)
     for feature, total, passed, failed, skipped, st in rows:
         print("%-42s %6d %6d %6d %6d %6s" % (feature[:42], total, passed, failed, skipped, st))
     print("-" * 78)
-    print("总用例: %d | 通过: %d | 失败: %d | 错误: %d | 跳过: %d" % (
+    print("鎬荤敤渚? %d | 閫氳繃: %d | 澶辫触: %d | 閿欒: %d | 璺宠繃: %d" % (
         result.testsRun, len(result.passed), len(result.failures), len(result.errors), len(result.skipped)))
     return 0 if result.wasSuccessful() else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

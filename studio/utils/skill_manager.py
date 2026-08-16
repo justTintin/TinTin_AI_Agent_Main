@@ -280,9 +280,14 @@ def ensure_builtin_skills():
 
         else:
 
-            # 已安装：保证服务端登记存在（幂等）
-
-            register_skill(meta)
+            # 已安装：同步为包内最新版本（内置技能以仓库为准，覆盖本地旧副本），
+            # 并保证服务端登记存在（幂等）
+            try:
+                entry = install_skill(src_dir, overwrite=True)
+            except Exception as e:
+                _log_warn(f"[技能] 内置技能同步失败 {sid}: {e}")
+                entry = meta
+            register_skill(entry)
 
 
 

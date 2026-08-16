@@ -367,6 +367,12 @@ class CompileVideoPage(BasePage):
         self._setup_beat_tab(tab_beat)
         self.tabs.addTab(tab_beat, " 卡点成片")
 
+        # tab4：爆款仿制（复用 ViralClonePage 组件，与工作台对话框同一实现）
+        tab_viral = QWidget()
+        from gui.viral_clone_dialog import ViralClonePage
+        self.viral_clone_page = ViralClonePage(tab_viral, self.main_window, show_close=False)
+        self.tabs.addTab(tab_viral, " 爆款仿制")
+
     # ════════════════════════════════════════════════════════════
     #  卡点成片 tab（独立控制器 + StepBeatView）
     # ════════════════════════════════════════════════════════════

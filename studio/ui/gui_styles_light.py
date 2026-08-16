@@ -553,6 +553,31 @@ QPushButton#secondary_button[pressed="true"] {
     background-color: #f0f1f7 /* --surface-dim */;
 }
 
+QPushButton#icon_only_button {
+    background-color: #ffffff /* --surface */;
+    border: 1px solid #c3c6d2 /* --border */;
+    border-radius: 6px /* --radius-sm */;
+    padding: 4px;
+    color: #5f6475 /* --muted-foreground */;
+}
+
+QPushButton#icon_only_button:hover {
+    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
+    border: 1px solid #6366f1 /* --primary */;
+    color: #151722 /* --foreground */;
+}
+
+QPushButton#icon_only_button:pressed {
+    background-color: #f0f1f7 /* --surface-dim */;
+    border: 1px solid #9ca1b1 /* --surface-container-high */;
+}
+
+QPushButton#icon_only_button:disabled {
+    background-color: #ffffff /* --surface */;
+    border: 1px solid #c3c6d2 /* --border */;
+    color: #9ca1b1 /* --luosiding-slate-200 */;
+}
+
 QPushButton#action_button {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);
     border: 1px solid rgba(5, 150, 105, 0.5);

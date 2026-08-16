@@ -1740,7 +1740,11 @@ class PageSetupMixin:
                 try: import torch; w.setText(f"CUDA: {'可用' if torch.cuda.is_available() else '不可用'}")
                 except Exception: w.setText("CUDA: 未检测")
 
-    def setup_backup_page(self):
+    def setup_env_maintenance_page(self):
+        """环境与维护页（原 setup_backup_page）：系统日志/运行环境/终端/系统配置。
+
+        备份管理（BackupPage/backup_manager）已下线删除。
+        """
         layout = QVBoxLayout(self.page_backup)
         layout.setContentsMargins(20, 20, 20, 20); layout.setSpacing(16)
 
@@ -1763,13 +1767,7 @@ class PageSetupMixin:
         self.terminal_tool = TerminalPage(p2, self); self.terminal_tool.setup()
         tabs.addTab(p2, " 终端")
 
-        # Tab 4: 备份管理
-        p3 = QWidget(); p3.setObjectName("tab_page")
-        from gui.backup_page import BackupPage
-        self.backup_tool = BackupPage(p3, self); self.backup_tool.setup()
-        tabs.addTab(p3, " 备份管理")
-
-        # Tab 5: 系统配置
+        # Tab 4: 系统配置（备份管理已下线）
         p4 = QWidget(); p4.setObjectName("tab_page")
         self._setup_system_tab(p4)
         tabs.addTab(p4, " 系统配置")

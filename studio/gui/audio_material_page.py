@@ -25,6 +25,15 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
+from utils.gui_icons import icon_button, std_icon, mdi_icon
+
+
+def _set_button_icon(btn, name):
+    """优先使用 Qt 标准图标，缺失则回退到 mdi 图标。"""
+    icon = std_icon(name)
+    if icon.isNull():
+        icon = mdi_icon(name)
+    btn.setIcon(icon)
 
 
 def _get_server_url():
@@ -304,18 +313,12 @@ class AudioMaterialPage(BasePage):
         # ── 播放控制条 ──
         play_row = QHBoxLayout()
         play_row.setSpacing(6)
-        self.btn_play_pause = QPushButton("播放")
-        self.btn_play_pause.setObjectName("secondary_button")
-        self.btn_play_pause.setFixedWidth(40)
+        self.btn_play_pause = icon_button("play", "播放 / 暂停")
         self.btn_play_pause.setEnabled(False)
-        self.btn_play_pause.setToolTip("播放 / 暂停")
         self.btn_play_pause.clicked.connect(self._toggle_play_pause)
         play_row.addWidget(self.btn_play_pause)
-        self.btn_stop = QPushButton("停止")
-        self.btn_stop.setObjectName("secondary_button")
-        self.btn_stop.setFixedWidth(40)
+        self.btn_stop = icon_button("stop", "停止")
         self.btn_stop.setEnabled(False)
-        self.btn_stop.setToolTip("停止")
         self.btn_stop.clicked.connect(self._stop_preview)
         play_row.addWidget(self.btn_stop)
         self.slider_progress = QSlider(Qt.Horizontal)
@@ -340,15 +343,13 @@ class AudioMaterialPage(BasePage):
 
         # ── 分页 ──
         page_row = QHBoxLayout()
-        self.btn_prev = QPushButton("◀ 上一页")
-        self.btn_prev.setObjectName("secondary_button")
+        self.btn_prev = icon_button("previous", "上一页")
         self.btn_prev.clicked.connect(self._go_prev_page)
         page_row.addWidget(self.btn_prev)
         self.lbl_page = QLabel("")
         self.lbl_page.setObjectName("muted_text")
         page_row.addWidget(self.lbl_page)
-        self.btn_next = QPushButton("下一页 播放")
-        self.btn_next.setObjectName("secondary_button")
+        self.btn_next = icon_button("next", "下一页")
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
         page_row.addStretch(1)
@@ -556,6 +557,7 @@ class AudioMaterialPage(BasePage):
         self._playing_name = data.get("filename", mid)
         self._preview_mid = mid
         self.lbl_now_playing.setText(f"加载中: {self._playing_name}…")
+        _set_button_icon(self.btn_play_pause, "play")
         self._update_play_button()
         self._preview_worker = _AudioPreviewWorker(_serve_url(mid), mid)
         self._preview_worker.finished.connect(self._on_preview_ready)
@@ -572,7 +574,7 @@ class AudioMaterialPage(BasePage):
             self._pending_play = False
             player.play()
             self.lbl_now_playing.setText(
-                f"播放 播放中: {self._playing_name or ''}")
+                f"播放中: {self._playing_name or ''}")
         self.btn_stop.setEnabled(True)
         self.slider_progress.setEnabled(True)
 
@@ -581,7 +583,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self.lbl_now_playing.setText(
-            f"失败： 播放失败（服务端不可达？）：{msg}")
+            f"播放失败: {msg}")
         self._update_play_button()
 
     def _stop_preview(self):
@@ -623,22 +625,22 @@ class AudioMaterialPage(BasePage):
 
     def _update_play_button(self):
         if self._player is None or self._playing_mid is None:
-            self.btn_play_pause.setText("播放")
+            _set_button_icon(self.btn_play_pause, "play")
             self.btn_play_pause.setEnabled(False)
             return
         self.btn_play_pause.setEnabled(True)
         state = self._player.playbackState()
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.btn_play_pause.setText("暂停")
+            _set_button_icon(self.btn_play_pause, "pause")
             name = self._playing_name or ''
-            self.lbl_now_playing.setText(f"播放 播放中: {name}")
+            self.lbl_now_playing.setText(f"播放中: {name}")
         else:
-            self.btn_play_pause.setText("播放")
+            _set_button_icon(self.btn_play_pause, "play")
             name = self._playing_name or ''
             if self._pending_play:
                 self.lbl_now_playing.setText(f"加载中: {name}…")
             else:
-                self.lbl_now_playing.setText(f"暂停 已暂停: {name}")
+                self.lbl_now_playing.setText(f"已暂停: {name}")
 
     def _on_media_status(self, status):
         if (status == QMediaPlayer.MediaStatus.LoadedMedia
@@ -652,13 +654,13 @@ class AudioMaterialPage(BasePage):
             self._pending_play = False
             self.slider_progress.setValue(0)
             name = self._playing_name or ''
-            self.lbl_now_playing.setText(f"停止 播放结束: {name}")
+            self.lbl_now_playing.setText(f"播放结束: {name}")
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self._playing_mid = None
             self._playing_name = ""
             self._pending_play = False
             self.lbl_now_playing.setText(
-                " 无法播放该音频（格式不支持或文件损坏）")
+                "无法播放该音频（格式不支持或文件损坏）")
             self._update_play_button()
 
     def _on_player_error(self, error, error_string):
@@ -666,7 +668,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self._pending_play = False
-        self.lbl_now_playing.setText(f"失败： 播放失败：{error_string}")
+        self.lbl_now_playing.setText(f"播放失败: {error_string}")
         self._update_play_button()
 
     # ── 卡点成片 ──

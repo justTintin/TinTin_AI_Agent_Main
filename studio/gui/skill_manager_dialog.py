@@ -103,7 +103,14 @@ class SkillManagerDialog(QDialog):
 
     def _on_loaded(self, payload):
         entries, uploaded = payload
-        self._skills = entries or []
+        entries = list(entries or [])
+        # 内置技能排第一行，外部安装的技能从第二行开始（均按名称排序）
+        from utils import skill_manager as sm
+        entries.sort(key=lambda s: (
+            0 if sm.is_builtin(s.get("id") or "") else 1,
+            (s.get("name") or "").lower(),
+        ))
+        self._skills = entries
         uploaded = uploaded or set()
         self.table.setRowCount(0)
         for s in self._skills:

@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
-"""爆款仿制（Viral Clone）对话框：链接/素材 ID → 拆解结构 → 复刻脚本。
+"""爆款仿制（Viral Clone）：链接/素材 ID → 拆解结构 → 复刻脚本。
 
-- 拆解/复刻走服务端 /viral/clone/analyze + /viral/clone/plan（同步）
-- 外部链接先经 /material/web_download 落盘入库再拆解
+- 拆解/复刻走服务端 /viral/clone/analyze + /viral/clone/plan（flow 一条调用优先）
+- 视频下载一律由客户端素材浏览器完成（不走服务端）：填链接 → 点
+  「在素材浏览器中下载」→ 下载入库后填素材 ID
 - 生成（三替换）/组装（剪辑）为占位按钮：服务端 E-3.0 节点引擎就绪后开放
+
+ViralClonePage：可复用 QWidget 组件（工作台对话框 / 一键成片 Tab 均使用）；
+ViralCloneDialog：对话框包装（工作台「爆款仿制」卡片入口）。
 """
 import json
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QTextBrowser, QGroupBox, QGridLayout, QMessageBox, QApplication,
+    QTextBrowser, QGroupBox, QGridLayout, QMessageBox, QApplication, QWidget,
 )
 from utils.gui_icons import mdi_button
 from utils.logger_utils import log
@@ -54,21 +58,25 @@ class _ProductLoader(QThread):
         self.loaded.emit((mgr, items))
 
 
-class ViralCloneDialog(QDialog):
-    """爆款仿制对话框：来源 + 产品 → 拆解 → 复刻脚本（生成/组装占位）。"""
+class ViralClonePage(QWidget):
+    """爆款仿制页面组件：来源 + 产品 → 拆解 → 复刻脚本（生成/组装占位）。
 
-    def __init__(self, main_window=None, parent=None):
-        super().__init__(parent)
+    可嵌入任意容器（一键成片 Tab / 对话框）。show_close=True 时底部显示关闭按钮
+    （对话框模式），作为页面嵌入时不显示。
+    """
+
+    def __init__(self, parent_widget=None, main_window=None, show_close=False):
+        super().__init__(parent_widget)
         self.main_window = main_window
-        self.setWindowTitle("爆款仿制（Viral Clone）")
-        self.resize(820, 640)
+        self.show_close = show_close
         self._result = None
         self._product_mgr = None
-        self._setup_ui()
-        self._load_products()
+        self._worker = None
+        self._loader = None
+        self.build()
 
     # ── UI ────────────────────────────────────────────────────────────
-    def _setup_ui(self):
+    def build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
         root.setSpacing(12)
@@ -155,9 +163,18 @@ class ViralCloneDialog(QDialog):
         )
         root.addWidget(self.output, 1)
 
-        self.btn_close = mdi_button("关闭", "close")
-        self.btn_close.clicked.connect(self.reject)
-        root.addWidget(self.btn_close, 0, Qt.AlignRight)
+        if self.show_close:
+            self.btn_close = mdi_button("关闭", "close")
+            self.btn_close.clicked.connect(self._on_close)
+            root.addWidget(self.btn_close, 0, Qt.AlignRight)
+
+        self._load_products()
+
+    def _on_close(self):
+        """对话框模式下关闭（页面嵌入模式无关闭按钮）。"""
+        dlg = self.window()
+        if isinstance(dlg, QDialog):
+            dlg.reject()
 
     def _load_products(self):
         self._loader = _ProductLoader(self)
@@ -285,3 +302,17 @@ class ViralCloneDialog(QDialog):
         QApplication.clipboard().setText(
             json.dumps(self._result["script"], ensure_ascii=False, indent=2))
         self.lbl_status.setText("复刻脚本已复制到剪贴板")
+
+
+class ViralCloneDialog(QDialog):
+    """爆款仿制对话框（工作台「爆款仿制」卡片入口），内部复用 ViralClonePage。"""
+
+    def __init__(self, main_window=None, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.setWindowTitle("爆款仿制（Viral Clone）")
+        self.resize(820, 640)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.page = ViralClonePage(self, main_window=main_window, show_close=True)
+        lay.addWidget(self.page)

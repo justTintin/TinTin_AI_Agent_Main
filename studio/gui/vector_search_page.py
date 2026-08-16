@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QTimer, Signal, QUrl, QRect, QObject, QEvent
 from PySide6.QtGui import QGuiApplication, QPixmap, QPainter, QColor, QPen, QCursor, QAction
 from gui.video_player import VideoPlayerWidget
+from utils.gui_icons import icon_button
 
 from gui.base_page import BasePage
 from utils.base_worker import BaseWorker
@@ -624,19 +625,18 @@ class VectorSearchPage(BasePage):
         self.btn_montage.setToolTip("把选中的视频素材发送到「智能混剪」进行分镜/拼接（素材需在本地/NAS 可访问）。")
         self.btn_montage.clicked.connect(self._send_to_montage)
         sel_row.addWidget(self.btn_montage)
-        right_lay.addLayout(sel_row)
 
         # 分页控件行
         page_row = QHBoxLayout()
-        self.btn_prev = QPushButton("◀ 上一页")
-        self.btn_prev.setObjectName("secondary_button")
+        self.btn_prev = icon_button("previous", "上一页")
+        self.btn_prev.setEnabled(False)
         self.btn_prev.clicked.connect(self._go_prev_page)
         page_row.addWidget(self.btn_prev)
         self.lbl_page = QLabel("第 0 / 0 页")
         self.lbl_page.setObjectName("muted_text")
         page_row.addWidget(self.lbl_page)
-        self.btn_next = QPushButton("下一页 播放")
-        self.btn_next.setObjectName("secondary_button")
+        self.btn_next = icon_button("next", "下一页")
+        self.btn_next.setEnabled(False)
         self.btn_next.clicked.connect(self._go_next_page)
         page_row.addWidget(self.btn_next)
         page_row.addWidget(QLabel("每页:"))
@@ -651,7 +651,18 @@ class VectorSearchPage(BasePage):
         self.lbl_stat = QLabel("")
         self.lbl_stat.setObjectName("muted_text")
         page_row.addWidget(self.lbl_stat)
-        right_lay.addLayout(page_row)
+
+        # 底部栏：固定高度，避免被网格压缩导致控件隐藏
+        bottom_frame = QFrame()
+        bottom_frame.setObjectName("search_bottom_bar")
+        bottom_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        bottom_frame.setMinimumHeight(64)
+        bottom_lay = QVBoxLayout(bottom_frame)
+        bottom_lay.setContentsMargins(0, 4, 0, 4)
+        bottom_lay.setSpacing(6)
+        bottom_lay.addLayout(sel_row)
+        bottom_lay.addLayout(page_row)
+        right_lay.addWidget(bottom_frame)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)

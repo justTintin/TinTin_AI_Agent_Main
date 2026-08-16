@@ -662,22 +662,27 @@ class _ModelLoader(QThread):
 
 
 class _AgentLoader(QThread):
-    """后台加载服务端智能体注册表（GET /agent/registry），过滤基础设施类 → 智能体列表。"""
+    """后台加载服务端智能体列表（GET /agent/agents，AGENT_PERSONAS 权威）。
+
+    智能体 ≠ 能力：能力注册表（/agent/registry）只用于意图路由/编排规划，
+    对话/斜杠菜单里只展示智能体，本地技能由 _on_agents_loaded 另行合并。
+    """
     done = Signal(list)
 
     def run(self):
         try:
-            from utils.agent_client import get_registry
-            data = get_registry(include_external=False, timeout=8) or {}
+            from utils.agent_client import get_agents
+            raw = get_agents(timeout=8) or []
             agents = []
-            for c in (data.get("capabilities") or []):
-                tags = c.get("tags") or []
-                if any(t in ("infra", "external") for t in tags):
-                    continue  # 注册表/任务登记/任务树等基础设施不当作对话智能体
+            for a in raw:
+                if not isinstance(a, dict):
+                    continue
+                if a.get("exposed") is False:
+                    continue  # 未开放给对话的智能体不展示
                 agents.append({
-                    "id": c.get("id") or "",
-                    "name": c.get("name") or c.get("id") or "",
-                    "desc": c.get("description") or "",
+                    "id": a.get("agent_id") or "",
+                    "name": a.get("name") or a.get("agent_id") or "",
+                    "desc": a.get("desc") or a.get("description") or "",
                 })
             self.done.emit(agents)
         except Exception as e:
@@ -1465,16 +1470,23 @@ class _ChatPanel(QWidget):
 
     # ── 智能体快捷唤起 ─────────────────────────────────────
     def _load_agents(self):
+        # 技能管理在服务端：先确保内置技能已安装并登记，再一起加载
+        try:
+            from utils.skill_manager import ensure_builtin_skills
+            ensure_builtin_skills()
+        except Exception as e:
+            log.warning(f"[工作台对话] 内置技能同步失败: {e}")
         self._agent_loader = _AgentLoader()
         self._agent_loader.done.connect(self._on_agents_loaded)
         self._agent_loader.start()
 
     def _on_agents_loaded(self, agents):
+        # 技能与智能体一起更新：优先服务端登记清单（GET /skills），失败回退本地扫描
         try:
             from utils.skill_manager import skill_entries
             self._skills = skill_entries()
         except Exception as e:
-            log.warning(f"[工作台对话] 加载本地技能失败: {e}")
+            log.warning(f"[工作台对话] 加载技能失败: {e}")
             self._skills = []
         self._agents = list(agents or []) + self._skills
         self._agent_bar.set_agents(self._agents)

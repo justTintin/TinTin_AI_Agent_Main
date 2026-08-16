@@ -117,7 +117,10 @@ class SkillManagerDialog(QDialog):
     @staticmethod
     def _run_install(src):
         from utils import skill_manager as sm
-        return sm.install_skill(src, overwrite=True)
+        entry = sm.install_skill(src, overwrite=True)
+        # 技能管理在服务端：安装后登记（GET /skills 统一返回）
+        sm.register_skill(entry)
+        return entry
 
     def _on_installed(self, entry):
         name = (entry or {}).get("name") or "技能"

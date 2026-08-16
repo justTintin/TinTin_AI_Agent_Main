@@ -73,6 +73,26 @@ def get_capability(capability_id, timeout=10):
     return None
 
 
+def get_agents(timeout=10):
+    """GET /agent/agents → 服务端智能体列表（AGENT_PERSONAS，权威）。
+
+    返回 [{agent_id, name, version, exposed, desc}, ...]；失败返回 []。
+    智能体 ≠ 能力：能力注册表（/agent/registry）只用于意图路由/编排规划，
+    对话/斜杠菜单里只展示智能体（+ 客户端本地技能）。
+    """
+    try:
+        r = http_get(f"{_server_url()}/agent/agents", timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                return data.get("agents") or []
+            if isinstance(data, list):
+                return data
+    except Exception as e:
+        log.warning(f"[智能体] get_agents 失败: {e}")
+    return []
+
+
 def create_task(goal=None, plan=None, capability=None, params=None,
                 parent_task_id=None, mode=None, timeout=15):
     """POST /agent/tasks → 登记/提交编排任务，返回新任务 dict（失败返回 None）。

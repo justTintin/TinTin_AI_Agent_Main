@@ -26,6 +26,26 @@ SKILLS_DIR = os.path.join(DATA_DIR, "skills")
 SKILLS_INDEX_FILE = os.path.join(DATA_DIR, "skills_index.json")
 
 
+BUILTIN_SKILLS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "skills")
+
+
+def is_builtin(skill_id) -> bool:
+    """判断技能是否为内置技能（studio/assets/skills/ 随包分发，客户端功能，不允许卸载）。"""
+    sid = (skill_id or "").strip()
+    if not sid:
+        return False
+    import glob
+    for md in glob.glob(os.path.join(BUILTIN_SKILLS_DIR, "*", "SKILL.md")):
+        try:
+            meta = _parse_skill_dir(os.path.dirname(md))
+        except Exception:
+            continue
+        if meta.get("id") == sid:
+            return True
+    return False
+
+
 def _machine_id() -> str:
 
     """当前机器码（技能登记归属，与服务端会话多租户隔离一致）。"""
@@ -197,6 +217,34 @@ def ensure_builtin_skills():
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
                         "assets", "skills")
+
+    # 清理旧 id 残留：data/skills 中与内置技能同名但 id 不一致的旧目录
+    try:
+        builtin_names = set()
+        for md in glob.glob(os.path.join(base, "*", "SKILL.md")):
+            try:
+                builtin_names.add(_parse_skill_dir(os.path.dirname(md)).get("name") or "")
+            except Exception:
+                pass
+        if os.path.isdir(SKILLS_DIR):
+            for old_name in os.listdir(SKILLS_DIR):
+                old_dir = os.path.join(SKILLS_DIR, old_name)
+                if not (os.path.isdir(old_dir) and os.path.isfile(os.path.join(old_dir, "SKILL.md"))):
+                    continue
+                try:
+                    old_meta = _parse_skill_dir(old_dir)
+                except Exception:
+                    continue
+                if (old_meta.get("name") in builtin_names
+                        and not is_builtin(old_meta.get("id") or "")):
+                    old_id = old_meta.get("id") or ""
+                    shutil.rmtree(old_dir, ignore_errors=True)
+                    _log_warn(f"[技能] 已清理内置技能旧目录: {old_dir}")
+                    if old_id:
+                        # 同步取消服务端旧 id 登记，避免重复条目
+                        unregister_skill(old_id)
+    except Exception as e:
+        _log_warn(f"[技能] 内置技能旧目录清理失败: {e}")
 
     for md in sorted(glob.glob(os.path.join(base, "*", "SKILL.md"))):
 
@@ -506,8 +554,11 @@ def skill_entries():
 
 
 def remove_skill(skill_id):
-    """卸载技能；技能目录不在 data/skills 内时拒绝删除。"""
+    """卸载技能；内置技能（客户端功能）不允许卸载；技能目录不在 data/skills 内时拒绝删除。"""
     skill_id = (skill_id or "").strip()
+    if is_builtin(skill_id):
+        _log_warn(f"[技能] 内置技能不允许卸载: {skill_id}")
+        return False
     if not skill_id:
         return False
     skills_abs = os.path.abspath(SKILLS_DIR)

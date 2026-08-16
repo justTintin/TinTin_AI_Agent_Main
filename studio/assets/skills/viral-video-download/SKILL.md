@@ -1,4 +1,5 @@
 ---
+id: viral-video-download
 name: 爆款视频下载
 description: 在客户端素材浏览器中打开链接下载爆款视频并入库，供仿爆款拆解使用
 version: 1.0.0

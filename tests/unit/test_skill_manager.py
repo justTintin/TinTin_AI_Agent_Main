@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
@@ -115,6 +116,20 @@ class TestSkillManager(unittest.TestCase):
                 f.write("x")
         with self.assertRaises(ValueError):
             sm.install_skill(d)
+
+    @mock.patch.object(sm, "is_builtin", return_value=True)
+    def test_remove_builtin_rejected(self, m_is_builtin):
+        """内置技能（客户端功能）不允许卸载。"""
+        self.assertFalse(sm.remove_skill("viral-video-download"))
+        m_is_builtin.assert_called_once_with("viral-video-download")
+
+    def test_is_builtin_detects_packaged_skill(self):
+        """仓库内置技能包（爆款视频下载）应被识别为内置。"""
+        self.assertTrue(sm.is_builtin("viral-video-download"))
+
+    def test_is_builtin_unknown_false(self):
+        self.assertFalse(sm.is_builtin("no-such-skill"))
+        self.assertFalse(sm.is_builtin(""))
 
 
 if __name__ == "__main__":

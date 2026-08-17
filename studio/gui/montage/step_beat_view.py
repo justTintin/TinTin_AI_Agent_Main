@@ -308,6 +308,7 @@ class BeatSegmentCard(QFrame):
         self.slot_start = int(slot_start)
         self.music_path = music_path
         self.is_full_track = is_full_track
+        self.parent_view = None  # 由页面创建时回注，用于播放互斥
         # 服务端下载的卡点视频（有则优先播放视频，否则回退播放音乐）
         self._video_path = None
         self._in_video_mode = False
@@ -410,6 +411,11 @@ class BeatSegmentCard(QFrame):
         if self._player.playbackState() == QMediaPlayer.PlayingState:
             self.pause()
         else:
+            # 先让其它正在播放的卡片彻底停止，再启动本卡片，
+            # 避免两个 QMediaPlayer 并行切换时 Windows 后端死锁卡死
+            for c in getattr(self.parent_view, "segment_cards", None) or []:
+                if c is not self and c.is_playing():
+                    c.stop_for_switch()
             self.play()
 
     def play(self):
@@ -442,6 +448,16 @@ class BeatSegmentCard(QFrame):
 
     def stop(self):
         self._player.stop()
+        self.btn_play.setText("▶")
+
+    def stop_for_switch(self):
+        """被其它卡片抢占时彻底停止（先暂停再停止，避免 Windows 后端管线死锁）。"""
+        try:
+            if self._player.playbackState() != QMediaPlayer.StoppedState:
+                self._player.pause()
+            self._player.stop()
+        except Exception as e:
+            log.warning(f"[音乐卡点] 停止旧播放卡片失败: {e}")
         self.btn_play.setText("▶")
 
     def is_playing(self):
@@ -780,6 +796,7 @@ class StepBeatView(BaseStepView):
                 self._full_peaks, self._full_duration, 0.0, full_end, full_beats, 0)
             full_card.play_started.connect(self._on_card_play_started)
             full_card.position_changed.connect(self._on_card_position)
+            full_card.parent_view = self
             self.full_card_layout.addWidget(full_card)
             self.segment_cards.append(full_card)
 
@@ -800,6 +817,7 @@ class StepBeatView(BaseStepView):
                 seg.get("beats", []), seg.get("slot_start", 0))
             card.play_started.connect(self._on_card_play_started)
             card.position_changed.connect(self._on_card_position)
+            card.parent_view = self
             self.cards_layout.addWidget(card)
             self.segment_cards.append(card)
         self.cards_layout.addStretch()
@@ -821,11 +839,11 @@ class StepBeatView(BaseStepView):
                 c.refresh_slots_from_assignments(assignments)
 
     def _on_card_play_started(self, card):
-        """同一时刻只允许一个卡片播放。"""
+        """同一时刻只允许一个卡片播放（旧卡片已在 toggle_play 里先行停止，此处仅作兼容兜底）。"""
         self._active_card = card
         for c in self.segment_cards:
             if c is not card and c.is_playing():
-                c.pause()
+                c.stop_for_switch()
         self.main_page._beat_on_card_play_started(card)
 
     def _on_card_position(self, card, abs_sec):

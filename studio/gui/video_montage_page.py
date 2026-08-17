@@ -2331,13 +2331,38 @@ class VideoMontagePage(BasePage):
                     self._media_player.play()
                     return
 
-            # 切换到其它音频：停止当前并从头播放新音频
+            # 切换到其它音频：先暂停再停止，并先卸载旧源再加载新源。
+            # Windows Media Foundation 后端下 stop() 是异步的，紧随其后的
+            # setSource()+play() 会让播放管线死锁导致界面卡死，
+            # 因此延迟到源加载完成（mediaStatusChanged）后再开始播放。
+            if state != QMediaPlayer.StoppedState:
+                self._media_player.pause()
             self._media_player.stop()
-            self._media_player.setSource(QUrl.fromLocalFile(wav_path))
+            self._media_player.setSource(QUrl())
             self._audio_output.setVolume(1.0)
-            self._media_player.play()
+            try:
+                self._media_player.mediaStatusChanged.disconnect(self._on_preview_media_ready)
+            except (RuntimeError, TypeError):
+                pass
+            self._media_player.mediaStatusChanged.connect(self._on_preview_media_ready)
+            self._media_player.setSource(QUrl.fromLocalFile(wav_path))
         except Exception as e:
             log.error(f"播放音频失败: {e}")
+    # [6·配音]  _on_preview_media_ready
+    def _on_preview_media_ready(self, status):
+        """试听源加载完成后再播放，避免切歌时 stop() 未完成即 play() 卡死。"""
+        from PySide6.QtMultimedia import QMediaPlayer
+        player = getattr(self, "_media_player", None)
+        if not player:
+            return
+        if status in (QMediaPlayer.MediaStatus.LoadedState, QMediaPlayer.MediaStatus.BufferedMedia):
+            player.play()
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            try:
+                player.mediaStatusChanged.disconnect(self._on_preview_media_ready)
+            except (RuntimeError, TypeError):
+                pass
+            log.error("试听音频加载失败（文件可能已损坏或被占用）")
     # [9·其他]  _on_btn_regen_clicked
     def _on_btn_regen_clicked(self, video_path):
         for i in range(self.voice_table.rowCount()):

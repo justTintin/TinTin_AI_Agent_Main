@@ -1,6 +1,6 @@
 # 需求 & Bug 修改记录
 
-> 最后更新：2026-08-12
+> 最后更新：2026-08-14
 
 ---
 
@@ -202,6 +202,14 @@
   - 排查结论：客户端链路（上传/轮询/状态解析）实测全部正常，失败发生在服务端——`apps/vsr-v1.4.0/vsr_run.py` 引擎启动约 5 秒即退出码 1（自动检测与手动指定字幕区域均失败，与视频内容无关），需服务端排查依赖/模型权重/GPU
   - 客户端改进：① 失败提示附带服务端任务日志尾部（直接可见真实报错）；② 修复结果文件名解析——服务端把文件名放在 `params.output` 字段，之前未取该字段会导致下载 404
   - **文件**：`studio/utils/vsr_client.py`
+
+- [x] **33.** 播放一个音频时点另一个音频试听直接卡死（QMediaPlayer 切换死锁）
+  - 现象：试听某条配音/克隆声音播放中，再点另一条的试听按钮，界面直接卡死无响应
+  - 根因：切换音频时用 `stop() → 立即 setSource() → 立即 play()` 三连调用；Windows Media Foundation 后端下 `stop()` 是异步的，旧播放管线未停完即切新源并启动，后端管线死锁导致 UI 冻结
+  - 修复：① 先 `pause()` 再 `stop()`，先 `setSource(QUrl())` 卸载旧源再加载新源；② 不再立即 `play()`，改为监听 `mediaStatusChanged` 收到 `LoadedState/BufferedMedia` 后才播放（新增 `_on_preview_media_ready` 回调），`InvalidMedia` 时断开连接并记日志；③ 每次切换前 disconnect 旧信号避免重复触发
+  - 同步修复音乐卡点页隐患：每张片段卡片各持独立播放器，原逻辑新卡片先 `play()` 后才 pause 旧卡片（两播放器瞬时并行）；改为 `toggle_play` 里先 `stop_for_switch()`（先暂停再停止）彻底停掉旧卡片再启新卡片，卡片创建时回注 `parent_view` 实现互斥
+  - 同一音频的 播放→暂停→继续 切换逻辑不受影响；`_play_ref_audio` 复用 `_play_audio` 一处修复两处生效
+  - **文件**：`studio/gui/video_montage_page.py`、`studio/gui/voice_clone_page.py`、`studio/gui/montage/step_beat_view.py`
 
 ---
 

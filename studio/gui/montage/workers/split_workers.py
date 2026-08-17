@@ -228,10 +228,16 @@ class ServerSplitWorker(BaseWorker):
                 start = float(sh.get("start_sec") or 0)
                 end = float(sh.get("end_sec") or start)
                 idx = int(sh.get("shot_index") or (created + 1))
-                # 文件名保持 {源名}_shot_{序号:03d}.mp4（优先用服务端返回的 filename）；
-                # 服务端返回的长名也截断，防止超长路径
-                fname = sh.get("filename") or f"{base}_shot_{idx:03d}.mp4"
-                fname = safe_source_name(os.path.basename(fname), max_len=60)
+                # 文件名统一 {safe源名}_shot_{序号:03d}.mp4，与目录名/重命名/分析缓存前缀一致；
+                # 不能用 safe_source_name 直接处理完整文件名——它会剥掉扩展名，
+                # 导致片段无 .mp4 后缀，_check_split_clips_exist 等按扩展名过滤查不到。
+                # 素材库素材（无本地源名）用服务端返回名，保留扩展名并截断防超长路径。
+                if base:
+                    fname = f"{base}_shot_{idx:03d}.mp4"
+                else:
+                    _raw = os.path.basename(sh.get("filename") or f"clip_{idx:03d}.mp4")
+                    _ext = os.path.splitext(_raw)[1] or ".mp4"
+                    fname = safe_source_name(os.path.splitext(_raw)[0], max_len=60) + _ext
                 out = os.path.join(self.output_dir, fname)
                 ok = False
                 dl_url = sh.get("download_url") or ""

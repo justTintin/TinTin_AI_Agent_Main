@@ -1000,7 +1000,8 @@ class VideoMontagePage(BasePage):
 
             # Try to restore split descriptions from the srt file if they are not in self.split_descriptions yet
             if files and video_path:
-                video_basename = os.path.splitext(os.path.basename(video_path))[0]
+                from gui.montage.utils_media import safe_source_name as _safe_name2
+                video_basename = _safe_name2(video_path)
                 video_dir = os.path.dirname(video_path)
                 video_workspace_dir = os.path.dirname(splits_dir)
                 if shot_caches is not None:
@@ -2163,8 +2164,8 @@ class VideoMontagePage(BasePage):
         if not os.path.exists(splits_dir) or not video_path:
             return
         import re
-        basename = os.path.splitext(os.path.basename(video_path))[0]
-        prefix = f"{basename}_shot_"
+        from gui.montage.utils_media import safe_source_name as _safe_name
+        basename = _safe_name(video_path)
         files = [f for f in os.listdir(splits_dir)
                  if f.startswith(prefix) and f.lower().endswith((".mp4", ".m4v"))]
         def get_shot_idx(filename):

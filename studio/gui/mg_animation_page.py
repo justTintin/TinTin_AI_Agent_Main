@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QTimer
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from gui.searchable_combo import SearchableComboBox
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
@@ -226,10 +227,8 @@ class MGAnimationPage(BasePage):
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
-        sub = QLabel("选择模板、填写参数，服务端渲染 MG 动画。")
+        sub = ElidedLabel("选择模板、填写参数，服务端渲染 MG 动画。", max_lines=1)
         sub.setObjectName("muted_text")
-        sub.setWordWrap(True)
-        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
+from gui.elided_label import ElidedLabel
 from utils.hwaccel import get_video_encode_args
 
 
@@ -167,11 +168,12 @@ class VideoLutPage(BasePage):
         title.setStyleSheet("font-size: 20px; font-weight: bold; color: #ecf0f1;")
         lay.addWidget(title)
 
-        hint = QLabel(
+        hint = ElidedLabel(
             "选择视频文件夹和 LUT 文件，批量为所有视频应用 LUT 调色并导出为标准 H.264 MP4。\n"
-            "支持 .cube / .3dl / .lut 格式的 LUT 文件。")
+            "支持 .cube / .3dl / .lut 格式的 LUT 文件。",
+            max_lines=2,
+        )
         hint.setStyleSheet("color: #aaa; font-size: 13px;")
-        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         # ── 输入文件夹 ───────────────────────────────────────────────────────

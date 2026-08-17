@@ -25,6 +25,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from utils.logger_utils import log
+from gui.elided_label import ElidedLabel
 
 # ─────────────────────────────────────────────
 #  常量 / 知识库
@@ -999,16 +1000,19 @@ class VideoAiRenamePage(BasePage):
         layout.setSpacing(10)
 
         # 标题
+        hdr = QHBoxLayout()
         heading = QLabel(" 视频AI智能重命名")
         heading.setObjectName("heading")
-        layout.addWidget(heading)
-
-        desc = QLabel(
-            "选择文件夹 → AI 分析视频内容 → 预览新文件名 → 手动调整 → 批量重命名\n"
-            "命名规则：品牌_品类_型号_视频日期_视频分辨率_横竖屏"
+        hdr.addWidget(heading)
+        desc = ElidedLabel(
+            "选择文件夹 → AI 分析视频内容 → 预览新文件名 → 手动调整 → 批量重命名；"
+            "命名规则：品牌_品类_型号_视频日期_视频分辨率_横竖屏",
+            max_lines=1,
         )
         desc.setObjectName("aiRenameDesc")
-        layout.addWidget(desc)
+        hdr.addWidget(desc)
+        hdr.addStretch()
+        layout.addLayout(hdr)
 
         # ── 文件夹选择行 ──
         row_folder = QHBoxLayout()

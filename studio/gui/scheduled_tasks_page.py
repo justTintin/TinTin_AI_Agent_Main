@@ -22,6 +22,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from utils.gui_icons import mdi_button, table_action_button
 from utils.logger_utils import log
 from utils import scheduled_task_client as stc
@@ -121,9 +122,8 @@ class ScheduledTasksPage(BasePage):
         heading = QLabel("成片任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = QLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。")
-        sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        sub = ElidedLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。", max_lines=1)
+        sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)

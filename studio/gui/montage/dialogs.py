@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
                                QLineEdit)
 from PySide6.QtCore import Qt
+from gui.elided_label import ElidedLabel
 from gui.montage.widgets import ReadOnlyDoubleClickLineEdit
 import subprocess
 from utils.gui_icons import mdi_button
@@ -648,9 +649,8 @@ class ArrangeMaterialsDialog(QDialog):
         self.header_lbl.setStyleSheet("font-size: 14px; color: #2ecc71;")
         layout.addWidget(self.header_lbl)
 
-        tip_lbl = QLabel("提示：点击右侧「删除」可移除单个素材；底部「清空全部」可一键移除。")
+        tip_lbl = ElidedLabel("提示：点击右侧「删除」可移除单个素材；底部「清空全部」可一键移除。", max_lines=2)
         tip_lbl.setStyleSheet("font-size: 12px; color: #9ca3af;")
-        tip_lbl.setWordWrap(True)
         layout.addWidget(tip_lbl)
 
         self.list_widget = QListWidget()

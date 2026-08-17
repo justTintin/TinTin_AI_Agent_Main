@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from utils.base_worker import BaseWorker
 from utils.dreamina_client import DreaminaClient
 from config.paths import DREAMINA_OUTPUT_DIR
@@ -124,9 +125,9 @@ class DreaminaPage(BasePage):
         root.addWidget(heading)
 
         if not self.client.is_installed():
-            warn = QLabel("注意： 未检测到 dreamina 可执行文件（studio/bin/dreamina.exe）。"
-                          "请先放置即梦 CLI 二进制后重启。")
-            warn.setObjectName("muted_text"); warn.setWordWrap(True)
+            warn = ElidedLabel("注意： 未检测到 dreamina 可执行文件（studio/bin/dreamina.exe）。"
+                          "请先放置即梦 CLI 二进制后重启。", max_lines=2)
+            warn.setObjectName("muted_text")
             root.addWidget(warn)
 
         root.addWidget(self._build_login_card())

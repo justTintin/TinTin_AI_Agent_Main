@@ -25,6 +25,7 @@ from gui.searchable_combo import SearchableComboBox
 from utils.my_knowledge_manager import MyKnowledgeManager, STYLIZATION_TYPE
 from gui.ai_script_page import LLMWorker
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 
 
 class ProductScriptPage(BasePage):
@@ -46,10 +47,8 @@ class ProductScriptPage(BasePage):
         heading = QLabel(" 产品文案创作")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        desc = QLabel("基于产品资料与风格化画像，一键生成产品文案与分镜脚本")
+        desc = ElidedLabel("基于产品资料与风格化画像，一键生成产品文案与分镜脚本", max_lines=1)
         desc.setObjectName("muted_text")
-        desc.setWordWrap(True)
-        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(desc)
         hdr.addStretch()
         layout.addLayout(hdr)

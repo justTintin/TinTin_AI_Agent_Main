@@ -20,6 +20,7 @@ from PySide6.QtGui import QPixmap, QColor, QFont
 from PySide6.QtCore import Signal, Qt
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from utils.base_worker import BaseWorker
 from utils.video_compiler import _find, _probe_duration
 from utils.platform_utils import find_ffmpeg
@@ -164,15 +165,16 @@ class MarketingDetectPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(12)
 
-        # 1. 标题与说明（介绍独立一行，暂不并排标题）
+        # 1. 标题与说明
+        hdr = QHBoxLayout()
         heading = QLabel(" 视频营销检测")
         heading.setObjectName("heading")
-        root.addWidget(heading)
-
-        sub = QLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。")
+        hdr.addWidget(heading)
+        sub = ElidedLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。", max_lines=1)
         sub.setObjectName("muted_text")
-        sub.setWordWrap(True)
-        root.addWidget(sub)
+        hdr.addWidget(sub)
+        hdr.addStretch()
+        root.addLayout(hdr)
 
         warning_lbl = QLabel("注意： 说明：此为根据大模型预测，实验功能，不一定完全准确。")
         warning_lbl.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")

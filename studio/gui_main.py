@@ -311,6 +311,9 @@ class SystemStatusOverlay(QWidget):
         self.ram_lbl = metric("", "内存")
         self.vram_lbl = metric("", "显存")
 
+        # 服务端资源监控（来自 /health gpu 字段）：显存占用 / GPU 利用率
+        self.server_gpu_lbl = metric("", "服务端GPU")
+
         def create_sep():
             sep = QFrame()
             sep.setFrameShape(QFrame.VLine)
@@ -319,24 +322,7 @@ class SystemStatusOverlay(QWidget):
             sep.setObjectName("status_separator")
             return sep
 
-        layout.addWidget(create_sep())
-
-        # AI 服务状态：图标 + 名称，文字按状态着色
-        def service(icon, name):
-            lbl = QLabel(f"{icon} {name}")
-            lbl.setObjectName("ov_service")
-            layout.addWidget(lbl)
-            return lbl
-
-        self.ollama_lbl = service("", "Ollama")
-        layout.addWidget(create_sep())
-        self.vision_lbl = service("", "视觉")
-        layout.addWidget(create_sep())
-        self.whisper_lbl = service("", "语音")
-        layout.addWidget(create_sep())
-        self.clip_lbl = service("", "向量")
-        layout.addWidget(create_sep())
-        self.clone_lbl = service("", "克隆")
+        # AI 服务状态（Ollama/视觉/语音/向量/克隆）已按需求移除，仅保留资源指标
 
         # 兼容别名（旧代码可能引用）
         self.gpu_lbl = self.server_lbl
@@ -358,12 +344,6 @@ class SystemStatusOverlay(QWidget):
         label.style().polish(label)
 
     @staticmethod
-    def _set_service_state(label, state):
-        label.setProperty("state", state)
-        label.style().unpolish(label)
-        label.style().polish(label)
-
-    @staticmethod
     def _load_level(value):
         if value >= 85:
             return "bad"
@@ -371,17 +351,26 @@ class SystemStatusOverlay(QWidget):
             return "warn"
         return "ok"
 
-    def update_ai_status(self, status):
-        self._set_service_state(self.ollama_lbl,
-                                "ok" if status.get("ollama_ok") else "bad")
-        self._set_service_state(self.vision_lbl,
-                                "ok" if status.get("vision_ok") else "bad")
-        self._set_service_state(self.whisper_lbl,
-                                "ok" if status.get("whisper_ok") else "bad")
-        self._set_service_state(self.clip_lbl,
-                                "ok" if status.get("clip_ok") else "bad")
-        self._set_service_state(self.clone_lbl,
-                                "ok" if status.get("clone_ok") else "bad")
+    def update_server_status(self, status):
+        """更新服务端资源监控（来自心跳 /health 的 gpu 字段），不含模型状态。"""
+        health = status.get("health") if isinstance(status, dict) else None
+        gpu = (health or {}).get("gpu") if isinstance(health, dict) else None
+        if not isinstance(gpu, dict):
+            self.server_gpu_lbl.setText("--")
+            self._set_level(self.server_gpu_lbl, "idle")
+            return
+        vram_pct = gpu.get("vram_percent")
+        util_pct = gpu.get("gpu_util_percent")
+        if vram_pct is None:
+            self.server_gpu_lbl.setText("--")
+            self._set_level(self.server_gpu_lbl, "idle")
+            return
+        text = f"{vram_pct:.0f}%"
+        if util_pct is not None:
+            text += f" {util_pct:.0f}%"
+        self.server_gpu_lbl.setText(text)
+        self._set_level(self.server_gpu_lbl, self._load_level(vram_pct))
+        self.adjustSize()
 
     def _on_stats_ready(self, cpu, ram, up, down, gpu_vram):
         self.cpu_lbl.setText(f"{cpu:.0f}%")
@@ -391,17 +380,6 @@ class SystemStatusOverlay(QWidget):
         self.vram_lbl.setText(gpu_vram if gpu_vram != "--" else "--")
         self._set_level(self.vram_lbl, "idle")
         self.adjustSize()
-
-    def update_stats(self):
-        pass  # kept for compatibility
-
-    def format_speed(self, bytes_per_sec):
-        if bytes_per_sec < 1024:
-            return f"{bytes_per_sec:.0f}B"
-        elif bytes_per_sec < 1024 * 1024:
-            return f"{bytes_per_sec/1024:.1f}K"
-        else:
-            return f"{bytes_per_sec/1024/1024:.1f}M"
 
 
 from gui.main_window_pages import PageSetupMixin
@@ -488,6 +466,15 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # System status overlay
         self.status_overlay = SystemStatusOverlay(self)
         self.status_overlay.show()
+
+        # 服务端连接警告横幅：服务端不通时顶部显示，恢复后消失
+        self.server_warning = QLabel(" ⚠ 无法连接服务端，部分功能不可用")
+        self.server_warning.setObjectName("server_warning")
+        self.server_warning.setStyleSheet(
+            "QLabel { background:#7f1d1d; color:#fecaca; padding:7px 20px;"
+            " border-radius:5px; font-size:13px; font-weight:600; }")
+        self.server_warning.adjustSize()
+        self.server_warning.hide()
         
         self._update_splash("正在检测 Playwright 运行状态...", 85)
         self.ensure_playwright_chromium_ready()
@@ -503,14 +490,26 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.comfy_ws = None
         # self.start_comfyui_websocket()
         
-        # 启动后台大模型状态监测线程
-        self._models_ready = False
+        # 启动服务端心跳监测（只关心服务端状态，不检测具体模型）
         self.ai_status_collector = AIStatusCheckThread(self.ai_config_file)
+
+        # 客户端任务下发闭环：周期领取（微信等 → 本机下载任务）并执行上报
+        try:
+            from gui.client_task_thread import ClientTaskWorker
+            self.client_task_worker = ClientTaskWorker(self)
+            self.client_task_worker.progress.connect(
+                lambda msg: log.info(f"[客户端任务] {msg}"))
+            self.client_task_worker.task_picked.connect(self._on_client_task_picked)
+            self.client_task_worker.start()
+        except Exception as e:
+            log.warning(f"[客户端任务] 领取线程启动失败: {e}")
+            self.client_task_worker = None
         
         def handle_ai_status(status):
             if hasattr(self, "status_overlay") and self.status_overlay:
-                self.status_overlay.update_ai_status(status)
-            self._models_ready = status.get("ollama_ok", False) and status.get("vision_ok", False)
+                self.status_overlay.update_server_status(status)
+            # 服务端可达性 → 顶部警告横幅显示/隐藏
+            self._update_server_warning(status.get("server_ok", False))
 
         self.ai_status_collector.status_updated.connect(handle_ai_status)
         self.ai_status_collector.start()
@@ -536,6 +535,33 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             apply_theme(app)
         self.theme_hint.setText(f" 已切换到「{self.theme_combo.currentText()}」，立即生效")
 
+    def _on_client_task_picked(self, task):
+        """领取到客户端任务（下载）：系统托盘提示用户操作。"""
+        try:
+            params = (task or {}).get("params") or {}
+            url = str(params.get("url") or "")
+            cap = (task or {}).get("capability") or ""
+            msg = f"收到客户端任务：{cap}\n{url}" if url else f"收到客户端任务：{cap}"
+            log.info(f"[客户端任务] 领取任务: {msg}")
+            if hasattr(self, "tray") and self.tray is not None:
+                self.tray.showMessage("客户端任务", msg,
+                                      QSystemTrayIcon.Information, 6000)
+        except Exception as e:
+            log.warning(f"[客户端任务] 任务提示失败: {e}")
+
+    def _update_server_warning(self, server_ok):
+        """服务端连通状态 → 顶部警告横幅显示/隐藏。"""
+        if not hasattr(self, "server_warning"):
+            return
+        if server_ok:
+            if not self.server_warning.isHidden():
+                self.server_warning.hide()
+        else:
+            self.server_warning.show()
+            self.server_warning.raise_()
+            self.server_warning.adjustSize()
+            self.server_warning.move((self.width() - self.server_warning.width()) // 2, 8)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, "status_overlay") and self.status_overlay:
@@ -544,6 +570,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             w = self.status_overlay.width()
             h = self.status_overlay.height()
             self.status_overlay.move(self.width() - w - margin_right, margin_top)
+        if hasattr(self, "server_warning") and not self.server_warning.isHidden():
+            self.server_warning.move((self.width() - self.server_warning.width()) // 2, 8)
 
     def _setup_tray(self):
         """系统托盘：关闭窗口时最小化到托盘，仅托盘「退出」走确认关闭流程。"""
@@ -657,6 +685,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "ai_status_collector") and self.ai_status_collector:
                 self.ai_status_collector.running = False
                 self.ai_status_collector.wait()
+        except Exception:
+            pass
+        try:
+            if getattr(self, "client_task_worker", None) is not None:
+                self.client_task_worker.stop()
+                self.client_task_worker.wait(3000)
         except Exception:
             pass
         try:

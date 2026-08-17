@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from config.paths import EXTENSION_DIR
 from utils.extension_bridge import DEFAULT_PORT
 from utils.logger_utils import log
@@ -146,10 +147,8 @@ class ExtensionPage(BasePage):
         title = QLabel(" 扩展插件")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        desc = QLabel("浏览器素材采集扩展（仿 Billfish 采集插件）")
+        desc = ElidedLabel("浏览器素材采集扩展（仿 Billfish 采集插件）", max_lines=1)
         desc.setObjectName("muted_text")
-        desc.setWordWrap(True)
-        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(desc)
         hdr.addStretch()
         root.addLayout(hdr)
@@ -207,13 +206,13 @@ class ExtensionPage(BasePage):
         row.addLayout(btns)
         lay.addLayout(row)
 
-        tip = QLabel(
+        tip = ElidedLabel(
             "说明：新版 Chrome / Edge 已禁止启用非商店来源的 .crx 扩展（旁加载已失效）。\n"
             "点击「安装到所选浏览器」会打开扩展管理页并复制扩展路径，按提示开启「开发者模式」→"
-            "「加载已解压的扩展程序」即可——只需装一次，重启浏览器后仍然有效。"
+            "「加载已解压的扩展程序」即可——只需装一次，重启浏览器后仍然有效。",
+            max_lines=2,
         )
         tip.setObjectName("muted_text")
-        tip.setWordWrap(True)
         lay.addWidget(tip)
         return card
 

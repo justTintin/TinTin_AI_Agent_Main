@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTime
 
 from utils.gui_icons import mdi_button, table_action_button
+from gui.elided_label import ElidedLabel
 from utils.logger_utils import log
 from utils import local_scheduler as ls
 
@@ -68,7 +69,7 @@ class ScheduledTasksMgmtPage(QWidget):
         heading = QLabel("定时任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = QLabel("本地定时任务（如热点采集，不依赖服务端智能体）与云端智能体（到点提交服务端自动分解执行）的统一管理。")
+        sub = ElidedLabel("本地定时任务（如热点采集，不依赖服务端智能体）与云端智能体（到点提交服务端自动分解执行）的统一管理。", max_lines=1)
         sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
@@ -205,10 +206,11 @@ class ScheduledTasksMgmtPage(QWidget):
 
         tip_card = QFrame(); tip_card.setObjectName("card")
         tl = QVBoxLayout(tip_card); tl.setContentsMargins(12, 10, 12, 10); tl.setSpacing(8)
-        tip = QLabel(
+        tip = ElidedLabel(
             "「一键成片 / 脚本成片」的定时任务由服务端调度执行："
-            "在「一键成片」页配置好产品与文案后，点「添加为定时任务」选择调度方式提交服务端即可。")
-        tip.setWordWrap(True)
+            "在「一键成片」页配置好产品与文案后，点「添加为定时任务」选择调度方式提交服务端即可。",
+            max_lines=2,
+        )
         tl.addWidget(tip)
         btn_row = QHBoxLayout(); btn_row.setSpacing(8)
         btn_compile = mdi_button("去一键成片页添加定时任务", "rocket")
@@ -568,9 +570,11 @@ class _AgentCapabilityDialog(QDialog):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
 
-        tip = QLabel("以下为服务端注册的智能体（云端能力）：在「云端智能体」定时任务或工作台输入任务描述时，"
-                     "可参照「能力说明」中的唤醒提示词表达需求，任务会被自动拆解分配到这里对应的智能体执行。")
-        tip.setWordWrap(True)
+        tip = ElidedLabel(
+            "以下为服务端注册的智能体（云端能力）：在「云端智能体」定时任务或工作台输入任务描述时，"
+            "可参照「能力说明」中的唤醒提示词表达需求，任务会被自动拆解分配到这里对应的智能体执行。",
+            max_lines=2,
+        )
         tip.setObjectName("muted_text")
         lay.addWidget(tip)
 

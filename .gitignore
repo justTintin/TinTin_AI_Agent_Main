@@ -179,3 +179,6 @@ studio/config/local_config.json
 /_*.txt
 /pythonw_test.txt
 /studio/ingestion_diagnose_report.txt
+
+# Local Codex tool config (not part of the product)
+.codex/

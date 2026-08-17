@@ -16,6 +16,7 @@ from utils.base_worker import BaseWorker
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
 from utils.logger_utils import log
+from gui.elided_label import ElidedLabel
 
 
 class ValidateWorker(BaseWorker):
@@ -97,9 +98,8 @@ class AutoListingTab(QWidget):
         title = QLabel(" 自动上架")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        desc = QLabel("抖店商品自动上架：导入数据包 → 复用已登录 Chrome → 自动填写并保存草稿")
+        desc = ElidedLabel("抖店商品自动上架：导入数据包 → 复用已登录 Chrome → 自动填写并保存草稿", max_lines=1)
         desc.setObjectName("muted_text")
-        desc.setWordWrap(True)
         hdr.addWidget(desc)
         hdr.addStretch()
         lay.addLayout(hdr)

@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from utils.base_worker import BaseWorker
 
 from utils.logger_utils import log
+from gui.elided_label import ElidedLabel
 from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS
 
 
@@ -292,10 +293,8 @@ class ProductLibraryPage(BasePage):
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
-        subtitle = QLabel("基础数据从旺店通仓库同步，按 品类 → 品牌 → 型号 统一管理，供 AI 文案创作调用")
+        subtitle = ElidedLabel("基础数据从旺店通仓库同步，按 品类 → 品牌 → 型号 统一管理，供 AI 文案创作调用", max_lines=1)
         subtitle.setObjectName("muted_text")
-        subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(subtitle)
         hdr.addStretch()
         root.addLayout(hdr)
@@ -386,10 +385,12 @@ class ProductLibraryPage(BasePage):
         title_basic.setObjectName("card_title")
         top_layout.addWidget(title_basic)
 
-        tip = QLabel("仓库同步的产品：仅「商品名称/型号、品类、备注」可改，其余为仓库只读数据；"
-                     "所有修改仅保存在本地，不会回写仓库。")
+        tip = ElidedLabel(
+            "仓库同步的产品：仅「商品名称/型号、品类、备注」可改，其余为仓库只读数据；"
+            "所有修改仅保存在本地，不会回写仓库。",
+            max_lines=2,
+        )
         tip.setObjectName("muted_text")
-        tip.setWordWrap(True)
         top_layout.addWidget(tip)
 
         form_container = QWidget()

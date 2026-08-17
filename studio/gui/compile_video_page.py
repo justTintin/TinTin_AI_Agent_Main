@@ -30,10 +30,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QTimer
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from gui.montage.beat_montage_controller import BeatMontageController
 from gui.montage.step_beat_view import StepBeatView
 from utils.base_worker import BaseWorker
-from utils.gui_icons import mdi_button, table_action_button
+from utils.gui_icons import mdi_button, table_action_button, icon_button
 from utils.logger_utils import log
 from utils.video_compiler import compile_video, collect_images, RATIO_SIZES
 from utils.voxcpm_client import synthesize_tts
@@ -395,8 +396,8 @@ class CompileVideoPage(BasePage):
         root.setContentsMargins(0, 8, 0, 0)
         root.setSpacing(12)
 
-        sub = QLabel("选择产品（必选，任务起点）→ 可选设置/自动匹配素材 → 设置条数与时长 → 开始执行。复杂剪辑请用「智能混剪」。")
-        sub.setObjectName("muted_text"); sub.setWordWrap(True)
+        sub = ElidedLabel("选择产品（必选，任务起点）→ 可选设置/自动匹配素材 → 设置条数与时长 → 开始执行。复杂剪辑请用「智能混剪」。", max_lines=1)
+        sub.setObjectName("muted_text")
         root.addWidget(sub)
 
         # ── 上段：左右分割（左=产品，右=可选设置）──────────────────────────
@@ -661,8 +662,8 @@ class CompileVideoPage(BasePage):
         root.setContentsMargins(0, 8, 0, 0)
         root.setSpacing(10)
 
-        sub = QLabel("选择一个已保存的分镜脚本（含素材+文案），直接提交服务端成片。脚本在「分镜脚本」页保存为 JSON 格式生成。")
-        sub.setObjectName("muted_text"); sub.setWordWrap(True)
+        sub = ElidedLabel("选择一个已保存的分镜脚本（含素材+文案），直接提交服务端成片。脚本在「分镜脚本」页保存为 JSON 格式生成。", max_lines=1)
+        sub.setObjectName("muted_text")
         root.addWidget(sub)
 
         # ── 脚本选择行 ─────────────────────────────────────────────────────
@@ -1585,9 +1586,7 @@ class CompileVideoPage(BasePage):
             self.list_templates.setItem(current_row, 0, item)
             url = self._video_url_for_template(t)
             if url:
-                btn = QPushButton("播放")
-                btn.setFixedSize(32, 26)
-                btn.setToolTip(f"播放预览: {url}")
+                btn = icon_button("play", f"播放预览: {url}")
                 btn.clicked.connect(lambda checked=False, u=url: self._play_template_video(u))
             else:
                 btn = QLabel("—")

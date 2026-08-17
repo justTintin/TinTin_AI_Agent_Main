@@ -20,6 +20,7 @@ import uuid
 import configparser
 from version import __app_name__, get_version
 from ui import gui_styles
+from gui.elided_label import ElidedLabel
 from gui.transcription_page import TranscriptionToolPage
 from gui.env_config_page import EnvConfigPage, EnvInstallWorker
 from gui.live_clip_page import LiveClipPage
@@ -624,7 +625,7 @@ class PageSetupMixin:
 
         # ───── Whisper ─────
         g5 = QGroupBox(" Whisper 语音转写（远程 ASR 服务）"); g5.setObjectName("model_groupbox"); g5.setProperty("section", "whisper"); lg5 = QVBoxLayout(g5); lg5.setSpacing(10)
-        whisper_desc = QLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。"); whisper_desc.setObjectName("muted_text"); whisper_desc.setWordWrap(True); lg5.addWidget(whisper_desc)
+        whisper_desc = ElidedLabel("工程已切换为纯远程 ASR 模式，语音转写由远程 Whisper 服务完成，无需本地模型。", max_lines=2); whisper_desc.setObjectName("muted_text"); lg5.addWidget(whisper_desc)
         _rl(lg5, "ASR 服务地址:", lambda r: (setattr(self,'whisper_api_url_input',QLineEdit()), self.whisper_api_url_input.setPlaceholderText("http://192.168.x.x:9000/asr"), r.addWidget(self.whisper_api_url_input)))
         lg5.addLayout(_row(lambda r: (r.addStretch(),
             setattr(self,'btn_test_whisper',mdi_button("测试连接", "search")), self.btn_test_whisper.setObjectName("secondary_button"), self.btn_test_whisper.setFixedWidth(110), self.btn_test_whisper.clicked.connect(self._test_whisper_connection),
@@ -635,7 +636,7 @@ class PageSetupMixin:
 
         # ───── PaddleOCR（服务端 OCR，与 Whisper/CLIP 一致的远程配置样式）─────
         g6 = QGroupBox(" PaddleOCR 文本识别（服务端 OCR）"); g6.setObjectName("model_groupbox"); g6.setProperty("section", "ocr"); lg6 = QVBoxLayout(g6); lg6.setSpacing(10)
-        paddle_desc = QLabel("OCR 已切换为纯服务端模式，由算力服务端 POST /material/ocr 完成识别，无需本地模型或专属环境。"); paddle_desc.setObjectName("muted_text"); paddle_desc.setWordWrap(True); lg6.addWidget(paddle_desc)
+        paddle_desc = ElidedLabel("OCR 已切换为纯服务端模式，由算力服务端 POST /material/ocr 完成识别，无需本地模型或专属环境。", max_lines=2); paddle_desc.setObjectName("muted_text"); lg6.addWidget(paddle_desc)
         _rl(lg6, "OCR 服务地址:", lambda r: (setattr(self,'ocr_api_url_input',QLineEdit()), self.ocr_api_url_input.setPlaceholderText("http://192.168.x.x:8000（与统一服务端地址同步）"), r.addWidget(self.ocr_api_url_input)))
         lg6.addLayout(_row(lambda r: (r.addStretch(),
             setattr(self,'btn_test_ocr',mdi_button("测试连接", "search")), self.btn_test_ocr.setObjectName("secondary_button"), self.btn_test_ocr.setFixedWidth(110), self.btn_test_ocr.clicked.connect(self._test_ocr_connection),
@@ -649,7 +650,7 @@ class PageSetupMixin:
 
         # ───── CLIP ─────
         g7 = QGroupBox(" CLIP 向量检索（远程 embedding 服务）"); g7.setObjectName("model_groupbox"); g7.setProperty("section", "clip"); lg7 = QVBoxLayout(g7); lg7.setSpacing(10)
-        clip_desc = QLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。"); clip_desc.setObjectName("muted_text"); clip_desc.setWordWrap(True); lg7.addWidget(clip_desc)
+        clip_desc = ElidedLabel("向量检索的 CLIP embedding 已切换为纯远程模式，由远程 embedding 服务完成图文向量编码，无需本地模型。", max_lines=2); clip_desc.setObjectName("muted_text"); lg7.addWidget(clip_desc)
         _rl(lg7, "CLIP API 地址:", lambda r: (setattr(self,'clip_api_url_input',QLineEdit()), self.clip_api_url_input.setPlaceholderText("http://192.168.x.x:8001"), r.addWidget(self.clip_api_url_input)))
         lg7.addLayout(_row(lambda r: (r.addStretch(),
             setattr(self,'btn_test_clip',mdi_button("测试连接", "search")), self.btn_test_clip.setObjectName("secondary_button"), self.btn_test_clip.setFixedWidth(110), self.btn_test_clip.clicked.connect(self._test_clip_connection),
@@ -1787,10 +1788,8 @@ class PageSetupMixin:
         title = QLabel(" 系统配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        hint = QLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。")
+        hint = ElidedLabel("系统级运行开关，改动立即生效（写入 Windows 注册表 Run 键）。", max_lines=1)
         hint.setObjectName("muted_text")
-        hint.setWordWrap(True)
-        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(hint)
         hdr.addStretch()
         layout.addLayout(hdr)
@@ -1836,10 +1835,8 @@ class PageSetupMixin:
         title = QLabel(" 本地缓存配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        hint = QLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。")
+        hint = ElidedLabel("设置本地缓存目录，智能混剪、分割等生成的中间文件将统一存放在此目录下。", max_lines=1)
         hint.setObjectName("muted_text")
-        hint.setWordWrap(True)
-        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(hint)
         hdr.addStretch()
         layout.addLayout(hdr)
@@ -1913,9 +1910,8 @@ class PageSetupMixin:
         title = QLabel(" 视频 LUT 还原配置")
         title.setObjectName("heading")
         hdr.addWidget(title)
-        hint = QLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用；格式支持：.cube / .3dl / .lut")
+        hint = ElidedLabel("配置各相机/风格的 LUT 还原文件。在智能混剪镜头重组时可选择应用；格式支持：.cube / .3dl / .lut", max_lines=1)
         hint.setObjectName("muted_text")
-        hint.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(hint)
         hdr.addStretch()
         layout.addLayout(hdr)

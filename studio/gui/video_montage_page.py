@@ -531,11 +531,13 @@ class VideoMontagePage(BasePage):
         """单个本地视频的派生分割片段目录。
 
         任务缓存已创建时写到
-        .runtime/montage_cache/<job_id>/splits/<视频名>/，
+        .runtime/montage_cache/<job_id>/splits/<短视频名>/，
         不复制原始素材、不污染源视频目录；
         未创建任务时回退旧式目录以兼容历史分镜。
+        短名与片段文件名共用 safe_source_name（防超长路径，全链路一致）。
         """
-        base = os.path.splitext(os.path.basename(video_path))[0]
+        from gui.montage.utils_media import safe_source_name
+        base = safe_source_name(video_path)
         sp_root = self._montage_splits_root()
         if sp_root:
             return os.path.join(sp_root, base)
@@ -904,7 +906,8 @@ class VideoMontagePage(BasePage):
             video_path = self.processing_video_path
         if not video_path:
             return
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
+        from gui.montage.utils_media import safe_source_name
+        video_basename = safe_source_name(video_path)
         video_dir = os.path.dirname(video_path)
         splits_dir = self._montage_per_video_splits_dir(video_path)
         video_workspace_dir = os.path.dirname(splits_dir)

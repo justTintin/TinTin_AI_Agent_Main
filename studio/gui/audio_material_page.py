@@ -410,7 +410,7 @@ class AudioMaterialPage(BasePage):
         friendly = msg
         if "Connection" in msg or "timed out" in msg or "Max retries" in msg:
             friendly = "无法连接服务端，请检查服务端是否在线"
-        self.lbl_stat.setText(f"失败： {friendly}")
+        self.lbl_stat.setText(f"失败：{friendly}")
         self.table.setRowCount(0)
         self._results = []
         self._total = 0
@@ -711,7 +711,7 @@ class AudioMaterialPage(BasePage):
             tool = getattr(mw, "compile_video_tool", None)
             if tool is None:
                 mw.switch_page(45)
-                self.lbl_now_playing.setText("失败： 一键成片页未加载")
+                self.lbl_now_playing.setText("失败：一键成片页未加载")
                 return
             bc = getattr(tool, "beat_controller", None)
             if bc is not None:
@@ -733,12 +733,12 @@ class AudioMaterialPage(BasePage):
                 if hasattr(bc, "step_beat"):
                     bc.step_beat.load_music(path)
             self.lbl_now_playing.setText(
-                f" 已跳转到卡点成片: {os.path.basename(path)}")
+                f"已跳转到卡点成片: {os.path.basename(path)}")
         except Exception as e:
-            self.lbl_now_playing.setText(f"失败： 跳转失败: {e}")
+            self.lbl_now_playing.setText(f"失败：跳转失败: {e}")
 
     def _on_beat_download_error(self, msg):
-        self.lbl_now_playing.setText(f"失败： 下载音频失败: {msg}")
+        self.lbl_now_playing.setText(f"失败：下载音频失败: {msg}")
 
     # ── 分页 ──
     def _update_page_label(self):

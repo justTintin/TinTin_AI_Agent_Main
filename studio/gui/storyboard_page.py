@@ -28,6 +28,7 @@ from utils.dreamina_client import DreaminaClient
 from config.paths import DREAMINA_OUTPUT_DIR, CONFIG_INI_FILE, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from gui.ai_script_page import LLMWorker, FeishuUploadWorker, WebSearchWorker
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from gui.searchable_combo import SearchableComboBox
 from gui.vector_search_page import _ThumbWorker, VideoPreviewDialog
 
@@ -813,10 +814,8 @@ class StoryboardPage(BasePage):
         heading = QLabel(" 分镜脚本创作")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        desc = QLabel("视频分镜设计 + 即梦 / MG 动画素材生成")
+        desc = ElidedLabel("视频分镜设计 + 即梦 / MG 动画素材生成", max_lines=1)
         desc.setObjectName("muted_text")
-        desc.setWordWrap(True)
-        desc.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(desc)
         hdr.addStretch()
         layout.addLayout(hdr)

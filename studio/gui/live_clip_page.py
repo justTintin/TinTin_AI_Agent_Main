@@ -1365,19 +1365,19 @@ class ClipListItemWidget(QFrame):
     def toggle_play(self):
         if not self.clip_info.get("video_path") or not os.path.exists(self.clip_info["video_path"]):
             return
-            
+
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放声音")
+            _set_button_icon(self.btn_play, "play")
         else:
             self.main_page.pause_all_players_except(self.clip_index)
             self.player.play()
-            self.btn_play.setText("暂停")
-            
+            _set_button_icon(self.btn_play, "pause")
+
     def pause_audio(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            self.btn_play.setText("播放声音")
+            _set_button_icon(self.btn_play, "play")
             
     def open_cover_editor(self):
         video_path = self.clip_info.get("video_path")
@@ -1558,7 +1558,7 @@ class LiveClipPage(BasePage):
         self.pause_all_players_except(-1)
         if hasattr(self, "audio_player"):
             self.audio_player.player.pause()
-            self.audio_player.btn_play.setText("播放")
+            _set_button_icon(self.audio_player.btn_play, "play")
 
         if index == 0:
             self.progress_bar = self.progress_bar_p0
@@ -2068,7 +2068,7 @@ class LiveClipPage(BasePage):
                 w.wait(2000)
         self._workers.clear()
         self._reset_ui()
-        self.stage_lbl.setText("停止 已停止")
+        self.stage_lbl.setText("已停止")
         log.info("[LiveClip] _stop_analysis 完成")
 
     def _do_analyze(self, srt_path):
@@ -2488,7 +2488,7 @@ class LiveClipPage(BasePage):
         self.btn_export.setEnabled(True)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)
-        self.stage_lbl.setText("失败： 操作失败")
+        self.stage_lbl.setText("操作失败")
         
         for widget in getattr(self, "clip_item_widgets", []):
             if not widget.clip_info.get("video_path"):

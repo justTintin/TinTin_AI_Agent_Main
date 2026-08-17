@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from utils.gui_icons import mdi_icon
 
 log = logging.getLogger(__name__)
@@ -61,10 +62,9 @@ class _ToolCard(QFrame):
         title_lbl.setAlignment(Qt.AlignCenter)
         lay.addWidget(title_lbl, 0, Qt.AlignCenter)
 
-        desc_lbl = QLabel(desc)
+        desc_lbl = ElidedLabel(desc, max_lines=2)
         desc_lbl.setObjectName("tool_card_desc")
         desc_lbl.setAlignment(Qt.AlignCenter)
-        desc_lbl.setWordWrap(True)
         lay.addWidget(desc_lbl, 0, Qt.AlignCenter)
         lay.addStretch()
 

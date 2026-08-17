@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QEvent, QObject
 from PySide6.QtGui import QFont, QColor, QTextCursor, QKeyEvent
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from config.paths import PROJECT_ROOT
 
 
@@ -106,9 +107,8 @@ class TerminalPage(BasePage):
 
         # Python 路径独立一行（标题行不放其它控件）
         py_row = QHBoxLayout()
-        lbl_py = QLabel(_PYTHON_EXE)
+        lbl_py = ElidedLabel(_PYTHON_EXE, max_lines=2)
         lbl_py.setObjectName("muted_text")
-        lbl_py.setWordWrap(False)
         py_row.addWidget(lbl_py)
         py_row.addStretch()
         lay.addLayout(py_row)

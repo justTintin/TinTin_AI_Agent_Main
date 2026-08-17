@@ -19,6 +19,7 @@ from utils.ocr_workers import VideoOcrWorker
 
 
 from utils.file_dialog_utils import pick_file
+from gui.elided_label import ElidedLabel
 from utils.gui_icons import mdi_button
 class InteractivePreviewLabelOCR(QLabel):
     boundsChanged = Signal(int, int, int, int) # x, y, w, h
@@ -497,13 +498,13 @@ class VideoOcrPage(BasePage):
         help_card.setObjectName("card")
         help_layout = QVBoxLayout(help_card)
         help_card.setContentsMargins(16, 12, 16, 12)
-        help_lbl = QLabel(
+        help_lbl = ElidedLabel(
             " **大模型与本地 OCR 提示**:\n"
             "PaddleOCR 使用本地内置的深度学习模型进行文本提取，完全免费且离线运行，**不需要下载大语言模型 (LLM)**。 "
             "权重会自动从百度官方国内镜像下载。\n"
-            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「 大模型配置」** 页面来接入国内主流大模型 API 服务。"
+            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「 大模型配置」** 页面来接入国内主流大模型 API 服务。",
+            max_lines=2,
         )
-        help_lbl.setWordWrap(True)
         help_lbl.setStyleSheet("font-size: 11px; line-height: 16px; color: #a1a1aa;")
         help_layout.addWidget(help_lbl)
         right_layout.addWidget(help_card)

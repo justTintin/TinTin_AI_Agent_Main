@@ -32,6 +32,7 @@ from utils.base_worker import BaseWorker
 from utils import knowledge_distiller
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 
 
 # ══════════════════════════════════════════════════════
@@ -304,10 +305,8 @@ class MyKnowledgePage(BasePage):
         heading = QLabel(" 我的知识库")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        subtitle = QLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整")
+        subtitle = ElidedLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整", max_lines=1)
         subtitle.setObjectName("muted_text")
-        subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(subtitle)
         hdr.addStretch()
         root.addLayout(hdr)

@@ -21,6 +21,7 @@ from config.paths import (WORKSPACE_ROOT, APPS_DIR,
 
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
+from gui.elided_label import ElidedLabel
 class EnvInstallWorker(BaseWorker):
     log_line = Signal(str)
     stage = Signal(str)
@@ -203,12 +204,12 @@ class EnvConfigPage(BasePage):
         layout_mat.setContentsMargins(16, 20, 16, 16)
         layout_mat.setSpacing(10)
 
-        mat_desc = QLabel(
+        mat_desc = ElidedLabel(
             "素材浏览器下载的视频/图片等媒体文件存储至此目录。\n"
-            "可指定外置盘或网络映射盘，JSON 元数据始终保留在项目内部。"
+            "可指定外置盘或网络映射盘，JSON 元数据始终保留在项目内部。",
+            max_lines=2,
         )
         mat_desc.setObjectName("muted_text")
-        mat_desc.setWordWrap(True)
         layout_mat.addWidget(mat_desc)
 
         mat_row = QHBoxLayout()
@@ -239,12 +240,12 @@ class EnvConfigPage(BasePage):
         layout_rustfs.setContentsMargins(16, 20, 16, 16)
         layout_rustfs.setSpacing(10)
 
-        rustfs_desc = QLabel(
+        rustfs_desc = ElidedLabel(
             "RustFS 兼容 S3/MinIO 协议，用于素材文件的云端对象存储。\n"
-            "配置后可在「素材管理」页将本地素材目录同步到对象存储桶。"
+            "配置后可在「素材管理」页将本地素材目录同步到对象存储桶。",
+            max_lines=2,
         )
         rustfs_desc.setObjectName("muted_text")
-        rustfs_desc.setWordWrap(True)
         layout_rustfs.addWidget(rustfs_desc)
 
         row_rustfs1 = QHBoxLayout()

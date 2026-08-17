@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QTextBrowser, QScrollArea, QDialog, QFileDialog,
                                QListWidget, QListWidgetItem, QMessageBox)
 from gui.searchable_combo import SearchableComboBox
-from utils.gui_icons import mdi_icon, mdi_button
+from gui.elided_label import ElidedLabel
+from utils.gui_icons import mdi_icon, mdi_button, icon_button
 from utils.logger_utils import log
 
 # (标题, 图标, 描述, 目标页 index, 强调色)
@@ -510,9 +511,8 @@ class _ChatBubble(QWidget):
         style = ("QPushButton { background:#232838; border:1px solid #2f6fed;"
                  " border-radius:12px; color:#5b8ef0; padding:2px 14px; font-size:12px; }"
                  " QPushButton:hover { background:#2f6fed; color:#ffffff; }")
-        btn_play = QPushButton("播放 播放成片")
+        btn_play = icon_button("play", title or "播放对话生成的成片视频")
         btn_play.setStyleSheet(style)
-        btn_play.setToolTip(title or "播放对话生成的成片视频")
         btn_play.clicked.connect(self._play_asset)
         self._asset_box.layout().addWidget(btn_play)
         btn_dl = QPushButton("⬇ 下载成片")
@@ -787,8 +787,7 @@ class _ProductPickerDialog(QDialog):
         self.combo = SearchableComboBox(placeholder="输入品牌/型号/品类搜索…")
         self.combo.setMinimumHeight(34)
         v.addWidget(self.combo)
-        tip = QLabel("产品数据来自服务端产品资料库；为空时可先在「产品资料」页同步。")
-        tip.setWordWrap(True)
+        tip = ElidedLabel("产品数据来自服务端产品资料库；为空时可先在「产品资料」页同步。", max_lines=2)
         tip.setStyleSheet("color:#8b93a3; font-size:12px;")
         v.addWidget(tip)
         btns = QHBoxLayout()
@@ -856,8 +855,7 @@ class _MaterialPickerDialog(QDialog):
         self.combo = SearchableComboBox(placeholder="输入文件名/品牌/型号搜索…")
         self.combo.setMinimumHeight(34)
         v.addWidget(self.combo)
-        tip = QLabel("素材来自服务端素材库；为空时可先在「素材检索」页确认服务端素材是否已入库。")
-        tip.setWordWrap(True)
+        tip = ElidedLabel("素材来自服务端素材库；为空时可先在「素材检索」页确认服务端素材是否已入库。", max_lines=2)
         tip.setStyleSheet("color:#8b93a3; font-size:12px;")
         v.addWidget(tip)
         btns = QHBoxLayout()
@@ -941,8 +939,7 @@ class _ScriptPickerDialog(QDialog):
         self.combo = SearchableComboBox(placeholder="输入主题搜索脚本…")
         self.combo.setMinimumHeight(34)
         v.addWidget(self.combo)
-        tip = QLabel("脚本来自服务端分镜脚本库；为空时可先在「分镜脚本创作」页保存脚本。")
-        tip.setWordWrap(True)
+        tip = ElidedLabel("脚本来自服务端分镜脚本库；为空时可先在「分镜脚本创作」页保存脚本。", max_lines=2)
         tip.setStyleSheet("color:#8b93a3; font-size:12px;")
         v.addWidget(tip)
         btns = QHBoxLayout()

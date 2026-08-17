@@ -1075,7 +1075,7 @@ class VectorSearchPage(BasePage):
     def _copy_selected_url(self):
         mid, _ = self._selected_mid()
         if not mid:
-            self.lbl_stat.setText("注意： 请先选中一个素材")
+            self.lbl_stat.setText("注意：请先选中一个素材")
             return
         url = _serve_url(mid)
         QGuiApplication.clipboard().setText(url)
@@ -1085,7 +1085,7 @@ class VectorSearchPage(BasePage):
         """收集当前选中的素材为统一 dict 列表；无有效素材返回 None。"""
         items = self._selected_items()
         if not items:
-            self.lbl_stat.setText("注意： 请先在缩略图右上角方框选择素材")
+            self.lbl_stat.setText("注意：请先在缩略图右上角方框选择素材")
             return None
         materials = []
         for it in items:
@@ -1116,7 +1116,7 @@ class VectorSearchPage(BasePage):
                 "ai_confidence": raw.get("ai_confidence"),
             })
         if not materials:
-            self.lbl_stat.setText(" 未选择到有效素材")
+            self.lbl_stat.setText("未选择到有效素材")
             return None
         return materials
 
@@ -1127,7 +1127,7 @@ class VectorSearchPage(BasePage):
             return
         mw = getattr(self, "main_window", None)
         if mw is None:
-            self.lbl_stat.setText(" 无法访问主窗口")
+            self.lbl_stat.setText("无法访问主窗口")
             return
         # 切换到一键成片页（第 34 页）并填充素材列表
         try:
@@ -1136,11 +1136,11 @@ class VectorSearchPage(BasePage):
             if tool is None:
                 # 恢复当前页面
                 mw.switch_page(38)
-                self.lbl_stat.setText("失败： 一键成片页未加载")
+                self.lbl_stat.setText("失败：一键成片页未加载")
                 return
             tool.import_materials(materials)
         except Exception as e:
-            self.lbl_stat.setText(f"失败： 跳转失败: {e}")
+            self.lbl_stat.setText(f"失败：跳转失败: {e}")
 
     def _send_to_montage(self):
         """把选中的视频素材发送到「智能混剪」（支持多选，需本地/NAS 可访问路径）。"""
@@ -1149,18 +1149,18 @@ class VectorSearchPage(BasePage):
             return
         mw = getattr(self, "main_window", None)
         if mw is None:
-            self.lbl_stat.setText(" 无法访问主窗口")
+            self.lbl_stat.setText("无法访问主窗口")
             return
         try:
             mw.switch_page(14)
             tool = getattr(mw, "video_montage_tool", None)
             if tool is None:
                 mw.switch_page(38)
-                self.lbl_stat.setText("失败： 智能混剪页未加载")
+                self.lbl_stat.setText("失败：智能混剪页未加载")
                 return
             tool.set_external_materials(materials)
         except Exception as e:
-            self.lbl_stat.setText(f"失败： 跳转失败: {e}")
+            self.lbl_stat.setText(f"失败：跳转失败: {e}")
 
     def _on_item_double_clicked(self, item):
         """双击卡片：图片弹大图预览（右侧反推提示词），视频弹播放器预览。"""

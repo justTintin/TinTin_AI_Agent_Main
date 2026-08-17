@@ -26,6 +26,7 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QPen, QBrush, QPolyg
 from PySide6.QtCore import Signal, Qt, QPointF, QRectF
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from utils.base_worker import BaseWorker
 from utils.video_compiler import _find, _probe_duration
 from utils.platform_utils import find_ffmpeg
@@ -251,10 +252,9 @@ class HookScorePage(BasePage):
         heading = QLabel(" 视频评价预测")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = QLabel("选投放平台 → 上传视频 → 视觉模型按该平台推荐逻辑预测表现（综合分 + 预测量级 + 多维评分）。"
-                     "发布后回填真实播放量与平台评价，模型会据此自我校准。")
-        sub.setObjectName("muted_text"); sub.setWordWrap(True)
-        sub.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        sub = ElidedLabel("选投放平台 → 上传视频 → 视觉模型按该平台推荐逻辑预测表现（综合分 + 预测量级 + 多维评分）。"
+                          "发布后回填真实播放量与平台评价，模型会据此自我校准。", max_lines=1)
+        sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)

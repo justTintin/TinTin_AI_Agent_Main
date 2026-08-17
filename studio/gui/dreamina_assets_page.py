@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from config.paths import MATERIALS_DIR
 
 # 常见媒体文件后缀
@@ -38,10 +39,8 @@ class DreaminaAssetsPage(BasePage):
         heading.setObjectName("heading")
         hdr.addWidget(heading)
 
-        tip = QLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库。")
+        tip = ElidedLabel("浏览即梦素材请点击『打开即梦素材浏览器』。下载到本地后，可在本页一键入库。", max_lines=1)
         tip.setObjectName("muted_text")
-        tip.setWordWrap(True)
-        tip.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
         hdr.addWidget(tip)
         hdr.addStretch()
         root.addLayout(hdr)

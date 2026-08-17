@@ -11,6 +11,8 @@ subprocess.Popen monkey-patch。
   保证 Worker 子模块（同样 import 本模块）也能享受到无黑框效果。
 """
 import os
+import re
+import hashlib
 import subprocess
 
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
@@ -22,6 +24,27 @@ class _patched_Popen(subprocess.Popen):
             kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
         super().__init__(*args, **kwargs)
 subprocess.Popen = _patched_Popen
+
+
+def safe_source_name(video_path, max_len=40):
+    """视频文件 → 统一的短源名（splits 目录名 / 片段文件名 / srt 名共用）。
+
+    目的：避免超长视频名（如即梦分镜描述名）导致 Windows 路径超 260 字符
+    （makedirs/写片段时报 WinError 3/206）。规则：
+    - 保留中文与全角字符（它们本身合法），仅防御性替换半角非法字符与控制字符
+    - 折叠连续空白
+    - 超过 max_len 时截断并附加 MD5 短哈希保唯一（不同长名截断后不冲突）
+    全链路（目录名/片段名/读取）都经此函数，保证一致、不丢镜头。
+    """
+    base = os.path.splitext(os.path.basename(video_path or ""))[0]
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", base or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(".")
+    if not cleaned:
+        cleaned = "video"
+    if len(cleaned) > max_len:
+        digest = hashlib.md5((base or "").encode("utf-8", errors="ignore")).hexdigest()[:8]
+        cleaned = cleaned[:max_len] + "_" + digest
+    return cleaned
 
 
 def find_ffmpeg():

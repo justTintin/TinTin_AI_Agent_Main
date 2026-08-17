@@ -21,6 +21,7 @@ from utils.gui_icons import mdi_button
 SETTINGS_MENUS = [
     ("平台接入", "link", 22),
     ("本地配置", "download", 21),
+    ("环境与维护", "server", 36),
     ("扩展插件", "puzzle", 43),
     ("任务队列", "format-list-checks", 9),
     ("关于", "information", 6),
@@ -77,7 +78,8 @@ class SystemSettingsDialog(QDialog):
 
         页面从主窗口 content_stack 迁出时，原位置先插入空占位再移除页面，
         保证主窗口其余页面索引（如工作台 46）不漂移；此后页面常驻本窗口。
-        平台接入（22）合并为 Tabs：LLM 设置 + 服务接入（原模型配置界面）。
+        平台接入（22）：把原模型配置（ai_settings）作为「服务接入」tab 注入
+        平台接入页内部 tabs（与 ComfyUI / RunningHub 等平级）。
         """
         # 关于页是懒加载页面：确保已构建
         if hasattr(main_window, "_ensure_page_built"):
@@ -86,7 +88,7 @@ class SystemSettingsDialog(QDialog):
             except Exception as e:
                 log.warning(f"[系统设置] 关于页构建失败: {e}")
         attr_map = {
-            22: "llm_settings", 21: "voice_samples",
+            22: "llm_settings", 21: "voice_samples", 36: "backup",
             43: "extension", 9: "task_list", 6: "about",
         }
         stack = main_window.content_stack
@@ -102,28 +104,26 @@ class SystemSettingsDialog(QDialog):
                 stack.removeWidget(page)
             return page
 
-        # 平台接入：Tabs（LLM 设置 + 服务接入=原模型配置 ai_settings）
+        # 平台接入：原模型配置（ai_settings）作为「服务接入」tab 注入页内 tabs
         page_llm = getattr(main_window, "page_llm_settings", None)
         page_ai = getattr(main_window, "page_ai_settings", None)
-        if page_llm is not None or page_ai is not None:
-            wrap = QWidget()
-            wl = QVBoxLayout(wrap)
-            wl.setContentsMargins(0, 0, 0, 0)
-            wl.setSpacing(0)
-            tabs = QTabWidget()
-            tabs.setDocumentMode(True)
-            if page_llm is not None:
-                tabs.addTab(_detach(page_llm), " 平台接入")
-            if page_ai is not None:
-                tabs.addTab(_detach(page_ai), " 服务接入")
-            wl.addWidget(tabs)
-            self._stack.addWidget(wrap)
+        if page_llm is not None:
+            _detach(page_llm)
+            inner_tabs = page_llm.findChild(QTabWidget)
+            if page_ai is not None and inner_tabs is not None:
+                inner_tabs.insertTab(0, _detach(page_ai), " 服务接入")
+            self._stack.addWidget(page_llm)
+            self._page_index[22] = self._stack.count() - 1
+        elif page_ai is not None:
+            # 平台接入页缺失时兜底：直接挂模型配置页
+            _detach(page_ai)
+            self._stack.addWidget(page_ai)
             self._page_index[22] = self._stack.count() - 1
 
         # 其余菜单页面
         for _text, _icon, idx in SETTINGS_MENUS:
             if idx == 22:
-                continue  # 已在上面合并
+                continue  # 已在上面处理
             page = getattr(main_window, "page_" + attr_map[idx], None)
             if page is None:
                 continue
@@ -162,6 +162,11 @@ class SystemSettingsDialog(QDialog):
                     mw.refresh_timer.stop()
             if idx == 22 and hasattr(mw, "refresh_llm_page_status"):
                 mw.refresh_llm_page_status()
+            elif idx == 36:
+                if hasattr(mw, "env_config_tool"):
+                    mw.env_config_tool.refresh_status()
+                if hasattr(mw, "refresh_logs"):
+                    mw.refresh_logs()
             elif idx == 21:
                 if hasattr(mw, "voice_samples_tool"):
                     mw.voice_samples_tool._load_table_data()

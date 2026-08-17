@@ -38,6 +38,7 @@ FEATURES = [
     ("涓€閿垚鐗囩绾?(video_compiler)", ["TestVideoCompilerPure", "TestCompileVideoSmoke"]),
     ("鏅鸿兘娣峰壀鏈嶅姟绔嫾鎺?Worker锛堢绾?mock锛?, ["TestMontageConcatWorker"]),
     ("浠跨垎娆惧鎴风锛坴iral_clone_client锛岀绾?mock锛?, ["TestViralCloneAnalyze", "TestViralClonePlan", "TestViralCloneFlow", "TestViralCloneSource", "TestViralCloneAssetBrowser", "TestViralCloneRun", "TestViralClonePlaceholders"]),
+    ("客户端任务下发闭环（client_task_worker，离线 mock）", ["TestPickup", "TestReport", "TestExecute"]),
     ("鏅鸿兘娣峰壀闀滃ご鍒嗗壊锛堝湪绾?/montage/split锛?, ["TestMontageSplitOnline"]),
     ("Ollama 鍥剧墖璇嗗埆锛堝湪绾匡級", ["TestOllamaImageRecognition"]),
     ("Ollama 瑙嗛鍒嗘瀽锛堝湪绾匡級", ["TestOllamaVideo"]),

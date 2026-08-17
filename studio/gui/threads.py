@@ -113,88 +113,66 @@ class AIStatusCheckThread(QThread):
         self.running = True
 
     def run(self):
+        """客户端心跳：GET /health?machine_id=&capabilities=（技能匹配路由用）。
+
+        - machine_id：本机归属（任务派发按在线客户端）
+        - capabilities：已装技能 id 列表（逗号分隔）——下载/技能任务优先派给
+          有该技能的在线客户端（online_client_with，回退任意在线）
+        /health 返回 {status, hostname, os, python, gpu:{...}}——服务端整体
+        健康与服务端资源（GPU 显存/利用率），供资源监控栏展示。
+        """
         import os
         import json
+        from urllib.parse import quote
         from utils.http_client import http_get
 
         consecutive_failures = 0
         while self.running:
-            status = {
-                "ollama_ok": False,
-                "vision_ok": False,
-                "whisper_ok": False,
-                "clip_ok": False,
-                "clone_ok": False,
-            }
+            status = {"server_ok": False, "health": None}
             try:
-                # 1. 检测大模型 — 走服务端代理（不再直连带 API Key）
                 if os.path.isfile(self.config_file_path):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
                     server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
-
                     if server_url:
-                        # 健康探活：单次请求、不重试不打日志（避免服务不可达时刷屏）
+                        # 心跳带 machine_id + capabilities（已装技能）
+                        mid = ""
                         try:
-                            res = http_get(f"{server_url.rstrip('/')}/ollama/status", timeout=2, quiet=True)
-                            if res.status_code == 200:
-                                status["ollama_ok"] = True
-                                status["vision_ok"] = True  # 服务端代理管理视觉模型
+                            from utils.license import get_machine_id
+                            mid = get_machine_id() or ""
                         except Exception:
                             pass
-            except Exception:
-                pass
-
-            # 2. 检测远程声音克隆 API (VoxCPM) 连通性
-            try:
-                import json as _json
-                if os.path.isfile(self.config_file_path):
-                    with open(self.config_file_path, encoding="utf-8") as f:
-                        cfg = _json.load(f)
-                    vox_url = cfg.get("vox_api_url", "").strip()
-                    if vox_url:
-                        base = vox_url.rstrip("/voxcpm/tts").rstrip("/")
-                        r = http_get(f"{base}/voxcpm/health", timeout=2, quiet=True)
-                        if r.status_code == 200:
-                            status["clone_ok"] = True
-            except Exception:
-                pass
-
-            # 3. 检测远程 Whisper ASR 服务连通性
-            try:
-                import json as _json
-                if os.path.isfile(self.config_file_path):
-                    with open(self.config_file_path, encoding="utf-8") as f:
-                        cfg = _json.load(f)
-                    whisper_url = cfg.get("whisper_api_url", "").strip()
-                    if whisper_url:
-                        base = whisper_url.rstrip("/")
-                        r = http_get(f"{base}/whisper/health", timeout=2, quiet=True)
-                        if r.status_code == 200:
-                            status["whisper_ok"] = True
-            except Exception:
-                pass
-
-            # 4. 检测远程 CLIP embedding 服务连通性
-            try:
-                import json as _json
-                if os.path.isfile(self.config_file_path):
-                    with open(self.config_file_path, encoding="utf-8") as f:
-                        cfg = _json.load(f)
-                    clip_url = cfg.get("clip_api_url", "").strip()
-                    if clip_url:
-                        base = clip_url.rstrip("/")
-                        r = http_get(f"{base}/clip/health", timeout=2, quiet=True)
-                        if r.status_code == 200:
-                            status["clip_ok"] = True
+                        caps = ""
+                        try:
+                            from utils.skill_manager import list_skills
+                            caps = ",".join(
+                                str(s.get("id") or "") for s in list_skills()
+                                if s.get("id"))
+                        except Exception:
+                            pass
+                        params = []
+                        if mid:
+                            params.append(f"machine_id={quote(mid)}")
+                        if caps:
+                            params.append(f"capabilities={quote(caps)}")
+                        url = f"{server_url.rstrip(chr(47))}/health"
+                        if params:
+                            url += "?" + "&".join(params)
+                        # 服务端心跳：单次请求、不重试不打日志（避免不可达时刷屏）；200=服务端可达
+                        res = http_get(url, timeout=2, quiet=True)
+                        if res.status_code == 200:
+                            status["server_ok"] = True
+                            try:
+                                status["health"] = res.json()
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
             self.status_updated.emit(status)
 
-            # 指数退避：全部服务探测失败（如服务端不可达）时拉长间隔，避免刷日志；
-            # 任一服务恢复后回到基础 10s 间隔。封顶 60s。
-            if any(status.values()):
+            # 指数退避：服务端不可达时拉长间隔，恢复后回到基础 10s，封顶 60s
+            if status.get("server_ok"):
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
@@ -204,3 +182,5 @@ class AIStatusCheckThread(QThread):
                 if not self.running:
                     return
                 time.sleep(0.5)
+
+

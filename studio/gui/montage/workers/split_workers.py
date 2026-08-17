@@ -72,7 +72,8 @@ class PySceneDetectWorker(BaseWorker):
             self.progress.emit(60)
 
             os.makedirs(self.output_dir, exist_ok=True)
-            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+            from gui.montage.utils_media import safe_source_name
+            video_basename = safe_source_name(self.video_path)
             output_template = f"{video_basename}_shot_$SCENE_NUMBER.mp4"
 
             # 调用 PySceneDetect 进行分段视频导出
@@ -173,7 +174,8 @@ class ServerSplitWorker(BaseWorker):
 
             from utils.http_client import http_get, http_post
             os.makedirs(self.output_dir, exist_ok=True)
-            base = os.path.splitext(os.path.basename(self.video_path))[0] if self.video_path else ""
+            from gui.montage.utils_media import safe_source_name
+            base = safe_source_name(self.video_path) if self.video_path else ""
             data = {
                 "threshold": str(self.threshold),
                 "min_scene_len": str(self.min_scene_len),
@@ -226,9 +228,11 @@ class ServerSplitWorker(BaseWorker):
                 start = float(sh.get("start_sec") or 0)
                 end = float(sh.get("end_sec") or start)
                 idx = int(sh.get("shot_index") or (created + 1))
-                # 文件名保持 {源名}_shot_{序号:03d}.mp4（优先用服务端返回的 filename）
+                # 文件名保持 {源名}_shot_{序号:03d}.mp4（优先用服务端返回的 filename）；
+                # 服务端返回的长名也截断，防止超长路径
                 fname = sh.get("filename") or f"{base}_shot_{idx:03d}.mp4"
-                out = os.path.join(self.output_dir, os.path.basename(fname))
+                fname = safe_source_name(os.path.basename(fname), max_len=60)
+                out = os.path.join(self.output_dir, fname)
                 ok = False
                 dl_url = sh.get("download_url") or ""
                 if dl_url:
@@ -399,7 +403,8 @@ class BestClipWorker(BaseWorker):
             except Exception:
                 pass
 
-        basename = os.path.splitext(os.path.basename(self.video_path))[0]
+        from gui.montage.utils_media import safe_source_name
+        basename = safe_source_name(self.video_path)
         s_str = format_seconds_to_srt_timestamp(start).replace(":", "-")
         e_str = format_seconds_to_srt_timestamp(end).replace(":", "-")
         out_name = f"{basename}_shot_{self.shot_index:03d}_{s_str}_{e_str}.mp4"

@@ -3,7 +3,8 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QL
                                QProgressBar, QMessageBox, QFrame, QListWidget, QTableWidget,
                                QTableWidgetItem, QHeaderView, QAbstractItemView, QDoubleSpinBox, QWidget,
                                QComboBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from utils.file_dialog_utils import pick_files
 from gui.montage.base_step_view import BaseStepView
 from utils.gui_icons import mdi_button
 
@@ -22,20 +23,16 @@ class Step1SplitView(BaseStepView):
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(12)
-
-        # Input source videos
-        row_dir = QHBoxLayout()
-        row_dir.addWidget(QLabel("原始素材:"))
+        # 源目录状态(隐藏保留: 代码多处引用 folder_path_input 作为共享源目录)
         self.main_page.folder_path_input = QLineEdit()
-        self.main_page.folder_path_input.setPlaceholderText("选择一个或多个视频素材，可多次追加...")
-        self.main_page.folder_path_input.setReadOnly(True)
-        row_dir.addWidget(self.main_page.folder_path_input)
-        
-        btn_sel = mdi_button("选择素材", "folder")
-        btn_sel.setObjectName("secondary_button")
-        btn_sel.clicked.connect(self.main_page._select_folder)
-        row_dir.addWidget(btn_sel)
-        card_layout.addLayout(row_dir)
+        self.main_page.folder_path_input.setVisible(False)
+
+        from gui.common_widgets import DropZone as _DropZone
+        self.main_page.drop_zone = _DropZone(("mp4", "mov", "avi", "mkv", "flv", "webm", "m4v"),
+                                               hint="拖入视频素材 或 点击选择")
+        self.main_page.drop_zone.clicked.connect(self.main_page._select_folder)
+        self.main_page.drop_zone.file_dropped.connect(self.main_page._on_drop_videos)
+        card_layout.addWidget(self.main_page.drop_zone)
 
         # Raw videos list
         card_layout.addWidget(QLabel("已选择的原始视频素材 (双击可播放预览，右键可删除):"))
@@ -58,11 +55,13 @@ class Step1SplitView(BaseStepView):
         self.main_page.threshold_spin.setSingleStep(1.0)
         split_row.addWidget(self.main_page.threshold_spin)
 
-        split_row.addWidget(QLabel("最少帧数 (默认15):"))
+        split_row.addWidget(QLabel("最小镜头(秒):"))
         self.main_page.min_len_spin = QDoubleSpinBox()
-        self.main_page.min_len_spin.setDecimals(0)
-        self.main_page.min_len_spin.setRange(5, 100)
-        self.main_page.min_len_spin.setValue(15)
+        self.main_page.min_len_spin.setDecimals(1)
+        self.main_page.min_len_spin.setRange(0.1, 60.0)
+        self.main_page.min_len_spin.setValue(0.5)
+        self.main_page.min_len_spin.setSingleStep(0.1)
+        self.main_page.min_len_spin.setSuffix(" 秒")
         split_row.addWidget(self.main_page.min_len_spin)
 
         split_row.addSpacing(12)
@@ -163,3 +162,4 @@ class Step1SplitView(BaseStepView):
         nav_row.addWidget(self.main_page.btn_next_to_step_2)
 
         layout.addLayout(nav_row)
+

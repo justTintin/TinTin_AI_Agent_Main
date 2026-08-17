@@ -12,106 +12,12 @@ from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 
 
 
-class PySceneDetectWorker(BaseWorker):
-    stage = Signal(str)
-    progress = Signal(int)
-    busy = Signal(bool)
-    finished = Signal(str, int, list)  # Output directory, number of scenes, list of (start_sec, end_sec)
-
-    def __init__(self, video_path, output_dir, threshold, min_scene_len):
-        super().__init__()
-        self.video_path = video_path
-        self.output_dir = output_dir
-        self.threshold = threshold
-        self.min_scene_len = min_scene_len
-
-    def run(self):
-        try:
-            self.stage.emit("正在检查 PySceneDetect 环境")
-            self.progress.emit(10)
-            self.busy.emit(True)
-
-            try:
-                from scenedetect import open_video, SceneManager, split_video_ffmpeg
-                from scenedetect.detectors import ContentDetector
-            except ImportError:
-                raise RuntimeError("未检测到 scenedetect 依赖。")
-
-            ffmpeg_path = find_ffmpeg()
-            if not ffmpeg_path:
-                raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
-
-            # Setup ffmpeg environment for scenedetect
-            if os.path.isfile(ffmpeg_path):
-                ffmpeg_dir = os.path.dirname(os.path.abspath(ffmpeg_path))
-                if ffmpeg_dir not in os.environ["PATH"]:
-                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
-                try:
-                    import scenedetect.output.video
-                    scenedetect.output.video._FFMPEG_PATH = ffmpeg_path
-                except Exception as e:
-                    log.warning(f"无法为 scenedetect 设置 _FFMPEG_PATH: {e}")
-
-            self.stage.emit("正在分析镜头切点...")
-            self.progress.emit(30)
-
-            # 打开视频并进行场景检测
-            video = open_video(self.video_path)
-            scene_manager = SceneManager()
-            scene_manager.add_detector(ContentDetector(threshold=self.threshold, min_scene_len=self.min_scene_len))
-            scene_manager.detect_scenes(video, show_progress=False)
-            scene_list = scene_manager.get_scene_list()
-
-            if not scene_list:
-                self.stage.emit("未检测到明显的镜头切点")
-                self.progress.emit(100)
-                self.finished.emit(self.output_dir, 0, [])
-                return
-
-            self.stage.emit(f"检测到 {len(scene_list)} 个镜头，正在分割输出...")
-            self.progress.emit(60)
-
-            os.makedirs(self.output_dir, exist_ok=True)
-            from gui.montage.utils_media import safe_source_name
-            video_basename = safe_source_name(self.video_path)
-            output_template = f"{video_basename}_shot_$SCENE_NUMBER.mp4"
-
-            # 调用 PySceneDetect 进行分段视频导出
-            split_video_ffmpeg(
-                self.video_path,
-                scene_list,
-                output_dir=self.output_dir,
-                output_file_template=output_template,
-                show_progress=False
-            )
-
-            # 验证输出文件是否生成，防止 ffmpeg 调用失败无输出却显示成功
-            created_files = []
-            if os.path.exists(self.output_dir):
-                created_files = [f for f in os.listdir(self.output_dir) if f.lower().endswith(".mp4")]
-            
-            if not created_files:
-                raise RuntimeError(
-                    "未能生成分割后的镜头视频文件。请检查 ffmpeg 是否工作正常。\n"
-                    "也可以尝试将 ffmpeg.exe 复制到软件根目录下。"
-                )
-
-            scenes_sec = [(s[0].get_seconds(), s[1].get_seconds()) for s in scene_list]
-            self.stage.emit("分割导出完成")
-            self.progress.emit(100)
-            self.finished.emit(self.output_dir, len(scene_list), scenes_sec)
-
-        except Exception:
-            self.busy.emit(False)
-            log.exception("镜头分割失败")
-            self.error.emit(traceback.format_exc())
-
 
 
 class ServerSplitWorker(BaseWorker):
     """服务端镜头分割 + 逐镜分析（POST /montage/split，分割+分析合并接口）。
 
-    与 PySceneDetectWorker 同信号契约：
+    信号契约：
         finished(output_dir, scene_count, [(start_sec, end_sec), ...])
     新增：
         analysis_ready(list)  # [{filename, shot_index, aesthetic_score, shot_analysis, description}, ...]
@@ -228,16 +134,12 @@ class ServerSplitWorker(BaseWorker):
                 start = float(sh.get("start_sec") or 0)
                 end = float(sh.get("end_sec") or start)
                 idx = int(sh.get("shot_index") or (created + 1))
-                # 文件名统一 {safe源名}_shot_{序号:03d}.mp4，与目录名/重命名/分析缓存前缀一致；
-                # 不能用 safe_source_name 直接处理完整文件名——它会剥掉扩展名，
-                # 导致片段无 .mp4 后缀，_check_split_clips_exist 等按扩展名过滤查不到。
-                # 素材库素材（无本地源名）用服务端返回名，保留扩展名并截断防超长路径。
-                if base:
-                    fname = f"{base}_shot_{idx:03d}.mp4"
-                else:
-                    _raw = os.path.basename(sh.get("filename") or f"clip_{idx:03d}.mp4")
-                    _ext = os.path.splitext(_raw)[1] or ".mp4"
-                    fname = safe_source_name(os.path.splitext(_raw)[0], max_len=60) + _ext
+                # 用服务端返回的片段名（保留 .mp4 扩展名），与 _rename_video_splits_with_metadata 的
+                # _shot_ 前缀约定一致；仅当文件名超长时截断（保留扩展名），防 Windows 260 路径。
+                fname = os.path.basename(sh.get("filename") or f"{base}_shot_{idx:03d}.mp4")
+                if len(fname) > 200:
+                    _stem, _ext = os.path.splitext(fname)
+                    fname = _stem[:196] + (_ext or ".mp4")
                 out = os.path.join(self.output_dir, fname)
                 ok = False
                 dl_url = sh.get("download_url") or ""

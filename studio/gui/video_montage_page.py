@@ -48,7 +48,7 @@ from gui.montage.dialogs import (TextEditDialog, ScriptCompareDialog, DubbedVide
                                   FinalMixedVideosDialog, ProductCopyInputDialog, VoiceRowDetailWidget,
                                   ClipSelectionDialog)
 from gui.error_dialog import show_error_dialog
-from gui.montage.workers.split_workers import (PySceneDetectWorker, BestClipWorker, ServerSplitWorker)
+from gui.montage.workers.split_workers import (BestClipWorker, ServerSplitWorker)
 from gui.montage.workers.concat_workers import (VideoConcatWorker, FinalMixWorker, VideoDubbingWorker)
 from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
 from gui.montage.workers.voice_workers import VoiceCloneWorker
@@ -463,6 +463,46 @@ class VideoMontagePage(BasePage):
             common_dir = os.path.dirname(os.path.abspath(paths[0]))
         self.folder_path_input.setText(common_dir)
     # [2·基础设施]  _select_folder
+    def _add_paths_to_video_list(self, paths):
+        """把一批本地视频路径加入 video_list（去重），供选择/拖拽共用入口。
+
+        返回新增数量；无新增时也刷新扫描（保持与 _select_folder 行为一致）。
+        """
+        if not paths:
+            return 0
+        existing = set()
+        for i in range(self.video_list.count()):
+            if self._is_local_file_item(self.video_list.item(i)):
+                existing.add(os.path.abspath(self.video_list.item(i).text().strip()))
+        added = 0
+        for p in paths:
+            ap = os.path.abspath(p)
+            if ap in existing:
+                continue
+            existing.add(ap)
+            it = QListWidgetItem(ap)
+            self.video_list.addItem(it)
+            self._decorate_video_item_widget(it)
+            added += 1
+        if added or True:
+            self._ensure_montage_job()
+            self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
+            self.processing_video_path = ""
+            self.video_list.setCurrentItem(None)
+            self._refresh_source_root_hint()
+            self._check_split_clips_exist()
+        log.info(f"[DIAG _add_paths] paths={len(paths)} added={added} list_count={self.video_list.count()}")
+        return added
+
+    def _on_drop_videos(self, paths):
+        """拖放区拖入视频的回调：去重加入列表并刷新。"""
+        if not paths:
+            return
+        added = self._add_paths_to_video_list(list(paths))
+        if hasattr(self, "stage_label"):
+            self.stage_label.setText(
+                f"已新增 {added} 个素材到列表。" if added else "所选素材已在列表中，无新增。")
+
     def _select_folder(self):
         file_paths, _ = pick_files(
             self.parent_widget,
@@ -472,33 +512,8 @@ class VideoMontagePage(BasePage):
         )
         if not file_paths:
             return
-
-        existing = set()
-        for i in range(self.video_list.count()):
-            if self._is_local_file_item(self.video_list.item(i)):
-                existing.add(os.path.abspath(self.video_list.item(i).text().strip()))
-
-        added = 0
-        for p in file_paths:
-            ap = os.path.abspath(p)
-            if ap in existing:
-                continue
-            existing.add(ap)
-            it = QListWidgetItem(ap)
-            self.video_list.addItem(it)
-            self._decorate_video_item_widget(it)
-            added += 1
-
-        log.info(f"[DIAG _select_folder] selected={len(file_paths)} added={added} list_count={self.video_list.count()}")
-        # 多素材时走合并视图：收集列表中所有视频各自的 per-video splits 目录，
-        # 并清空当前选中项与 processing_video_path，使 _check_split_clips_exist
-        # 走「合并扫描」分支展示全部素材的分镜片段（否则会只显示列表第一项的片段）。
-        self._ensure_montage_job()
-        self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
-        self.processing_video_path = ""
-        self.video_list.setCurrentItem(None)
-        self._refresh_source_root_hint()
-        self._check_split_clips_exist()
+        added = self._add_paths_to_video_list(file_paths)
+        log.info(f"[DIAG _select_folder] selected={len(file_paths)} added={added}")
         if added == 0:
             self.stage_label.setText("所选素材已在列表中，无新增。")
         else:
@@ -677,7 +692,7 @@ class VideoMontagePage(BasePage):
         """从「素材检索」带入多个素材（仅本地/NAS 可访问路径会加入）。
 
         materials: [{material_id, filename, media_type, path, url, ...}]
-        注：当前混剪镜头分割为本地 PySceneDetect，素材需在本地/NAS 挂载可访问；
+        注：镜头分割由服务端完成，素材需在本地/NAS 挂载或素材库可访问；
         只有服务端 URL 的素材会被跳过并提示。
         """
         if not materials:
@@ -906,8 +921,7 @@ class VideoMontagePage(BasePage):
             video_path = self.processing_video_path
         if not video_path:
             return
-        from gui.montage.utils_media import safe_source_name
-        video_basename = safe_source_name(video_path)
+        video_basename = os.path.splitext(os.path.basename(video_path))[0]
         video_dir = os.path.dirname(video_path)
         splits_dir = self._montage_per_video_splits_dir(video_path)
         video_workspace_dir = os.path.dirname(splits_dir)
@@ -1000,8 +1014,7 @@ class VideoMontagePage(BasePage):
 
             # Try to restore split descriptions from the srt file if they are not in self.split_descriptions yet
             if files and video_path:
-                from gui.montage.utils_media import safe_source_name as _safe_name2
-                video_basename = _safe_name2(video_path)
+                video_basename = os.path.splitext(os.path.basename(video_path))[0]
                 video_dir = os.path.dirname(video_path)
                 video_workspace_dir = os.path.dirname(splits_dir)
                 if shot_caches is not None:
@@ -1932,7 +1945,7 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(int(self._merged_done * 100 / max(1, self._merged_total)))
 
         self._start_merged_split(item, cur_splits_dir,
-                                self.threshold_spin.value(), int(self.min_len_spin.value()))
+                                self.threshold_spin.value(), float(self.min_len_spin.value()))
 
     def _retire_worker(self, w):
         """保留 QThread 引用直到线程结束，避免对象被 GC 时线程仍在运行导致崩溃。"""
@@ -1952,7 +1965,7 @@ class VideoMontagePage(BasePage):
                     pass
 
     def _start_merged_split(self, item, cur_splits_dir, threshold, min_scene_len):
-        """镜头分割：优先服务端 /montage/split（分割+分析合并），本地素材失败回退 PySceneDetect。"""
+        """镜头分割：服务端 /montage/split（分割+分析合并），失败时本地视频自动挑精华。"""
         is_local = item["kind"] == "local"
         video_path = item.get("path") if is_local else ""
         # 替换前保留旧 worker 引用（避免 QThread 被 GC 时线程未结束崩溃）
@@ -1971,25 +1984,7 @@ class VideoMontagePage(BasePage):
         self.worker.analysis_ready.connect(
             lambda meta, _d=cur_splits_dir, _v=video_path: self._on_split_analysis_ready(meta, _d, _v))
 
-        def _on_server_split_error(err):
-            if not is_local:
-                log.warning(f"[合并分割] 服务端分割素材库视频失败，跳过: {err}")
-                self._on_merged_split_error(err)
-                return
-            log.warning(f"[合并分割] 服务端分割失败，回退本地 PySceneDetect: {err}")
-            self._retire_worker(getattr(self, "worker", None))
-            self.worker = PySceneDetectWorker(
-                video_path=video_path,
-                output_dir=cur_splits_dir,
-                threshold=threshold,
-                min_scene_len=min_scene_len,
-            )
-            self.worker.stage.connect(lambda t: self.stage_label.setText(t))
-            self.worker.finished.connect(self._on_merged_split_done)
-            self.worker.error.connect(self._on_merged_split_error)
-            self.worker.start()
-
-        self.worker.error.connect(_on_server_split_error)
+        self.worker.error.connect(self._on_merged_split_error)
         self.worker.start()
     # [3·分割]  _on_split_analysis_ready
     # [3·分割]  _on_split_analysis_ready
@@ -2164,8 +2159,8 @@ class VideoMontagePage(BasePage):
         if not os.path.exists(splits_dir) or not video_path:
             return
         import re
-        from gui.montage.utils_media import safe_source_name as _safe_name
-        basename = _safe_name(video_path)
+        basename = os.path.splitext(os.path.basename(video_path))[0]
+        prefix = f"{basename}_shot_"
         files = [f for f in os.listdir(splits_dir)
                  if f.startswith(prefix) and f.lower().endswith((".mp4", ".m4v"))]
         def get_shot_idx(filename):

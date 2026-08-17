@@ -1471,7 +1471,7 @@ class PageSetupMixin:
             layout.addWidget(self.account_videos_table, 1)
 
     def _build_log_tab(self, parent):
-        """系统日志 Tab：日志查看器 + 级别/关键词过滤 + 服务端日志开关。"""
+        """系统日志 Tab：日志查看器 + 级别/关键词过滤。"""
         l1 = QVBoxLayout(parent); l1.setContentsMargins(16,16,16,16)
         frow = QHBoxLayout(); l1.addLayout(frow)
         b = mdi_button("刷新", "refresh"); b.setObjectName("primary_button"); b.setFixedWidth(90); b.clicked.connect(self.refresh_logs); frow.addWidget(b)
@@ -1486,18 +1486,39 @@ class PageSetupMixin:
         self.log_keyword_input.setMinimumWidth(160)
         self.log_keyword_input.returnPressed.connect(self.refresh_logs)
         frow.addWidget(self.log_keyword_input)
-        self.btn_server_log = mdi_button("服务端", "server")
-        self.btn_server_log.setObjectName("secondary_button")
-        self.btn_server_log.setCheckable(True)
-        self.btn_server_log.setChecked(False)
-        self.btn_server_log.clicked.connect(self.refresh_logs)
-        frow.addWidget(self.btn_server_log)
+        frow.addWidget(QLabel("历史日志:"))
+        self.log_file_combo = QComboBox()
+        self.log_file_combo.setMinimumWidth(170)
+        self.log_file_combo.currentIndexChanged.connect(self.refresh_logs)
+        frow.addWidget(self.log_file_combo)
         frow.addStretch()
         self.log_viewer = QTextEdit(); self.log_viewer.setReadOnly(True); self.log_viewer.setObjectName("log_viewer"); l1.addWidget(self.log_viewer, 1)
         # 右键菜单：清空日志
         self.log_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.log_viewer.customContextMenuRequested.connect(self._log_viewer_context_menu)
-        l1.addWidget(QLabel("完整日志: .runtime/logs/app.log"))
+        self.log_path_label = QLabel("完整日志: .runtime/logs/app.log")
+        l1.addWidget(self.log_path_label)
+        self._populate_log_file_combo()
+    def _populate_log_file_combo(self):
+        """刷新历史日志下拉框（logs/ 下所有日志文件，按时间倒序）。"""
+        combo = getattr(self, "log_file_combo", None)
+        if combo is None:
+            return
+        from utils.logger_utils import list_log_files, log_file_label
+        combo.blockSignals(True)
+        prev = combo.currentData() if combo.count() else None
+        combo.clear()
+        for name, path in list_log_files():
+            combo.addItem(f"{log_file_label(name)} ({name})", path)
+        # 默认选中"本次会话"(第一个)
+        if prev is not None:
+            idx = combo.findData(prev)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        if combo.count() == 0:
+            combo.addItem("本次会话 (app.log)", "")
+
 
     def _build_sysinfo_tab(self, parent):
         """系统信息 Tab：本机硬件 / Python / CUDA 环境检测。"""

@@ -120,78 +120,7 @@ def _format_result(data):
     return "\n\n".join(parts) if parts else json.dumps(data, ensure_ascii=False, indent=2)
 
 
-# ── 拖放区 ──
-
-class _DropZone(QFrame):
-    """可拖入文件或点击上传的放置区。"""
-    file_dropped = Signal(str)
-
-    def __init__(self, accepted_exts, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setObjectName("drop_zone")
-        self.setMinimumHeight(120)
-        self._exts = accepted_exts
-        self.setStyleSheet("""
-            #drop_zone {
-                background: #1c1c24; border: 2px dashed #3a3a48;
-                border-radius: 10px;
-            }
-            #drop_zone:hover { border-color: #2ecc71; background: #1f1f2a; }
-        """)
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignCenter)
-        hint = QLabel("拖入文件 或 点击上传")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet("color: #6b7280; font-size: 14px;")
-        lay.addWidget(hint)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            ext_filter = " ".join(f"*{e}" for e in self._exts)
-            path, _ = pick_file(self, "选择文件", "", f"媒体文件 ({ext_filter});;所有文件 (*)")
-            if path:
-                self.file_dropped.emit(path)
-        super().mousePressEvent(event)
-
-    def dragEnterEvent(self, event):
-        # 注意：endswith 返回 bool，不能再用 any() 包一层（会抛 TypeError 导致拖放失效）
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if any(u.toLocalFile().lower().endswith(self._exts) for u in urls):
-                event.acceptProposedAction()
-                self._set_active(True)
-
-    def dragMoveEvent(self, event):
-        # 移动阶段需持续接受，否则松开时 dropEvent 不会触发
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-
-    def dragLeaveEvent(self, event):
-        self._set_active(False)
-
-    def dropEvent(self, event):
-        urls = event.mimeData().urls()
-        for u in urls:
-            path = u.toLocalFile()
-            if path.lower().endswith(self._exts):
-                self.file_dropped.emit(path)
-                event.acceptProposedAction()
-                break
-        self._set_active(False)
-
-    def _set_active(self, active):
-        """拖入时高亮边框提示可放置，离开/放下后恢复原样式。"""
-        if active:
-            self.setStyleSheet(
-                "#drop_zone { background: #1f2a24; border: 2px dashed #2ecc71;"
-                " border-radius: 10px; }")
-        else:
-            self.setStyleSheet(
-                "#drop_zone { background: #1c1c24; border: 2px dashed #3a3a48;"
-                " border-radius: 10px; }"
-                "#drop_zone:hover { border-color: #2ecc71; background: #1f1f2a; }")
-
+from gui.common_widgets import DropZone as _DropZone
 
 class _FrameExtractWorker(BaseWorker):
     """后台抽取视频帧缩略图，供时间轴帧预览使用。"""
@@ -551,7 +480,8 @@ class ImagePromptReversePage(BasePage):
         top.addLayout(right, 2)
         root.addLayout(top, 1)
 
-    def _on_image_selected(self, path):
+    def _on_image_selected(self, paths):
+        path = paths[0] if isinstance(paths, (list, tuple)) else paths
         self._image_path = path
         pm = QPixmap(path)
         if not pm.isNull():
@@ -655,7 +585,8 @@ class VideoPromptReversePage(BasePage):
 
         self.timeline.range_changed.connect(self._update_range_label)
 
-    def _on_video_selected(self, path):
+    def _on_video_selected(self, paths):
+        path = paths[0] if isinstance(paths, (list, tuple)) else paths
         self._video_path = path
         self._duration = _probe_duration(path)
         if self._duration <= 0:

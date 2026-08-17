@@ -283,7 +283,11 @@ class SystemStatusOverlay(QWidget):
         layout.setContentsMargins(14, 4, 14, 4)
         layout.setSpacing(8)
 
-        # 服务器入口
+        # 服务器入口（状态点 + 名称）：服务端连接状态实时反映在圆点上
+        self.server_dot = QLabel("●")
+        self.server_dot.setObjectName("ov_server_dot")
+        self.server_dot.setToolTip("服务端连接状态")
+        layout.addWidget(self.server_dot)
         self.server_lbl = QLabel(" 服务器")
         self.server_lbl.setObjectName("ov_server")
         layout.addWidget(self.server_lbl)
@@ -335,6 +339,16 @@ class SystemStatusOverlay(QWidget):
         self._collector = _StatsCollector(self)
         self._collector.stats_ready.connect(self._on_stats_ready)
         self._collector.start()
+
+    @staticmethod
+    def set_server_state(self, ok):
+        """服务端连接状态 → 状态点颜色：正常绿、不可用红。"""
+        if not hasattr(self, "server_dot"):
+            return
+        self.server_dot.setProperty("state", "ok" if ok else "bad")
+        self.server_dot.style().unpolish(self.server_dot)
+        self.server_dot.style().polish(self.server_dot)
+        self.server_dot.setToolTip("服务端连接正常" if ok else "无法连接服务端，部分功能不可用")
 
     @staticmethod
     def _set_level(label, level):
@@ -467,15 +481,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.status_overlay = SystemStatusOverlay(self)
         self.status_overlay.show()
 
-        # 服务端连接警告横幅：服务端不通时顶部显示，恢复后消失
-        self.server_warning = QLabel(" ⚠ 无法连接服务端，部分功能不可用")
-        self.server_warning.setObjectName("server_warning")
-        self.server_warning.setStyleSheet(
-            "QLabel { background:#7f1d1d; color:#fecaca; padding:7px 20px;"
-            " border-radius:5px; font-size:13px; font-weight:600; }")
-        self.server_warning.adjustSize()
-        self.server_warning.hide()
-        
+        # 服务端连接警告横幅：不可用时红色常驻顶端（同资源监控停靠）；
+        # 恢复可用时变绿色提示，3 秒后自动消失。
+        # 服务端连接状态：已集成到资源监控栏的状态点（SystemStatusOverlay.set_server_state）,
         self._update_splash("正在检测 Playwright 运行状态...", 85)
         self.ensure_playwright_chromium_ready()
         
@@ -550,17 +558,27 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             log.warning(f"[客户端任务] 任务提示失败: {e}")
 
     def _update_server_warning(self, server_ok):
-        """服务端连通状态 → 顶部警告横幅显示/隐藏。"""
-        if not hasattr(self, "server_warning"):
+        """服务端连通状态 → 资源监控栏状态点。
+
+        - 不可用：状态点红色常驻；
+        - 恢复可用：状态点绿色 3 秒后回到中性色（常驻栏内颜色变化，无弹窗）。
+        """
+        overlay = getattr(self, "status_overlay", None)
+        if overlay is None:
             return
         if server_ok:
-            if not self.server_warning.isHidden():
-                self.server_warning.hide()
+            overlay.set_server_state(True)
+            if not hasattr(self, "_server_ok_timer"):
+                from PySide6.QtCore import QTimer
+                self._server_ok_timer = QTimer(self)
+                self._server_ok_timer.setSingleShot(True)
+                self._server_ok_timer.setInterval(3000)
+                self._server_ok_timer.timeout.connect(lambda: overlay.set_server_state("idle"))
+            self._server_ok_timer.start()
         else:
-            self.server_warning.show()
-            self.server_warning.raise_()
-            self.server_warning.adjustSize()
-            self.server_warning.move((self.width() - self.server_warning.width()) // 2, 8)
+            if hasattr(self, "_server_ok_timer") and self._server_ok_timer.isActive():
+                self._server_ok_timer.stop()
+            overlay.set_server_state(False)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -570,8 +588,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             w = self.status_overlay.width()
             h = self.status_overlay.height()
             self.status_overlay.move(self.width() - w - margin_right, margin_top)
-        if hasattr(self, "server_warning") and not self.server_warning.isHidden():
-            self.server_warning.move((self.width() - self.server_warning.width()) // 2, 8)
 
     def _setup_tray(self):
         """系统托盘：关闭窗口时最小化到托盘，仅托盘「退出」走确认关闭流程。"""
@@ -1547,21 +1563,16 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
     def refresh_logs(self):
         level_filter = getattr(self, "log_level_filter", None)
         keyword_filter = getattr(self, "log_keyword_input", None)
-        btn_server = getattr(self, "btn_server_log", None)
         level_text = level_filter.currentText() if level_filter else "全部"
-        keyword = keyword_filter.text().strip() if keyword_filter else ""
+        level_text = level_filter.currentText() if level_filter else "全部"
 
-        # 服务端日志按钮勾选时，自动加上服务端相关关键词
-        if btn_server and btn_server.isChecked():
-            server_keys = ["[ASR]", "[_RemoteWorker]", "[RemoteTranscribeWorker]", "[VoxCPM]", "POST ", "HTTP "]
-            if keyword:
-                keyword = f"({keyword})|{'|'.join(server_keys)}"
-            else:
-                keyword = "|".join(server_keys)
-            keyword_filter.setText(f"[服务端] {keyword[:50]}")
+        # 历史日志下拉框：选中文件路径存于 itemData，空时读当前会话 app.log
+        log_combo = getattr(self, "log_file_combo", None)
+        log_path = ""
+        if log_combo is not None and log_combo.currentIndex() >= 0:
+            log_path = log_combo.itemData(log_combo.currentIndex()) or ""
 
-        raw = get_last_logs(2000)
-        lines = raw.split("\n")
+        raw = get_last_logs(2000, path=log_path or None)
 
         if level_text != "全部":
             lines = [l for l in lines if f"| {level_text: <8} |" in l or f"| {level_text}" in l]
@@ -1572,6 +1583,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         lines = lines[-500:]
 
         self.log_viewer.setPlainText("\n".join(lines))
+        # 底部标签同步当前查看的日志文件
+        try:
+            cur_name = log_combo.currentText() if log_combo is not None else "app.log"
+            if hasattr(self, "log_path_label"):
+                self.log_path_label.setText(f"完整日志: .runtime/logs/{cur_name}")
+        except Exception:
+            pass
         # 首次调用时挂上高亮器（只挂一次）
         if not hasattr(self, "_log_highlighter"):
             self._log_highlighter = LogHighlighter(self.log_viewer.document())

@@ -1653,15 +1653,94 @@ if __name__ == "__main__":
 
         # ── 单例保护：只允许运行一个实例 ──
         _is_already_running = False
-        # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
-        import ctypes as _ctypes
-        _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
-        if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            _is_already_running = True
+        _owner_pid = "未知"
+        _lock_file = os.path.join(RUNTIME_DIR, "single_instance.lock")
+        _my_pid = os.getpid()
+
+        def _is_pid_alive(pid):
+            try:
+                import psutil as _psutil
+                return _psutil.Process(pid).is_running()
+            except Exception:
+                return False
+
+        # 1) 先查文件锁（PID 级），可识别 stale lock
+        if os.path.isfile(_lock_file):
+            try:
+                with open(_lock_file, "r", encoding="utf-8") as f:
+                    _lock_pid = int(f.read().strip())
+                if _lock_pid == _my_pid:
+                    # 自己上次崩溃残留，清理
+                    os.remove(_lock_file)
+                elif _is_pid_alive(_lock_pid):
+                    _is_already_running = True
+                    _owner_pid = f"{_lock_pid}"
+                    try:
+                        import psutil as _psutil
+                        _owner_pid += f" ({_psutil.Process(_lock_pid).name()})"
+                    except Exception:
+                        pass
+                else:
+                    # stale lock，清理后继续
+                    os.remove(_lock_file)
+            except Exception:
+                try:
+                    os.remove(_lock_file)
+                except Exception:
+                    pass
+
+        # 2) 再查 Windows 命名互斥量（显式不可继承，防 agent/IDE 继承句柄）
+        if not _is_already_running:
+            import ctypes as _ctypes
+            from ctypes import wintypes as _wintypes
+
+            class _SECURITY_ATTRIBUTES(_ctypes.Structure):
+                _fields_ = [
+                    ("nLength", _wintypes.DWORD),
+                    ("lpSecurityDescriptor", _wintypes.LPVOID),
+                    ("bInheritHandle", _wintypes.BOOL),
+                ]
+
+            _sa = _SECURITY_ATTRIBUTES()
+            _sa.nLength = _ctypes.sizeof(_SECURITY_ATTRIBUTES)
+            _sa.lpSecurityDescriptor = None
+            _sa.bInheritHandle = False
+
+            _MUTEX_NAME = "luosiding.ecommerce.agent.matrix.single_instance"
+            _mutex = _ctypes.windll.kernel32.CreateMutexW(
+                _ctypes.byref(_sa), False, _MUTEX_NAME)
+            if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                _is_already_running = True
+
+        # 兜底：互斥量存在但无文件锁/无占用进程，且当前没有 python/pythonw 在跑，
+        # 说明是 agent/IDE 宿主继承了句柄导致的 stale mutex，允许启动。
+        if _is_already_running and _owner_pid == "未知":
+            try:
+                import psutil as _psutil
+                _python_running = any(
+                    _p.name().lower() in ("python.exe", "pythonw.exe")
+                    for _p in _psutil.process_iter(["name"])
+                )
+                if not _python_running:
+                    _is_already_running = False
+            except Exception:
+                pass
+
         if _is_already_running:
             from PySide6.QtWidgets import QMessageBox as _QMB
-            _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
+            _QMB.warning(
+                None, "提示",
+                f"电商智能体矩阵已在运行中（占用进程 PID: {_owner_pid}），请勿重复启动。\n"
+                "如确认无窗口在运行，请结束残留 python/pythonw 进程，或删除 .runtime/single_instance.lock 后重试。")
             sys.exit(0)
+
+        # 3) 写入文件锁
+        try:
+            os.makedirs(os.path.dirname(_lock_file), exist_ok=True)
+            with open(_lock_file, "w", encoding="utf-8") as f:
+                f.write(str(_my_pid))
+        except Exception:
+            pass
 
         app.setAttribute(Qt.AA_DontUseNativeDialogs, True)  # 主题对话框
         app.setStyle("Fusion")

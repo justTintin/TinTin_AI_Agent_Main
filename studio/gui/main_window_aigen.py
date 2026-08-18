@@ -46,6 +46,39 @@ from PySide6.QtGui import QFont
 from utils.file_dialog_utils import pick_file
 WORKFLOW_TYPES = ("文生图", "图生图", "图生视频", "数字人", "其他")
 
+def _classify_runninghub_input_nodes(workflow_json):
+    """从 RunningHub workflow JSON 中分类出需要客户端提供的输入节点。
+
+    返回 {"image": [...], "audio": [...], "video": [...], "duration": [...]}，
+    每个元素为 (node_id, class_type, field_name, default_value)。
+    当前支持：image / audio / video / duration。
+    """
+    result = {"image": [], "audio": [], "video": [], "duration": []}
+    if not isinstance(workflow_json, dict):
+        return result
+    duration_aliases = {"duration", "seconds", "length", "video_length", "clip_duration"}
+    for node_id, node in workflow_json.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+        for field_name, val in inputs.items():
+            if isinstance(val, list):
+                continue
+            if field_name == "image":
+                result["image"].append((node_id, class_type, field_name, val))
+            elif field_name == "audio":
+                result["audio"].append((node_id, class_type, field_name, val))
+            elif field_name == "video":
+                result["video"].append((node_id, class_type, field_name, val))
+            elif field_name in duration_aliases and isinstance(val, (int, float)):
+                # 文件上传节点里的 duration/seconds 通常是内部参数（如音频裁剪），
+                # 不作为可配置的“生成视频时长”。
+                if class_type not in ("LoadImage", "LoadAudio", "VHS_LoadAudioUpload", "LoadVideo", "VHS_LoadVideo", "LoadVideoPath"):
+                    result["duration"].append((node_id, class_type, field_name, val))
+    return result
+
+
 class AIGenMixin:
     def start_comfyui_websocket(self):
         # 被动解析后端（不为监听进度而启动本地）；无可用后端则跳过
@@ -245,37 +278,44 @@ class AIGenMixin:
                 return
 
             self.current_rh_workflow_json = wf
-            self.rh_image_nodes = []
-            self.rh_audio_nodes = []
-            for node_id, node in wf.items():
-                if not isinstance(node, dict):
-                    continue
-                class_type = node.get("class_type", "")
-                inputs = node.get("inputs", {})
-                for field_name, val in inputs.items():
-                    # 只把真实文件输入节点（非连线）当作可映射输入，
-                    # 连线节点的 image/audio 是列表引用，不能直接填文件 URL
-                    if field_name in ("image", "audio") and not isinstance(val, list):
-                        if field_name == "image":
-                            self.rh_image_nodes.append((node_id, class_type, field_name))
-                        else:
-                            self.rh_audio_nodes.append((node_id, class_type, field_name))
+            classified = _classify_runninghub_input_nodes(wf)
+            self.rh_image_nodes = [(n, c, f) for n, c, f, _ in classified["image"]]
+            self.rh_audio_nodes = [(n, c, f) for n, c, f, _ in classified["audio"]]
+            self.rh_video_nodes = [(n, c, f) for n, c, f, _ in classified["video"]]
+            self.rh_duration_nodes = [(n, c, f, v) for n, c, f, v in classified["duration"]]
 
-            # 填充节点列表，默认全部勾选
             self.rh_node_list.clear()
-            for node_id, class_type, field_name in self.rh_image_nodes + self.rh_audio_nodes:
+            typed_items = []
+            for node in classified["image"]:
+                typed_items.append((node, "image"))
+            for node in classified["audio"]:
+                typed_items.append((node, "audio"))
+            for node in classified["video"]:
+                typed_items.append((node, "video"))
+            for node in classified["duration"]:
+                typed_items.append((node, "duration"))
+            for (node_id, class_type, field_name, default_val), input_type in typed_items:
                 display = f"[{node_id}] {class_type} ({field_name})"
                 item = QListWidgetItem(display)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 item.setCheckState(Qt.Checked)
-                item.setData(Qt.UserRole, {"node_id": node_id, "class_type": class_type, "field_name": field_name})
+                item.setData(Qt.UserRole, {
+                    "node_id": node_id,
+                    "class_type": class_type,
+                    "field_name": field_name,
+                    "input_type": input_type,
+                    "default_value": default_val,
+                })
                 self.rh_node_list.addItem(item)
 
             self._refresh_rh_input_panel()
-            summary = f"图片节点 {len(self.rh_image_nodes)} 个，音频节点 {len(self.rh_audio_nodes)} 个；默认全部勾选。"
-            self.rh_workflow_info.setText(f" 已获取 {len(self.rh_image_nodes) + len(self.rh_audio_nodes)} 个输入节点，{summary}")
+            summary = (
+                f"图片节点 {len(self.rh_image_nodes)} 个，音频节点 {len(self.rh_audio_nodes)} 个，"
+                f"视频节点 {len(self.rh_video_nodes)} 个，时长节点 {len(self.rh_duration_nodes)} 个；默认全部勾选。"
+            )
+            self.rh_workflow_info.setText(f" 已获取 {self.rh_node_list.count()} 个输入节点，{summary}")
             if self.backend_selector.currentIndex() == 1:
-                self.btn_run_workflow.setEnabled(self.rh_audio_list.rowCount() > 0)
+                self.btn_run_workflow.setEnabled(self._rh_ready_to_run())
 
         self.start_worker(fetch, on_done)
 
@@ -283,6 +323,8 @@ class AIGenMixin:
         """清空节点列表并重置输入面板。"""
         self.rh_image_nodes = []
         self.rh_audio_nodes = []
+        self.rh_video_nodes = []
+        self.rh_duration_nodes = []
         if hasattr(self, "rh_node_list"):
             self.rh_node_list.clear()
         self._refresh_rh_input_panel()
@@ -295,21 +337,40 @@ class AIGenMixin:
         """根据勾选的节点类型显示/隐藏对应的输入组件。"""
         has_img = False
         has_aud = False
+        has_vid = False
+        has_dur = False
+        duration_default = None
         for i in range(self.rh_node_list.count()):
             item = self.rh_node_list.item(i)
-            if item.checkState() == Qt.Checked:
-                data = item.data(Qt.UserRole) or {}
-                if data.get("field_name") == "image":
-                    has_img = True
-                elif data.get("field_name") == "audio":
-                    has_aud = True
+            if item.checkState() != Qt.Checked:
+                continue
+            data = item.data(Qt.UserRole) or {}
+            input_type = data.get("input_type")
+            if input_type == "image":
+                has_img = True
+            elif input_type == "audio":
+                has_aud = True
+            elif input_type == "video":
+                has_vid = True
+            elif input_type == "duration":
+                has_dur = True
+                if duration_default is None:
+                    default_val = data.get("default_value")
+                    if isinstance(default_val, (int, float)) and default_val > 0:
+                        duration_default = int(default_val)
         if hasattr(self, "rh_img_input_group"):
             self.rh_img_input_group.setVisible(has_img)
         if hasattr(self, "rh_audio_input_group"):
             self.rh_audio_input_group.setVisible(has_aud)
+        if hasattr(self, "rh_video_input_group"):
+            self.rh_video_input_group.setVisible(has_vid)
+        if hasattr(self, "rh_duration_input_group"):
+            self.rh_duration_input_group.setVisible(has_dur)
+            if has_dur and duration_default is not None:
+                self.rh_duration_spinbox.setValue(duration_default)
 
     def run_runninghub_task(self):
-        """RunningHub 数字人：按队列提交批量任务（1 张图片 + N 个音频）。"""
+        """RunningHub 数字人：根据勾选节点提交任务（图片 + 音频/视频 + 可选时长）。"""
         if not self.runninghub:
             self.rh_workflow_info.setText("RunningHub 模块未初始化，无法提交任务")
             return
@@ -318,9 +379,12 @@ class AIGenMixin:
             self.rh_workflow_info.setText("请先选择 RunningHub 数字人工作流")
             return
 
-        checked_image_nodes, checked_audio_nodes = self._get_checked_rh_nodes()
-        if not checked_image_nodes or not checked_audio_nodes:
-            self.rh_workflow_info.setText("请先在节点列表中勾选至少 1 个图片节点和 1 个音频节点")
+        checked_image_nodes, checked_audio_nodes, checked_video_nodes, checked_duration_nodes = self._get_checked_rh_nodes()
+        if not checked_image_nodes:
+            self.rh_workflow_info.setText("请先在节点列表中勾选至少 1 个图片节点")
+            return
+        if not checked_audio_nodes and not checked_video_nodes:
+            self.rh_workflow_info.setText("请先在节点列表中勾选至少 1 个音频或视频节点")
             return
 
         img_file = self.rh_img_path_input.text().strip()
@@ -328,47 +392,88 @@ class AIGenMixin:
             self.rh_workflow_info.setText("请选择人物图片")
             return
 
-        audio_files = []
-        for _row in range(self.rh_audio_list.rowCount()):
-            _item = self.rh_audio_list.item(_row, 0)
-            if _item and _item.data(Qt.UserRole):
-                audio_files.append(_item.data(Qt.UserRole))
-        if not audio_files:
-            self.rh_workflow_info.setText("请至少添加一个驱动音频")
-            return
+        duration_value = None
+        if checked_duration_nodes:
+            duration_value = self.rh_duration_spinbox.value()
 
-        # 只提交新添加的音频：已成功处理过的文件不重复提交
-        processed = getattr(self, "_rh_processed_audios", None) or set()
-        new_files = [f for f in audio_files if f not in processed]
-        if not new_files:
-            self.rh_workflow_info.setText("当前音频都已处理过，请先添加新的驱动音频")
-            return
-        audio_files = new_files
+        # 视频类工作流：单任务，使用输入视频
+        if checked_video_nodes:
+            vid_file = self.rh_video_path_input.text().strip()
+            if not vid_file:
+                self.rh_workflow_info.setText("请选择输入视频")
+                return
+            processed_videos = getattr(self, "_rh_processed_videos", None) or set()
+            if vid_file in processed_videos:
+                self.rh_workflow_info.setText("当前视频已处理过，请更换新的输入视频")
+                return
 
-        # 构建待处理队列
-        self.rh_queue_paused = False
-        wf_cfg = self._rh_find_workflow_config(wf_id) or {}
-        self.rh_pending_tasks = []
-        for idx, aud_file in enumerate(audio_files):
-            self.rh_pending_tasks.append({
-                "idx": idx,
+            self.rh_queue_paused = False
+            wf_cfg = self._rh_find_workflow_config(wf_id) or {}
+            self.rh_pending_tasks = [{
+                "idx": 0,
                 "wf_id": wf_id,
                 "img_file": img_file,
-                "aud_file": aud_file,
+                "vid_file": vid_file,
                 "image_nodes": checked_image_nodes,
-                "audio_nodes": checked_audio_nodes,
+                "video_nodes": checked_video_nodes,
+                "duration_nodes": checked_duration_nodes,
+                "duration_value": duration_value,
                 "instance_type": wf_cfg.get("instanceType") or "default",
-                "state": "pending",  # pending | paused | submitted | done | failed
+                "state": "pending",
                 "task_id": None,
                 "error": None,
                 "retry_count": 0,
                 "next_attempt_at": 0,
                 "submit_count": 0,
                 "downloaded": False,
-            })
+            }]
+            self.rh_submitted_tasks = {}
+            self.log_area.setText("已加入 1 个视频到 RunningHub 任务队列，开始执行...")
+        else:
+            audio_files = []
+            for _row in range(self.rh_audio_list.rowCount()):
+                _item = self.rh_audio_list.item(_row, 0)
+                if _item and _item.data(Qt.UserRole):
+                    audio_files.append(_item.data(Qt.UserRole))
+            if not audio_files:
+                self.rh_workflow_info.setText("请至少添加一个驱动音频")
+                return
 
-        self.rh_submitted_tasks = {}
-        self.log_area.setText(f"已加入 {len(audio_files)} 个音频到 RunningHub 任务队列，开始执行...")
+            # 只提交新添加的音频：已成功处理过的文件不重复提交
+            processed = getattr(self, "_rh_processed_audios", None) or set()
+            new_files = [f for f in audio_files if f not in processed]
+            if not new_files:
+                self.rh_workflow_info.setText("当前音频都已处理过，请先添加新的驱动音频")
+                return
+            audio_files = new_files
+
+            # 构建待处理队列
+            self.rh_queue_paused = False
+            wf_cfg = self._rh_find_workflow_config(wf_id) or {}
+            self.rh_pending_tasks = []
+            for idx, aud_file in enumerate(audio_files):
+                self.rh_pending_tasks.append({
+                    "idx": idx,
+                    "wf_id": wf_id,
+                    "img_file": img_file,
+                    "aud_file": aud_file,
+                    "image_nodes": checked_image_nodes,
+                    "audio_nodes": checked_audio_nodes,
+                    "duration_nodes": checked_duration_nodes,
+                    "duration_value": duration_value,
+                    "instance_type": wf_cfg.get("instanceType") or "default",
+                    "state": "pending",
+                    "task_id": None,
+                    "error": None,
+                    "retry_count": 0,
+                    "next_attempt_at": 0,
+                    "submit_count": 0,
+                    "downloaded": False,
+                })
+
+            self.rh_submitted_tasks = {}
+            self.log_area.setText(f"已加入 {len(audio_files)} 个音频到 RunningHub 任务队列，开始执行...")
+
         self.btn_run_workflow.setEnabled(False)
         self._start_rh_poll_timer()
         self._update_rh_queue_stats()
@@ -390,7 +495,7 @@ class AIGenMixin:
         if aud_file in processed:
             QMessageBox.warning(self, "已处理", "该音频已处理过，请勿重复提交")
             return
-        image_nodes, audio_nodes = self._get_checked_rh_nodes()
+        image_nodes, audio_nodes, _, _ = self._get_checked_rh_nodes()
         if not image_nodes or not audio_nodes:
             image_nodes = [("180", "LoadImage", "image")]
             audio_nodes = [("6", "LoadAudio", "audio")]
@@ -420,9 +525,11 @@ class AIGenMixin:
         self._process_rh_queue()
 
     def _get_checked_rh_nodes(self):
-        """从节点列表中返回当前勾选的 (image_nodes, audio_nodes)。"""
+        """从节点列表中返回当前勾选的 (image_nodes, audio_nodes, video_nodes, duration_nodes)。"""
         image_nodes = []
         audio_nodes = []
+        video_nodes = []
+        duration_nodes = []
         for i in range(self.rh_node_list.count()):
             item = self.rh_node_list.item(i)
             if item.checkState() != Qt.Checked:
@@ -431,13 +538,19 @@ class AIGenMixin:
             node_id = data.get("node_id")
             field_name = data.get("field_name")
             class_type = data.get("class_type")
+            default_val = data.get("default_value")
+            input_type = data.get("input_type")
             if not node_id or not field_name:
                 continue
-            if field_name == "image":
+            if input_type == "image":
                 image_nodes.append((node_id, class_type, field_name))
-            elif field_name == "audio":
+            elif input_type == "audio":
                 audio_nodes.append((node_id, class_type, field_name))
-        return image_nodes, audio_nodes
+            elif input_type == "video":
+                video_nodes.append((node_id, class_type, field_name))
+            elif input_type == "duration":
+                duration_nodes.append((node_id, class_type, field_name, default_val))
+        return image_nodes, audio_nodes, video_nodes, duration_nodes
 
     def upload_to_comfyui(self, server_addr, file_path):
         # 兼容旧签名（server_addr 已忽略）；统一走 ComfyUIClient
@@ -530,7 +643,7 @@ class AIGenMixin:
             wf_id = self.rh_workflow_id_input.text().strip()
             if wf_id and hasattr(self, "rh_node_list") and self.rh_node_list.count() == 0:
                 QTimer.singleShot(300, self.view_rh_api_detail)
-            self.btn_run_workflow.setEnabled(bool(wf_id) and self._rh_has_new_audios())
+            self.btn_run_workflow.setEnabled(self._rh_ready_to_run())
 
     def _rh_has_new_audios(self):
         """列表中是否存在未处理过的驱动音频（只认新增的，已处理过的不重复提交）。"""
@@ -540,6 +653,30 @@ class AIGenMixin:
             if item and item.data(Qt.UserRole) and item.data(Qt.UserRole) not in processed:
                 return True
         return False
+
+    def _rh_ready_to_run(self):
+        """RunningHub 数字人页面当前是否满足提交条件（图片 + 音频/视频 + 工作流 ID）。"""
+        wf_id = self.rh_workflow_id_input.text().strip()
+        if not wf_id:
+            return False
+        has_img = bool(self.rh_img_path_input.text().strip())
+        has_new_audios = self._rh_has_new_audios()
+        has_video = bool(self.rh_video_path_input.text().strip())
+        if not has_img or (not has_new_audios and not has_video):
+            return False
+        # 要求节点列表中至少勾选了 1 个图片节点和 1 个媒体节点
+        has_checked_image = False
+        has_checked_media = False
+        for i in range(self.rh_node_list.count()):
+            item = self.rh_node_list.item(i)
+            if item.checkState() != Qt.Checked:
+                continue
+            input_type = (item.data(Qt.UserRole) or {}).get("input_type")
+            if input_type == "image":
+                has_checked_image = True
+            elif input_type in ("audio", "video"):
+                has_checked_media = True
+        return has_checked_image and has_checked_media
 
     def _test_runninghub_config(self):
         """在 AI 设置页测试 RunningHub API Key 是否可用。"""
@@ -711,7 +848,7 @@ class AIGenMixin:
             if all_done and not self.rh_submitted_tasks:
                 self.log_area.append("所有任务已完成。")
                 self.btn_run_workflow.setEnabled(
-                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
+                    self._rh_ready_to_run())
             return
 
         now = time.time()
@@ -726,11 +863,14 @@ class AIGenMixin:
         task["state"] = "submitted"
         wf_id = task["wf_id"]
         img_file = task["img_file"]
-        aud_file = task["aud_file"]
+        aud_file = task.get("aud_file")
+        vid_file = task.get("vid_file")
         idx = task["idx"]
 
-        self._set_rh_audio_row_state(aud_file, "running")
-        self.log_area.append(f"[{idx+1}/{len(self.rh_pending_tasks)}] 正在上传并提交: {os.path.basename(aud_file)}")
+        media_file = vid_file or aud_file or ""
+        if aud_file:
+            self._set_rh_audio_row_state(aud_file, "running")
+        self.log_area.append(f"[{idx+1}/{len(self.rh_pending_tasks)}] 正在上传并提交: {os.path.basename(media_file)}")
 
         def run_task():
             try:
@@ -741,7 +881,10 @@ class AIGenMixin:
                     from utils.runninghub_comfy_client import get_runninghub_comfy_client
                     client = get_runninghub_comfy_client(self.ai_config)
                     img_name = client.upload_file(img_file)
-                    aud_name = client.upload_file(aud_file)
+                    if task.get("video_nodes"):
+                        media_name = client.upload_file(task["vid_file"])
+                    else:
+                        media_name = client.upload_file(aud_file)
                     wf = json.loads(json.dumps(self.current_rh_workflow_json))
                     for node_id, node in wf.items():
                         if not isinstance(node, dict):
@@ -750,38 +893,73 @@ class AIGenMixin:
                         inputs = node.get("inputs", {})
                         if class_type == "LoadImage" and "image" in inputs:
                             inputs["image"] = img_name
-                        elif class_type == "LoadAudio" and "audio" in inputs:
-                            inputs["audio"] = aud_name
+                        elif task.get("video_nodes"):
+                            if class_type in ("LoadVideo", "VHS_LoadVideo", "LoadVideoPath") and "video" in inputs:
+                                inputs["video"] = media_name
+                        elif task.get("audio_nodes"):
+                            if class_type == "LoadAudio" and "audio" in inputs:
+                                inputs["audio"] = media_name
+                        # 时长节点直接写入数值
+                        for dur_node in task.get("duration_nodes") or []:
+                            dur_id, dur_class, dur_field = dur_node[:3]
+                            if node_id == dur_id and dur_field in inputs:
+                                inputs[dur_field] = task.get("duration_value", inputs.get(dur_field, 0))
                     prompt_id = client.submit_prompt(wf)
-                    meta = {"img_url": img_name, "aud_url": aud_name, "aud_file": aud_file, "img_file": img_file, "protocol": True}
+                    meta = {"img_url": img_name, "media_url": media_name, "img_file": img_file, "protocol": True}
+                    if aud_file:
+                        meta["aud_file"] = aud_file
+                    if vid_file:
+                        meta["vid_file"] = vid_file
                     return True, prompt_id, meta
 
-                # 优先走服务端统一接口（服务端已配置 RunningHub，客户端免 API Key）；
-                # 服务端地址未配置或提交失败时静默回退直连 RunningHub
-                from utils import digital_human_client as dhc
-                task_id, dh_err = dhc.submit_digital_human(
-                    img_file, aud_file, wf_id,
-                    instance_type=task.get("instance_type") or "default")
-                if task_id:
-                    meta = {"aud_file": aud_file, "img_file": img_file, "server": True}
-                    return True, task_id, meta
-                if dh_err:
-                    log.warning("数字人服务端提交失败，回退直连 RunningHub: %s", dh_err)
+                # 视频类工作流服务端接口暂不支持，直接走 RunningHub
+                if not task.get("video_nodes"):
+                    # 优先走服务端统一接口（服务端已配置 RunningHub，客户端免 API Key）；
+                    # 服务端地址未配置或提交失败时静默回退直连 RunningHub
+                    from utils import digital_human_client as dhc
+                    task_id, dh_err = dhc.submit_digital_human(
+                        img_file, aud_file, wf_id,
+                        instance_type=task.get("instance_type") or "default")
+                    if task_id:
+                        meta = {"aud_file": aud_file, "img_file": img_file, "server": True}
+                        return True, task_id, meta
+                    if dh_err:
+                        log.warning("数字人服务端提交失败，回退直连 RunningHub: %s", dh_err)
 
                 img_url = self.runninghub.upload_file(img_file)
                 if not img_url:
                     return False, "图片上传失败", None
-                aud_url = self.runninghub.upload_file(aud_file)
-                if not aud_url:
-                    return False, "音频上传失败", None
 
                 node_info_list = []
                 for node_id, _class_type, field_name in task.get("image_nodes", []):
                     node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": img_url})
-                for node_id, _class_type, field_name in task.get("audio_nodes", []):
-                    node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": aud_url})
 
-                meta = {"img_url": img_url, "aud_url": aud_url, "aud_file": aud_file, "img_file": img_file}
+                if task.get("video_nodes"):
+                    vid_url = self.runninghub.upload_file(task["vid_file"])
+                    if not vid_url:
+                        return False, "视频上传失败", None
+                    for node_id, _class_type, field_name in task.get("video_nodes", []):
+                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": vid_url})
+                else:
+                    aud_url = self.runninghub.upload_file(aud_file)
+                    if not aud_url:
+                        return False, "音频上传失败", None
+                    for node_id, _class_type, field_name in task.get("audio_nodes", []):
+                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": aud_url})
+
+                # 时长节点直接透传数值
+                for node_id, _class_type, field_name, default_val in task.get("duration_nodes", []):
+                    node_info_list.append({
+                        "nodeId": node_id,
+                        "fieldName": field_name,
+                        "fieldValue": task.get("duration_value") if task.get("duration_value") is not None else default_val,
+                    })
+
+                meta = {"img_url": img_url, "img_file": img_file}
+                if aud_file:
+                    meta["aud_file"] = aud_file
+                if vid_file:
+                    meta["vid_file"] = vid_file
                 instance_type = task.get("instance_type") or "default"
                 use_personal_queue = bool((self.ai_config or {}).get("runninghub_use_personal_queue", True))
                 result = self.runninghub.run_workflow(
@@ -836,7 +1014,7 @@ class AIGenMixin:
                     status="排队中",
                     task_type="RunningHub",
                     source="云端",
-                    extra={"wf_id": wf_id, "aud_file": aud_file, "img_file": img_file, "rh_meta": True}
+                    extra={"wf_id": wf_id, "aud_file": aud_file, "vid_file": vid_file, "img_file": img_file, "rh_meta": True}
                 )
                 self._start_rh_poll_timer()
                 self.log_area.append(f"[{idx+1}] 已提交: {info}")
@@ -849,7 +1027,8 @@ class AIGenMixin:
                     task["retry_count"] = task.get("retry_count", 0) + 1
                     task["state"] = "pending"
                     task["next_attempt_at"] = time.time() + 30
-                    self._set_rh_audio_row_state(aud_file, "pending")
+                    if aud_file:
+                        self._set_rh_audio_row_state(aud_file, "pending")
                     self.log_area.append(f"[{idx+1}] 提交失败（415 资源不足），30 秒后自动重试第 {task['retry_count']} 次")
                     self._update_rh_queue_stats()
                     if not self.rh_queue_paused:
@@ -859,7 +1038,8 @@ class AIGenMixin:
                     return
                 task["state"] = "failed"
                 task["error"] = info
-                self._set_rh_audio_row_state(aud_file, "failed")
+                if aud_file:
+                    self._set_rh_audio_row_state(aud_file, "failed")
                 self.log_area.append(f"[{idx+1}] 提交失败: {info}")
                 self._update_rh_queue_stats()
 
@@ -922,10 +1102,15 @@ class AIGenMixin:
             if status == "SUCCESS":
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
-                self._set_rh_audio_row_state(task.get("aud_file") or "", "done")
-                processed = getattr(self, "_rh_processed_audios", None)
-                if processed is not None:
-                    processed.add(task.get("aud_file") or "")
+                if task.get("aud_file"):
+                    self._set_rh_audio_row_state(task["aud_file"], "done")
+                    processed = getattr(self, "_rh_processed_audios", None)
+                    if processed is not None:
+                        processed.add(task["aud_file"])
+                if task.get("vid_file"):
+                    processed_videos = getattr(self, "_rh_processed_videos", None)
+                    if processed_videos is not None:
+                        processed_videos.add(task["vid_file"])
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
                 self._auto_download_rh_results(task_id, results, record.get("meta") or {})
@@ -933,7 +1118,8 @@ class AIGenMixin:
                 task["state"] = "failed"
                 task["error"] = error_msg
                 self.rh_submitted_tasks.pop(task_id, None)
-                self._set_rh_audio_row_state(task.get("aud_file") or "", "failed")
+                if task.get("aud_file"):
+                    self._set_rh_audio_row_state(task["aud_file"], "failed")
                 self.log_area.append(f"任务失败: {task_id} {error_msg}")
                 self._update_rh_queue_stats()
 
@@ -946,7 +1132,7 @@ class AIGenMixin:
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
                 self.btn_run_workflow.setEnabled(
-                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
+                    self._rh_ready_to_run())
                 self.log_area.append("批量任务队列已全部结束。")
 
         self.start_worker(run_task, on_done)
@@ -985,10 +1171,15 @@ class AIGenMixin:
             if status in ("success", "completed"):
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
-                self._set_rh_audio_row_state(task.get("aud_file") or "", "done")
-                processed = getattr(self, "_rh_processed_audios", None)
-                if processed is not None:
-                    processed.add(task.get("aud_file") or "")
+                if task.get("aud_file"):
+                    self._set_rh_audio_row_state(task["aud_file"], "done")
+                    processed = getattr(self, "_rh_processed_audios", None)
+                    if processed is not None:
+                        processed.add(task["aud_file"])
+                if task.get("vid_file"):
+                    processed_videos = getattr(self, "_rh_processed_videos", None)
+                    if processed_videos is not None:
+                        processed_videos.add(task["vid_file"])
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
                 self._auto_download_rh_results(task_id, results, record.get("meta") or {})
@@ -996,7 +1187,8 @@ class AIGenMixin:
                 task["state"] = "failed"
                 task["error"] = err or "工作流运行失败"
                 self.rh_submitted_tasks.pop(task_id, None)
-                self._set_rh_audio_row_state(task.get("aud_file") or "", "failed")
+                if task.get("aud_file"):
+                    self._set_rh_audio_row_state(task["aud_file"], "failed")
                 self.log_area.append(f"任务失败: {task_id} {task['error']}")
                 self._update_rh_queue_stats()
             else:
@@ -1010,7 +1202,7 @@ class AIGenMixin:
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
                 self.btn_run_workflow.setEnabled(
-                    bool(self.rh_workflow_id_input.text().strip()) and self._rh_has_new_audios())
+                    self._rh_ready_to_run())
                 self.log_area.append("批量任务队列已全部结束。")
 
         self.start_worker(run_task, on_done)
@@ -1077,12 +1269,14 @@ class AIGenMixin:
             log.error(f"创建 RunningHub 下载目录失败: {e}")
             self.log_area.append(f"自动下载失败，无法创建目录: {save_dir} ({e})")
             return
-        aud_name = ""
+        media_name = ""
         if meta and meta.get("aud_file"):
-            aud_name = os.path.splitext(os.path.basename(meta["aud_file"]))[0]
+            media_name = os.path.splitext(os.path.basename(meta["aud_file"]))[0]
+        elif meta and meta.get("vid_file"):
+            media_name = os.path.splitext(os.path.basename(meta["vid_file"]))[0]
         self.log_area.append(f"任务完成，开始自动下载到: {save_dir}")
-        if aud_name:
-            self.log_area.append(f"下载命名规范: {aud_name}.扩展名（多个结果时为 {aud_name}_序号.扩展名）")
+        if media_name:
+            self.log_area.append(f"下载命名规范: {media_name}.扩展名（多个结果时为 {media_name}_序号.扩展名）")
 
         def run_task():
             import requests
@@ -1104,8 +1298,8 @@ class AIGenMixin:
                 if not url and not text_val and not filename:
                     continue
                 ext = res.get("outputType", "bin")
-                if aud_name:
-                    base_name = aud_name if len(results) == 1 else f"{aud_name}_{idx}"
+                if media_name:
+                    base_name = media_name if len(results) == 1 else f"{media_name}_{idx}"
                 else:
                     base_name = f"{task_id}_{idx}"
                 name = f"{base_name}.{ext}"

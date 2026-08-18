@@ -999,6 +999,38 @@ class PageSetupMixin:
             rh_audio_group_layout.addWidget(self.rh_audio_list, 1)
             rh_input_layout.addWidget(self.rh_audio_input_group)
 
+            # 视频输入组
+            self.rh_video_input_group = QWidget()
+            rh_video_group_layout = QVBoxLayout(self.rh_video_input_group)
+            rh_video_group_layout.setContentsMargins(0, 0, 0, 0)
+            rh_video_group_layout.addWidget(QLabel("输入视频（所有勾选的视频节点共用）:"))
+            rh_video_row = QHBoxLayout()
+            self.rh_video_path_input = QLineEdit()
+            self.rh_video_path_input.setPlaceholderText("请选择一个视频...")
+            self.rh_video_path_input.textChanged.connect(
+                lambda: self.btn_run_workflow.setEnabled(self._rh_ready_to_run()))
+            rh_video_row.addWidget(self.rh_video_path_input)
+            btn_sel_rh_video = mdi_button("浏览", "folder")
+            btn_sel_rh_video.clicked.connect(self.select_rh_video)
+            rh_video_row.addWidget(btn_sel_rh_video)
+            rh_video_group_layout.addLayout(rh_video_row)
+            rh_input_layout.addWidget(self.rh_video_input_group)
+
+            # 时长输入组
+            self.rh_duration_input_group = QWidget()
+            rh_duration_group_layout = QVBoxLayout(self.rh_duration_input_group)
+            rh_duration_group_layout.setContentsMargins(0, 0, 0, 0)
+            rh_duration_group_layout.addWidget(QLabel("生成视频时长（秒）:"))
+            rh_duration_row = QHBoxLayout()
+            self.rh_duration_spinbox = QSpinBox()
+            self.rh_duration_spinbox.setRange(1, 600)
+            self.rh_duration_spinbox.setValue(5)
+            self.rh_duration_spinbox.setSuffix(" 秒")
+            rh_duration_row.addWidget(self.rh_duration_spinbox)
+            rh_duration_row.addStretch()
+            rh_duration_group_layout.addLayout(rh_duration_row)
+            rh_input_layout.addWidget(self.rh_duration_input_group)
+
             rh_layout.addWidget(self.rh_input_panel, 1)
             self.rh_queue_stats_label = QLabel("任务队列: 共 0 | 成功 0 | 失败 0 | 运行中 0 | 待处理 0 | 进度 0%")
             self.rh_queue_stats_label.setObjectName("muted_text")
@@ -1038,6 +1070,7 @@ class PageSetupMixin:
             self.current_workflow_data = None
             # 已成功处理过的驱动音频路径（跨队列保留：只提交新增音频，不重复处理旧文件）
             self._rh_processed_audios = set()
+            self._rh_processed_videos = set()
             # Auto-load default workflow for Digital Human
             QTimer.singleShot(500, self.auto_load_default_dh_workflow)
             QTimer.singleShot(600, lambda: self._on_dh_backend_changed(self.backend_selector.currentIndex()))
@@ -1094,6 +1127,15 @@ class PageSetupMixin:
         if file:
             self.rh_img_path_input.setText(file)
 
+
+    def select_rh_video(self):
+        """数字人 RunningHub：选择输入视频。"""
+        file, _ = pick_file(self, "选择视频", "", "Video (*.mp4 *.mov *.avi *.mkv)")
+        if file:
+            self.rh_video_path_input.setText(file)
+            if self.backend_selector.currentIndex() == 1:
+                self._on_dh_backend_changed(1)
+ 
     def add_rh_audio(self):
         """数字人 RunningHub：表单方式批量添加驱动音频。"""
         files, _ = QFileDialog.getOpenFileNames(self, "选择音频", "", "Audio (*.mp3 *.wav *.flac *.aac *.m4a)")

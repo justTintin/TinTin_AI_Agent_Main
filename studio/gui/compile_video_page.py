@@ -354,9 +354,10 @@ class CompileVideoPage(BasePage):
         root.addWidget(self.tabs, 1)
 
         # tab1：产品成片（原有完整界面）
-        tab_product = QWidget()
-        self._setup_product_tab(tab_product)
-        self.tabs.addTab(tab_product, " 产品成片")
+        # 产品成片 tab 暂时隐藏（功能当前不可用）
+        # tab_product = QWidget()
+        # self._setup_product_tab(tab_product)
+        # self.tabs.addTab(tab_product, " 产品成片")
 
         # tab2：脚本成片（选分镜脚本提交服务端）
         tab_script = QWidget()

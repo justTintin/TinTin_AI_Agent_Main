@@ -1652,16 +1652,20 @@ if __name__ == "__main__":
                 sys.exit(0)
 
         # ── 单例保护：只允许运行一个实例 ──
-        _is_already_running = False
-        # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
-        import ctypes as _ctypes
-        _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
-        if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            _is_already_running = True
-        if _is_already_running:
-            from PySide6.QtWidgets import QMessageBox as _QMB
-            _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
-            sys.exit(0)
+        # 调试用：设置环境变量 TINTIN_SKIP_SINGLE_INSTANCE=1 可跳过单例检查
+        if os.environ.get("TINTIN_SKIP_SINGLE_INSTANCE") == "1":
+            pass
+        else:
+            _is_already_running = False
+            # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
+            import ctypes as _ctypes
+            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
+            if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                _is_already_running = True
+            if _is_already_running:
+                from PySide6.QtWidgets import QMessageBox as _QMB
+                _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
+                sys.exit(0)
 
         app.setAttribute(Qt.AA_DontUseNativeDialogs, True)  # 主题对话框
         app.setStyle("Fusion")

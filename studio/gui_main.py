@@ -504,7 +504,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 客户端任务下发闭环：周期领取（微信等 → 本机下载任务）并执行上报
         try:
             from gui.client_task_thread import ClientTaskWorker
-            self.client_task_worker = ClientTaskWorker(self)
+            self.client_task_worker = ClientTaskWorker(parent=self)
             self.client_task_worker.progress.connect(
                 lambda msg: log.info(f"[客户端任务] {msg}"))
             self.client_task_worker.task_picked.connect(self._on_client_task_picked)
@@ -1564,7 +1564,6 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         level_filter = getattr(self, "log_level_filter", None)
         keyword_filter = getattr(self, "log_keyword_input", None)
         level_text = level_filter.currentText() if level_filter else "全部"
-        level_text = level_filter.currentText() if level_filter else "全部"
 
         # 历史日志下拉框：选中文件路径存于 itemData，空时读当前会话 app.log
         log_combo = getattr(self, "log_file_combo", None)
@@ -1573,9 +1572,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             log_path = log_combo.itemData(log_combo.currentIndex()) or ""
 
         raw = get_last_logs(2000, path=log_path or None)
+        lines = raw.splitlines()
 
         if level_text != "全部":
             lines = [l for l in lines if f"| {level_text: <8} |" in l or f"| {level_text}" in l]
+
+        keyword = keyword_filter.text().strip() if keyword_filter else ""
 
         if keyword:
             lines = [l for l in lines if keyword.lower() in l.lower()]

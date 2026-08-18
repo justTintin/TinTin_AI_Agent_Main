@@ -1,17 +1,27 @@
-# -*- coding: utf-8 -*-
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QProgressBar, QMessageBox, QFrame, QListWidget, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QAbstractItemView, QDoubleSpinBox, QWidget,
-                               QComboBox)
-from PySide6.QtCore import Qt, Signal
-from utils.file_dialog_utils import pick_files
 from gui.montage.base_step_view import BaseStepView
+from gui.montage.step1_split_controller import Step1SplitController
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QTableWidget,
+    QVBoxLayout,
+)
 from utils.gui_icons import mdi_button
+
 
 class Step1SplitView(BaseStepView):
     """步骤 1: 镜头智能分割界面"""
     def __init__(self, main_page):
         super().__init__(main_page)
+        self.controller = Step1SplitController(self, main_page)
         self.setup_ui()
 
     def setup_ui(self):
@@ -85,7 +95,7 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_split.setToolTip(
             "对列表中所有视频逐个处理：能做镜头分割的先做镜头分割，\n"
             "无法分割的视频自动挑出一段精华片段，统一写入 splits 目录。")
-        self.main_page.btn_split.clicked.connect(self.main_page._start_split)
+        self.main_page.btn_split.clicked.connect(self.controller.start_split)
         split_row.addWidget(self.main_page.btn_split)
 
         card_layout.addLayout(split_row)
@@ -117,7 +127,7 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)
         self.main_page.split_result_table.cellChanged.connect(self.main_page._on_table_cell_changed)
         self.main_page.split_result_table.itemChanged.connect(self.main_page._on_step1_checkbox_changed)
-        
+
         header = self.main_page.split_result_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         self.main_page.split_result_table.setColumnWidth(0, 32)
@@ -136,7 +146,7 @@ class Step1SplitView(BaseStepView):
         header.setSectionResizeMode(8, QHeaderView.Fixed)
         self.main_page.split_result_table.setColumnWidth(8, 50)
         header.setStretchLastSection(False)
-        
+
         card_layout.addWidget(self.main_page.split_result_table)
         layout.addWidget(card, 1)
 

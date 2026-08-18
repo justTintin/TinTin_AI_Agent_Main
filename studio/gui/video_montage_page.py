@@ -91,7 +91,6 @@ class VideoMontagePage(BasePage):
     # [1·初始化]  __init__
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        self.worker = None
         self.concat_worker = None
         self.voice_worker = None
         self.mix_worker = None
@@ -152,6 +151,7 @@ class VideoMontagePage(BasePage):
         self._confirm_queue = []
         self._preview_sequence_clips = []
         self._preview_sequence_idx = 0
+        self._preview_auto_advance = True  # 序列预览：默认自动连播（各片段合计约 30s）；切换方案卡顿另因 _clip_duration_text 重复 ffprobe，已修复回写缓存
     # [1·初始化]  setup
     def setup(self):
         # Main layout
@@ -291,6 +291,11 @@ class VideoMontagePage(BasePage):
             self._stop_bgm_play()
         if hasattr(self, "preview_player") and self.preview_player:
             self.preview_player.stop()
+            # 取消待加载片段的 pending timer，防止页面离开后回调访问已销毁对象导致堆损坏
+            if getattr(self, "_pending_play_timer", None) is not None:
+                self._pending_play_timer.stop()
+                self._pending_play_timer = None
+            self._pending_play_clip = ""
         if hasattr(self, "final_preview_player") and self.final_preview_player:
             self.final_preview_player.stop()
         if hasattr(self, "_media_player") and self._media_player:
@@ -424,8 +429,11 @@ class VideoMontagePage(BasePage):
     # [2·基础设施]  _kill_running_workers
     def _kill_running_workers(self):
         """终止所有可能正在后台运行的 worker（镜头分割 / 批量分割 / 挑精华）。"""
-        for attr in ("worker", "highlight_worker"):
-            w = getattr(self, attr, None)
+        ctrl = getattr(getattr(self, "step1", None), "controller", None)
+        workers = []
+        if ctrl:
+            workers.extend([getattr(ctrl, "worker", None), getattr(ctrl, "highlight_worker", None)])
+        for w in workers:
             if w and w.isRunning():
                 try:
                     subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
@@ -439,14 +447,21 @@ class VideoMontagePage(BasePage):
                     w.wait(3000)
                 except Exception:
                     pass
-                # 保留引用直到线程真正结束，避免 GC 运行中的 QThread 崩溃
-                self._retire_worker(w)
-                setattr(self, attr, None)
+                if ctrl:
+                    ctrl._retire_worker(w)
+                if w is getattr(ctrl, "worker", None):
+                    ctrl.worker = None
+                elif w is getattr(ctrl, "highlight_worker", None):
+                    ctrl.highlight_worker = None
         # 恢复按钮状态
-        for btn_attr in ("btn_split", "btn_pick_highlights", "btn_transcribe_raw"):
-            btn = getattr(self, btn_attr, None)
-            if btn:
-                btn.setEnabled(True)
+        ctrl = getattr(getattr(self, "step1", None), "controller", None)
+        if ctrl:
+            ctrl._set_split_buttons_enabled(True)
+        else:
+            for btn_attr in ("btn_split", "btn_pick_highlights", "btn_transcribe_raw"):
+                btn = getattr(self, btn_attr, None)
+                if btn:
+                    btn.setEnabled(True)
         self.progress_bar.setVisible(False)
     # [2·基础设施]  _refresh_source_root_hint
     def _refresh_source_root_hint(self):
@@ -1795,364 +1810,6 @@ class VideoMontagePage(BasePage):
     # ==================== CONTROLLER RUN WORKERS ====================
 
     # --- Step 1 single video split ---
-    # [3·分割]  _start_split
-    def _start_split(self):
-        """合并后的智能镜头分割入口：对列表中所有素材（本地/素材库的视频和图片）逐个处理。
-
-        每个素材：服务端 /montage/split 处理 + 逐镜分析，片段下载到任务级缓存 splits/；
-        视频做镜头分割，图片转静态镜头并分析（is_image + 评分/景别/产品），
-        分析完成后全部镜头进入下方镜头重组。本地视频无法分割时自动挑取精华片段。
-        """
-        if (self.worker and self.worker.isRunning()) or \
-           (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
-            QMessageBox.warning(self.parent_widget, "任务进行中",
-                                "上一个任务仍在运行中，请等待完成或先停止。")
-            return
-
-        _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif")
-
-        def _is_img_path(p):
-            return os.path.splitext(p or "")[1].lower() in _IMAGE_EXTS
-
-        items = []
-        for i in range(self.video_list.count()):
-            it = self.video_list.item(i)
-            if it is None:
-                continue
-            t = it.text().strip()
-            if not t:
-                continue
-            if self._is_local_file_item(it):
-                # 本地视频/图片都进分割（图片由服务端转静态镜头+分析）
-                items.append({"kind": "local", "path": t, "display": os.path.basename(t)})
-            elif t.startswith("material://"):
-                # 素材库地址（视频/图片）都参与服务端处理：视频分割，图片转静态镜头+分析
-                mid = t[len("material://"):].split(" ")[0].strip()
-                if mid:
-                    items.append({"kind": "server", "material_id": mid,
-                                  "clip_url": f"material://{mid}", "display": t})
-        if not items:
-            QMessageBox.warning(self.parent_widget, "无素材",
-                                "上方列表中没有可处理的素材。\n"
-                                "请先添加本地视频/图片，或从素材检索带入素材。")
-            return
-
-        dur = self.spin_highlight_sec.value()
-        local_n = sum(1 for x in items if x["kind"] == "local")
-        server_n = sum(1 for x in items if x["kind"] == "server")
-
-        # 确定共享根目录（仅本地素材时用于界面显示）
-        local_paths = [x["path"] for x in items if x["kind"] == "local"]
-        shared_root = self.folder_path_input.text().strip()
-        if local_paths and (not shared_root or not os.path.isdir(shared_root)):
-            try:
-                shared_root = os.path.commonpath([os.path.dirname(p) for p in local_paths])
-            except Exception:
-                shared_root = os.path.dirname(local_paths[0])
-            self.folder_path_input.setText(shared_root)
-
-        # 每个素材的分割输出到任务级缓存
-        # .runtime/montage_cache/<job_id>/splits/<视频名或material_id>/（与 _check_split_clips_exist 一致）
-        self._ensure_montage_job()
-        sp_root = self._montage_splits_root()
-        per_video_splits = []
-        for x in items:
-            if x["kind"] == "local":
-                per_video_splits.append(self._montage_per_video_splits_dir(x["path"]))
-            else:
-                per_video_splits.append(os.path.join(sp_root, f"mat_{x['material_id']}"))
-
-        # 显示摘要
-        if len(set(per_video_splits)) == 1:
-            out_summary = per_video_splits[0]
-        else:
-            out_summary = f"{len(per_video_splits)} 个素材各自工作目录\n(例: {per_video_splits[0]})"
-
-        local_img = sum(1 for x in items if x["kind"] == "local" and _is_img_path(x["path"]))
-        local_vid = max(0, local_n - local_img)
-        confirm_msg = (f"将对列表中的 {len(items)} 个素材逐个处理：\n"
-                       f"· 本地视频 {local_vid} 个：服务端分割 + 逐镜分析；\n"
-                       f"· 本地图片 {local_img} 个：服务端转静态镜头 + 分析；\n"
-                       f"· 素材库素材 {server_n} 个：服务端按素材库地址分割/转静态镜头 + 分析；\n"
-                       f"· 无法分割的本地视频，自动挑出一段约 {dur:.0f} 秒的精华片段。\n"
-                       f"· 分割/分析完成后，全部镜头进入下方镜头重组。\n")
-        confirm_msg += (f"\n分割片段输出目录（任务级缓存，不复制原始素材）：\n{out_summary}\n"
-                        f"注意：会先清空缓存各目录里已有的分镜片段。\n\n确认继续？")
-        reply = QMessageBox.question(
-            self.parent_widget, "智能镜头分割",
-            confirm_msg,
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        # 清空缓存各 per-video splits 目录里旧的分镜片段
-        try:
-            for sp_dir in set(per_video_splits):
-                os.makedirs(sp_dir, exist_ok=True)
-                for f in os.listdir(sp_dir):
-                    if "_shot_" in f and f.lower().endswith((".mp4", ".m4v")):
-                        try:
-                            os.remove(os.path.join(sp_dir, f))
-                        except Exception:
-                            pass
-        except Exception as e:
-            QMessageBox.warning(self.parent_widget, "无法准备目录", f"创建/清理 splits 目录失败：\n{e}")
-            return
-
-        self._merged_queue = list(items)
-        self._merged_total = len(items)
-        self._merged_done = 0
-        self._merged_split_ok = 0
-        self._merged_hl_ok = 0
-        self._merged_fail = 0
-        self._merged_fail_msgs = []
-        self._merged_per_video_splits = per_video_splits  # 每个素材对应的 splits 目录
-        self._merged_hl_duration = dur
-
-        self.btn_split.setEnabled(False)
-        if hasattr(self, "btn_transcribe_raw"):
-            self.btn_transcribe_raw.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-
-        self._process_next_merged_video()
-    # [3·分割]  _process_next_merged_video
-    def _process_next_merged_video(self):
-        if not self._merged_queue:
-            self._on_merged_all_finished()
-            return
-
-        item = self._merged_queue.pop(0)
-        self._merged_cur_item = item
-        self._merged_cur_video = item.get("path") or item.get("display") or ""
-        idx = self._merged_done + 1
-        fname = item.get("display") or os.path.basename(item.get("path") or "")
-
-        # 当前素材的 per-video splits 目录
-        cur_splits_dir = self._merged_per_video_splits[self._merged_done]
-        self._merged_cur_splits_dir = cur_splits_dir
-
-        if item["kind"] == "local" and not os.path.exists(item.get("path", "")):
-            self._merged_fail += 1
-            self._merged_fail_msgs.append(f"{fname}: 文件不存在")
-            self._merged_done += 1
-            self._process_next_merged_video()
-            return
-
-        self.stage_label.setText(f"智能镜头分割 ({idx}/{self._merged_total})：{fname}")
-        self.progress_bar.setValue(int(self._merged_done * 100 / max(1, self._merged_total)))
-
-        self._start_merged_split(item, cur_splits_dir,
-                                self.threshold_spin.value(), float(self.min_len_spin.value()))
-
-    def _retire_worker(self, w):
-        """保留 QThread 引用直到线程结束，避免对象被 GC 时线程仍在运行导致崩溃。"""
-        if w is None:
-            return
-        pool = getattr(self, "_retired_workers", None)
-        if pool is None:
-            pool = []
-            self._retired_workers = pool
-        pool.append(w)
-        # 清理已结束的（引用释放）
-        for old in list(pool):
-            if old is not None and not old.isRunning():
-                try:
-                    pool.remove(old)
-                except ValueError:
-                    pass
-
-    def _start_merged_split(self, item, cur_splits_dir, threshold, min_scene_len):
-        """镜头分割：服务端 /montage/split（分割+分析合并），失败时本地视频自动挑精华。"""
-        is_local = item["kind"] == "local"
-        video_path = item.get("path") if is_local else ""
-        # 替换前保留旧 worker 引用（避免 QThread 被 GC 时线程未结束崩溃）
-        self._retire_worker(getattr(self, "worker", None))
-        self.worker = ServerSplitWorker(
-            video_path=video_path or None,
-            output_dir=cur_splits_dir,
-            threshold=threshold,
-            min_scene_len=min_scene_len,
-            material_id=item.get("material_id", "") if not is_local else "",
-            clip_url=item.get("clip_url", "") if not is_local else "",
-        )
-        self.worker.stage.connect(lambda t: self.stage_label.setText(t))
-        self.worker.finished.connect(self._on_merged_split_done)
-        # 服务端分割+分析合并：逐镜分析结果写 sidecar 缓存（闭包绑定本素材目录）
-        self.worker.analysis_ready.connect(
-            lambda meta, _d=cur_splits_dir, _v=video_path: self._on_split_analysis_ready(meta, _d, _v))
-
-        self.worker.error.connect(self._on_merged_split_error)
-        self.worker.start()
-    # [3·分割]  _on_split_analysis_ready
-    # [3·分割]  _on_split_analysis_ready
-    def _on_split_analysis_ready(self, shot_meta, splits_dir, video_path):
-        """服务端分割内嵌的逐镜分析结果写入 sidecar 缓存。
-
-        评分/desc/景别/产品/型号都从服务端返回，直接写盘，
-        下次 _check_split_clips_exist 扫描时回填表格。
-        """
-        if not shot_meta or not splits_dir:
-            return
-        try:
-            from utils.shot_analysis_cache import ShotAnalysisCache
-            # vbase/prefix 优先从服务端返回的片段名推导（支持素材库素材无本地文件）
-            first_fname = ""
-            for _m in shot_meta:
-                if _m.get("filename"):
-                    first_fname = _m["filename"]
-                    break
-            if first_fname and "_shot_" in first_fname:
-                vbase = first_fname.split("_shot_")[0]
-            elif video_path:
-                vbase = os.path.splitext(os.path.basename(video_path))[0]
-            else:
-                vbase = ""
-            workspace = os.path.dirname(splits_dir)
-            if not workspace:
-                return
-            cache = ShotAnalysisCache(workspace, vbase)
-            prefix = f"{vbase}_shot_" if vbase else ""
-            for meta in shot_meta:
-                fname = meta.get("filename") or ""
-                idx = meta.get("shot_index")
-                path = ""
-                # 重命名后文件名可能带时间戳/描述：按前缀匹配实际文件
-                if prefix and idx is not None and os.path.isdir(splits_dir):
-                    cand = [f for f in os.listdir(splits_dir)
-                            if f.startswith(f"{prefix}{idx:03d}") and f.lower().endswith((".mp4", ".m4v"))]
-                    if cand:
-                        path = os.path.join(splits_dir, sorted(cand)[0])
-                if not path or not os.path.isfile(path):
-                    path = os.path.join(splits_dir, fname)
-                if not os.path.isfile(path):
-                    log.warning(f"[分割分析] 找不到镜头片段: {fname}")
-                    continue
-                as_ = meta.get("aesthetic_score") or {}
-                sa = meta.get("shot_analysis") or {}
-                if not isinstance(as_, dict):
-                    as_ = {}
-                if not isinstance(sa, dict):
-                    sa = {}
-                cache.upsert(path, {
-                    "score": as_.get("total"),
-                    "desc": meta.get("description") or sa.get("scene_primary") or "",
-                    "shot_type": sa.get("shot_type") or "",
-                    "product": sa.get("product") or "",
-                    "model": sa.get("model") or "",
-                    "extra": {"aesthetic_score": as_, "shot_analysis": sa},
-                })
-                # 同步内存，避免重新扫描之前就可用
-                if meta.get("description"):
-                    self.split_descriptions[os.path.abspath(path)] = meta["description"]
-                if path in self.split_clips_cache:
-                    self.split_clips_cache[path]["score"] = as_.get("total")
-                    self.split_clips_cache[path]["shot_type"] = sa.get("shot_type") or ""
-                    self.split_clips_cache[path]["product"] = sa.get("product") or ""
-                    self.split_clips_cache[path]["model"] = sa.get("model") or ""
-                    if meta.get("description"):
-                        self.split_clips_cache[path]["desc"] = meta["description"]
-            log.info(f"[分割分析] 已写入 {len(shot_meta)} 条分析缓存 -> {splits_dir}")
-        except Exception as e:
-            log.warning(f"写入分割分析缓存失败: {e}")
-
-    # [3·分割]  _on_merged_split_done
-    def _on_merged_split_done(self, out_dir, count, scenes):
-        item = getattr(self, "_merged_cur_item", None) or {}
-        is_local = item.get("kind") == "local"
-        video_path = item.get("path") or ""
-        fname = item.get("display") or os.path.basename(video_path) or ""
-        if count > 0:
-            self._merged_split_ok += 1
-            log.info(f"[合并分割] {fname} 分割出 {count} 个镜头")
-            # 重命名写入时间戳元数据：仅本地素材可重命名（素材库素材文件名已规范）
-            if is_local and video_path and os.path.isfile(video_path):
-                self._rename_video_splits_with_metadata(self._merged_cur_splits_dir, video_path, scenes)
-            self._merged_done += 1
-            self._process_next_merged_video()
-        else:
-            if is_local:
-                log.info(f"[合并分割] {fname} 未检测到镜头切点，改为挑精华")
-                self._run_merged_highlight(video_path)
-            else:
-                log.info(f"[合并分割] 素材库视频 {fname} 未检测到镜头切点，跳过")
-                self._merged_fail += 1
-                self._merged_fail_msgs.append(f"{fname}: 服务端未检测到镜头切点")
-                self._merged_done += 1
-                self._process_next_merged_video()
-    # [3·分割]  _on_merged_split_error
-    def _on_merged_split_error(self, err):
-        item = getattr(self, "_merged_cur_item", None) or {}
-        is_local = item.get("kind") == "local"
-        video_path = item.get("path") or ""
-        fname = item.get("display") or os.path.basename(video_path) or ""
-        if not is_local:
-            log.warning(f"[合并分割] 素材库视频 {fname} 分割失败，跳过: {err}")
-            self._merged_fail += 1
-            self._merged_fail_msgs.append(f"{fname}: 服务端分割失败")
-            self._merged_done += 1
-            self._process_next_merged_video()
-            return
-        log.warning(f"[合并分割] {fname} 镜头分割失败，改为挑精华: {err}")
-        self._run_merged_highlight(video_path)
-    # [3·分割]  _run_merged_highlight
-    def _run_merged_highlight(self, video_path):
-        fname = os.path.basename(video_path)
-        idx = self._merged_done + 1
-        self.stage_label.setText(f"无法分割，挑取精华 ({idx}/{self._merged_total})：{fname}")
-        self.highlight_worker = BestClipWorker(
-            video_path=video_path,
-            output_dir=self._merged_cur_splits_dir,
-            duration_sec=self._merged_hl_duration,
-            shot_index=1,
-            clear_dir=False,
-        )
-        self.highlight_worker.finished.connect(self._on_merged_highlight_done)
-        self.highlight_worker.error.connect(self._on_merged_highlight_error)
-        self.highlight_worker.start()
-    # [3·分割]  _on_merged_highlight_done
-    def _on_merged_highlight_done(self, out_path, start, end):
-        self._merged_hl_ok += 1
-        log.info(f"[合并分割] 精华片段已生成：{out_path} [{start:.2f}-{end:.2f}]")
-        self._merged_done += 1
-        self._process_next_merged_video()
-    # [3·分割]  _on_merged_highlight_error
-    def _on_merged_highlight_error(self, err):
-        video_path = getattr(self, "_merged_cur_video", "")
-        fname = os.path.basename(video_path) if video_path else ""
-        last_line = (err or "").strip().splitlines()[-1] if err else "未知错误"
-        self._merged_fail += 1
-        self._merged_fail_msgs.append(f"{fname}: {last_line[:100]}")
-        log.error(f"[合并分割] {fname} 挑精华也失败：{err}")
-        self._merged_done += 1
-        self._process_next_merged_video()
-    # [3·分割]  _on_merged_all_finished
-    def _on_merged_all_finished(self):
-        self.btn_split.setEnabled(True)
-        if hasattr(self, "btn_transcribe_raw"):
-            self.btn_transcribe_raw.setEnabled(True)
-
-        # 让下方表格读取各 per-video splits 目录
-        self.processing_video_path = ""
-        self.video_list.setCurrentItem(None)
-        self.temp_scenes = []
-        # 保存所有 per-video splits 目录，供 _check_split_clips_exist 扫描
-        self._last_merged_splits_dirs = list(set(self._merged_per_video_splits))
-        # 分割完成，把缓存生成的派生片段同步进 manifest
-        self._sync_manifest_local_clips()
-
-        msg = (f"处理完成：分割 {self._merged_split_ok} 个，挑精华 {self._merged_hl_ok} 个，"
-               f"失败 {self._merged_fail} 个（共 {self._merged_total} 个视频）。")
-        detail = msg
-        if self._merged_fail_msgs:
-            detail += "\n\n失败明细：\n" + "\n".join(self._merged_fail_msgs[:8])
-
-        self.stage_label.setText("完成： " + msg)
-        self.progress_bar.setRange(0, 0)
-        self._pending_dialog = ("智能镜头分割完成", detail)
-        self._check_split_clips_exist()
     # [3·分割]  _rename_video_splits_with_metadata
     def _rename_video_splits_with_metadata(self, splits_dir, video_path, scenes):
         """重命名单个视频刚分割出的片段（写入时间戳元数据），仅处理该视频前缀的文件。"""
@@ -2213,8 +1870,11 @@ class VideoMontagePage(BasePage):
     # --- Step 1 batch "pick best N seconds" highlights ---
     # [3·分割]  _start_pick_highlights
     def _start_pick_highlights(self):
-        if (self.worker and self.worker.isRunning()) or \
-           (getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning()):
+        ctrl = getattr(getattr(self, "step1", None), "controller", None)
+        split_running = bool(ctrl and ctrl.worker and ctrl.worker.isRunning())
+        hl_running = bool(ctrl and ctrl.highlight_worker and ctrl.highlight_worker.isRunning())
+        batch_hl_running = bool(getattr(self, "highlight_worker", None) and self.highlight_worker.isRunning())
+        if split_running or hl_running or batch_hl_running:
             QMessageBox.warning(self.parent_widget, "任务进行中",
                                 "上一个任务仍在运行中，请等待完成或先停止。")
             return
@@ -2230,7 +1890,7 @@ class VideoMontagePage(BasePage):
         dur = self.spin_highlight_sec.value()
 
         # 同型号的多个视频，精华片段统一放进一个共享 splits 目录，便于下一步组合混剪。
-        # 任务缓存已创建时写入 .runtime/montage_cache/<job_id>/splits/highlights/，
+        # 任务缓存已创建时写入 <缓存目录>/montage_cache/<job_id>/splits/highlights/，
         # 否则退回旧式「扫描目录/splits」（与下方表格读取位置一致）。
         self._ensure_montage_job()
         sp_root = self._montage_splits_root()
@@ -2686,6 +2346,10 @@ class VideoMontagePage(BasePage):
         if self.concat_worker and self.concat_worker.isRunning():
             return
 
+        # 防止上一次预合成方案线程未结束时再次点击导致重复启动/GC
+        if getattr(self, "_plan_worker", None) and self._plan_worker.isRunning():
+            return
+
         if not self.split_clips_list:
             QMessageBox.warning(self.parent_widget, "无可排列镜头",
                                 "当前没有勾选任何镜头，无法执行镜头重组。\n\n"
@@ -2746,31 +2410,62 @@ class VideoMontagePage(BasePage):
             self.script_match_worker.start()
             return
 
-        # ── 随机洗牌：使用全部已选镜头生成“预合成方案”，供人工删改/调序并确认后再正式合成 ──
+        # ── 随机洗牌：生成预合成方案（后台线程，避免镜头本地分析阻塞 UI）──
         target_clip_count = len(self.split_clips_list)
 
         batch_count = int(self.batch_count_spin.value())
         randomness_val = self.randomness_combo.currentData() if hasattr(self, "randomness_combo") else "medium"
         duration_limit = int(self.duration_limit_combo.currentData()) if hasattr(self, "duration_limit_combo") else 30
-        plan_clips_list = self._build_precompose_plans(
-            clips=self.split_clips_list,
-            target_clip_count=target_clip_count,
-            batch_count=batch_count,
-            randomness=randomness_val,
-            duration_limit_sec=duration_limit,
-        )
-        if not plan_clips_list:
-            QMessageBox.warning(self.parent_widget, "未生成方案", "未能生成预合成方案，请检查是否已勾选镜头。")
-            return
-        self._load_precompose_plans(plan_clips_list, out_montage_dir)
-        self.stage_label.setText(f"完成： 预合成方案已生成：{len(plan_clips_list)} 条，请检查后确认合成")
-        self.progress_bar.setVisible(False)
-        QMessageBox.information(
-            self.parent_widget,
-            "预合成完成",
-            f"已生成 {len(plan_clips_list)} 条预合成方案。\n"
-            "可在下方删除/调序镜头，确认无误后点击“确认合成视频”。"
-        )
+
+        # _build_precompose_plans 对每个镜头做 hash/质量/时长分析（本地打开视频，
+        # 每镜头约 1 秒），在 UI 线程同步执行会卡死界面（按钮点了没反应）。
+        # 移到后台线程，完成后再加载方案。
+        self.btn_assemble_video.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.stage_label.setText(f"正在生成预合成方案（分析 {target_clip_count} 个镜头）…")
+        from utils.thread_worker import TaskWorker as _PlanWorker
+        _clips = list(self.split_clips_list)
+        _bc = batch_count
+        _rv = randomness_val
+        _dl = duration_limit
+        _tc = target_clip_count
+        _out_dir = out_montage_dir
+
+        def _plan_work():
+            return self._build_precompose_plans(
+                clips=_clips,
+                target_clip_count=_tc,
+                batch_count=_bc,
+                randomness=_rv,
+                duration_limit_sec=_dl,
+            )
+
+        def _plan_done(plan_clips_list):
+            self.btn_assemble_video.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            if not plan_clips_list:
+                QMessageBox.warning(self.parent_widget, "未生成方案", "未能生成预合成方案，请检查是否已勾选镜头。")
+                return
+            self._load_precompose_plans(plan_clips_list, _out_dir)
+            self.stage_label.setText(f"完成： 预合成方案已生成：{len(plan_clips_list)} 条，请检查后确认合成")
+            QMessageBox.information(
+                self.parent_widget,
+                "预合成完成",
+                f"已生成 {len(plan_clips_list)} 条预合成方案。\n"
+                "可在下方删除/调序镜头，确认无误后点击“确认合成视频”。"
+            )
+
+        def _plan_err(e):
+            self.btn_assemble_video.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.stage_label.setText("失败： 预合成方案生成失败")
+            self._show_long_error("生成方案失败", str(e))
+
+        self._plan_worker = _PlanWorker(_plan_work)
+        self._plan_worker.finished.connect(_plan_done, type=Qt.QueuedConnection)
+        self._plan_worker.error.connect(_plan_err, type=Qt.QueuedConnection)
+        self._plan_worker.start()
     # [4·文案脚本]  _on_script_match_finished
     def _on_script_match_finished(self, matched_paths, matched_descs):
         """LLM 匹配完成：生成 1 条按文案顺序的预合成方案，待用户确认合成。"""
@@ -4178,21 +3873,57 @@ class VideoMontagePage(BasePage):
                 f"导出剪映草稿时发生错误：\n{result_path}")
     # [9·其他]  _preview_final_video
     def _preview_final_video(self, item):
+        """双击最终视频列表：异步加载新源，避免同步 setSource 导致 Qt 卡死。"""
         path = item.data(Qt.UserRole)
         if not (path and os.path.exists(path)):
             return
-        from PySide6.QtCore import QUrl
-        # 切换视频前先停止并清空上一个源，避免 QMediaPlayer 切换时卡死
-        # （PySide6 已知问题：上一个源未正确释放就 setSource 新源会挂起）
+        from PySide6.QtCore import QUrl, QTimer
+        self._pending_final_preview_path = path
         try:
             self.final_preview_player.stop()
-            self.final_preview_player.setSource(QUrl())  # 先清空，释放上一个资源
-            self.final_preview_title.setText(f" {os.path.basename(path)}")
+            # 先清空源，触发 NoMedia 后再加载新视频；同步 setSource 会导致 Qt 内部死锁/卡死
+            self.final_preview_player.setSource(QUrl())
+        except Exception as e:
+            log.warning(f"停止最终预览失败: {e}")
+        # 兜底：部分 Qt 版本/文件占用下不触发 NoMedia，200ms 后主动加载
+        if getattr(self, "_pending_final_preview_timer", None) is not None:
+            self._pending_final_preview_timer.stop()
+        self._pending_final_preview_timer = QTimer.singleShot(200, self._on_final_preview_no_media)
+
+    def _on_final_preview_no_media(self):
+        """final_preview_player 源释放完成（NoMedia 或兜底定时器）后加载目标视频。"""
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.final_preview_player)):
+                self._pending_final_preview_path = ""
+                return
+        except Exception:
+            self._pending_final_preview_path = ""
+            return
+        if getattr(self, "_pending_final_preview_timer", None) is not None:
+            self._pending_final_preview_timer.stop()
+            self._pending_final_preview_timer = None
+        path = getattr(self, "_pending_final_preview_path", "")
+        self._pending_final_preview_path = ""
+        if not path or not os.path.isfile(path):
+            return
+        from PySide6.QtCore import QUrl
+        try:
+            self.final_preview_title.setText(f"  {os.path.basename(path)}")
             self.final_preview_player.setSource(QUrl.fromLocalFile(path))
             self.final_preview_player.play()
         except Exception as e:
-            log.warning(f"特效包装视频预览失败: {e}")
-    # [4·文案脚本]  _run_batch_vision_descriptions
+            log.warning(f"最终视频预览加载失败: {e}")
+
+    def _on_final_preview_media_status_changed(self, status):
+        """监听 final_preview_player 的 NoMedia 信号，异步加载目标视频。"""
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if status == QMediaPlayer.NoMedia:
+                self._on_final_preview_no_media()
+        except Exception:
+            pass
+
     def _run_batch_vision_descriptions(self, splits_dir, split_files, missing_only=None):
         """用 BatchGenerateDescriptionsWorker 对分割镜头做批量画面分析，生成描述。
 
@@ -4405,32 +4136,49 @@ class VideoMontagePage(BasePage):
     def _get_shot_cache_for_clip(self, clip_path):
         """根据镜头片段路径返回对应源视频的 ShotAnalysisCache（按需创建）。
 
-        合并分割/挑精华模式下当前可能没有选中单个视频，self._shot_cache 为 None，
-        导致分析结果无法落盘。此 helper 按 clip_path 反推 {workspace_dir}/{basename}
-        并创建/加载对应 sidecar JSON，保证任何场景下都能保存。
+        不再依赖文件名反推 vbase（片段会被 _rename_video_splits_with_metadata 重命名，
+        反推的前缀可能与写入时的 vbase 不一致导致查不到）。改为：
+        扫描 workspace 下所有 *_shots.json，逐个加载并用内容指纹（_clip_key）匹配，
+        只要片段内容对得上就能命中，与文件名无关。
         """
         if not clip_path:
             return None
         try:
             from utils.shot_analysis_cache import ShotAnalysisCache
+            from utils.shot_analysis_cache import _clip_key
             clip_path = os.path.abspath(clip_path)
             clip_splits_dir = os.path.dirname(clip_path)
             clip_workspace_dir = os.path.dirname(clip_splits_dir)
-            # 片段文件名为 <视频名>_shot_XXX.mp4，反推源视频名（缓存布局下 workspace 与源视频并不在同一层）
-            _base_hint = os.path.basename(clip_path).split("_shot_")[0]
-            clip_basename = _base_hint if _base_hint else os.path.basename(clip_workspace_dir)
-            if not clip_workspace_dir or not clip_basename:
+            if not clip_workspace_dir or not os.path.isdir(clip_workspace_dir):
                 return None
-            cache_key = (clip_workspace_dir, clip_basename)
-            caches = getattr(self, "_shot_cache_pool", {})
-            if cache_key not in caches:
-                caches[cache_key] = ShotAnalysisCache(clip_workspace_dir, clip_basename)
-                self._shot_cache_pool = caches
-            return caches[cache_key]
+            # 目标片段的内容指纹（size|md5），不依赖文件名
+            target_key = _clip_key(clip_path)
+            # 工作区下所有 *_shots.json
+            import glob as _glob
+            cache_files = sorted(_glob.glob(os.path.join(clip_workspace_dir, "*_shots.json")))
+            for cf in cache_files:
+                cache_key = (clip_workspace_dir, os.path.basename(cf)[:-11])
+                caches = getattr(self, "_shot_cache_pool", {})
+                if cache_key not in caches:
+                    caches[cache_key] = ShotAnalysisCache(clip_workspace_dir, os.path.basename(cf)[:-11])
+                    self._shot_cache_pool = caches
+                cache = caches[cache_key]
+                if target_key in cache._items:
+                    return cache
+            # 未命中任何缓存文件：返回第一个（若无，返回 None）
+            if cache_files:
+                bname = os.path.basename(cache_files[0])[:-11]
+                caches = getattr(self, "_shot_cache_pool", {})
+                ck = (clip_workspace_dir, bname)
+                if ck not in caches:
+                    caches[ck] = ShotAnalysisCache(clip_workspace_dir, bname)
+                    self._shot_cache_pool = caches
+                return caches[ck]
+            return None
         except Exception as e:
             log.warning(f"获取镜头分析缓存失败({clip_path}): {e}")
             return None
-    # [3·分割]  _on_step1_score_filter_changed
+
     def _on_step1_score_filter_changed(self):
         combo = getattr(self, "step1_score_filter_combo", None)
         if combo is None:
@@ -5319,10 +5067,11 @@ class VideoMontagePage(BasePage):
         os.makedirs(out_montage_dir, exist_ok=True)
         self._confirming_plan_index = index
 
-        # 停止并清空预览，释放当前镜头文件句柄，避免上传/合成期间被占用
+        # 停止预览播放（不做同步 setSource(QUrl()) 释放：旧媒体释放是异步的，
+        # 在 UI 线程同步清源会阻塞界面导致"确认合成时卡死"。文件句柄释放由
+        # 后台合成 worker 上传时自然完成）。
         try:
             self.preview_player.stop()
-            self.preview_player.setSource(QUrl())
         except Exception:
             pass
 
@@ -5358,7 +5107,11 @@ class VideoMontagePage(BasePage):
     # [2·基础设施]  _clip_duration_text
     def _clip_duration_text(self, cache_item, time_str, path=""):
         """优先用镜头分析缓存的 duration，其次由 time_str('起 --> 止')推算，
-        最后用 ffprobe 直接探测片段文件（cv2 读不了 10-bit/特殊编码时兜底）。"""
+        最后用 ffprobe 直接探测片段文件（cv2 读不了 10-bit/特殊编码时兜底）。
+
+        探测结果无条件回写 split_clips_cache：切换预合成方案时（_refresh_sources_for_plan）
+        避免对每个镜头重复 ffprobe 导致 UI 卡死。
+        """
         dur = 0.0
         if cache_item:
             try:
@@ -5372,8 +5125,16 @@ class VideoMontagePage(BasePage):
                 dur = max(0.0, e - s)
         if dur <= 0 and path and os.path.isfile(path):
             dur = get_media_duration(path)
-            if dur > 0 and cache_item is not None:
-                cache_item["duration"] = dur
+            if dur > 0:
+                # 无条件回写缓存（无缓存条目则新建），保证下次切换方案直接读缓存不再 ffprobe
+                try:
+                    norm = os.path.abspath(path)
+                    cache = getattr(self, "split_clips_cache", {})
+                    if norm not in cache or not isinstance(cache.get(norm), dict):
+                        cache[norm] = {}
+                    cache[norm]["duration"] = dur
+                except Exception:
+                    pass
         return f"{dur:.1f}s" if dur > 0 else "—"
     # [2·基础设施]  _refresh_sources_for_plan
     def _refresh_sources_for_plan(self, plan_index):
@@ -5565,9 +5326,52 @@ class VideoMontagePage(BasePage):
         self._play_current_sequence_clip()
     # [9·其他]  _play_current_sequence_clip
     def _play_current_sequence_clip(self):
+        """播放序列中的当前片段。"""
+        # 防止页面已销毁后由 EndOfMedia timer 触发访问已释放对象：仅用对象有效性判断
+        # （不能用 isVisible()：页面在 QStackedWidget 中切换步骤时可能不可见，会误杀正常播放）
+        try:
+            import shiboken6 as _sb
+            if _sb.isValid(self) and _sb.isValid(self.preview_player) and self._preview_sequence_clips:
+                pass
+            else:
+                return
+        except Exception:
+            return
+
         if not self._preview_sequence_clips:
             return
         clip = self._preview_sequence_clips[self._preview_sequence_idx]
+        from PySide6.QtCore import QUrl
+        self.preview_player.stop()
+        # 记录待加载片段（若已有待加载则覆盖，防止连播快速切换时旧定时器串号）
+        self._pending_play_clip = clip
+        # 清空旧源触发 NoMedia
+        self.preview_player.setSource(QUrl())
+        # 兜底：若 Qt 未触发 NoMedia（文件占用/解码异常），200ms 后直接加载，避免永远不播
+        from PySide6.QtCore import QTimer as _QT
+        if getattr(self, "_pending_play_timer", None) is not None:
+            self._pending_play_timer.stop()
+        self._pending_play_timer = _QT.singleShot(200, self._on_preview_no_media)
+
+    def _on_preview_no_media(self):
+        """mediaStatusChanged == NoMedia 时回调：加载待播放片段。"""
+        # 回调来自 pending timer 或信号：用 shiboken 确认对象未销毁，避免访问已释放内存
+        # （不用 isVisible()：步骤切换时页面可能不可见但播放应继续）
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
+                self._pending_play_clip = ""
+                return
+        except Exception:
+            self._pending_play_clip = ""
+            return
+        if getattr(self, "_pending_play_timer", None) is not None:
+            self._pending_play_timer.stop()
+            self._pending_play_timer = None
+        clip = getattr(self, "_pending_play_clip", "")
+        self._pending_play_clip = ""
+        if not clip or not os.path.isfile(clip):
+            return
         from PySide6.QtCore import QUrl
         self.preview_player.setSource(QUrl.fromLocalFile(clip))
         self.preview_player.play()
@@ -5576,7 +5380,6 @@ class VideoMontagePage(BasePage):
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
-    # [3·分割]  _get_video_scene_sources
     def _get_video_scene_sources(self, path):
         """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
         sources_file = os.path.splitext(path)[0] + "_sources.txt"
@@ -6035,12 +5838,23 @@ class VideoMontagePage(BasePage):
             from PySide6.QtMultimedia import QMediaPlayer
             from PySide6.QtCore import QTimer
             if status == QMediaPlayer.EndOfMedia and self._preview_sequence_clips:
-                self._preview_sequence_idx += 1
-                if self._preview_sequence_idx >= len(self._preview_sequence_clips):
-                    self._preview_sequence_idx = 0
-                # 用 QTimer 延迟播放下一个，避免在 mediaStatusChanged 信号内
-                # 直接调 setSource() 导致 Qt 内部死锁 / 界面卡死
-                QTimer.singleShot(50, self._play_current_sequence_clip)
+                # 默认自动连播（各片段合计约 30s）；_play_current_sequence_clip 内已
+                # stop + 清源再换源，避免直接换源卡死。
+                if getattr(self, "_preview_auto_advance", True):
+                    self._preview_sequence_idx += 1
+                    if self._preview_sequence_idx >= len(self._preview_sequence_clips):
+                        self._preview_sequence_idx = 0
+                    # 用 QTimer 延迟播放下一个，避免在 mediaStatusChanged 信号内
+                    # 直接调 setSource() 导致 Qt 内部死锁 / 界面卡死
+                    QTimer.singleShot(50, self._play_current_sequence_clip)
+                else:
+                    # 关闭连播时停在当前片段末尾
+                    self.preview_player.setPosition(0)
+                    self.btn_preview_play.setIcon(mdi_icon("play"))
+            elif status == QMediaPlayer.NoMedia:
+                # 旧源已释放，加载待播放片段（信号驱动，避免固定延时不可靠）
+                self._on_preview_no_media()
+
             elif status == QMediaPlayer.InvalidMedia:
                 # 当前片段无法播放，跳过并尝试下一个
                 if self._preview_sequence_clips:

@@ -1,17 +1,15 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 分割阶段 Worker：场景检测、挑精华、镜头评分。"""
+import contextlib
 import os
 import subprocess
 import traceback
-from PySide6.QtCore import Signal
-from utils.base_worker import BaseWorker
-from utils.logger_utils import log
-from utils.api_error import ApiError
-from utils.hwaccel import get_video_encode_args
+
 from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
-
-
-
+from PySide6.QtCore import Signal
+from utils.api_error import ApiError
+from utils.base_worker import BaseWorker
+from utils.hwaccel import get_video_encode_args
+from utils.logger_utils import log
 
 
 class ServerSplitWorker(BaseWorker):
@@ -53,6 +51,10 @@ class ServerSplitWorker(BaseWorker):
         self.image_duration = image_duration
         self.analyze = analyze
         self.shot_meta = []  # 逐镜分析结果（finished 之后 analysis_ready emit）
+        self._aborted = False
+
+    def abort(self):
+        self._aborted = True
 
     def _local_cut(self, start, end, out):
         """本地 ffmpeg 按起止时间重裁（download_url 下载失败时的兜底）。"""
@@ -63,7 +65,7 @@ class ServerSplitWorker(BaseWorker):
         cmd = [ffmpeg, "-y", "-ss", str(start), "-to", str(end),
                "-i", self.video_path, "-c:v", "libx264", "-pix_fmt", "yuv420p",
                "-c:a", "aac", out]
-        r2 = subprocess.run(cmd, capture_output=True, creationflags=flags)
+        subprocess.run(cmd, capture_output=True, creationflags=flags)
         return os.path.isfile(out) and os.path.getsize(out) > 0
 
     def run(self):
@@ -78,7 +80,7 @@ class ServerSplitWorker(BaseWorker):
             if not self.server_url:
                 raise RuntimeError("未配置 compute_server_url")
 
-            from utils.http_client import http_get, http_post
+            from utils.http_client import http_get
             os.makedirs(self.output_dir, exist_ok=True)
             from gui.montage.utils_media import safe_source_name
             base = safe_source_name(self.video_path) if self.video_path else ""
@@ -101,18 +103,33 @@ class ServerSplitWorker(BaseWorker):
                          ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
                          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                          ".webp": "image/webp", ".bmp": "image/bmp", ".gif": "image/gif"}.get(_ext, "video/mp4")
-                files = {"file": (os.path.basename(self.video_path), open(self.video_path, "rb"), _mime)}
+                # 文件句柄由 finally 关闭；保持打开是为了在 multipart POST 期间可读
+                files = {"file": (os.path.basename(self.video_path), open(self.video_path, "rb"), _mime)}  # noqa: SIM115
             else:
                 raise RuntimeError("没有可分割的素材（需 file / material_id / clip_url 之一）")
 
+            url = f"{self.server_url}/montage/split"
+            file_size = (os.path.getsize(self.video_path)
+                         if self.video_path and os.path.isfile(self.video_path) else 0)
+            log.info(f"[服务端镜头分割] 开始请求: {url} "
+                     f"file={self.video_path or '-'} size={file_size} "
+                     f"material_id={self.material_id or '-'} clip_url={self.clip_url or '-'}")
+            # 使用独立 Session + Connection: close，避免连接池中的空闲/半开连接导致请求挂起
+            import requests
+            session = requests.Session()
+            session.headers.update({"Connection": "close"})
             try:
-                r = http_post(f"{self.server_url}/montage/split", files=files, data=data, timeout=600)
+                r = session.post(url, files=files, data=data, timeout=(10, 590),
+                                 headers={"Connection": "close"})
+            except Exception as e:
+                log.error(f"[服务端镜头分割] 请求异常: {type(e).__name__}: {e}")
+                raise
             finally:
+                session.close()
                 if files:
-                    try:
+                    with contextlib.suppress(Exception):
                         files["file"][1].close()
-                    except Exception:
-                        pass
+            log.info(f"[服务端镜头分割] 服务端响应: HTTP {r.status_code} len={len(r.content)}")
             if r.status_code != 200:
                 raise RuntimeError(f"服务端分割返回 {r.status_code}: {r.text[:200]}")
 
@@ -121,8 +138,8 @@ class ServerSplitWorker(BaseWorker):
             if not shots:
                 self.stage.emit("服务端未检测到镜头切点")
                 self.progress.emit(100)
-                self.finished.emit(self.output_dir, 0, [])
                 self.analysis_ready.emit([])
+                self.finished.emit(self.output_dir, 0, [])
                 return
 
             self.progress.emit(50)
@@ -176,12 +193,17 @@ class ServerSplitWorker(BaseWorker):
 
             self.progress.emit(100)
             self.stage.emit("分割导出完成（服务端分割+分析，片段已下载）")
-            self.finished.emit(self.output_dir, created, scenes)
             self.analysis_ready.emit(list(self.shot_meta))
+            self.finished.emit(self.output_dir, created, scenes)
+            self.busy.emit(False)
         except Exception:
             self.busy.emit(False)
             log.exception("服务端镜头分割失败")
             self.error.emit(traceback.format_exc())
+        finally:
+            if files:
+                with contextlib.suppress(Exception):
+                    files["file"][1].close()
 
 
 class BestClipWorker(BaseWorker):
@@ -368,8 +390,9 @@ class BeatDetectWorker(BaseWorker):
         self._should_stop = True
 
     def do_work(self):
-        from utils.http_client import http_get, http_post
         import time as _time
+
+        from utils.http_client import http_get, http_post
 
         fname = os.path.basename(self.music_path)
         fsize = os.path.getsize(self.music_path) if os.path.isfile(self.music_path) else 0
@@ -567,8 +590,9 @@ class BeatVideoGenWorker(BaseWorker):
         return cls._MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
 
     def do_work(self):
-        from utils.http_client import http_get
         import time as _time
+
+        from utils.http_client import http_get
 
         spec = self.spec
         n_variants = max(1, int(spec.get("variant_count") or 1))
@@ -797,3 +821,4 @@ class BeatVideoGenWorker(BaseWorker):
         if not os.path.isfile(local) or os.path.getsize(local) == 0:
             raise RuntimeError("下载文件为空")
         return local
+

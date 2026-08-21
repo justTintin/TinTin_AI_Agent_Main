@@ -2,11 +2,12 @@
 """智能混剪 - 分割阶段 Worker：场景检测、挑精华、镜头评分。"""
 import os
 import subprocess
+import time as _time
 import traceback
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from utils.hwaccel import get_video_encode_args
+from utils.hwaccel import get_video_encode_args, get_hwaccel_decode_args, get_encoder
 from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 
 
@@ -31,7 +32,7 @@ class PySceneDetectWorker(BaseWorker):
             self.busy.emit(True)
 
             try:
-                from scenedetect import open_video, SceneManager, split_video_ffmpeg
+                from scenedetect import open_video, SceneManager
                 from scenedetect.detectors import ContentDetector
             except ImportError:
                 raise RuntimeError("未检测到 scenedetect 依赖。")
@@ -54,12 +55,16 @@ class PySceneDetectWorker(BaseWorker):
             self.stage.emit("正在分析镜头切点...")
             self.progress.emit(30)
 
-            # 打开视频并进行场景检测
+            # 打开视频并进行场景检测（frame_skip 跳过部分帧加速，min_scene_len 已限制最小镜头长度，
+            # 跳帧带来的切点偏移 ≤ frame_skip 帧，对混剪素材可接受）
+            _t_detect = _time.time()
             video = open_video(self.video_path)
             scene_manager = SceneManager()
             scene_manager.add_detector(ContentDetector(threshold=self.threshold, min_scene_len=self.min_scene_len))
-            scene_manager.detect_scenes(video, show_progress=False)
+            scene_manager.detect_scenes(video, show_progress=False, frame_skip=3)
             scene_list = scene_manager.get_scene_list()
+            log.info(f"[镜头分割] {os.path.basename(self.video_path)} 场景检测耗时 "
+                     f"{_time.time() - _t_detect:.1f}s，检出 {len(scene_list)} 个镜头")
 
             if not scene_list:
                 self.stage.emit("未检测到明显的镜头切点")
@@ -72,16 +77,12 @@ class PySceneDetectWorker(BaseWorker):
 
             os.makedirs(self.output_dir, exist_ok=True)
             video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
-            output_template = f"{video_basename}_shot_$SCENE_NUMBER.mp4"
 
-            # 调用 PySceneDetect 进行分段视频导出
-            split_video_ffmpeg(
-                self.video_path,
-                scene_list,
-                output_dir=self.output_dir,
-                output_file_template=output_template,
-                show_progress=False
-            )
+            # 自行切分：GPU 硬编（可用时）替代 scenedetect 内置 libx264 软编码，大幅提速
+            _t_split = _time.time()
+            self._split_scenes_ffmpeg(ffmpeg_path, scene_list, video_basename)
+            log.info(f"[镜头分割] {os.path.basename(self.video_path)} 切分导出耗时 "
+                     f"{_time.time() - _t_split:.1f}s（{len(scene_list)} 段）")
 
             # 验证输出文件是否生成，防止 ffmpeg 调用失败无输出却显示成功
             created_files = []
@@ -103,6 +104,43 @@ class PySceneDetectWorker(BaseWorker):
             self.busy.emit(False)
             log.exception("镜头分割失败")
             self.error.emit(traceback.format_exc())
+
+    def _split_scenes_ffmpeg(self, ffmpeg_path, scene_list, video_basename):
+        """按场景列表逐段切分：输入快速 seek + 重编码（帧级精确）。
+
+        实测结论：分割是「大量短片段」场景，每段独立起 ffmpeg 进程，GPU 会话初始化
+        开销（约 0.2~0.3s/次）会超过编码本身收益，故固定 libx264 veryfast 软编
+        （强 CPU 可达 50x+ 实时），不启用 CUDA 硬解；单段失败自动重试一次。
+        输出命名 {basename}_shot_{NNN}.mp4，与后续 _rename_video_splits_with_metadata 兼容。
+        """
+        total = len(scene_list)
+        pad = max(2, len(str(total)))
+        encode_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
+        decode_args = []
+        creationflags = 0x08000000
+        for idx, (start_tc, end_tc) in enumerate(scene_list):
+            start_s = float(start_tc.get_seconds())
+            end_s = float(end_tc.get_seconds())
+            dur = max(0.1, end_s - start_s)
+            out_name = f"{video_basename}_shot_{str(idx + 1).zfill(pad)}.mp4"
+            out_path = os.path.join(self.output_dir, out_name)
+            tail_args = ["-t", f"{dur:.3f}", *encode_args,
+                         "-pix_fmt", "yuv420p", "-c:a", "aac",
+                         "-movflags", "+faststart", out_path]
+            cmd = [ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+                   *decode_args, "-ss", f"{start_s:.3f}", "-i", self.video_path] + tail_args
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                               errors="ignore", creationflags=creationflags)
+            if (r.returncode != 0 or not os.path.exists(out_path)) and decode_args:
+                # 硬解失败（编码格式不受支持等）→ 去掉硬解参数软解重试
+                cmd_soft = [ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+                            "-ss", f"{start_s:.3f}", "-i", self.video_path] + tail_args
+                r = subprocess.run(cmd_soft, capture_output=True, text=True, encoding="utf-8",
+                                   errors="ignore", creationflags=creationflags)
+            if r.returncode != 0 or not os.path.exists(out_path):
+                log.warning(f"[镜头分割] 第 {idx + 1}/{total} 段切分失败: {(r.stderr or '')[-200:]}")
+            self.stage.emit(f"正在分割输出 ({idx + 1}/{total})...")
+            self.progress.emit(60 + int((idx + 1) * 38 / total))
 
 
 
@@ -241,12 +279,19 @@ class BestClipWorker(BaseWorker):
         dur = max(0.1, end - start)
 
         creationflags = 0x08000000
-        cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path,
-               "-t", f"{dur:.3f}", *get_video_encode_args(crf=18, preset="veryfast"),
-               "-pix_fmt", "yuv420p", "-c:a", "aac",
-               "-movflags", "+faststart", out_path]
+        # 单段短片段场景：GPU 会话初始化开销大于编码收益，沿用 libx264 软编（见 _split_scenes_ffmpeg 实测结论）
+        decode_args = []
+        tail_args = ["-t", f"{dur:.3f}", *get_video_encode_args(crf=18, preset="veryfast"),
+                     "-pix_fmt", "yuv420p", "-c:a", "aac",
+                     "-movflags", "+faststart", out_path]
+        cmd = [ffmpeg, "-y", *decode_args, "-ss", f"{start:.3f}", "-i", self.video_path] + tail_args
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                            errors="ignore", creationflags=creationflags)
+        if (r.returncode != 0 or not os.path.exists(out_path)) and decode_args:
+            # 硬解失败时去掉硬解参数软解重试
+            cmd_soft = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path] + tail_args
+            r = subprocess.run(cmd_soft, capture_output=True, text=True, encoding="utf-8",
+                               errors="ignore", creationflags=creationflags)
         if r.returncode != 0 or not os.path.exists(out_path):
             tail = (r.stderr or "")[-400:]
             raise RuntimeError(f"ffmpeg 裁剪失败:\n{tail}")

@@ -1799,10 +1799,11 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
 
-        # Set default directory for Step 2 and scan it
+        # 给 Step 2 带入目录（展示用），并按表格行重建候选池
+        # （合并分割时表格含多个 per-video splits 目录，不能用单目录扫描，否则其他目录的镜头丢失）
         if splits_dir and os.path.exists(splits_dir):
             self.concat_src_dir_input.setText(splits_dir)
-            self._scan_concat_src_dir()
+            self._rebuild_concat_clips_from_table()
         else:
             self._available_concat_clips = []
             self._update_concat_count_lbl()
@@ -4810,7 +4811,17 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self._save_split_srt()
-        self._apply_step1_score_filter()
+        # 只刷新行外观（评分着色/低分置灰），不改变勾选状态：
+        # 若此处调 _apply_step1_score_filter，默认≥6分阈值会把低分镜头全部静默取消勾选，
+        # 导致用户已勾选的镜头到步骤2丢失。勾选状态仅由用户手动勾选/切换评分过滤下拉驱动。
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is not None:
+            tbl.blockSignals(True)
+            try:
+                for r in range(tbl.rowCount()):
+                    self._refresh_step1_row_visual(r)
+            finally:
+                tbl.blockSignals(False)
         if ok == 0 and fail > 0:
             self.stage_label.setText(f"❌ 镜头分析失败：{fail} 个镜头全部失败，服务端未返回有效数据")
             QMessageBox.warning(
@@ -4928,6 +4939,42 @@ class VideoMontagePage(BasePage):
         """点击下一步：从表格checkbox同步选中状态，再进入镜头重组。"""
         self._sync_step1_checkboxes_to_clips()
         self._go_to_step(1)
+    # [3·分割]  _rebuild_concat_clips_from_table
+    def _rebuild_concat_clips_from_table(self):
+        """按步骤1表格行重建 _available_concat_clips（支持多目录合并分割）。
+
+        `_scan_concat_src_dir` 只扫 concat_src_dir_input 单个目录，合并分割模式下
+        （多个 per-video splits 目录）会漏掉其他目录的镜头，导致步骤1已勾选的镜头
+        到步骤2重组页丢失。此处以表格行（已含合并多目录扫描结果）为准重建候选池：
+        勾选状态以表格当前 checkbox 为准（表格默认全部勾选）。
+        """
+        tbl = getattr(self, "split_result_table", None)
+        if tbl is None:
+            return
+        cache_all = getattr(self, "split_clips_cache", {}) or {}
+        self._available_concat_clips = []
+        for r in range(tbl.rowCount()):
+            file_item = tbl.item(r, 2)
+            if not file_item:
+                continue
+            path = file_item.data(Qt.UserRole)
+            if not path:
+                continue
+            chk_item = tbl.item(r, 0)
+            table_checked = (chk_item.checkState() == Qt.Checked) if chk_item else True
+            cache = cache_all.get(path, {})
+            if not isinstance(cache, dict):
+                cache = {}
+            self._available_concat_clips.append({
+                "path": path,
+                "filename": cache.get("filename") or os.path.basename(path),
+                "time_str": cache.get("time_str", ""),
+                "desc": cache.get("desc", ""),
+                "duration": self._get_clip_duration(path),
+                "score": cache.get("score"),
+                "checked": table_checked,
+            })
+        self._update_concat_count_lbl()
     # [3·分割]  _sync_step1_checkboxes_to_clips
     def _sync_step1_checkboxes_to_clips(self):
         """从步骤1表格的checkbox列同步勾选状态到 _available_concat_clips。"""

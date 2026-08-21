@@ -801,13 +801,12 @@ class PageSetupMixin:
             try:
                 from config.paths import AI_CONFIG_FILE
                 import json as _json
+                from utils.server_resolver import get_server_url
                 base_url = "http://192.168.111.18:8000"
-                if os.path.isfile(AI_CONFIG_FILE):
-                    with open(AI_CONFIG_FILE, "r") as f:
-                        cfg = _json.load(f)
-                    url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-                    if url:
-                        base_url = url
+                try:
+                    base_url = get_server_url()
+                except RuntimeError:
+                    pass
                 resp = _req.get(f"{base_url}/tasks", timeout=10)
                 if resp.status_code != 200:
                     return None

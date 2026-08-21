@@ -20,19 +20,12 @@ from utils.logger_utils import log
 
 
 def _server_url():
-    """读取 compute_server_url（与 vector_search_page / compile_video_page 一致）。"""
+    """统一服务端地址解析。"""
+    from utils.server_resolver import get_server_url
     try:
-        import json
-        from config.paths import AI_CONFIG_FILE
-        import os
-        if os.path.isfile(AI_CONFIG_FILE):
-            cfg = json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:
-        pass
-    return "http://192.168.111.19:8000"
+        return get_server_url()
+    except RuntimeError:
+        return "http://192.168.111.19:8000"
 
 
 # ── 同步 API（供 Worker 调用，全部带超时）──────────────────────────────────

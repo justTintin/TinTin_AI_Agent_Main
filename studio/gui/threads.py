@@ -121,7 +121,12 @@ class AIStatusCheckThread(QThread):
                 if os.path.isfile(self.config_file_path):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
-                    server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
+                    server_url = ""
+                    try:
+                        from utils.server_resolver import get_server_url
+                        server_url = get_server_url()
+                    except RuntimeError:
+                        server_url = (cfg.get("llm_vision_api_url", "") or "").strip()
                     model   = cfg.get("llm_vision_model", "").strip()
 
                     if server_url:

@@ -15,19 +15,24 @@ from utils.logger_utils import log
 
 
 def _read_vox_url() -> str:
-    """从 ai_config 读 vox_api_url。优先 vox_api_url，否则从 compute_server_url + /voxcpm/tts 派生。"""
+    """从 ai_config 读 vox_api_url。优先 vox_api_url，否则走统一服务端地址派生。"""
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
             with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             url = (cfg.get("vox_api_url") or "").strip()
-            if not url:
-                base = (cfg.get("compute_server_url") or "").strip()
-                if base:
-                    url = base.rstrip("/") + "/voxcpm/tts"
-            return url
+            if url:
+                return url
     except Exception:
+        pass
+    # fallback: 统一服务端地址 + /voxcpm/tts
+    try:
+        from utils.server_resolver import get_server_url
+        base = get_server_url()
+        if base:
+            return base.rstrip("/") + "/voxcpm/tts"
+    except RuntimeError:
         pass
     return ""
 

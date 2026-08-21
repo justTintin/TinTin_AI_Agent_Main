@@ -29,13 +29,15 @@ def _read_ai_config() -> dict:
 
 
 def read_asr_url() -> str:
-    """远程 ASR 服务地址。优先 whisper_api_url，否则从 compute_server_url 派生。"""
+    """远程 ASR 服务地址。优先 whisper_api_url，否则走统一服务端地址。"""
     cfg = _read_ai_config()
     url = (cfg.get("whisper_api_url") or "").strip()
     if not url:
-        base = (cfg.get("compute_server_url") or "").strip()
-        if base:
-            url = base
+        from utils.server_resolver import get_server_url
+        try:
+            url = get_server_url()
+        except RuntimeError:
+            pass
     return url
 
 

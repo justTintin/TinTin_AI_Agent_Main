@@ -23,13 +23,15 @@ def _read_ai_config() -> dict:
 
 
 def _read_ollama_api() -> str:
-    """返回远程 Ollama API 基地址。优先读 llm_vision_api_url，否则从 compute_server_url 派生。"""
+    """返回远程 Ollama API 基地址。优先读 llm_vision_api_url，否则走统一服务端地址。"""
     cfg = _read_ai_config()
     url = (cfg.get("llm_vision_api_url") or "").strip()
     if not url:
-        base = (cfg.get("compute_server_url") or "").strip()
-        if base:
-            url = base
+        from utils.server_resolver import get_server_url
+        try:
+            url = get_server_url()
+        except RuntimeError:
+            pass
     if not url:
         return "http://127.0.0.1:11434"
     if not url.startswith("http://") and not url.startswith("https://"):

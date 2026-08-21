@@ -205,17 +205,11 @@ class _StatsCollector(QThread):
         self._running = True
 
     def _get_server_url(self):
-        """从 ai_config 读远程服务地址。"""
+        """从统一解析获取远程服务地址。"""
         try:
-            import json as _json
-            from config.paths import AI_CONFIG_FILE
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url") or "").strip()
-                if url:
-                    return url.rstrip("/")
-        except Exception:
+            from utils.server_resolver import get_server_url
+            return get_server_url()
+        except RuntimeError:
             pass
         return ""
 

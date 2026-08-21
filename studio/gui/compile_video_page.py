@@ -42,17 +42,11 @@ from config.paths import FINAL_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 
 # ─── 远程素材服务地址（与 vector_search_page 一致） ─────────────────────────
 def _get_server_url():
+    from utils.server_resolver import get_server_url
     try:
-        import json
-        from config.paths import AI_CONFIG_FILE
-        if os.path.isfile(AI_CONFIG_FILE):
-            cfg = json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:
-        pass
-    return "http://192.168.111.19:8000"
+        return get_server_url()
+    except RuntimeError:
+        return "http://192.168.111.19:8000"
 
 
 class TTSWorker(BaseWorker):

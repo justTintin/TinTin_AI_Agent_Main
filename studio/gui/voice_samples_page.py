@@ -453,12 +453,17 @@ class VoiceSamplesPage(BasePage):
         from config.paths import AI_CONFIG_FILE
         whisper_url = ""
         try:
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                whisper_url = (cfg.get("whisper_api_url") or cfg.get("compute_server_url") or "").strip()
-        except Exception:
-            pass
+            from utils.server_resolver import get_server_url
+            whisper_url = get_server_url()
+        except RuntimeError:
+            # fallback: 直接读 whisper_api_url
+            try:
+                if os.path.isfile(AI_CONFIG_FILE):
+                    with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    whisper_url = (cfg.get("whisper_api_url") or "").strip()
+            except Exception:
+                pass
         if not whisper_url:
             self.status_label.setText("❌ 未配置 Whisper 服务地址")
             QMessageBox.critical(self.parent_widget, "配置错误", "ai_config.json 中未配置 whisper_api_url 或 compute_server_url")

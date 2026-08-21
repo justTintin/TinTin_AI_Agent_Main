@@ -27,24 +27,13 @@ _PROXY_CACHE = None
 
 
 def _read_proxy_addr() -> str | None:
-    """从 ai_config 读取 compute_server_url（服务端代理地址）。"""
-    global _PROXY_CACHE
-    if _PROXY_CACHE is not None:
-        return _PROXY_CACHE
+    """从统一解析读取 compute_server_url（服务端代理地址）。"""
+    from utils.server_resolver import get_server_url
     try:
-        from config.paths import AI_CONFIG_FILE
-        import json
-        if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                _PROXY_CACHE = url
-                return url
-    except Exception:
-        pass
-    _PROXY_CACHE = ""
-    return None
+        url = get_server_url()
+        return url or None
+    except RuntimeError:
+        return None
 
 
 def _is_proxy_alive(timeout: float = 3) -> bool:

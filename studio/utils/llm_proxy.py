@@ -36,9 +36,12 @@ def _read_config() -> dict:
 
 
 def _get_server_url() -> str:
-    """获取服务端统一地址。"""
-    cfg = _read_config()
-    return (cfg.get("compute_server_url") or "").strip().rstrip("/")
+    """获取服务端统一地址（走统一解析 + 缓存）。"""
+    from utils.server_resolver import get_server_url
+    try:
+        return get_server_url()
+    except RuntimeError:
+        return ""
 
 
 def _get_default_model() -> str:

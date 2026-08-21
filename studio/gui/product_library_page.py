@@ -24,20 +24,12 @@ from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRE
 
 
 def _get_server_url() -> str:
-    """读取 ai_config.json 中的统一服务端地址（与 llm_proxy / compile_video_page 一致）。"""
+    """统一服务端地址解析。"""
+    from utils.server_resolver import get_server_url
     try:
-        import json
-        from config.paths import AI_CONFIG_FILE
-        import os
-        if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:
-        pass
-    return ""
+        return get_server_url()
+    except RuntimeError:
+        return ""
 
 
 class StockSyncWorker(BaseWorker):

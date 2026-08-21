@@ -19,18 +19,11 @@ from utils.base_worker import BaseWorker
 
 
 def _get_server_url():
+    from utils.server_resolver import get_server_url
     try:
-        from config.paths import AI_CONFIG_FILE
-        import json
-        if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:
-        pass
-    return "http://192.168.111.18:8000"
+        return get_server_url()
+    except RuntimeError:
+        return ""
 
 
 class _SearchWorker(BaseWorker):

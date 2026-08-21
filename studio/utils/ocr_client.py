@@ -22,21 +22,9 @@ _POLL_TIMEOUT = 1800.0      # 最长等待（OCR 批量/视频较慢，给足 30
 
 
 def _server_url(server_url: str = "") -> str:
-    """获取算力服务端地址（参数优先，其次读 ai_config.json 的 compute_server_url）。"""
-    if server_url:
-        return server_url.strip().rstrip("/")
-    try:
-        from config.paths import AI_CONFIG_FILE
-        import json
-        if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:
-        pass
-    raise RuntimeError("未配置算力服务端地址（compute_server_url），请在系统设置中填写。")
+    """获取算力服务端地址（参数优先，否则走统一解析）。"""
+    from utils.server_resolver import get_server_url
+    return get_server_url(explicit=server_url)
 
 
 def _poll_and_download(base: str, task_id: str, out_path: str,

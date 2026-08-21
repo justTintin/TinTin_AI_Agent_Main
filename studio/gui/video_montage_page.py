@@ -4697,21 +4697,10 @@ class VideoMontagePage(BasePage):
         self._analysis_worker.start()
     # [2·基础设施]  _get_compute_server_url
     def _get_compute_server_url(self):
+        from utils.server_resolver import get_server_url
         try:
-            cfg = getattr(self.main_window, "ai_config", {}) or {}
-            url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-            if url:
-                return url
-        except Exception:
-            pass
-        try:
-            from config.paths import AI_CONFIG_FILE
-            import json as _json
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    cfg = _json.load(f)
-                return (cfg.get("compute_server_url") or "").strip().rstrip("/")
-        except Exception:
+            return get_server_url()
+        except RuntimeError:
             pass
         return ""
     # [3·分割]  _on_analysis_item_ready

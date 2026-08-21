@@ -35,14 +35,11 @@ SHOT_TYPES = ["特写", "近景", "中景", "远景", "全景", "俯拍", "仰�
 def _material_search(query, top_k=30, brand="", category="", path_prefix=""):
     """调用服务端 POST /material/search 做 CLIP 向量相似度检索（替代已移除的本地索引）。"""
     import requests
-    server_url = ""
+    from utils.server_resolver import get_server_url
     try:
-        from config.paths import AI_CONFIG_FILE
-        if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                server_url = (json.load(f).get("compute_server_url") or "").strip().rstrip("/")
-    except Exception:
-        pass
+        server_url = get_server_url()
+    except RuntimeError:
+        server_url = ""
     if not server_url:
         raise RuntimeError("未配置算力服务端地址，请先在系统设置中填写 compute_server_url")
     body = {"query": query, "limit": top_k}

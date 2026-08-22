@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """智能混剪服务端拼接 Worker：离线 mock 测试（不连真服务端）。
 
 验证 MontageConcatServerWorker 的：
@@ -14,28 +13,11 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
-from utils import scheduled_task_client as stc
-
-
-class FakeResponse:
-    def __init__(self, status=200, payload=None, content=b""):
-        self.status_code = status
-        self._payload = payload
-        self._content = content
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError("HTTP %d" % self.status_code)
-
-    def json(self):
-        return self._payload() if callable(self._payload) else self._payload
-
-    def iter_content(self, chunk_size=8192):
-        for i in range(0, len(self._content), chunk_size):
-            yield self._content[i:i + chunk_size]
+from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker  # noqa: E402
+from utils import scheduled_task_client as stc  # noqa: E402
 
 
 class TestMontageConcatWorker(unittest.TestCase):
@@ -65,29 +47,28 @@ class TestMontageConcatWorker(unittest.TestCase):
 
     def test_submit_concat_multipart_contract(self):
         w = self._worker(options={"transition": "fade", "fps": 30, "width": 720})
-        with mock.patch("gui.montage.workers.montage_concat_server_worker.http_post",
-                        return_value=FakeResponse(200, {"id": "task-abc"})) as m:
+        with mock.patch("gui.montage.workers.montage_concat_server_worker.concat",
+                        return_value={"id": "task-abc"}) as m:
             task_id = w._submit_concat()
         self.assertEqual(task_id, "task-abc")
         self.assertEqual(m.call_count, 1)
-        args, kwargs = m.call_args
-        url = args[0] if args else kwargs["url"]
-        self.assertTrue(url.endswith("/montage/concat"), url)
+        # concat(server_url, files, data, timeout) — montage_client 内部拼 /montage/concat
+        server, files, data, _timeout = m.call_args.args
+        self.assertTrue(server)
         # form 字段必须是字符串
-        data = kwargs["data"]
         self.assertEqual(data, {"transition": "fade", "fps": "30", "width": "720"})
         # files：两个 clips
-        files = kwargs["files"]
         self.assertEqual(len(files), 2)
         self.assertEqual(files[0][1][0], "clip_001.mp4")
         self.assertEqual(files[1][1][0], "clip_002.mp4")
 
     def test_submit_concat_with_lut(self):
         w = self._worker(lut_path=self.lut)
-        with mock.patch("gui.montage.workers.montage_concat_server_worker.http_post",
-                        return_value=FakeResponse(200, {"id": "t1"})) as m:
+        with mock.patch("gui.montage.workers.montage_concat_server_worker.concat",
+                        return_value={"id": "t1"}) as m:
             w._submit_concat()
-        files = m.call_args.kwargs["files"]
+        # concat(server_url, files, data, timeout) — files 在第二个位置参数
+        files = m.call_args.args[1]
         names = [f[1][0] for f in files]
         self.assertIn("look.cube", names)
         lut_parts = [f for f in files if f[0] == "lut"]
@@ -105,21 +86,26 @@ class TestMontageConcatWorker(unittest.TestCase):
 
     def test_submit_no_task_id_raises(self):
         w = self._worker()
-        with mock.patch("gui.montage.workers.montage_concat_server_worker.http_post",
-                        return_value=FakeResponse(200, {"status": "ok"})):
-            with self.assertRaises(RuntimeError):
-                w._submit_concat()
+        with mock.patch("gui.montage.workers.montage_concat_server_worker.concat",
+                        return_value={"status": "ok"}), self.assertRaises(RuntimeError):
+            w._submit_concat()
 
     def test_poll_download_and_sources(self):
         w = self._worker(source_clips=["src_1.mp4", "src_2.mp4"], task_id="task-1")
         completed = {"status": "completed", "progress": 100,
                      "result": {"video_url": "/files/result.mp4"}}
         content = b"z" * 2048
+
+        def _fake_download(url, path, timeout):
+            with open(path, "wb") as f:
+                f.write(content)
+            return path
+
         with mock.patch.object(stc, "get_task", return_value=completed), \
-             mock.patch("gui.montage.workers.montage_concat_server_worker.http_get",
-                        return_value=FakeResponse(200, content=content)) as mg:
+             mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                        side_effect=_fake_download) as mg:
             w.do_work()
-        # 下载 URL 拼接了服务端地址
+        # download_result 的 URL 拼接了服务端地址
         self.assertTrue(mg.call_args.args[0].startswith("http://"))
         self.assertTrue(mg.call_args.args[0].endswith("/files/result.mp4"))
         self.assertTrue(os.path.isfile(self.out))
@@ -132,19 +118,25 @@ class TestMontageConcatWorker(unittest.TestCase):
     def test_task_failed_raises(self):
         w = self._worker(task_id="task-x")
         with mock.patch.object(stc, "get_task",
-                               return_value={"status": "failed", "error_msg": "boom"}):
-            with self.assertRaises(RuntimeError) as ctx:
-                w.do_work()
+                               return_value={"status": "failed", "error_msg": "boom"}), \
+                 self.assertRaises(RuntimeError) as ctx:
+                    w.do_work()
         self.assertIn("boom", str(ctx.exception))
 
     def test_download_too_small_raises(self):
         w = self._worker(task_id="task-y")
         completed = {"status": "completed", "result": {"video_url": "/files/small.mp4"}}
+
+        def _fake_download(url, path, timeout):
+            with open(path, "wb") as f:
+                f.write(b"tiny")
+            return path
+
         with mock.patch.object(stc, "get_task", return_value=completed), \
-             mock.patch("gui.montage.workers.montage_concat_server_worker.http_get",
-                        return_value=FakeResponse(200, content=b"tiny")):
-            with self.assertRaises(RuntimeError):
-                w.do_work()
+             mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                        side_effect=_fake_download), \
+             self.assertRaises(RuntimeError):
+            w.do_work()
 
     def test_stopped_raises(self):
         w = self._worker(task_id="task-z")

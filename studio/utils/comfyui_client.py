@@ -1,16 +1,16 @@
+import contextlib
+import json
 import os
-import sys
-import time
-import threading
 import subprocess
+import threading
+import time
 
 import requests
-from utils.http_client import (resilient_get, resilient_post,
-                               http_get, http_post, http_put, http_delete)
+from config.paths import APPS_DIR, LOG_DIR
 
-from config.paths import APPS_DIR, PYTHON_EMBEDED_DIR, LOG_DIR
+from utils.http_client import http_get, http_post, resilient_get, resilient_post
 from utils.logger_utils import log
-from utils.platform_utils import find_python, create_no_window_flag
+from utils.platform_utils import create_no_window_flag, find_python
 
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 COMFYUI_MAIN = os.path.join(COMFYUI_DIR, "main.py")
@@ -33,16 +33,17 @@ def _read_proxy_addr() -> str | None:
     if _PROXY_CACHE is not None:
         return _PROXY_CACHE
     try:
-        from config.paths import AI_CONFIG_FILE
         import json
+
+        from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 cfg = json.load(f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 _PROXY_CACHE = url
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     _PROXY_CACHE = ""
     return None
@@ -62,7 +63,7 @@ def _is_proxy_alive(timeout: float = 3) -> bool:
     except requests.exceptions.Timeout:
         log.warning(f"[ComfyUI] 服务端 {proxy} 响应超时")
         return False
-    except Exception:
+    except (requests.exceptions.RequestException, json.JSONDecodeError):
         return False
 
 
@@ -103,7 +104,7 @@ class ComfyUILocal:
         if not self.is_present():
             return False, (f"未找到本地 ComfyUI（{COMFYUI_MAIN}）。\n"
                            "请将 ComfyUI 源码克隆到 apps/comfyui/ 目录：\n"
-                           "git clone https://github.com/comfyanonymous/ComfyUI apps/comfyui")
+                           "git clone https://github.com/comfyanonymous/ComfyUI apps/comfyui")  # noqa: E501
         if self.is_running():
             return False, "本地 ComfyUI 已在运行"
 
@@ -115,7 +116,7 @@ class ComfyUILocal:
         cmd = [python, script, "--listen", LOCAL_HOST, "--port", str(LOCAL_PORT),
                "--disable-auto-launch"]
         os.makedirs(LOG_DIR, exist_ok=True)
-        logf = open(os.path.join(LOG_DIR, "comfyui.log"), "a", encoding="utf-8")
+        logf = open(os.path.join(LOG_DIR, "comfyui.log"), "a", encoding="utf-8")  # noqa: SIM115
 
         with self._lock:
             try:
@@ -124,7 +125,7 @@ class ComfyUILocal:
                     creationflags=_CREATE_NO_WINDOW,
                 )
                 log.info(f"ComfyUI 进程已启动 PID={self._proc.pid}")
-            except Exception as e:
+            except Exception as e:  # 外部API调用（subprocess）
                 return False, f"启动失败: {e}"
 
         deadline = time.time() + 60
@@ -145,19 +146,17 @@ class ComfyUILocal:
                 self._proc = None
 
             for img in ["python.exe", "pythonw.exe"]:
-                try:
+                with contextlib.suppress(Exception):
                     subprocess.call(
                         ["taskkill", "/F", "/IM", img, "/FI",
                          f"COMMANDLINE eq '*{COMFYUI_MAIN.replace('/', os.sep)}*'"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         creationflags=_CREATE_NO_WINDOW, timeout=5,
                     )
-                except Exception:
-                    pass
             log.info("ComfyUI 进程已停止")
 
 
-def resolve_addr(ai_config: dict, auto_start: bool = True, force_proxy: bool = False) -> str | None:
+def resolve_addr(ai_config: dict, auto_start: bool = True, force_proxy: bool = False) -> str | None:  # noqa: E501
     """解析可用的 ComfyUI 后端地址。返回地址或 None。
 
     优先级：
@@ -197,7 +196,7 @@ def resolve_addr(ai_config: dict, auto_start: bool = True, force_proxy: bool = F
 
 def _is_proxy_addr(addr: str) -> bool:
     """判断 addr 是否为服务端代理地址（非直连 ComfyUI）。"""
-    return addr and addr != LOCAL_ADDR and addr != DEFAULT_EXTERNAL_ADDR
+    return bool(addr) and addr != LOCAL_ADDR and addr != DEFAULT_EXTERNAL_ADDR
 
 
 def _proxy_url(addr: str, path: str) -> str:
@@ -208,10 +207,7 @@ def upload_file(ai_config, file_path):
     addr = resolve_addr(ai_config)
     if not addr:
         raise RuntimeError("ComfyUI 后端不可用")
-    if _is_proxy_addr(addr):
-        url = _proxy_url(addr, "upload/image")
-    else:
-        url = f"{addr}/upload/image"
+    url = _proxy_url(addr, "upload/image") if _is_proxy_addr(addr) else f"{addr}/upload/image"
     with open(file_path, "rb") as f:
         resp = resilient_post(url, files={"image": f}, timeout=60, service="comfyui")
     resp.raise_for_status()
@@ -260,10 +256,7 @@ def get_history(ai_config, prompt_id=None):
     if not addr:
         return None
     if _is_proxy_addr(addr):
-        if prompt_id:
-            url = _proxy_url(addr, f"history/{prompt_id}")
-        else:
-            url = _proxy_url(addr, "history")
+        url = _proxy_url(addr, f"history/{prompt_id}") if prompt_id else _proxy_url(addr, "history")
     else:
         if prompt_id:
             url = f"{addr}/history/{prompt_id}"
@@ -281,7 +274,7 @@ def get_history(ai_config, prompt_id=None):
 def view_url(addr, filename, file_type="output", subfolder=""):
     addr = (addr or "").strip().rstrip("/")
     if _is_proxy_addr(addr):
-        return _proxy_url(addr, f"view?filename={filename}&type={file_type}&subfolder={subfolder}")
+        return _proxy_url(addr, f"view?filename={filename}&type={file_type}&subfolder={subfolder}")  # noqa: E501
     return f"{addr}/view?filename={filename}&type={file_type}&subfolder={subfolder}"
 
 
@@ -290,13 +283,10 @@ def system_stats(ai_config):
     if not addr:
         return {}
     try:
-        if _is_proxy_addr(addr):
-            url = _proxy_url(addr, "status")
-        else:
-            url = f"{addr}/system_stats"
+        url = _proxy_url(addr, "status") if _is_proxy_addr(addr) else f"{addr}/system_stats"
         resp = resilient_get(url, timeout=5, service="comfyui", circuit_breaker=False)
         return resp.json() if resp.status_code == 200 else {}
-    except Exception:
+    except (requests.exceptions.RequestException, json.JSONDecodeError):
         return {}
 
 
@@ -327,7 +317,7 @@ def _comfyui_direct_addr(ai_config: dict) -> str | None:
                     host = f"http://{host}"
                 if host and is_alive(host):
                     return host
-        except Exception:
+        except (requests.exceptions.RequestException, json.JSONDecodeError):
             pass
     # 2. 外部直连
     external = (ai_config or {}).get("comfyui_addr", "").strip().rstrip("/")
@@ -374,17 +364,17 @@ class ComfyUIClient:
     # ── 应用发现 ──
     def list_apps(self) -> list:
         """GET /apps — 已发布应用列表（摘要）。"""
-        r = resilient_get(self._app_url(""), timeout=10, service="comfyui", circuit_breaker=False)
+        r = resilient_get(self._app_url(""), timeout=10, service="comfyui", circuit_breaker=False)  # noqa: E501
         if r.status_code == 200:
             return r.json().get("apps", [])
         raise RuntimeError(f"GET /apps 失败 HTTP {r.status_code}: {r.text[:200]}")
 
     def get_app(self, app_id: str) -> dict:
         """GET /apps/{app_id} — 应用详情（含完整 input/output schema）。"""
-        r = resilient_get(self._app_url(app_id), timeout=10, service="comfyui", circuit_breaker=False)
+        r = resilient_get(self._app_url(app_id), timeout=10, service="comfyui", circuit_breaker=False)  # noqa: E501
         if r.status_code == 200:
             return r.json()
-        raise RuntimeError(f"GET /apps/{app_id} 失败 HTTP {r.status_code}: {r.text[:200]}")
+        raise RuntimeError(f"GET /apps/{app_id} 失败 HTTP {r.status_code}: {r.text[:200]}")  # noqa: E501
 
     # ── 文件上传/下载（走 ComfyUI 直连）──
     def upload_file(self, file_path: str, accept: str = "image") -> str:
@@ -412,7 +402,7 @@ class ComfyUIClient:
         log.info(f"[ComfyUI] 上传成功: {file_path} → {name}")
         return name
 
-    def download_output(self, filename: str, file_type: str = "output", subfolder: str = "") -> bytes:
+    def download_output(self, filename: str, file_type: str = "output", subfolder: str = "") -> bytes:  # noqa: E501
         """下载生成的文件，返回二进制内容。"""
         addr = self._direct()
         if not addr:
@@ -422,7 +412,7 @@ class ComfyUIClient:
         resp.raise_for_status()
         return resp.content
 
-    def output_url(self, filename: str, file_type: str = "output", subfolder: str = "") -> str:
+    def output_url(self, filename: str, file_type: str = "output", subfolder: str = "") -> str:  # noqa: E501
         """返回生成文件的下载 URL（供浏览器/播放器直接访问）。"""
         addr = self._direct()
         if not addr:
@@ -438,9 +428,9 @@ class ComfyUIClient:
         if not self.server_addr:
             raise RuntimeError("无服务端地址，无法提交 workflow。")
         url = _proxy_url(self.server_addr, "run")
-        resp = resilient_post(url, json={"prompt": workflow_json}, timeout=30, service="comfyui")
+        resp = resilient_post(url, json={"prompt": workflow_json}, timeout=30, service="comfyui")  # noqa: E501
         if resp.status_code != 200:
-            raise RuntimeError(f"提交 workflow 失败 HTTP {resp.status_code}: {resp.text[:200]}")
+            raise RuntimeError(f"提交 workflow 失败 HTTP {resp.status_code}: {resp.text[:200]}")  # noqa: E501
         prompt_id = resp.json().get("prompt_id")
         if not prompt_id:
             raise RuntimeError(f"提交响应缺少 prompt_id: {resp.text[:200]}")
@@ -453,9 +443,9 @@ class ComfyUIClient:
         :param params: 应用参数（文件类参数需先 upload_file 拿到文件名再传入）。
         """
         url = self._app_url(f"{app_id}/run")
-        resp = resilient_post(url, json={"params": params}, timeout=30, service="comfyui")
+        resp = resilient_post(url, json={"params": params}, timeout=30, service="comfyui")  # noqa: E501
         if resp.status_code != 200:
-            raise RuntimeError(f"执行应用 {app_id} 失败 HTTP {resp.status_code}: {resp.text[:200]}")
+            raise RuntimeError(f"执行应用 {app_id} 失败 HTTP {resp.status_code}: {resp.text[:200]}")  # noqa: E501
         data = resp.json()
         prompt_id = data.get("prompt_id")
         if not prompt_id:
@@ -487,10 +477,8 @@ class ComfyUIClient:
             last = self.get_status(app_id, prompt_id)
             st = last.get("status")
             if progress_cb:
-                try:
+                with contextlib.suppress(Exception):
                     progress_cb(last)
-                except Exception:
-                    pass
             if st == "completed" or st == "failed":
                 return last
             time.sleep(interval)
@@ -499,4 +487,74 @@ class ComfyUIClient:
 
 def get_client(ai_config: dict | None = None) -> ComfyUIClient:
     """工厂：根据 ai_config 创建 ComfyUIClient。"""
-    return ComfyUIClient(server_addr=_read_proxy_addr() or "", ai_config=ai_config or {})
+    return ComfyUIClient(server_addr=_read_proxy_addr() or "", ai_config=ai_config or {})  # noqa: E501
+
+
+# ── 服务端代理模式快捷函数（供 GUI Worker 调用）──────────────────────────────
+
+def list_workflows(server_url: str, timeout: int = 10) -> list:
+    """GET /comfyui/workflows — 列出服务端可用工作流。"""
+    url = f"{server_url.rstrip('/')}/comfyui/workflows"
+    r = http_get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json().get("workflows", [])
+
+
+def get_workflow_json(server_url: str, wf_path: str, timeout: int = 10) -> dict:
+    """GET /comfyui/workflow?path=xx — 获取工作流 JSON 定义。"""
+    url = f"{server_url.rstrip('/')}/comfyui/workflow"
+    r = http_get(url, params={"path": wf_path}, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_proxy_status(server_url: str, timeout: int = 5) -> dict:
+    """GET /comfyui/status — 服务端 ComfyUI 代理状态。"""
+    url = f"{server_url.rstrip('/')}/comfyui/status"
+    r = http_get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def upload_image(server_url: str, image_path: str, timeout: int = 60):
+    """POST /comfyui/upload/image — 上传产品图到服务端，返回文件名。"""
+    url = f"{server_url.rstrip('/')}/comfyui/upload/image"
+    with open(image_path, "rb") as f:
+        resp = http_post(url, files={"image": f},
+                         params={"overwrite": "true"}, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("name", os.path.basename(image_path)) or ""
+
+
+def run_workflow(server_url: str, workflow: dict, client_id: str = "tintin-studio",
+                 timeout: int = 30) -> str:
+    """POST /comfyui/run — 提交工作流执行，返回 prompt_id。"""
+    url = f"{server_url.rstrip('/')}/comfyui/run"
+    resp = http_post(url, json={"prompt": workflow, "client_id": client_id}, timeout=timeout)  # noqa: E501
+    resp.raise_for_status()
+    result = resp.json()
+    return result.get("prompt_id") or result.get("id") or ""
+
+
+def get_history(server_url: str, prompt_id=None, timeout: int = 10):  # type: ignore[no-redef]  # noqa: E501 F811
+    """GET /comfyui/history — 执行历史（代理模式）。
+
+    prompt_id 指定时返回该任务的历史 dict；为 None 时返回全部历史。
+    """
+    url = f"{server_url.rstrip('/')}/comfyui/history"
+    r = http_get(url, timeout=timeout)
+    r.raise_for_status()
+    hist = r.json()
+    if prompt_id:
+        return hist.get(prompt_id) if isinstance(hist, dict) else None
+    return hist or {}
+
+
+def download_image(server_url: str, filename: str, img_type: str = "output",
+                   subfolder: str = "", timeout: int = 30) -> bytes:
+    """GET /comfyui/view?filename=... — 下载生成的图片，返回二进制内容。"""
+    url = (f"{server_url.rstrip('/')}/comfyui/view"
+           f"?filename={filename}&type={img_type}&subfolder={subfolder}")
+    r = http_get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.content

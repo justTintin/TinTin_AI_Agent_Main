@@ -38,7 +38,7 @@ class Step1SplitView(BaseStepView):
         self.main_page.folder_path_input.setVisible(False)
 
         from gui.common_widgets import DropZone as _DropZone
-        self.main_page.drop_zone = _DropZone(("mp4", "mov", "avi", "mkv", "flv", "webm", "m4v"),
+        self.main_page.drop_zone = _DropZone(("mp4", "mov", "avi", "mkv", "flv", "webm", "m4v"),  # noqa: E501
                                                hint="拖入视频素材 或 点击选择")
         self.main_page.drop_zone.clicked.connect(self.main_page._select_folder)
         self.main_page.drop_zone.file_dropped.connect(self.main_page._on_drop_videos)
@@ -50,10 +50,10 @@ class Step1SplitView(BaseStepView):
         self.main_page.video_list.setFixedHeight(120)
         self.main_page.video_list.setTextElideMode(Qt.ElideRight)
         self.main_page.video_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.main_page.video_list.itemClicked.connect(self.main_page._check_split_clips_exist)
-        self.main_page.video_list.itemDoubleClicked.connect(self.main_page._preview_video_item)
+        self.main_page.video_list.itemClicked.connect(self.main_page._check_split_clips_exist)  # noqa: E501
+        self.main_page.video_list.itemDoubleClicked.connect(self.main_page._preview_video_item)  # noqa: E501
         self.main_page.video_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)
+        self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)  # noqa: E501
         card_layout.addWidget(self.main_page.video_list)
 
         # SceneDetect Config
@@ -122,11 +122,11 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table.setColumnCount(9)
         self.main_page.split_result_table.setHorizontalHeaderLabels(
             ["", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
-        self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)  # noqa: E501
         self.main_page.split_result_table.setMinimumHeight(180)
-        self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)
-        self.main_page.split_result_table.cellChanged.connect(self.main_page._on_table_cell_changed)
-        self.main_page.split_result_table.itemChanged.connect(self.main_page._on_step1_checkbox_changed)
+        self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)  # noqa: E501
+        self.main_page.split_result_table.cellChanged.connect(self.main_page._on_table_cell_changed)  # noqa: E501
+        self.main_page.split_result_table.itemChanged.connect(self.main_page._on_step1_checkbox_changed)  # noqa: E501
 
         header = self.main_page.split_result_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -154,21 +154,21 @@ class Step1SplitView(BaseStepView):
         nav_row = QHBoxLayout()
         self.main_page.btn_open_splits_dir = mdi_button("打开已分割镜头目录", "folder")
         self.main_page.btn_open_splits_dir.setObjectName("secondary_button")
-        self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)
+        self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)  # noqa: E501
         nav_row.addWidget(self.main_page.btn_open_splits_dir)
 
         self.main_page.btn_clear_montage_cache = mdi_button("清空混剪缓存", "broom")
         self.main_page.btn_clear_montage_cache.setObjectName("secondary_button")
         self.main_page.btn_clear_montage_cache.setToolTip(
             "清除本地混剪任务缓存（分割片段/素材清单），不会删除原始素材。")
-        self.main_page.btn_clear_montage_cache.clicked.connect(self.main_page._clear_montage_cache)
+        self.main_page.btn_clear_montage_cache.clicked.connect(self.main_page._clear_montage_cache)  # noqa: E501
         nav_row.addWidget(self.main_page.btn_clear_montage_cache)
 
         nav_row.addStretch()
         self.main_page.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.main_page.btn_next_to_step_2.setObjectName("primary_button")
         self.main_page.btn_next_to_step_2.setEnabled(True)
-        self.main_page.btn_next_to_step_2.clicked.connect(self.main_page._go_next_to_step2)
+        self.main_page.btn_next_to_step_2.clicked.connect(self.main_page._go_next_to_step2)  # noqa: E501
         nav_row.addWidget(self.main_page.btn_next_to_step_2)
 
         layout.addLayout(nav_row)

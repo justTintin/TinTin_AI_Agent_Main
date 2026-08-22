@@ -1,22 +1,23 @@
-# -*- coding: utf-8 -*-
 """
 Remotion（编程式 MG 动画）渲染客户端。
 
 工程在 studio/remotion/（package.json + src 模板）。本模块用 Node/npm/npx 调用 Remotion：
 - install()：在工程目录跑 npm install（首次需要，依赖较重，含无头 Chrome）。
-- render(comp_id, props, out_path)：npx remotion render src/index.ts <comp> <out> --props=<json>。
+- render(comp_id, props, out_path)：npx remotion render src/index.ts <comp> <out> --props=<json>。  # noqa: E501
 模板元数据 TEMPLATES 同时驱动 GUI 表单。
 
  注意：业务已迁移到服务端渲染（见 utils/mg_server_client.py 与 gui.mg_render_worker）。
  本模块仅作为离线 fallback 保留，新代码不再要求客户端安装 Node/Chrome。
 """
-import os
+import contextlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 
 from config.paths import REMOTION_DIR
+
 from utils.platform_utils import create_no_window_flag
 
 # MG 模板（id 对应 remotion/src/Root.tsx 的 Composition id）+ 参数（驱动表单）。
@@ -63,9 +64,11 @@ def is_installed():
 
 def _run(args, cwd, timeout, on_line=None):
     flags = create_no_window_flag()
-    p = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, encoding="utf-8", errors="replace", creationflags=flags)
+    p = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # noqa: E501
+                         text=True, encoding="utf-8", errors="replace", creationflags=flags)  # noqa: E501
     out = []
+    if p.stdout is None:
+        raise RuntimeError("无法读取子进程输出")
     for line in p.stdout:
         out.append(line)
         if on_line:
@@ -92,9 +95,8 @@ def render(comp_id, props, out_path, on_line=None, timeout=1200):
     npx = _which("npx")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     # props 写临时文件，避免命令行 JSON 转义问题
-    pf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
-    json.dump(props or {}, pf, ensure_ascii=False)
-    pf.close()
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as pf:  # noqa: E501
+        json.dump(props or {}, pf, ensure_ascii=False)
     try:
         args = [npx, "remotion", "render", "src/index.ts", comp_id,
                 os.path.abspath(out_path), f"--props={pf.name}", "--log=error"]
@@ -103,7 +105,5 @@ def render(comp_id, props, out_path, on_line=None, timeout=1200):
             raise RuntimeError("Remotion 渲染失败：\n" + out[-600:])
         return out_path
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(pf.name)
-        except OSError:
-            pass

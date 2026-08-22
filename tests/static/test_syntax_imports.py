@@ -1,5 +1,4 @@
-﻿# -*- coding: utf-8 -*-
-"""璇硶/瀵煎叆鍋ュ悍妫€鏌ワ細鍏ㄩ儴 studio Python 鏂囦欢鍙紪璇戯紝鍏抽敭妯″潡鍙鍏ャ€?""
+"""语法/导入检查：全部 studio Python 文件可编译，关键模块可导入。"""
 import os
 import py_compile
 import sys
@@ -61,7 +60,7 @@ class TestSyntaxImports(unittest.TestCase):
 
     def test_http_client_interface(self):
         testutil.ensure_studio_on_path()
-        from utils.http_client import http_get, http_post, resilient_get, resilient_post
+        from utils.http_client import http_get, http_post
         self.assertTrue(callable(http_get))
         self.assertTrue(callable(http_post))
 

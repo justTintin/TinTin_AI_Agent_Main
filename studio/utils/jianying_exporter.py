@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
-import os
 import json
-import uuid
+import os
 import time
+import uuid
+from typing import Any
+
 from utils.logger_utils import log
 
 
@@ -35,11 +36,11 @@ class JianyingExporter:
         appdata = os.environ.get("LOCALAPPDATA")
         if not appdata:
             appdata = os.path.expandvars(r"%USERPROFILE%\AppData\Local")
-        path = os.path.join(appdata, "JianyingPro", "User Data", "Projects", "com.lveditor.draft")
+        path = os.path.join(appdata, "JianyingPro", "User Data", "Projects", "com.lveditor.draft")  # noqa: E501
         return os.path.normpath(path)
 
     @classmethod
-    def export_to_draft(cls, video_path, bgm_path=None, bgm_volume=50, srt_path=None, draft_name=None):
+    def export_to_draft(cls, video_path, bgm_path=None, bgm_volume=50, srt_path=None, draft_name=None):  # noqa: E501
         """一键导出单个视频为剪映工程草稿（兼容旧入口，内部走多片段时间轴导出）。
 
         :param video_path: 视频绝对路径 (例如: dubbed_xxx.mp4)
@@ -63,7 +64,7 @@ class JianyingExporter:
         )
 
     @classmethod
-    def export_multi_to_draft(cls, video_paths, transitions=None, bgm_path=None, bgm_volume=50,
+    def export_multi_to_draft(cls, video_paths, transitions=None, bgm_path=None, bgm_volume=50,  # noqa: E501
                               srt_paths=None, draft_name=None):
         """将多个视频按顺序导出为一条剪映时间轴（可带转场 + 各自字幕 + BGM）。
 
@@ -87,8 +88,9 @@ class JianyingExporter:
                 return False, f"视频文件不存在: {p}"
 
         try:
-            from utils.platform_utils import find_ffprobe, create_no_window_flag
             import subprocess
+
+            from utils.platform_utils import create_no_window_flag, find_ffprobe
             creationflags = create_no_window_flag()
             ffprobe_exe = find_ffprobe()
 
@@ -96,7 +98,7 @@ class JianyingExporter:
             clips = []
             total_duration_us = 0
             for p in video_paths:
-                duration_us, width, height = cls._probe_video(p, ffprobe_exe, creationflags)
+                duration_us, width, height = cls._probe_video(p, ffprobe_exe, creationflags)  # noqa: E501
                 if duration_us <= 0:
                     duration_us = 10_000_000  # 兜底 10s
                 clips.append({
@@ -116,7 +118,7 @@ class JianyingExporter:
             project_uuid = str(uuid.uuid4()).upper()
             if not draft_name:
                 if len(clips) == 1:
-                    draft_name = f"螺丝钉智能混剪_{os.path.splitext(os.path.basename(clips[0]['path']))[0]}"
+                    draft_name = f"螺丝钉智能混剪_{os.path.splitext(os.path.basename(clips[0]['path']))[0]}"  # noqa: E501
                 else:
                     draft_name = "螺丝钉智能混剪_多片段时间轴"
             draft_folder = os.path.join(draft_root, project_uuid)
@@ -135,17 +137,17 @@ class JianyingExporter:
                 "draft_rootpath": draft_root.replace("\\", "/"),
                 "platform": "windows"
             }
-            with open(os.path.join(draft_folder, "draft_meta_info.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(draft_folder, "draft_meta_info.json"), "w", encoding="utf-8") as f:  # noqa: E501
                 json.dump(meta_info, f, ensure_ascii=False, indent=2)
 
             # 4. 素材库 + 轨道
-            materials = {
+            materials: dict[str, Any] = {
                 "videos": [],
                 "audios": [],
                 "texts": [],
                 "transitions": [],
             }
-            video_track = {
+            video_track: dict[str, Any] = {
                 "id": str(uuid.uuid4()).upper(),
                 "type": "video",
                 "segments": [],
@@ -189,10 +191,10 @@ class JianyingExporter:
                     spec = transition_specs[i - 1]
                     if spec:
                         trans_id = cls._build_transition_material(materials, spec)
-                        video_track["segments"][-2]["extra_material_refs"].append(trans_id)
+                        video_track["segments"][-2]["extra_material_refs"].append(trans_id)  # noqa: E501
 
                 # 该片段的字幕按时间轴偏移
-                if srt_paths and i < len(srt_paths) and srt_paths[i] and os.path.exists(srt_paths[i]):
+                if srt_paths and i < len(srt_paths) and srt_paths[i] and os.path.exists(srt_paths[i]):  # noqa: E501
                     cls._append_subtitle_track(
                         tracks, materials, srt_paths[i], offset_us=cursor_us,
                         limit_end_us=cursor_us + clip["duration_us"],
@@ -221,13 +223,13 @@ class JianyingExporter:
                 "materials": materials,
                 "tracks": tracks,
             }
-            with open(os.path.join(draft_folder, "draft_content.json"), "w", encoding="utf-8") as f:
+            with open(os.path.join(draft_folder, "draft_content.json"), "w", encoding="utf-8") as f:  # noqa: E501
                 json.dump(content_info, f, ensure_ascii=False, indent=2)
 
             log.info(f"[Jianying] 草稿导出成功: {draft_folder}（{len(clips)} 个片段）")
             return True, draft_folder
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, KeyError, TypeError) as e:
             log.exception(f"导出剪映草稿失败: {e}")
             return False, str(e)
 
@@ -249,21 +251,21 @@ class JianyingExporter:
                                    creationflags=creationflags, timeout=10)
                 if r.returncode == 0 and r.stdout.strip():
                     duration_sec = float(r.stdout.strip())
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 pass
             try:
                 cmd_size = [ffprobe_exe, "-v", "error", "-select_streams", "v:0",
-                            "-show_entries", "stream=width,height", "-of", "csv=p=0", video_path]
+                            "-show_entries", "stream=width,height", "-of", "csv=p=0", video_path]  # noqa: E501
                 r_size = subprocess.run(cmd_size, capture_output=True, text=True,
                                         creationflags=creationflags, timeout=10)
                 if r_size.returncode == 0 and r_size.stdout.strip():
-                    sz_lines = [s.strip() for s in r_size.stdout.splitlines() if s.strip()]
+                    sz_lines = [s.strip() for s in r_size.stdout.splitlines() if s.strip()]  # noqa: E501
                     if sz_lines:
                         parts = sz_lines[0].split(",")
                         if len(parts) >= 2:
                             width = int(float(parts[0]))
                             height = int(float(parts[1]))
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 pass
         return int(duration_sec * 1000000), width, height
 
@@ -289,7 +291,7 @@ class JianyingExporter:
             key = spec.strip().lower()
             if key in ("", "none", "无", "null"):
                 return None
-            name, resource_id, effect_id, is_overlap, duration_us = cls.TRANSITION_MAP.get(
+            name, resource_id, effect_id, is_overlap, duration_us = cls.TRANSITION_MAP.get(  # noqa: E501
                 key, cls.TRANSITION_MAP["fade"])
             return {
                 "name": name,
@@ -330,7 +332,7 @@ class JianyingExporter:
         return trans_id
 
     @staticmethod
-    def _append_subtitle_track(tracks, materials, srt_path, offset_us=0, limit_end_us=None):
+    def _append_subtitle_track(tracks, materials, srt_path, offset_us=0, limit_end_us=None):  # noqa: E501
         """把一个 .srt 解析后写入字幕轨道（若不存在则新建），时间整体偏移 offset_us"""
         srt_segments = JianyingExporter._parse_srt(srt_path)
         if not srt_segments:
@@ -341,7 +343,7 @@ class JianyingExporter:
                 text_track = t
                 break
         if text_track is None:
-            text_track = {"id": str(uuid.uuid4()).upper(), "type": "text", "segments": []}
+            text_track = {"id": str(uuid.uuid4()).upper(), "type": "text", "segments": []}  # noqa: E501
             tracks.append(text_track)
 
         for start_sec, end_sec, text_content in srt_segments:
@@ -360,7 +362,7 @@ class JianyingExporter:
             safe_text = text_content.replace("\\", "\\\\").replace('"', '\\"')
             materials["texts"].append({
                 "id": text_material_id,
-                "content": f'[{{"text":"{safe_text}","style":{{"bold":false,"color":"#FFFFFF","font":""}}}}]',
+                "content": f'[{{"text":"{safe_text}","style":{{"bold":false,"color":"#FFFFFF","font":""}}}}]',  # noqa: E501
                 "type": "text",
             })
             text_track["segments"].append({
@@ -386,7 +388,7 @@ class JianyingExporter:
                                    creationflags=creationflags, timeout=5)
                 if r.returncode == 0 and r.stdout.strip():
                     bgm_duration_sec = float(r.stdout.strip())
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 pass
         if bgm_duration_sec <= 0:
             bgm_duration_sec = total_duration_us / 1000000.0 + 60.0  # 足够长
@@ -427,7 +429,7 @@ class JianyingExporter:
         """解析 srt 格式为时间轴片段元组列表: (start_sec, end_sec, text)"""
         segments = []
         try:
-            with open(srt_path, "r", encoding="utf-8") as f:
+            with open(srt_path, encoding="utf-8") as f:
                 lines = f.readlines()
 
             idx = 0
@@ -459,7 +461,7 @@ class JianyingExporter:
                     text = " ".join(text_lines)
                     segments.append((start_sec, end_sec, text))
                 idx += 1
-        except Exception as e:
+        except OSError as e:
             log.warning(f"解析字幕文件失败: {e}")
         return segments
 
@@ -473,5 +475,5 @@ class JianyingExporter:
             m = int(parts[1])
             s = float(parts[2])
             return h * 3600 + m * 60 + s
-        except Exception:
+        except (ValueError, IndexError):
             return 0.0

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RunningHub online workflow client using the standard ComfyUI protocol.
 
 RunningHub hosts standard ComfyUI instances.  Instead of the public openapi
@@ -24,7 +23,7 @@ from utils.logger_utils import log
 
 
 class RunningHubComfyClient:
-    """Client-side wrapper that runs an online RunningHub workflow like a local ComfyUI."""
+    """Client-side wrapper that runs an online RunningHub workflow like a local ComfyUI."""  # noqa: E501
 
     def __init__(self, base_url="https://www.runninghub.cn",
                  comfy_auth="", identify="", access_token="",
@@ -87,7 +86,7 @@ class RunningHubComfyClient:
         return None
 
     def upload_file(self, file_path):
-        """Upload a local file to the RunningHub ComfyUI input dir, return server filename."""
+        """Upload a local file to the RunningHub ComfyUI input dir, return server filename."""  # noqa: E501
         if not os.path.isfile(file_path):
             raise FileNotFoundError(file_path)
         url = f"{self.base_url}/upload/image"
@@ -103,12 +102,12 @@ class RunningHubComfyClient:
                 timeout=self.timeout,
             )
         if resp.status_code != 200:
-            raise RuntimeError(f"upload failed HTTP {resp.status_code}: {resp.text[:200]}")
+            raise RuntimeError(f"upload failed HTTP {resp.status_code}: {resp.text[:200]}")  # noqa: E501
         data = resp.json()
         name = data.get("name") or data.get("subfolder") or ""
         if not name:
             raise RuntimeError(f"upload response missing name: {resp.text[:200]}")
-        log.info(f"[RunningHub ComfyUI] uploaded {os.path.basename(file_path)} -> {name}")
+        log.info(f"[RunningHub ComfyUI] uploaded {os.path.basename(file_path)} -> {name}")  # noqa: E501
         return name
 
     def submit_prompt(self, workflow_json):
@@ -122,7 +121,7 @@ class RunningHubComfyClient:
             timeout=60,
         )
         if resp.status_code != 200:
-            raise RuntimeError(f"submit prompt failed HTTP {resp.status_code}: {resp.text[:300]}")
+            raise RuntimeError(f"submit prompt failed HTTP {resp.status_code}: {resp.text[:300]}")  # noqa: E501
         data = resp.json()
         prompt_id = data.get("prompt_id") or data.get("taskId") or ""
         if not prompt_id:
@@ -162,7 +161,7 @@ class RunningHubComfyClient:
     @staticmethod
     def history_outputs(entry):
         """Convert a ComfyUI history entry to RunningHub-like result rows."""
-        outputs = []
+        outputs: list[dict] = []
         if not entry or not isinstance(entry, dict):
             return outputs
         node_outputs = entry.get("outputs") or {}
@@ -206,7 +205,7 @@ class RunningHubComfyClient:
         url = self.output_url(filename, subfolder, file_type)
         resp = requests.get(url, headers=self._headers(), timeout=self.timeout)
         if resp.status_code != 200:
-            raise RuntimeError(f"download failed HTTP {resp.status_code}: {resp.text[:200]}")
+            raise RuntimeError(f"download failed HTTP {resp.status_code}: {resp.text[:200]}")  # noqa: E501
         return resp.content
 
 

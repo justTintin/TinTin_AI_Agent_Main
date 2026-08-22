@@ -48,3 +48,39 @@ exclude = [
     "python_embeded",
     ".runtime",
 ]
+
+[[tool.mypy.overrides]]
+module = "PySide6.*"
+ignore_missing_imports = true
+follow_imports = "silent"
+disable_error_code = "syntax"
+
+[[tool.mypy.overrides]]
+module = "shiboken6.*"
+ignore_missing_imports = true
+follow_imports = "silent"
+disable_error_code = "syntax"
+
+[[tool.mypy.overrides]]
+module = "numpy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "cv2.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "PIL.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "boto3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "botocore.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "av.*"
+ignore_missing_imports = true

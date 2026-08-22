@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """客户端任务下发闭环：领取 → 执行 → 上报。
 
 服务端契约（权威：/guide 与 /tasks/* 接口）：
@@ -14,8 +13,12 @@
 
 心跳/技能登记见 skill_manager（POST /skills）与 AIStatusCheckThread（GET /health）。
 """
+import contextlib
+import json
 import os
 import time
+
+import requests
 
 from utils.http_client import http_get, http_post
 from utils.logger_utils import log
@@ -34,7 +37,7 @@ def _machine_id() -> str:
     try:
         from utils.license import get_machine_id
         return get_machine_id() or ""
-    except Exception:
+    except Exception:  # 外部API调用（import get_machine_id）
         return ""
 
 
@@ -50,14 +53,14 @@ def pickup_tasks(machine_id=None, timeout=10):
         log.warning("[客户端任务] 无 machine_id，跳过领取")
         return []
     try:
-        r = http_get(f"{_server_url()}/tasks/assigned/{mid}", timeout=timeout, quiet=True)
+        r = http_get(f"{_server_url()}/tasks/assigned/{mid}", timeout=timeout, quiet=True)  # noqa: E501
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, dict):
                 return data.get("tasks") or []
             if isinstance(data, list):
                 return data
-    except Exception as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.warning(f"[客户端任务] pickup 失败: {e}")
     return []
 
@@ -85,7 +88,7 @@ def report_task(task_id, machine_id=None, status="ok", file_path=None,
         if file_path and os.path.isfile(file_path):
             with open(file_path, "rb") as f:
                 resp = http_post(f"{_server_url()}/tasks/{task_id}/report",
-                                 data=data, files={"file": (os.path.basename(file_path), f)},
+                                 data=data, files={"file": (os.path.basename(file_path), f)},  # noqa: E501
                                  timeout=timeout)
         else:
             resp = http_post(f"{_server_url()}/tasks/{task_id}/report",
@@ -94,7 +97,7 @@ def report_task(task_id, machine_id=None, status="ok", file_path=None,
             log.info(f"[客户端任务] 上报成功 task_id={task_id} status={status}")
             return True
         log.warning(f"[客户端任务] report HTTP {resp.status_code}: {resp.text[:150]}")
-    except Exception as e:
+    except (OSError, requests.exceptions.RequestException) as e:
         log.warning(f"[客户端任务] report 失败 task_id={task_id}: {e}")
     return False
 
@@ -116,7 +119,7 @@ def _snapshot_dir(d):
         if not os.path.isdir(d):
             return set()
         return {f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))}
-    except Exception:
+    except OSError:
         return set()
 
 
@@ -130,10 +133,8 @@ def _wait_download_file(dl_dir, before, max_wait=_DOWNLOAD_MAX_WAIT,
         if new_files:
             newest = os.path.join(dl_dir, new_files[-1])
             if on_log:
-                try:
+                with contextlib.suppress(Exception):
                     on_log(f"检测到下载完成：{newest}")
-                except Exception:
-                    pass
             return newest
         time.sleep(poll)
     return None
@@ -147,10 +148,8 @@ def execute_task(task, on_log=None, download_max_wait=_DOWNLOAD_MAX_WAIT):
     """
     def _emit(msg):
         if on_log:
-            try:
+            with contextlib.suppress(Exception):
                 on_log(msg)
-            except Exception:
-                pass
         log.info(f"[客户端任务] {msg}")
 
     task_id = (task or {}).get("task_id") or ""
@@ -162,16 +161,15 @@ def execute_task(task, on_log=None, download_max_wait=_DOWNLOAD_MAX_WAIT):
 
     _emit(f"领取下载任务 {task_id}（{url}）")
     try:
-        from utils import asset_browser_client as ab
         from utils.viral_clone_client import open_in_asset_browser
-    except Exception as e:
+    except Exception as e:  # 外部API调用（import素材浏览器模块）
         return {"ok": False, "error": f"素材浏览器组件不可用: {e}"}
 
     topic = "客户端任务"
     dl_dir = ""
     try:
         ok, msg, dl_dir = open_in_asset_browser(url, topic=topic)
-    except Exception:
+    except Exception:  # 外部API调用
         ok, msg, dl_dir = False, "打开素材浏览器失败", ""
     if not ok:
         return {"ok": False, "error": msg or "打开素材浏览器失败"}

@@ -1,34 +1,40 @@
-# -*- coding: utf-8 -*-
 """
  视频营销检测页。
 
 通过对视频进行关键帧提取，使用配置的视觉大模型对关键帧内容进行综合研判，
 判断该视频是否为营销/广告视频，并分析推广的品类、提取营销特征线索，提供相关的改进建议。
 """
-import os
-import json
 import base64
+import os
 import shutil
-import subprocess
-import glob
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFrame,
-    QFileDialog, QProgressBar, QTextEdit, QScrollArea, QWidget, QGridLayout,
-)
-from PySide6.QtGui import QPixmap, QColor, QFont
-from PySide6.QtCore import Signal, Qt
-
+from config.paths import TMP_DIR
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.base_worker import BaseWorker
-from utils.video_compiler import _find, _probe_duration
-from utils.platform_utils import find_ffmpeg
-from config.paths import TMP_DIR
-
-
+from utils.ffmpeg_utils import extract_frame
 from utils.file_dialog_utils import pick_file
 from utils.gui_icons import mdi_button
+from utils.llm_output_utils import safe_json_parse
+from utils.video_compiler import _probe_duration
+
+
 def _sample_times(dur):
     """根据视频时长均匀抽取 6-10 个关键帧，以覆盖视频全片"""
     if dur <= 0:
@@ -54,7 +60,7 @@ class VisionModelTestWorker(BaseWorker):
         try:
             llm_chat("", "Hi", model=self.model, max_tokens=5, timeout=8)
             self.finished.emit(True, " 连接成功")
-        except Exception:
+        except Exception:  # 外部API调用（LLM 连接测试）
             self.finished.emit(False, " 无法连接")
 
 
@@ -77,33 +83,29 @@ class MarketingDetectWorker(BaseWorker):
         self.phase.emit("正在解析视频时长…")
         dur = _probe_duration(self.video) or 10.0
         times = _sample_times(dur)
-        
+
         frames_dir = os.path.join(TMP_DIR, "marketing_frames")
         shutil.rmtree(frames_dir, ignore_errors=True)
         os.makedirs(frames_dir, exist_ok=True)
-        
+
         frames = []
-        ffmpeg = find_ffmpeg()
-        flags = 0x08000000 if os.name == "nt" else 0
-        
+
         for i, t in enumerate(times):
             self.phase.emit(f"正在提取关键帧 {i + 1}/{len(times)}（{t}s）…")
             out = os.path.join(frames_dir, f"f{i:02d}_{t}s.jpg")
-            subprocess.run([ffmpeg, "-y", "-ss", str(t), "-i", self.video,
-                            "-vframes", "1", "-vf", "scale=512:-2", "-q:v", "4", out],
-                           capture_output=True, creationflags=flags)
+            extract_frame(self.video, t, out, scale="512:-2", quality=4)
             if os.path.isfile(out):
                 frames.append(out)
-                
+
         if not frames:
             raise RuntimeError("视频关键帧提取失败，请检查视频文件是否损坏。")
-            
+
         self.frames.emit(frames)
 
         # 2. 调用视觉大模型进行研判
         self.phase.emit("视觉大模型正在研判视频属性中…")
         title = os.path.splitext(os.path.basename(self.video))[0]
-        
+
         sys_prompt = (
             "你是专业的视频分析和营销内容审查专家。请仔细查看以下按时间顺序排列的视频关键帧（包含视频画面和字幕文字等信息）。\n"
             "你的任务是判断这个视频是否属于【营销/广告宣传/带货/商业推广/引流】类视频。\n"
@@ -111,46 +113,34 @@ class MarketingDetectWorker(BaseWorker):
             "{\n"
             '  "is_marketing": true 或 false,\n'
             '  "confidence": 0 到 100 之间的置信度数值,\n'
-            '  "category": "直销带货"、"品牌广告"、"软广植入"、"知识付费/教育推广"、"非营销/纯内容"、"其他（请注明）" 之一,\n'
+            '  "category": "直销带货"、"品牌广告"、"软广植入"、"知识付费/教育推广"、"非营销/纯内容"、"其他（请注明）" 之一,\n'  # noqa: E501
             '  "product_or_brand": "推广的产品/品牌名称，如果没有则为空字符串",\n'
             '  "clues": ["证据1", "证据2", ...（列出视觉画面或文字中体现营销意图的线索）],\n'
             '  "analysis": "对视频营销特征的简明分析说明（不超过150字）",\n'
-            '  "suggestions": ["优化或改进建议1", "优化或改进建议2", ...（如何提高营销吸引力、或若非营销视频如何保持内容纯粹性、商业合规等）]\n'
+            '  "suggestions": ["优化或改进建议1", "优化或改进建议2", ...（如何提高营销吸引力、或若非营销视频如何保持内容纯粹性、商业合规等）]\n'  # noqa: E501
             "}"
         )
-        
-        content = [{"type": "text", "text": f"视频名称：{title}。以下为按时间先后抽取的关键帧："}]
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": f"视频名称：{title}。以下为按时间先后抽取的关键帧："}]
         for fr in frames:
             with open(fr, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-            
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})  # noqa: E501
+
         try:
             text = llm_chat_messages(
                 [{"role": "system", "content": sys_prompt},
                  {"role": "user", "content": content}],
                 model=model, temperature=0.3, timeout=180)
         except RuntimeError as e:
-            raise RuntimeError(f"无法连接视觉大模型：{e}\n请检查“大模型配置”中的服务端地址和视觉模型名称。")
+            raise RuntimeError(f"无法连接视觉大模型：{e}\n请检查“大模型配置”中的服务端地址和视觉模型名称。") from e
         if not text:
             raise RuntimeError("大模型返回空响应。")
-            
-        body = text
-        if body.startswith("```"):
-            body = body.strip("`")
-            if body.lower().startswith("json"):
-                body = body[4:]
-            body = body.strip()
-            
-        try:
-            result = json.loads(body)
-        except json.JSONDecodeError:
-            import re
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            if not m:
-                raise RuntimeError("大模型没有输出有效的 JSON 对象，原始返回为：\n" + text[:500])
-            result = json.loads(m.group())
-            
+
+        result = safe_json_parse(text)
+        if result is None:
+            raise RuntimeError("大模型没有输出有效的 JSON 对象，原始返回为：\n" + text[:500])
+
         self.finished.emit(result)
 
 
@@ -170,7 +160,7 @@ class MarketingDetectPage(BasePage):
         heading = QLabel(" 视频营销检测")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = ElidedLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。", max_lines=1)
+        sub = ElidedLabel("提取视频关键帧 → 通过视觉大模型多维分析视频内容、字幕、场景，研判是否为广告推广/带货引流视频。", max_lines=1)  # noqa: E501
         sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
@@ -183,19 +173,19 @@ class MarketingDetectPage(BasePage):
         # 2. 视觉模型状态卡片
         self.model_status_card = QFrame()
         self.model_status_card.setObjectName("card")
-        self.model_status_card.setStyleSheet("background-color:#1a1a26; border:1px solid #3a3a4a; border-radius:8px;")
+        self.model_status_card.setStyleSheet("background-color:#1a1a26; border:1px solid #3a3a4a; border-radius:8px;")  # noqa: E501
         m_layout = QHBoxLayout(self.model_status_card)
         m_layout.setContentsMargins(16, 10, 16, 10)
-        
+
         self.lbl_model_info = QLabel("视频大模型：正在加载配置...")
-        self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")
+        self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")  # noqa: E501
         m_layout.addWidget(self.lbl_model_info)
-        
+
         self.lbl_model_status = QLabel(" 未检测")
         self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")
         m_layout.addWidget(self.lbl_model_status)
         m_layout.addStretch()
-        
+
         self.btn_test_model = QPushButton("测试连接")
         self.btn_test_model.setObjectName("secondary_button")
         self.btn_test_model.setFixedHeight(30)
@@ -208,22 +198,22 @@ class MarketingDetectPage(BasePage):
         bar.setObjectName("card")
         h_layout = QHBoxLayout(bar)
         h_layout.setContentsMargins(20, 12, 20, 12)
-        
+
         h_layout.addWidget(QLabel("选择视频："))
         self.in_video = QLineEdit()
         self.in_video.setPlaceholderText("请选择或拖入视频文件路径…")
         h_layout.addWidget(self.in_video, 1)
-        
+
         btn_browse = mdi_button("浏览…", "folder")
         btn_browse.setObjectName("secondary_button")
         btn_browse.clicked.connect(self._browse)
         h_layout.addWidget(btn_browse)
-        
+
         self.btn_run = QPushButton(" 开始检测")
         self.btn_run.setObjectName("primary_button")
         self.btn_run.clicked.connect(self._run)
         h_layout.addWidget(self.btn_run)
-        
+
         self.pbar = QProgressBar()
         self.pbar.setVisible(False)
         self.pbar.setRange(0, 0)
@@ -256,9 +246,9 @@ class MarketingDetectPage(BasePage):
         self.lbl_verdict = QLabel("—")
         self.lbl_verdict.setStyleSheet("font-size:24px; font-weight:bold;")
         top_layout.addWidget(self.lbl_verdict)
-        
+
         self.lbl_confidence = QLabel("")
-        self.lbl_confidence.setStyleSheet("font-size:16px; font-weight:bold; color:#a0aec0;")
+        self.lbl_confidence.setStyleSheet("font-size:16px; font-weight:bold; color:#a0aec0;")  # noqa: E501
         top_layout.addWidget(self.lbl_confidence)
         top_layout.addStretch()
         rc_layout.addLayout(top_layout)
@@ -311,7 +301,7 @@ class MarketingDetectPage(BasePage):
 
     def update_vision_model_display(self):
         ai = getattr(self.main_window, "ai_config", {}) or {}
-        server_url = ai.get("compute_server_url", "") or ai.get("llm_vision_api_url", "")
+        server_url = ai.get("compute_server_url", "") or ai.get("llm_vision_api_url", "")  # noqa: E501
         if server_url:
             self.lbl_model_info.setText("视频大模型：由服务端选择")
             self.lbl_model_status.setText(" 已配置")
@@ -325,14 +315,15 @@ class MarketingDetectPage(BasePage):
 
     def _test_vision_model(self):
         self.btn_test_model.setEnabled(False)
-        self.lbl_model_status.setText(" 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
-        self.test_worker = VisionModelTestWorker()
+        self.lbl_model_status.setText(" 正在测试...")
+        self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")  # noqa: E501
+        self.test_worker = VisionModelTestWorker("")
 
         def on_finished(success, message):
             self.btn_test_model.setEnabled(True)
             self.lbl_model_status.setText(message)
-            self.lbl_model_status.setStyleSheet(f"font-weight:bold; color:{'#2ecc71' if success else '#e74c3c'};")
-            
+            self.lbl_model_status.setStyleSheet(f"font-weight:bold; color:{'#2ecc71' if success else '#e74c3c'};")  # noqa: E501
+
         self.test_worker.finished.connect(on_finished)
         self.test_worker.start()
 
@@ -349,17 +340,17 @@ class MarketingDetectPage(BasePage):
         if not video or not os.path.isfile(video):
             self.show_warning("请选择有效的视频文件。")
             return
-            
+
         self.btn_run.setEnabled(False)
         self.pbar.setVisible(True)
         self.lbl_status.setText("检测中…")
-        
+
         self.worker = MarketingDetectWorker(video, self.ai_config)
         self.worker.phase.connect(self.lbl_status.setText)
         self.worker.frames.connect(self._show_frames)
         self.worker.finished.connect(self._done)
         self.worker.error.connect(self._err)
-        
+
         self.track_worker(self.worker)
         self.worker.start()
 
@@ -387,32 +378,32 @@ class MarketingDetectPage(BasePage):
     def _render(self, data):
         is_m = data.get("is_marketing", False)
         conf = data.get("confidence", 0)
-        
+
         if is_m:
             self.lbl_verdict.setText("注意： 检测结论：营销/商业推广视频")
-            self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#e74c3c;")
+            self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#e74c3c;")  # noqa: E501
         else:
             self.lbl_verdict.setText("完成： 检测结论：原创内容/非营销视频")
-            self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#2ecc71;")
-            
+            self.lbl_verdict.setStyleSheet("font-size:20px; font-weight:bold; color:#2ecc71;")  # noqa: E501
+
         self.lbl_confidence.setText(f"（置信度: {conf}%）")
         self.lbl_category.setText(str(data.get("category", "—")))
-        
+
         prod = data.get("product_or_brand")
         self.lbl_product.setText(str(prod) if prod else "无")
-        
+
         clues = data.get("clues", [])
         self.txt_clues.setPlainText(
-            "\n".join(f"• {c}" for c in clues) if isinstance(clues, list) else str(clues)
+            "\n".join(f"• {c}" for c in clues) if isinstance(clues, list) else str(clues)  # noqa: E501
         )
-        
+
         self.txt_analysis.setPlainText(str(data.get("analysis", "")))
-        
+
         sugg = data.get("suggestions", [])
         self.txt_suggestions.setPlainText(
             "\n".join(f"• {s}" for s in sugg) if isinstance(sugg, list) else str(sugg)
         )
-        
+
         self.result_card.setVisible(True)
 
     def _err(self, e):

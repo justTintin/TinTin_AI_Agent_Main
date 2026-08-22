@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """「系统设置」独立窗口：侧边栏底部「 系统设置」入口打开。
 
 主侧边栏不再直接展示系统配置菜单，统一收纳到本窗口的二级菜单：
@@ -8,14 +7,20 @@
 页面对象仍由主窗口构建（self.page_xxx），首次打开时 reparent 到本窗口的
 stack 中，页面内部对 main_window 的引用不受影响；关闭窗口仅隐藏，页面常驻。
 """
-from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QVBoxLayout, QLabel, QStackedWidget, QFrame, QPushButton,
-    QTabWidget, QWidget,
-)
 from PySide6.QtCore import Qt
-
-from utils.logger_utils import log
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QStackedWidget,
+    QTabBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.gui_icons import mdi_button
+from utils.logger_utils import log
 
 # 菜单项：(显示名, 图标, 主窗口页面索引)
 SETTINGS_MENUS = [
@@ -85,7 +90,7 @@ class SystemSettingsDialog(QDialog):
         if hasattr(main_window, "_ensure_page_built"):
             try:
                 main_window._ensure_page_built(6)
-            except Exception as e:
+            except Exception as e:  # Qt 页面构建操作可能抛出多类异常
                 log.warning(f"[系统设置] 关于页构建失败: {e}")
         attr_map = {
             22: "llm_settings", 21: "voice_samples", 36: "backup",
@@ -110,8 +115,15 @@ class SystemSettingsDialog(QDialog):
         if page_llm is not None:
             _detach(page_llm)
             inner_tabs = page_llm.findChild(QTabWidget)
-            if page_ai is not None and inner_tabs is not None:
-                inner_tabs.insertTab(0, _detach(page_ai), " 服务接入")
+            if inner_tabs is not None:
+                if page_ai is not None:
+                    inner_tabs.insertTab(0, _detach(page_ai), " 服务接入")
+            else:
+                inner_bar = page_llm.findChild(QTabBar)
+                inner_stack = page_llm.findChild(QStackedWidget)
+                if page_ai is not None and inner_bar is not None and inner_stack is not None:
+                    inner_bar.insertTab(0, " 服务接入")
+                    inner_stack.insertWidget(0, _detach(page_ai))
             self._stack.addWidget(page_llm)
             self._page_index[22] = self._stack.count() - 1
         elif page_ai is not None:
@@ -174,10 +186,10 @@ class SystemSettingsDialog(QDialog):
                     mw._load_lut_config()
             elif idx == 43 and hasattr(mw, "extension_tool"):
                 mw.extension_tool.refresh()
-        except Exception as e:
+        except Exception as e:  # 菜单刷新涉及多类 UI 操作异常
             log.warning(f"[系统设置] 菜单刷新失败 index={idx}: {e}")
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         """关闭设置窗口时停止任务队列轮询，避免后台继续请求。"""
         mw = self.main_window
         if hasattr(mw, "refresh_timer"):

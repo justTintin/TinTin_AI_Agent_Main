@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """批量 LUT 调色转换页面
 
 选定一个视频文件夹和一个 LUT 文件（.cube / .3dl / .lut），
@@ -7,27 +6,34 @@
 """
 
 import os
-import sys
-import subprocess
 import traceback
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QFileDialog, QProgressBar, QTextEdit, QDoubleSpinBox,
-    QCheckBox, QScrollArea, QFrame, QSizePolicy,
-)
-from PySide6.QtCore import Qt, QThread, Signal
-from utils.base_worker import BaseWorker
-
-from utils.logger_utils import log
 from gui.elided_label import ElidedLabel
-from utils.hwaccel import get_video_encode_args
-
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.base_worker import BaseWorker
+from utils.ffmpeg_utils import CREATE_NO_WINDOW, run
 
 # ─── 工具函数 ────────────────────────────────────────────────────────────────
-
 from utils.file_dialog_utils import pick_directory, pick_file
 from utils.gui_icons import mdi_button
+from utils.hwaccel import get_video_encode_args
+from utils.logger_utils import log
+
+
 def _find_ffmpeg():
     """查找 ffmpeg 可执行文件（使用平台感知的统一查找）。"""
     from utils.platform_utils import find_ffmpeg as _ff
@@ -95,11 +101,11 @@ class VideoLutWorker(BaseWorker):
                         ]
                     else:
                         # 混合：原始画面 × (1-intensity) + LUT画面 × intensity
-                        blend_expr = f"A*{1.0 - self.intensity:.4f}+B*{self.intensity:.4f}"
+                        blend_expr = f"A*{1.0 - self.intensity:.4f}+B*{self.intensity:.4f}"  # noqa: E501
                         fc = (
                             f"[0:v]split[orig][forlut];"
                             f"[forlut]lut3d='{lut_esc}'[lutted];"
-                            f"[orig][lutted]blend=all_expr='{blend_expr}',format=yuv420p[out]"
+                            f"[orig][lutted]blend=all_expr='{blend_expr}',format=yuv420p[out]"  # noqa: E501
                         )
                         cmd = [
                             ffmpeg, "-y", "-i", src,
@@ -110,8 +116,8 @@ class VideoLutWorker(BaseWorker):
                             dst,
                         ]
 
-                    creationflags = 0x08000000
-                    r = subprocess.run(
+                    creationflags = CREATE_NO_WINDOW
+                    r = run(
                         cmd, capture_output=True, text=True,
                         creationflags=creationflags)
 
@@ -124,7 +130,7 @@ class VideoLutWorker(BaseWorker):
                         self.log_line.emit(f"失败： {basename} 失败：{err_snippet}")
                         log.warning(f"LUT转换失败 {basename}: {r.stderr}")
 
-                except Exception as e:
+                except Exception as e:  # ffmpeg_utils 外部调用，涉及 subprocess 多类异常
                     fail += 1
                     self.log_line.emit(f"失败： {basename} 异常：{e}")
                     log.exception(f"LUT转换异常 {basename}")
@@ -134,13 +140,13 @@ class VideoLutWorker(BaseWorker):
                 f"批量 LUT 转换完成：成功 {success} 个，失败 {fail} 个")
             self.finished.emit(success, fail)
 
-        except Exception:
+        except Exception:  # 批量处理安全网
             self.error.emit(traceback.format_exc())
 
 
 # ─── Page ────────────────────────────────────────────────────────────────────
 
-from gui.base_page import BasePage
+from gui.base_page import BasePage  # noqa: E402
 
 
 class VideoLutPage(BasePage):
@@ -279,7 +285,7 @@ class VideoLutPage(BasePage):
     @staticmethod
     def _section(text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #e5e7eb; margin-top: 4px;")
+        lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #e5e7eb; margin-top: 4px;")  # noqa: E501
         return lbl
 
     def _browse_input(self):
@@ -327,7 +333,7 @@ class VideoLutPage(BasePage):
                 for f in os.listdir(folder):
                     if f.lower().endswith(VIDEO_EXTS):
                         result.append(os.path.join(folder, f))
-            except Exception:
+            except OSError:
                 pass
         result.sort()
         return result

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """浏览器扩展持久化安装：打包 .crx + 注册表外部扩展登记（Chrome/Edge）。
 
 流程（等价于 Eagle/Billfish 等桌面软件的本地安装方式）：
@@ -7,6 +6,7 @@
 3. 写注册表 HKCU\\Software\\<Vendor>\\Extensions\\<id> 的 path/version
 4. 用户下次启动浏览器时以其本人 Profile 持久安装（首次需确认启用）
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -59,18 +59,18 @@ def compute_extension_id(pem_path: str) -> str:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     digest = hashlib.sha256(spki).digest()[:16]
-    return "".join(chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in digest)
+    return "".join(chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in digest)  # noqa: E501
 
 
 def read_manifest_version(ext_dir: str) -> str:
     try:
-        with open(os.path.join(ext_dir, "manifest.json"), "r", encoding="utf-8") as f:
+        with open(os.path.join(ext_dir, "manifest.json"), encoding="utf-8") as f:
             return str(json.load(f).get("version") or "1.0.0")
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return "1.0.0"
 
 
-def register_external_extension(browser_name: str, ext_id: str, crx_path: str, version: str):
+def register_external_extension(browser_name: str, ext_id: str, crx_path: str, version: str):  # noqa: E501
     """写注册表外部扩展项（HKCU），浏览器下次启动时持久安装。"""
     reg_path = _BROWSER_EXT_REG.get(browser_name)
     if not reg_path:
@@ -88,7 +88,5 @@ def unregister_external_extension(browser_name: str, ext_id: str):
     reg_path = _BROWSER_EXT_REG.get(browser_name)
     if not reg_path:
         return
-    try:
+    with contextlib.suppress(OSError):
         winreg.DeleteKey(winreg.HKEY_CURRENT_USER, rf"{reg_path}\{ext_id}")
-    except OSError:
-        pass

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """技能安装/管理弹窗。
 
 表格列表：复选框 | 技能名称 | 是否内置 | 是否已上传。
@@ -7,16 +6,24 @@
 """
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMenu, QPushButton, QFileDialog, QMessageBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
-
 from utils.logger_utils import log
 from utils.thread_worker import TaskWorker
 
 
 class SkillManagerDialog(QDialog):
-    skillsChanged = Signal()
+    skillsChanged = Signal()  # noqa: N815
 
     _COL_CHECK = 0
     _COL_NAME = 1
@@ -97,7 +104,7 @@ class SkillManagerDialog(QDialog):
                 sid = s.get("skill_id") or s.get("id") or ""
                 if sid:
                     uploaded.add(sid)
-        except Exception as e:
+        except Exception as e:  # 外部API调用（技能服务端列表获取）
             log.warning(f"[技能管理] 服务端技能清单获取失败: {e}")
         return entries, uploaded
 
@@ -118,7 +125,6 @@ class SkillManagerDialog(QDialog):
             name = s.get("name") or sid or "未命名技能"
             version = s.get("version") or ""
             label = f"{name}  v{version}" if version else name
-            from utils import skill_manager as sm
             is_b = sm.is_builtin(sid)
             is_up = sid in uploaded
 

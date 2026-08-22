@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一文件对话框封装（全工程文件选择/保存/目录统一入口）。
 
 与 PySide6.QFileDialog 静态方法签名、返回结构保持一致，方便无感迁移：
@@ -19,17 +18,17 @@ _ALL = "All Files (*)"
 
 def pick_file(parent=None, caption="选择文件", start_dir="", file_filter=_ALL):
     """选择单个文件。返回 (path, selected_filter)，取消时 path 为空。"""
-    return QFileDialog.getOpenFileName(parent, caption, start_dir or "", file_filter or _ALL)
+    return QFileDialog.getOpenFileName(parent, caption, start_dir or "", file_filter or _ALL)  # noqa: E501
 
 
 def pick_files(parent=None, caption="选择文件", start_dir="", file_filter=_ALL):
     """选择一个或多个文件。返回 (paths, selected_filter)，取消时 paths 为空列表。"""
-    return QFileDialog.getOpenFileNames(parent, caption, start_dir or "", file_filter or _ALL)
+    return QFileDialog.getOpenFileNames(parent, caption, start_dir or "", file_filter or _ALL)  # noqa: E501
 
 
 def pick_save_file(parent=None, caption="保存文件", start_dir="", file_filter=_ALL):
     """选择保存路径。返回 (path, selected_filter)，取消时 path 为空。"""
-    return QFileDialog.getSaveFileName(parent, caption, start_dir or "", file_filter or _ALL)
+    return QFileDialog.getSaveFileName(parent, caption, start_dir or "", file_filter or _ALL)  # noqa: E501
 
 
 def pick_directory(parent=None, caption="选择目录", start_dir=""):

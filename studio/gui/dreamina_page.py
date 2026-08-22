@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 即梦（Dreamina）生成页。
 
@@ -14,17 +13,24 @@ import time
 import webbrowser
 from datetime import datetime
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QLineEdit,
-    QFrame, QWidget, QComboBox, QListWidget, QListWidgetItem, QProgressBar,
-)
-from PySide6.QtCore import Signal, Qt
-
+from config.paths import DREAMINA_OUTPUT_DIR
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
 from utils.base_worker import BaseWorker
 from utils.dreamina_client import DreaminaClient
-from config.paths import DREAMINA_OUTPUT_DIR
 
 RATIOS = ["(默认)", "9:16", "16:9", "1:1", "3:4", "4:3", "2:3", "3:2", "21:9"]
 MODELS = ["(默认)", "5.0", "4.7", "4.6", "4.5", "4.1", "4.0", "3.1", "3.0"]
@@ -39,7 +45,7 @@ class LoginInitWorker(BaseWorker):
         if not client.is_installed():
             import webbrowser
             webbrowser.open("https://jimeng.jianying.com/ai-tool/image/generate")
-            self.error.emit("即梦 CLI 未安装（Windows 专属）。已打开浏览器。建议使用「素材下载浏览器」左侧「即梦AI」标签直接访问。")
+            self.error.emit("即梦 CLI 未安装（Windows 专属）。已打开浏览器。建议使用「素材下载浏览器」左侧「即梦AI」标签直接访问。")  # noqa: E501
             return
         ok, info = client.login_headless()
         if not ok:
@@ -101,7 +107,7 @@ class Text2ImageWorker(BaseWorker):
                 self.finished.emit(files, submit_id)
                 return
             if info2.get("gen_status") == "fail":
-                self.error.emit("生成失败：" + info2.get("fail_reason", info2.get("raw", "")))
+                self.error.emit("生成失败：" + info2.get("fail_reason", info2.get("raw", "")))  # noqa: E501
                 return
             self.phase.emit(f"出图中…（{(i + 1) * 6}s）")
             time.sleep(6)
@@ -138,8 +144,11 @@ class DreaminaPage(BasePage):
 
     # ---------- 登录卡 ----------
     def _build_login_card(self):
-        card = QFrame(); card.setObjectName("card")
-        lay = QVBoxLayout(card); lay.setContentsMargins(20, 14, 20, 14); lay.setSpacing(8)
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(20, 14, 20, 14)
+        lay.setSpacing(8)  # noqa: E501
 
         row = QHBoxLayout()
         self.lbl_login = QLabel("登录状态：检测中…")
@@ -148,13 +157,15 @@ class DreaminaPage(BasePage):
         self.btn_login.setObjectName("primary_button")
         self.btn_login.clicked.connect(self._start_login)
         row.addWidget(self.btn_login)
-        btn_credit = QPushButton("刷新额度"); btn_credit.setObjectName("secondary_button")
+        btn_credit = QPushButton("刷新额度")
+        btn_credit.setObjectName("secondary_button")
         btn_credit.clicked.connect(self._refresh_login_state)
         row.addWidget(btn_credit)
         lay.addLayout(row)
 
         self.login_hint = QLabel("")
-        self.login_hint.setObjectName("muted_text"); self.login_hint.setWordWrap(True)
+        self.login_hint.setObjectName("muted_text")
+        self.login_hint.setWordWrap(True)
         self.login_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.login_hint)
 
@@ -166,8 +177,11 @@ class DreaminaPage(BasePage):
         return card
 
     def _build_generate_card(self):
-        card = QFrame(); card.setObjectName("card")
-        lay = QVBoxLayout(card); lay.setContentsMargins(20, 14, 20, 14); lay.setSpacing(10)
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(20, 14, 20, 14)
+        lay.setSpacing(10)  # noqa: E501
         lay.addWidget(QLabel(" 文生图（text2image，消耗额度）"))
 
         self.edit_prompt = QTextEdit()
@@ -177,13 +191,17 @@ class DreaminaPage(BasePage):
 
         opt = QHBoxLayout()
         opt.addWidget(QLabel("比例"))
-        self.combo_ratio = QComboBox(); self.combo_ratio.addItems(RATIOS); self.combo_ratio.setCurrentText("9:16")
+        self.combo_ratio = QComboBox()
+        self.combo_ratio.addItems(RATIOS)
+        self.combo_ratio.setCurrentText("9:16")  # noqa: E501
         opt.addWidget(self.combo_ratio)
         opt.addWidget(QLabel("模型"))
-        self.combo_model = QComboBox(); self.combo_model.addItems(MODELS)
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(MODELS)
         opt.addWidget(self.combo_model)
         opt.addWidget(QLabel("清晰度"))
-        self.combo_res = QComboBox(); self.combo_res.addItems(RESOLUTIONS)
+        self.combo_res = QComboBox()
+        self.combo_res.addItems(RESOLUTIONS)
         opt.addWidget(self.combo_res)
         opt.addStretch()
         self.btn_gen = QPushButton(" 生成图片")
@@ -193,22 +211,30 @@ class DreaminaPage(BasePage):
         lay.addLayout(opt)
 
         srow = QHBoxLayout()
-        self.gen_status = QLabel(""); self.gen_status.setObjectName("muted_text")
+        self.gen_status = QLabel("")
+        self.gen_status.setObjectName("muted_text")
         srow.addWidget(self.gen_status, 1)
-        self.gen_pbar = QProgressBar(); self.gen_pbar.setVisible(False)
-        self.gen_pbar.setRange(0, 0); self.gen_pbar.setMaximumWidth(160)
+        self.gen_pbar = QProgressBar()
+        self.gen_pbar.setVisible(False)
+        self.gen_pbar.setRange(0, 0)
+        self.gen_pbar.setMaximumWidth(160)
         srow.addWidget(self.gen_pbar)
         lay.addLayout(srow)
         return card
 
     def _build_result_card(self):
-        card = QFrame(); card.setObjectName("card")
-        lay = QVBoxLayout(card); lay.setContentsMargins(20, 14, 20, 14); lay.setSpacing(10)
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(20, 14, 20, 14)
+        lay.setSpacing(10)  # noqa: E501
         top = QHBoxLayout()
         top.addWidget(QLabel(" 生成结果"))
         top.addStretch()
-        self.btn_open_dir = QPushButton("打开输出目录"); self.btn_open_dir.setObjectName("secondary_button")
-        self.btn_open_dir.clicked.connect(self._open_out_dir); self.btn_open_dir.setEnabled(False)
+        self.btn_open_dir = QPushButton("打开输出目录")
+        self.btn_open_dir.setObjectName("secondary_button")  # noqa: E501
+        self.btn_open_dir.clicked.connect(self._open_out_dir)
+        self.btn_open_dir.setEnabled(False)  # noqa: E501
         top.addWidget(self.btn_open_dir)
         lay.addLayout(top)
         self.result_list = QListWidget()
@@ -279,14 +305,14 @@ class DreaminaPage(BasePage):
         if not prompt:
             self.show_warning("请先输入画面提示词。")
             return
-        out_dir = os.path.join(DREAMINA_OUTPUT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
+        out_dir = os.path.join(DREAMINA_OUTPUT_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))  # noqa: E501
         self._last_out_dir = out_dir
         self.btn_gen.setEnabled(False)
         self.gen_pbar.setVisible(True)
         self.result_list.clear()
         self.btn_open_dir.setEnabled(False)
         w = self.track_worker(Text2ImageWorker(
-            prompt, self._combo_val(self.combo_ratio), self._combo_val(self.combo_model),
+            prompt, self._combo_val(self.combo_ratio), self._combo_val(self.combo_model),  # noqa: E501
             self._combo_val(self.combo_res), out_dir))
         w.phase.connect(self.gen_status.setText)
         w.finished.connect(self._on_generated)
@@ -296,7 +322,7 @@ class DreaminaPage(BasePage):
     def _on_generated(self, files, submit_id):
         self.btn_gen.setEnabled(True)
         self.gen_pbar.setVisible(False)
-        self.gen_status.setText(f"完成： 生成完成，{len(files)} 个文件（submit_id={submit_id[:12]}…）")
+        self.gen_status.setText(f"完成： 生成完成，{len(files)} 个文件（submit_id={submit_id[:12]}…）")  # noqa: E501
         for f in files:
             self.result_list.addItem(QListWidgetItem(f))
         self.btn_open_dir.setEnabled(bool(files))
@@ -307,7 +333,7 @@ class DreaminaPage(BasePage):
         self.gen_status.setText("生成失败。")
         self.show_error(err, "即梦生成失败")
 
-    
+
     def _open_out_dir(self):
         if self._last_out_dir and os.path.isdir(self._last_out_dir) and os.name == "nt":
             os.startfile(self._last_out_dir)  # noqa

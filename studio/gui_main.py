@@ -1,24 +1,22 @@
-# -*- coding: utf-8 -*-
-import sys
+import contextlib
 import os
 
 # Configure CUDA/cuDNN DLL paths for Windows embedded Python immediately at startup
 # (Must be done before importing torch or other libraries that rely on CUDA DLLs)
 import site
+import sys
+from typing import Any
+
 packages_dirs = []
-try:
+with contextlib.suppress(Exception):
     packages_dirs.extend(site.getsitepackages())
-except Exception:
-    pass
-try:
+with contextlib.suppress(Exception):
     packages_dirs.append(site.getusersitepackages())
-except Exception:
-    pass
 try:
     base_dir = os.path.dirname(sys.executable)
     packages_dirs.append(os.path.join(base_dir, "Lib", "site-packages"))
     packages_dirs.append(os.path.join(base_dir, "lib", "site-packages"))
-except Exception:
+except (TypeError, AttributeError):  # sys.executable 可能为 None
     pass
 for p in packages_dirs:
     if p and os.path.isdir(p):
@@ -28,12 +26,12 @@ for p in packages_dirs:
                 bin_path = os.path.join(nvidia_base, sub, "bin")
                 if os.path.isdir(bin_path):
                     if bin_path not in os.environ.get("PATH", ""):
-                        os.environ["PATH"] = bin_path + os.pathsep + os.environ.get("PATH", "")
+                        os.environ["PATH"] = (
+                        bin_path + os.pathsep + os.environ.get("PATH", "")
+                    )  # noqa: E501
                     if hasattr(os, "add_dll_directory"):
-                        try:
+                        with contextlib.suppress(OSError):
                             os.add_dll_directory(bin_path)
-                        except Exception:
-                            pass
 
 # Set domestic Hugging Face mirror to prevent hanging and speed up model downloads
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
@@ -41,44 +39,48 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 # Set explicit AppUserModelID for Windows taskbar icon support
 try:
     import ctypes
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("luosiding.ecommerce.agent.matrix.2.0")
-except Exception:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+        "luosiding.ecommerce.agent.matrix.2.0"
+    )  # noqa: E501
+except Exception:  # ctypes.windll Windows 外部API，跨平台兼容
     pass
+import subprocess  # noqa: E402
 
-# Prevent black command prompt windows from popping up on Windows when running CLI tasks
-import subprocess
-class _patched_Popen(subprocess.Popen):
+
+class _patched_Popen(subprocess.Popen):  # noqa: N801
     def __init__(self, *args, **kwargs):
         if "creationflags" not in kwargs:
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
         super().__init__(*args, **kwargs)
-subprocess.Popen = _patched_Popen
+subprocess.Popen = _patched_Popen  # type: ignore[misc]
 
 # Prevent crash when sys.stdout or sys.stderr is None (under pythonw.exe)
 if sys.stdout is None:
-    try:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
-    except Exception:
-        pass
+    with contextlib.suppress(OSError):
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 if sys.stderr is None:
-    try:
-        sys.stderr = open(os.devnull, "w", encoding="utf-8")
-    except Exception:
-        pass
+    with contextlib.suppress(OSError):
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 
-# Add project root and workspace root to Python path to ensure local and app modules are found
+# Check NVIDIA Management Library availability
+try:
+    import pynvml as _pynvml
+    _pynvml  # noqa: B018
+    HAS_NVML = True
+except Exception:
+    HAS_NVML = False
+
+# Add project root and workspace root to Python path
+# to ensure local and app modules are found  # noqa: E501
 # frozen（PyInstaller 打包）模式下依赖已内嵌，跳过源码目录注入
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_DIR
-)
-from version import __app_name__, get_version
+from config.paths import COOKIES_DIR, LOG_DIR, PROJECT_ROOT, PW_BROWSERS_DIR, RUNTIME_DIR, TMP_DIR  # noqa: E402, E501
+from version import __app_name__, get_version  # noqa: E402
 
 os.environ.setdefault("TMP", TMP_DIR)
 os.environ.setdefault("TEMP", TMP_DIR)
@@ -94,19 +96,16 @@ for old_dir in [_old_pw_dir, _subproject_pw_dir]:
             import shutil
             os.makedirs(os.path.dirname(PW_BROWSERS_DIR), exist_ok=True)
             shutil.move(old_dir, PW_BROWSERS_DIR)
-            print(f"Successfully migrated pw-browsers from {old_dir} to: {PW_BROWSERS_DIR}")
+            print(f"Successfully migrated pw-browsers from {old_dir} to: {PW_BROWSERS_DIR}")  # noqa: E501
             # Clean up empty parent apps folder in subproject if needed
             subproject_apps = os.path.join(PROJECT_ROOT, "apps")
             if os.path.exists(subproject_apps) and not os.listdir(subproject_apps):
                 os.rmdir(subproject_apps)
-        except Exception as _e:
+        except OSError as _e:
             print(f"Failed to migrate pw-browsers directory from {old_dir}: {_e}")
 
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", PW_BROWSERS_DIR)
 
-import threading
-import uuid
-import configparser
 
 # --- Environment Diagnostic ---
 def print_env_info():
@@ -118,43 +117,84 @@ def print_env_info():
             f.write(f"\n[{now}] DEBUG: Python Executable: {sys.executable}\n")
             f.write(f"[{now}] DEBUG: sys.path: {sys.path}\n")
         print(f"Python Executable: {sys.executable}")
-    except:
+    except OSError:
         pass
 
 print_env_info()
 
 try:
     import json
-    import time
-    import random
-    import re
-    import requests
     import subprocess
-    import zipfile
+    import time
+
+    import requests
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     # Try to provide advice based on the missing module
     if "requests" in str(e):
         print("Please install 'requests' using: pip install requests")
     sys.exit(1)
-try:
-    from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
-                                 QListWidgetItem, QGridLayout, QFileDialog, 
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox, QSystemTrayIcon, QMenu)
-    from PySide6.QtGui import QIcon, QFont, QPixmap, QSyntaxHighlighter, QTextCharFormat, QColor
-    from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent, QSharedMemory
+try:  # noqa: F401 — startup dependency check
+    from PySide6.QtCore import (  # noqa: F401
+        QEvent,  # noqa: F401
+        QSharedMemory,  # noqa: F401
+        QSize,  # noqa: F401
+        Qt,
+        QThread,
+        QTimer,
+        QUrl,  # noqa: F401
+        Signal,  # noqa: F401
+    )
+    from PySide6.QtGui import (
+        QColor,
+        QFont,
+        QIcon,
+        QPixmap,
+        QSyntaxHighlighter,
+        QTextCharFormat,  # noqa: F401
+    )
+    from PySide6.QtWidgets import (  # noqa: F401
+        QAbstractItemView,  # noqa: F401
+        QApplication,
+        QButtonGroup,
+        QCheckBox,
+        QComboBox,
+        QDialog,
+        QFileDialog,
+        QFrame,  # noqa: F401
+        QGridLayout,
+        QGroupBox,
+        QHBoxLayout,  # noqa: F401
+        QHeaderView,
+        QInputDialog,
+        QLabel,
+        QLineEdit,
+        QListView,
+        QListWidget,
+        QListWidgetItem,  # noqa: F401
+        QMainWindow,
+        QMenu,
+        QMessageBox,
+        QProgressBar,  # noqa: F401
+        QPushButton,
+        QScrollArea,  # noqa: F401
+        QSizePolicy,
+        QSpinBox,  # noqa: F401
+        QSplitter,
+        QStackedWidget,
+        QSystemTrayIcon,
+        QTableWidget,
+        QTableWidgetItem,  # noqa: F401
+        QTextEdit,
+        QVBoxLayout,
+        QWidget,
+    )
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing dependency: {e}")
     print("Please install PySide6 using: pip install PySide6 shiboken6")
     sys.exit(1)
 
-from utils.file_dialog_utils import pick_directory
+from utils.file_dialog_utils import pick_directory  # noqa: E402
 
 
 class LogHighlighter(QSyntaxHighlighter):
@@ -163,45 +203,36 @@ class LogHighlighter(QSyntaxHighlighter):
         super().__init__(parent)
         self._rules = []
         for level, color in [("CRITICAL","#dc2626"),("ERROR","#ef4444"),
-                              ("WARNING","#f59e0b"),("INFO","#e4e4e7"),("DEBUG","#6b7280")]:
+                              ("WARNING","#f59e0b"),("INFO","#e4e4e7"),("DEBUG","#6b7280")]:  # noqa: E501
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(color))
             self._rules.append((f"| {level: <8} |", fmt))
 
-    def highlightBlock(self, text):
+    def highlightBlock(self, text):  # noqa: N802
         for pattern, fmt in self._rules:
             if pattern in text:
                 self.setFormat(0, len(text), fmt)
                 return
 
 
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.gui_icons import mdi_button, mdi_icon
-from utils.account_manager import AccountManager
-from core.creator_browser_controller import CreatorBrowserController
+from core.creator_browser_controller import CreatorBrowserController  # noqa: E402
+from utils.account_manager import AccountManager  # noqa: E402
+from utils.gui_icons import mdi_button  # noqa: E402
+from utils.logger_utils import get_last_logs, log  # noqa: E402
+
 try:
     import psutil
 except ImportError:
     psutil = None
 
-from utils.thread_worker import TaskWorker as Worker
-
-
-
-from gui.threads import SystemMonitorThread, ComfyWSThread, AIStatusCheckThread
-from utils.runninghub_manager import RunningHubManager
+from gui.threads import AIStatusCheckThread, SystemMonitorThread  # noqa: E402
+from utils.runninghub_manager import RunningHubManager  # noqa: E402
+from utils.thread_worker import TaskWorker as Worker  # noqa: E402
 
 
 class _StatsCollector(QThread):
     """后台线程：从远程服务器 /health 采集 CPU/RAM/GPU 资源状态。"""
-    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up, down, gpu_vram
+    stats_ready = Signal(float, float, float, float, str)  # cpu, ram, up, down, gpu_vram  # noqa: E501
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -211,14 +242,15 @@ class _StatsCollector(QThread):
         """从 ai_config 读远程服务地址。"""
         try:
             import json as _json
+
             from config.paths import AI_CONFIG_FILE
             if os.path.isfile(AI_CONFIG_FILE):
                 with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                     cfg = _json.load(f)
-                url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url") or "").strip()
+                url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url") or "").strip()  # noqa: E501
                 if url:
                     return url.rstrip("/")
-        except Exception:
+        except (OSError, json.JSONDecodeError, AttributeError):
             pass
         return ""
 
@@ -247,18 +279,16 @@ class _StatsCollector(QThread):
                                 vram_used = float(gpu.get("vram_used_mb", 0)) / 1024.0
                                 vram_total = float(gpu.get("vram_total_mb", 0)) / 1024.0
                                 gpu_util = int(gpu.get("gpu_util_percent", 0))
-                                gpu_vram = f"{vram_used:.1f}G/{vram_total:.1f}G {gpu_util}%"
-                    except Exception:
+                                gpu_vram = f"{vram_used:.1f}G/{vram_total:.1f}G {gpu_util}%"  # noqa: E501
+                    except (requests.exceptions.RequestException, json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError):  # noqa: E501
                         pass
 
                 self.stats_ready.emit(cpu, ram, up, down, gpu_vram)
-            except Exception:
+            except Exception:  # 线程主循环安全网，防止线程意外退出
                 pass
             # 指数退避：服务不可达时 3s→6s→12s→…封顶 60s，恢复后回到 3s；
             # 未配置地址不算失败，保持基础频率以便配置改动尽快生效
-            if not base:
-                consecutive_failures = 0
-            elif ok:
+            if not base or ok:
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
@@ -270,7 +300,7 @@ class _StatsCollector(QThread):
 
     def stop(self):
         self._running = False
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
+from gui.dialogs import StartupSplash  # noqa: E402
 
 
 class SystemStatusOverlay(QWidget):
@@ -396,26 +426,16 @@ class SystemStatusOverlay(QWidget):
         self.adjustSize()
 
 
-from gui.main_window_pages import PageSetupMixin
+from gui.main_window_accounts import AccountsMixin  # noqa: E402
+from gui.main_window_aiconfig import AIConfigMixin  # noqa: E402
+from gui.main_window_aigen import AIGenMixin  # noqa: E402
+from gui.main_window_installers import InstallersMixin  # noqa: E402
+from gui.main_window_pages import PageSetupMixin  # noqa: E402
+from gui.main_window_services import ServicesMixin  # noqa: E402
+from gui.main_window_sidebar import SidebarMixin  # noqa: E402
 
 
-from gui.main_window_services import ServicesMixin
-
-
-from gui.main_window_accounts import AccountsMixin
-
-
-from gui.main_window_aigen import AIGenMixin
-
-
-from gui.main_window_sidebar import SidebarMixin
-
-
-from gui.main_window_installers import InstallersMixin
-from gui.main_window_aiconfig import AIConfigMixin
-
-
-class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGenMixin, SidebarMixin, InstallersMixin, AIConfigMixin):
+class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGenMixin, SidebarMixin, InstallersMixin, AIConfigMixin):  # noqa: E501
     def __init__(self, splash=None):
         super().__init__()
         self.splash = splash
@@ -426,7 +446,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         icon_path = os.path.join(PROJECT_ROOT, "assets", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-            
+
         self._update_splash("正在加载账号管理组件...", 30)
         self.account_manager = AccountManager()
         self.current_parsed_videos = []
@@ -435,11 +455,11 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.load_ai_config()
 
         self._update_splash("正在配置独立浏览器 Profile...", 45)
-        
+
         # 初始化 RunningHub 管理器（API key 在 ai_config 中维护）
         self.runninghub = RunningHubManager(
             api_key=self.ai_config.get("runninghub_api_key", ""),
-            base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")
+            base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")  # noqa: E501
         )
         self.rh_pending_tasks = []
         self.rh_submitted_tasks = {}
@@ -452,7 +472,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         self.creator_pw_controller = None
         self.downloader_pw_controller = None
-        self.creator_guidance_url = "https://creator.douyin.com/creator-micro/creative-guidance"
+        self.system_default_login_controller: Any = None
+        self.creator_guidance_url = "https://creator.douyin.com/creator-micro/creative-guidance"  # noqa: E501
         self.creator_added_urls = []
         self.creator_current_video_url = ""
         self.creator_pw_poll_timer = QTimer(self)
@@ -466,17 +487,17 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.active_workers = []
         self.refresh_timer.setInterval(5000)
         self.refresh_timer.timeout.connect(self.refresh_server_tasks)
-        
+
         self.task_progress_bars = {}
         self.task_status_items = {}
         self.task_outputs = {}
         self._task_registry = {}
         self.download_tasks = []
-        
+
         self._update_splash("正在构建主界面 UI 元素 (组件较多，可能耗时数秒)...", 65)
         self.setup_ui()
         self._setup_tray()
-        
+
         # System status overlay
         self.status_overlay = SystemStatusOverlay(self)
         self.status_overlay.show()
@@ -486,7 +507,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 服务端连接状态：已集成到资源监控栏的状态点（SystemStatusOverlay.set_server_state）,
         self._update_splash("正在检测 Playwright 运行状态...", 85)
         self.ensure_playwright_chromium_ready()
-        
+
         self._update_splash("正在建立后台通信与系统资源监控服务...", 95)
         from utils import comfyui_client as comfy
         # 监控为被动探活：不为看状态而启动本地（auto_start=False），外部优先、本地已跑则用本地
@@ -494,10 +515,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             lambda: comfy.resolve_addr(self.ai_config, auto_start=False))
         # ComfyUI 默认不启动检测，用户可在「AI 设置」手动开启
         # self.monitor.start()
-        
+
         self.comfy_ws = None
         # self.start_comfyui_websocket()
-        
+
         # 启动服务端心跳监测（只关心服务端状态，不检测具体模型）
         self.ai_status_collector = AIStatusCheckThread(self.ai_config_file)
 
@@ -509,10 +530,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 lambda msg: log.info(f"[客户端任务] {msg}"))
             self.client_task_worker.task_picked.connect(self._on_client_task_picked)
             self.client_task_worker.start()
-        except Exception as e:
+        except Exception as e:  # Qt 线程启动涉及外部模块导入，无法预知所有异常
             log.warning(f"[客户端任务] 领取线程启动失败: {e}")
             self.client_task_worker = None
-        
+
         def handle_ai_status(status):
             if hasattr(self, "status_overlay") and self.status_overlay:
                 self.status_overlay.update_server_status(status)
@@ -530,13 +551,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 self.splash.status_lbl.setText(text)
                 self.splash.progress.setValue(value)
                 QApplication.processEvents()
-            except Exception:
+            except Exception:  # Qt 界面操作安全网
                 pass
 
     def _on_theme_changed(self):
         """主题切换回调：保存设置并立即应用到全部窗口（无需重启）。"""
         theme = self.theme_combo.currentData()
-        from utils.theme_manager import save_theme, apply_theme
+        from utils.theme_manager import apply_theme, save_theme
         save_theme(theme)
         app = QApplication.instance()
         if app is not None:
@@ -554,7 +575,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "tray") and self.tray is not None:
                 self.tray.showMessage("客户端任务", msg,
                                       QSystemTrayIcon.Information, 6000)
-        except Exception as e:
+        except (KeyError, TypeError, AttributeError) as e:
             log.warning(f"[客户端任务] 任务提示失败: {e}")
 
     def _update_server_warning(self, server_ok):
@@ -573,20 +594,19 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 self._server_ok_timer = QTimer(self)
                 self._server_ok_timer.setSingleShot(True)
                 self._server_ok_timer.setInterval(3000)
-                self._server_ok_timer.timeout.connect(lambda: overlay.set_server_state("idle"))
+                self._server_ok_timer.timeout.connect(lambda: overlay.set_server_state("idle"))  # noqa: E501
             self._server_ok_timer.start()
         else:
             if hasattr(self, "_server_ok_timer") and self._server_ok_timer.isActive():
                 self._server_ok_timer.stop()
             overlay.set_server_state(False)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         if hasattr(self, "status_overlay") and self.status_overlay:
             margin_right = 20
             margin_top = 20
             w = self.status_overlay.width()
-            h = self.status_overlay.height()
             self.status_overlay.move(self.width() - w - margin_right, margin_top)
 
     def _setup_tray(self):
@@ -619,7 +639,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.raise_()
         self.activateWindow()
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event):  # noqa: N802
         """F11 全屏/退出全屏（修复全屏右缘出屏问题的可控入口）。"""
         if event.key() == Qt.Key.Key_F11:
             self._toggle_fullscreen()
@@ -632,14 +652,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         else:
             # 先确保窗口在当前屏幕可视区内，再进入全屏，避免右缘出屏
             try:
-                from PySide6.QtGui import QGuiApplication as _QGA
+                from PySide6.QtGui import QGuiApplication as _QGA  # noqa: N814
                 frame = self.frameGeometry()
                 scr = _QGA.screenAt(frame.center()) or _QGA.primaryScreen()
                 if scr is not None:
                     avail = scr.availableGeometry()
                     if not avail.intersects(frame):
                         self.move(avail.center() - self.rect().center())
-            except Exception:
+            except Exception:  # Qt 屏幕几何计算，依赖窗口管理器状态
                 pass
             self.showFullScreen()
 
@@ -651,15 +671,16 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.activateWindow()
         self.close()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         # 点窗口 X：最小化到托盘，不退出（仅托盘右键「退出」才真正关闭）
-        if not getattr(self, "_tray_quit", False):
-            if getattr(self, "tray_icon", None) and self.tray_icon.isVisible():
+        if not getattr(self, "_tray_quit", False):  # noqa: SIM102
+            tray_icon = getattr(self, "tray_icon", None)
+            if tray_icon is not None and tray_icon.isVisible():
                 event.ignore()
                 self.hide()
                 if not self._tray_hint_shown:
                     self._tray_hint_shown = True
-                    self.tray_icon.showMessage(
+                    tray_icon.showMessage(
                         "螺丝钉-电商智能体矩阵",
                         "程序已最小化到系统托盘，右键托盘图标选择「退出」可关闭。",
                         QSystemTrayIcon.Information, 3000)
@@ -681,59 +702,59 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         try:
             if hasattr(self, "creator_pw_controller") and self.creator_pw_controller:
                 self.creator_pw_controller.stop()
-        except Exception:
+        except Exception:  # 外部浏览器控制器 stop() 可能抛出多种异常
             pass
         try:
             for _, ctrl in list(getattr(self, "account_pw_controllers", {}).items()):
-                try:
+                with contextlib.suppress(Exception):
                     ctrl.stop()
-                except Exception:
-                    pass
-        except Exception:
+        except (TypeError, AttributeError):
             pass
         try:
             if hasattr(self, "monitor") and self.monitor:
                 self.monitor.running = False
                 self.monitor.wait()
-        except Exception:
+        except Exception:  # 线程 wait() 可能因内部状态抛出异常
             pass
         try:
             if hasattr(self, "ai_status_collector") and self.ai_status_collector:
                 self.ai_status_collector.running = False
                 self.ai_status_collector.wait()
-        except Exception:
+        except Exception:  # 线程 wait() 可能因内部状态抛出异常
             pass
         try:
             if getattr(self, "client_task_worker", None) is not None:
                 self.client_task_worker.stop()
                 self.client_task_worker.wait(3000)
-        except Exception:
+        except Exception:  # 线程 stop/wait 涉及内部状态
             pass
         try:
             if hasattr(self, "comfy_ws") and self.comfy_ws:
                 self.comfy_ws.running = False
                 self.comfy_ws.wait()
-        except Exception:
+        except Exception:  # WebSocket 线程 stop/wait
             pass
         try:
             if hasattr(self, "extension_bridge") and self.extension_bridge:
                 self.extension_bridge.stop()
-        except Exception:
-            pass
-        try:
-            from core.creator_browser_controller import close_all_active_browsers
-            close_all_active_browsers()
-        except Exception:
+        except Exception:  # 扩展桥接 stop() 外部API
             pass
 
         try:
-            if getattr(self, "tray_icon", None):
-                self.tray_icon.hide()
-        except Exception:
+            from core.creator_browser_controller import close_all_active_browsers
+            close_all_active_browsers()
+        except Exception:  # 浏览器关闭外部API
+            pass
+
+        try:
+            tray_icon = getattr(self, "tray_icon", None)
+            if tray_icon is not None:
+                tray_icon.hide()
+        except Exception:  # Qt托盘 hide() 安全网
             pass
         try:
             super().closeEvent(event)
-        except Exception:
+        except Exception:  # Qt closeEvent 链式调用安全网
             event.accept()
 
 
@@ -748,25 +769,25 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
     def setup_ui(self):
         # Stylesheet is applied globally by apply_theme() at startup
-        
+
         # Main Layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QHBoxLayout(self.central_widget)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
-        
+
         # Create Sidebar
         self.setup_sidebar()
-        
+
         # Create Content Area
         self.content_stack = QStackedWidget()
         self.content_stack.setObjectName("content_area")
         self.main_layout.addWidget(self.content_stack)
-        
+
         # Setup Pages
         self.setup_pages()
-        
+
         # Default Page
         # Default page: workbench (agent home)
         self.switch_page(46)
@@ -776,24 +797,24 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         # 0: Downloader (Disabled)
         self.page_downloader = QWidget()
         self.content_stack.addWidget(self.page_downloader)
-        
+
         # 1: Hotspots
         self.page_hotspots = QWidget()
         self.setup_hotspots_page()
         self.content_stack.addWidget(self.page_hotspots)
-        
+
         # 2: Search (Disabled)
         self.page_search = QWidget()
         self.content_stack.addWidget(self.page_search)
-        
+
         # 3: Digital Human
         self.page_digital_human = QWidget()
         self.content_stack.addWidget(self.page_digital_human)
-        
+
         # 4: Library/Downloads (Disabled)
         self.page_library = QWidget()
         self.content_stack.addWidget(self.page_library)
-        
+
         # 5: Douyin Login
         self.page_login = QWidget()
         self.setup_login_page()
@@ -961,10 +982,9 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.setup_vector_search_page()
         self.content_stack.addWidget(self.page_vector_search)
 
-        # 41: Python Terminal (内嵌终端) Page
-        self.page_terminal = QWidget()
-        self.setup_terminal_page()
-        self.content_stack.addWidget(self.page_terminal)
+        # 39: Terminal Page placeholder (page_terminal removed, keep index slot)
+        self.page_terminal_placeholder = QWidget()
+        self.content_stack.addWidget(self.page_terminal_placeholder)
 
         # 42: Marketing Video Detection Page
         self.page_marketing_detect = QWidget()
@@ -1013,7 +1033,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.extension_bridge = get_bridge()
             if self.extension_bridge.config.get("auto_start", True):
                 self.extension_bridge.start()
-        except Exception as e:
+        except Exception as e:  # 扩展桥接 start() 涉及外部进程
             log.error(f"[扩展桥接] 自动启动失败: {e}")
 
         # 进入定时任务页时刷新（拉取最新服务端状态）
@@ -1036,10 +1056,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         # 热点页面：只在活跃时轮询，离开后立即停止（减少主线程常驻 2次/秒 事件回调）
         if index == 1:
-            if hasattr(self, "creator_pw_poll_timer") and not self.creator_pw_poll_timer.isActive():
+            if hasattr(self, "creator_pw_poll_timer") and not self.creator_pw_poll_timer.isActive():  # noqa: E501
                 self.creator_pw_poll_timer.start()
         else:
-            if hasattr(self, "creator_pw_poll_timer") and self.creator_pw_poll_timer.isActive():
+            if hasattr(self, "creator_pw_poll_timer") and self.creator_pw_poll_timer.isActive():  # noqa: E501
                 self.creator_pw_poll_timer.stop()
 
         if index == 8: # Accounts
@@ -1072,12 +1092,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if hasattr(self, "vector_search_tool"):
                 try:
                     self.vector_search_tool.refresh()
-                except Exception as e:
+                except Exception as e:  # 外部工具 refresh() 实现未知
                     log.error(f"刷新素材检索失败: {e}")
             if hasattr(self, "dreamina_assets_tool"):
                 try:
                     self.dreamina_assets_tool._scan_local_files()
-                except Exception as e:
+                except Exception as e:  # 外部工具扫描文件实现未知
                     log.error(f"刷新即梦素材列表失败: {e}")
         elif index == 37: # Storyboard
             if hasattr(self, "storyboard_tool"):
@@ -1097,7 +1117,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
     def setup_subtitle_removal_page_v14(self):
         from gui.subtitle_removal_page_v14 import SubtitleRemovalPageV14
-        self.subtitle_removal_tool_v14 = SubtitleRemovalPageV14(self.page_subtitle_removal_v14, self)
+        self.subtitle_removal_tool_v14 = SubtitleRemovalPageV14(self.page_subtitle_removal_v14, self)  # noqa: E501
         self.subtitle_removal_tool_v14.setup()
 
 
@@ -1123,13 +1143,13 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
 
     def refresh_creator_guidance(self):
-        if not self.creator_pw_controller or not self.creator_pw_controller.is_running():
+        if not self.creator_pw_controller or not self.creator_pw_controller.is_running():  # noqa: E501
             self.open_creator_guidance_browser()
             return
         self.creator_pw_controller.goto(self.creator_guidance_url)
 
     def apply_creator_guidance_category(self, category):
-        if not self.creator_pw_controller or not self.creator_pw_controller.is_running():
+        if not self.creator_pw_controller or not self.creator_pw_controller.is_running():  # noqa: E501
             self.open_creator_guidance_browser()
         if self.creator_pw_controller:
             self.creator_pw_controller.click_category(category)
@@ -1141,29 +1161,27 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             if not self._pw_install_running:
                 self.install_playwright_chromium()
             return
-            
+
         profile_id = "system_default_profile"
 
-        if self.creator_pw_controller and self.is_pw_controller_usable(self.creator_pw_controller):
+        if self.creator_pw_controller and self.is_pw_controller_usable(self.creator_pw_controller):  # noqa: E501
             self.creator_pw_controller.goto(self.creator_guidance_url)
             return
-        if self.creator_pw_controller and not self.is_pw_controller_usable(self.creator_pw_controller):
-            try:
+        if self.creator_pw_controller and not self.is_pw_controller_usable(self.creator_pw_controller):  # noqa: E501
+            with contextlib.suppress(Exception):
                 self.creator_pw_controller.stop()
-            except Exception:
-                pass
             self.creator_pw_controller = None
 
-        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", profile_id)
+        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", profile_id)  # noqa: E501
         os.makedirs(user_data_dir, exist_ok=True)
-        
+
         self.creator_pw_controller = CreatorBrowserController(
             user_data_dir=user_data_dir,
             browsers_path=PW_BROWSERS_DIR,
             headless=False,
         )
         self.creator_pw_controller.start()
-        QTimer.singleShot(300, lambda: self.creator_pw_controller.goto(self.creator_guidance_url) if self.creator_pw_controller else None)
+        QTimer.singleShot(300, lambda: self.creator_pw_controller.goto(self.creator_guidance_url) if self.creator_pw_controller else None)  # noqa: E501
 
     def close_creator_guidance_browser(self):
         if self.creator_pw_controller:
@@ -1224,7 +1242,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             self.cg_queue_table.setItem(i, 0, it)
             btn_rm = QPushButton("移除")
             btn_rm.setObjectName("secondary_button")
-            btn_rm.clicked.connect(lambda checked=False, u=url: self.remove_creator_queue_url(u))
+            btn_rm.clicked.connect(lambda checked=False, u=url: self.remove_creator_queue_url(u))  # noqa: E501
             self.cg_queue_table.setCellWidget(i, 1, btn_rm)
         if hasattr(self, "cg_queue_count"):
             self.cg_queue_count.setText(str(len(self.creator_added_urls)))
@@ -1247,14 +1265,14 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             QMessageBox.information(self, "提示", "正在准备 Playwright Chromium 内核，请先完成内核安装。")
             self.ensure_playwright_chromium_ready()
             return
-            
-        if self.system_default_login_controller and self.system_default_login_controller.is_running():
+
+        if self.system_default_login_controller and self.system_default_login_controller.is_running():  # noqa: E501
             self.system_default_login_controller.goto("https://www.douyin.com")
             return
-            
-        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", "system_default_profile")
+
+        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", "system_default_profile")  # noqa: E501
         os.makedirs(user_data_dir, exist_ok=True)
-        
+
         from core.creator_browser_controller import CreatorBrowserController
         self.system_default_login_controller = CreatorBrowserController(
             user_data_dir=user_data_dir,
@@ -1262,19 +1280,19 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             headless=False
         )
         self.system_default_login_controller.start()
-        QTimer.singleShot(500, lambda: self.system_default_login_controller.goto("https://www.douyin.com"))
-        QMessageBox.information(self, "提示", "已为您在外部启动独立登录窗口。\n请在弹出的 Chromium 窗口内登录抖音，完成后点击「提取并同步 Cookie」。")
+        QTimer.singleShot(500, lambda: self.system_default_login_controller.goto("https://www.douyin.com"))  # noqa: E501
+        QMessageBox.information(self, "提示", "已为您在外部启动独立登录窗口。\n请在弹出的 Chromium 窗口内登录抖音，完成后点击「提取并同步 Cookie」。")  # noqa: E501
 
     def sync_system_default_cookie(self):
-        if not self.system_default_login_controller or not self.system_default_login_controller.is_running():
+        if not self.system_default_login_controller or not self.system_default_login_controller.is_running():  # noqa: E501
             QMessageBox.warning(self, "错误", "登录浏览器未运行或已关闭，请先点击「打开独立登录窗口」。")
             return
-            
+
         cookies = self.system_default_login_controller.get_cookies()
         if not cookies:
             QMessageBox.warning(self, "提示", "未读取到 Cookie，请确认已在外部浏览器登录成功。")
             return
-            
+
         jar = {}
         for c in cookies:
             domain = str(c.get("domain", "") or "")
@@ -1286,28 +1304,28 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 continue
             if name not in jar:
                 jar[name] = value if value is not None else ""
-                
+
         cookie_str = "; ".join([f"{k}={v}" for k, v in jar.items()])
         if not cookie_str:
             QMessageBox.warning(self, "提示", "未筛选到可用的 douyin.com Cookie。")
             return
-            
+
         try:
             cookie_path_root = os.path.join(PROJECT_ROOT, "douyin_cookies.txt")
             cookie_path_runtime = os.path.join(COOKIES_DIR, "douyin_cookies.txt")
-            
+
             with open(cookie_path_root, "w", encoding="utf-8") as f:
                 f.write(cookie_str)
             with open(cookie_path_runtime, "w", encoding="utf-8") as f:
                 f.write(cookie_str)
-                
+
             self.system_default_login_controller.stop()
             self.update_system_default_login_status()
             QMessageBox.information(self, "成功", "系统默认 Cookie 同步并保存成功！")
-        except Exception as e:
+        except Exception as e:  # 文件I/O + 外部控制器 stop()，无法单一类型覆盖
             QMessageBox.critical(self, "错误", f"保存 Cookie 失败: {e}")
 
-    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端", extra=None):
+    def add_task_to_list(self, prompt_id, status="正在运行", task_type="ComfyUI", source="服务端", extra=None):  # noqa: E501
         row = self.task_table.rowCount()
         self.task_table.insertRow(row)
         item_id = QTableWidgetItem(prompt_id[:12])
@@ -1358,7 +1376,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         actions_layout.setContentsMargins(5, 2, 5, 2)
         actions_layout.setSpacing(5)
 
-        registry = {"row": row, "task_id": prompt_id, "task_type": task_type, "extra": extra}
+        registry = {"row": row, "task_id": prompt_id, "task_type": task_type, "extra": extra}  # noqa: E501
 
         btn_preview = mdi_button("", "eye")
         btn_preview.setToolTip("预览")
@@ -1421,29 +1439,31 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         if not outputs:
              QMessageBox.information(self, "提示", "未找到输出文件。")
              return
-             
+
         from utils import comfyui_client as comfy
         comfyui_addr = comfy.resolve_addr(self.ai_config, auto_start=False)
         # Pick first output for preview
         out = outputs[0]
         url = comfy.view_url(comfyui_addr, out['filename'], out['type'])
-        
+
         import webbrowser
-        webbrowser.open(url) # Simplest for now, as QWebEngine might be overkill for quick preview
+        webbrowser.open(url) # Simplest for now, as QWebEngine might be overkill for quick preview  # noqa: E501
 
     def download_result(self, prompt_id):
         outputs = self.task_outputs.get(prompt_id, [])
-        if not outputs: return
-        
+        if not outputs:
+            return
+
         from utils import comfyui_client as comfy
         comfyui_addr = comfy.resolve_addr(self.ai_config, auto_start=False)
         save_dir = pick_directory(self, "选择保存目录")
-        if not save_dir: return
+        if not save_dir:
+            return
 
         for out in outputs:
             url = comfy.view_url(comfyui_addr, out['filename'], out['type'])
             local_path = os.path.join(save_dir, out['filename'])
-            
+
             def do_download(u=url, p=local_path):
                 try:
                     from utils.http_client import http_get
@@ -1452,7 +1472,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                         for chunk in r.iter_content(chunk_size=8192):
                             f.write(chunk)
                     return True, p
-                except Exception as e:
+                except (requests.exceptions.RequestException, OSError) as e:
                     return False, str(e)
 
             def on_finished(res):
@@ -1467,7 +1487,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             # 必须持有 Worker：QThread 运行中被 Python GC 回收会触发 Qt fatal 崩溃（0xc0000409）
             self.active_workers.append(worker)
             worker.finished.connect(
-                lambda: self.active_workers.remove(worker) if worker in self.active_workers else None)
+                lambda _w=worker: self.active_workers.remove(_w) if _w in self.active_workers else None)  # noqa: E501
             worker.start()
 
     def extract_and_save_cookies(self):
@@ -1488,7 +1508,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 response = http_get(url, timeout=5)
                 if response.status_code == 200:
                     return response.content
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 log.error(f"Failed to fetch image {url}: {e}")
             return None
 
@@ -1497,8 +1517,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
                 pixmap = QPixmap()
                 pixmap.loadFromData(data)
                 if not pixmap.isNull():
-                    label.setPixmap(pixmap.scaled(size[0], size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    label.setStyleSheet("border-radius: %dpx; border: 2px solid #fff;" % (size[0]//2))
+                    label.setPixmap(pixmap.scaled(size[0], size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
+                    label.setStyleSheet(f"border-radius: {size[0]//2}px; border: 2px solid #fff;")  # noqa: E501
 
         worker = Worker(fetch_image)
         worker.finished.connect(on_fetched)
@@ -1515,12 +1535,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             return False
         try:
             status, _, err = controller.get_status()
-        except Exception:
+        except Exception:  # 浏览器控制器 get_status() 外部API
             return False
         if not status:
             return False
         bad_status = ("已停止" in status) or ("启动失败" in status) or ("已关闭" in status)
-        bad_err = bool(err) and (("Target closed" in err) or ("has been closed" in err) or ("Browser has been closed" in err))
+        bad_err = bool(err) and (("Target closed" in err) or ("has been closed" in err) or ("Browser has been closed" in err))  # noqa: E501
         return not (bad_status or bad_err)
 
 
@@ -1536,22 +1556,22 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         同时最多 3 个并发，超出的自动排队等待。"""
         active_count = len([w for w in self.active_workers if w.isRunning()])
         if active_count >= self.MAX_CONCURRENT_WORKERS:
-            QTimer.singleShot(500, lambda: self.start_worker(func, on_finished, on_error))
+            QTimer.singleShot(500, lambda: self.start_worker(func, on_finished, on_error))  # noqa: E501
             log.info(f"[并发控制] 当前 {active_count} 个任务运行中，排队等待...")
             return None
 
         worker = Worker(func)
         self.active_workers.append(worker)
-        
+
         if on_finished:
             worker.finished.connect(on_finished)
         if on_error:
             worker.error.connect(on_error)
-            
+
         def cleanup():
             if worker in self.active_workers:
                 self.active_workers.remove(worker)
-        
+
         worker.finished.connect(cleanup)
         worker.error.connect(lambda _: cleanup())
         worker.start()
@@ -1575,12 +1595,12 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         lines = raw.splitlines()
 
         if level_text != "全部":
-            lines = [l for l in lines if f"| {level_text: <8} |" in l or f"| {level_text}" in l]
+            lines = [line for line in lines if f"| {level_text: <8} |" in line or f"| {level_text}" in line]  # noqa: E501
 
         keyword = keyword_filter.text().strip() if keyword_filter else ""
 
         if keyword:
-            lines = [l for l in lines if keyword.lower() in l.lower()]
+            lines = [line for line in lines if keyword.lower() in line.lower()]
 
         lines = lines[-500:]
 
@@ -1590,7 +1610,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
             cur_name = log_combo.currentText() if log_combo is not None else "app.log"
             if hasattr(self, "log_path_label"):
                 self.log_path_label.setText(f"完整日志: .runtime/logs/{cur_name}")
-        except Exception:
+        except Exception:  # Qt 标签操作安全网
             pass
         # 首次调用时挂上高亮器（只挂一次）
         if not hasattr(self, "_log_highlighter"):
@@ -1631,9 +1651,7 @@ if __name__ == "__main__":
     # 那是个严重后门，已彻底移除——验证逻辑无条件执行，任何环境变量都不再有效。
     # 开发调试如需免激活，请把机器码加入 studio/config/trial_whitelist.json。
     from utils.license import (
-        get_machine_id, check_trial_whitelist,
-        verify_license, LicenseError,
-        load_activation_cache,
+        get_machine_id,
     )
     _access_granted = True
     _machine_id = get_machine_id()
@@ -1659,11 +1677,11 @@ if __name__ == "__main__":
             _is_already_running = False
             # Windows: 命名互斥量，进程退出/崩溃时OS自动释放，无残留无延迟
             import ctypes as _ctypes
-            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")
+            _mutex = _ctypes.windll.kernel32.CreateMutexW(None, False, "luosiding.ecommerce.agent.matrix.single_instance")  # noqa: E501
             if _ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
                 _is_already_running = True
             if _is_already_running:
-                from PySide6.QtWidgets import QMessageBox as _QMB
+                from PySide6.QtWidgets import QMessageBox as _QMB  # noqa: N814
                 _QMB.warning(None, "提示", "电商智能体矩阵已在运行中，请勿重复启动。")
                 sys.exit(0)
 
@@ -1675,17 +1693,17 @@ if __name__ == "__main__":
             from PySide6.QtGui import QFont
             font = QFont("Microsoft YaHei UI", 10)
             app.setFont(font)
-        except Exception:
+        except Exception:  # Qt QFont 创建可能失败
             pass
-        
+
         # Show startup loading splash window
         splash = StartupSplash()
         splash.show()
         QApplication.processEvents()
-        
+
         # Pass splash instance to MainWindow constructor
         window = MainWindow(splash=splash)
-        
+
         # Center the window before showing to avoid flash
         try:
             from PySide6.QtGui import QCursor
@@ -1693,16 +1711,20 @@ if __name__ == "__main__":
             if not active_screen:
                 active_screen = QApplication.primaryScreen()
             screen = active_screen.geometry()
-            screen_w = screen.width(); screen_h = screen.height()
-            win_w = 1300; win_h = 900
-            if screen_w < win_w: win_w = int(screen_w * 0.95)
-            if screen_h < win_h: win_h = int(screen_h * 0.95)
+            screen_w = screen.width()
+            screen_h = screen.height()
+            win_w = 1300
+            win_h = 900
+            if screen_w < win_w:
+                win_w = int(screen_w * 0.95)
+            if screen_h < win_h:
+                win_h = int(screen_h * 0.95)
             x = screen.x() + (screen_w - win_w) // 2
             y = screen.y() + (screen_h - win_h) // 2
             window.resize(win_w, win_h)
             window.move(x, y)
-            log.info(f"Centered window on screen {active_screen.name()} at ({x}, {y}) size {win_w}x{win_h}")
-        except Exception as e:
+            log.info(f"Centered window on screen {active_screen.name()} at ({x}, {y}) size {win_w}x{win_h}")  # noqa: E501
+        except Exception as e:  # Qt 屏幕/几何计算依赖窗口管理器
             log.error(f"Failed to center window: {e}")
 
         splash.close()
@@ -1712,8 +1734,8 @@ if __name__ == "__main__":
         # 导致最大化/全屏时右缘跑出屏幕、需二次全屏才复原。显示后延迟校正一次，
         # 把窗口完整拉回当前屏幕可视区（等待窗口管理器完成布局，避免与 WM 恢复位置竞争）。
         try:
-            from PySide6.QtGui import QGuiApplication as _QGA
             from PySide6.QtCore import QTimer as _QTimer
+            from PySide6.QtGui import QGuiApplication as _QGA  # noqa: N814
 
             def _ensure_window_visible():
                 try:
@@ -1728,14 +1750,14 @@ if __name__ == "__main__":
                     win_h = min(frame.height(), avail.height())
                     x = max(avail.left(), min(frame.left(), avail.right() - win_w + 1))
                     y = max(avail.top(), min(frame.top(), avail.bottom() - win_h + 1))
-                    if (x, y, win_w, win_h) != (frame.left(), frame.top(), frame.width(), frame.height()):
+                    if (x, y, win_w, win_h) != (frame.left(), frame.top(), frame.width(), frame.height()):  # noqa: E501
                         window.setGeometry(x, y, win_w, win_h)
-                        log.info(f"Corrected window bounds -> ({x}, {y}) {win_w}x{win_h}")
-                except Exception as e:
+                        log.info(f"Corrected window bounds -> ({x}, {y}) {win_w}x{win_h}")  # noqa: E501
+                except Exception as e:  # Qt 窗口几何校正安全网
                     log.error(f"校正窗口位置失败: {e}")
 
             _QTimer.singleShot(80, _ensure_window_visible)
-        except Exception as e:
+        except Exception as e:  # Qt 定时器初始化安全网
             log.error(f"窗口校正初始化失败: {e}")
 
         log.info("MainWindow shown successfully.")
@@ -1743,13 +1765,14 @@ if __name__ == "__main__":
         # 启动时后台清理中间产物（不阻塞 UI；NAS 上大量文件时清理耗时）
         try:
             from threading import Thread
+
             from utils.asset_cleanup import cleanup_on_startup
-            Thread(target=cleanup_on_startup, daemon=True, name="startup-cleanup").start()
-        except Exception as e:
+            Thread(target=cleanup_on_startup, daemon=True, name="startup-cleanup").start()  # noqa: E501
+        except Exception as e:  # 后台线程启动安全网
             log.warning(f"启动清理任务未能启动: {e}")
 
         sys.exit(app.exec())
-    except Exception as e:
+    except Exception as e:  # 应用启动顶层安全网
         import traceback
         traceback.print_exc()
         log.critical(f"FATAL ERROR during startup: {e}")
@@ -1759,7 +1782,7 @@ if __name__ == "__main__":
     def download_rh_result(self, task_id):
         """下载单个 RunningHub 任务结果。"""
         from utils import config_manager as cm
-        default_dir = cm.get_setting("local_config", "cache_dir", "") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "materials")
+        default_dir = cm.get_setting("local_config", "cache_dir", "") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "materials")  # noqa: E501
         os.makedirs(default_dir, exist_ok=True)
         save_dir = pick_directory(self, "选择保存目录", default_dir)
         if not save_dir:
@@ -1780,8 +1803,9 @@ if __name__ == "__main__":
             QMessageBox.information(self, "提示", "未找到可下载的结果。")
             return
 
-        import requests
         from datetime import datetime
+
+        import requests
         downloaded = 0
         for res in results:
             if not isinstance(res, dict):
@@ -1800,7 +1824,7 @@ if __name__ == "__main__":
                     downloaded += 1
                 else:
                     QMessageBox.warning(self, "下载失败", f"HTTP {r.status_code}: {url}")
-            except Exception as e:
+            except (requests.exceptions.RequestException, OSError) as e:
                 QMessageBox.warning(self, "下载失败", f"{url}\n{e}")
         if downloaded:
             QMessageBox.information(self, "下载完成", f"成功下载 {downloaded} 个文件到\n{save_dir}")

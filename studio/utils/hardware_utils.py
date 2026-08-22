@@ -1,11 +1,11 @@
-# -*- coding: utf-8 -*-
 """
 hardware_utils — 获取系统硬件信息并自动调整 AI 分析的并行配置。
 """
-import os
-import platform
 import json
 import logging
+import os
+import platform
+
 from config.paths import AI_CONFIG_FILE, CONFIG_DIR
 
 log = logging.getLogger(__name__)
@@ -25,28 +25,28 @@ def get_system_hardware_info() -> dict:
         "gpu_name": "无",
         "gpu_vram": 0.0,
     }
-    
+
     # 获取 CPU 核心数与线程数，获取 CPU 型号
     try:
         import psutil
-        info["cpu_cores"] = f"{psutil.cpu_count(logical=False)}核 / {psutil.cpu_count(logical=True)}线程"
-    except Exception:
+        info["cpu_cores"] = f"{psutil.cpu_count(logical=False)}核 / {psutil.cpu_count(logical=True)}线程"  # noqa: E501
+    except Exception:  # psutil 外部 API 调用
         pass
 
     try:
         import winreg
-        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")  # noqa: E501
         cpu_name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
         if cpu_name:
             info["cpu_name"] = cpu_name
-    except Exception:
+    except Exception:  # winreg 系统 API 调用
         pass
 
     # 获取运行内存 (RAM)
     try:
         import psutil
         info["ram"] = round(psutil.virtual_memory().total / (1024 ** 3), 2)
-    except Exception:
+    except Exception:  # psutil 外部 API 调用
         pass
 
     # 获取 GPU 和显存大小 (优先 PyTorch，次优 pynvml)
@@ -54,10 +54,10 @@ def get_system_hardware_info() -> dict:
         import torch
         if torch.cuda.is_available():
             info["gpu_name"] = torch.cuda.get_device_name(0)
-            info["gpu_vram"] = round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 2)
+            info["gpu_vram"] = round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 2)  # noqa: E501
         else:
             raise ImportError()
-    except Exception:
+    except Exception:  # torch 外部 API 调用
         try:
             import pynvml
             pynvml.nvmlInit()
@@ -68,9 +68,9 @@ def get_system_hardware_info() -> dict:
             info["gpu_name"] = name
             mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
             info["gpu_vram"] = round(mem_info.total / (1024 ** 3), 2)
-        except Exception:
+        except Exception:  # pynvml 外部 API 调用
             pass
-            
+
     return info
 
 def auto_adjust_concurrency_configs(force: bool = False) -> dict:
@@ -80,7 +80,7 @@ def auto_adjust_concurrency_configs(force: bool = False) -> dict:
     """
     hw = get_system_hardware_info()
     vram = hw["gpu_vram"]
-    
+
     # 自适应参数推荐
     if vram >= 15.5:  # 大于等于 16GB 显存 (如 RTX 4090 / 3090)
         ollama_parallel = 4
@@ -102,16 +102,16 @@ def auto_adjust_concurrency_configs(force: bool = False) -> dict:
     ai_cfg = {}
     if os.path.exists(AI_CONFIG_FILE):
         try:
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 ai_cfg = json.load(f)
         except json.JSONDecodeError:
             import shutil
             backup = AI_CONFIG_FILE + ".corrupted"
             shutil.copy2(AI_CONFIG_FILE, backup)
-            log.warning(f"[Hardware] ai_config.json corrupted, backed up to {backup}, starting fresh")
-        except Exception:
+            log.warning(f"[Hardware] ai_config.json corrupted, backed up to {backup}, starting fresh")  # noqa: E501
+        except OSError:
             pass
-    
+
     ai_updated = False
     if force or "ollama_num_parallel" not in ai_cfg:
         ai_cfg["ollama_num_parallel"] = ollama_parallel
@@ -119,44 +119,44 @@ def auto_adjust_concurrency_configs(force: bool = False) -> dict:
     if force or "vision_concurrency" not in ai_cfg:
         ai_cfg["vision_concurrency"] = vision_concurrency
         ai_updated = True
-        
+
     if ai_updated:
         try:
             os.makedirs(os.path.dirname(AI_CONFIG_FILE), exist_ok=True)
             with open(AI_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(ai_cfg, f, indent=4, ensure_ascii=False)
-            log.info(f"已根据硬件自动更新 ai_config: ollama_num_parallel={ai_cfg['ollama_num_parallel']}, vision_concurrency={ai_cfg['vision_concurrency']}")
-        except Exception as e:
+            log.info(f"已根据硬件自动更新 ai_config: ollama_num_parallel={ai_cfg['ollama_num_parallel']}, vision_concurrency={ai_cfg['vision_concurrency']}")  # noqa: E501
+        except OSError as e:
             log.error(f"保存 ai_config.json 自动优化失败: {e}")
 
     # 2. 写入 CLIP Config (material_index_config.json)
     clip_cfg = {}
     if os.path.exists(_CLIP_CFG_FILE):
         try:
-            with open(_CLIP_CFG_FILE, "r", encoding="utf-8") as f:
+            with open(_CLIP_CFG_FILE, encoding="utf-8") as f:
                 clip_cfg = json.load(f)
         except json.JSONDecodeError:
             import shutil
             backup = _CLIP_CFG_FILE + ".corrupted"
             shutil.copy2(_CLIP_CFG_FILE, backup)
-            log.warning(f"[Hardware] material_index_config.json corrupted, backed up to {backup}, starting fresh")
-        except Exception:
+            log.warning(f"[Hardware] material_index_config.json corrupted, backed up to {backup}, starting fresh")  # noqa: E501
+        except OSError:
             pass
-            
+
     clip_updated = False
     if force or "batch_size" not in clip_cfg:
         clip_cfg["batch_size"] = clip_batch_size
         clip_updated = True
-        
+
     if clip_updated:
         try:
             os.makedirs(os.path.dirname(_CLIP_CFG_FILE), exist_ok=True)
             with open(_CLIP_CFG_FILE, "w", encoding="utf-8") as f:
                 json.dump(clip_cfg, f, indent=2, ensure_ascii=False)
-            log.info(f"已根据硬件自动更新 material_index_config: batch_size={clip_cfg['batch_size']}")
-        except Exception as e:
+            log.info(f"已根据硬件自动更新 material_index_config: batch_size={clip_cfg['batch_size']}")  # noqa: E501
+        except OSError as e:
             log.error(f"保存 material_index_config.json 自动优化失败: {e}")
-        
+
     return {
         "level": level,
         "ollama_num_parallel": ai_cfg.get("ollama_num_parallel", ollama_parallel),

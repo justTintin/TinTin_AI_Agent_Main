@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """brand_normalizer：品牌归一化。"""
 import os
 import sys
@@ -6,9 +5,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils import brand_normalizer as bn
+from utils import brand_normalizer as bn  # noqa: E402
 
 
 class TestBrandNormalizer(unittest.TestCase):

@@ -1,10 +1,12 @@
+import contextlib
 import os
+import queue
 import re
 import threading
-import queue
+
 from config.paths import PW_BROWSERS_DIR
 
-_active_controllers = []
+_active_controllers: list = []
 _active_controllers_lock = threading.Lock()
 
 
@@ -14,7 +16,7 @@ def close_all_active_browsers():
             try:
                 if controller.is_running():
                     controller.stop()
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 pass
         _active_controllers.clear()
 
@@ -27,8 +29,8 @@ class CreatorBrowserController:
 
         self._stop_event = threading.Event()
         self._thread = None
-        self._cmd_q = queue.Queue()
-        self._resp_q = queue.Queue()
+        self._cmd_q: queue.Queue = queue.Queue()
+        self._resp_q: queue.Queue = queue.Queue()
 
         self._lock = threading.Lock()
         self._status = "未启动"
@@ -52,10 +54,8 @@ class CreatorBrowserController:
 
     def stop(self):
         self._stop_event.set()
-        try:
+        with contextlib.suppress(Exception):
             self._cmd_q.put_nowait(("stop",))
-        except Exception:
-            pass
 
     def is_running(self):
         return self._thread is not None and self._thread.is_alive()
@@ -73,7 +73,7 @@ class CreatorBrowserController:
             kind, got_token, cookies = self._resp_q.get(timeout=timeout_ms / 1000.0)
             if kind == "get_cookies" and got_token == token:
                 return cookies
-        except Exception:
+        except Exception:  # 跨线程通信
             return None
         return None
 
@@ -84,7 +84,7 @@ class CreatorBrowserController:
             kind, got_token, result = self._resp_q.get(timeout=timeout_ms / 1000.0)
             if kind == "evaluate" and got_token == token:
                 return result
-        except Exception:
+        except Exception:  # 跨线程通信
             return None
         return None
 
@@ -129,7 +129,7 @@ class CreatorBrowserController:
 
         try:
             from playwright.sync_api import sync_playwright
-        except Exception as e:
+        except Exception as e:  # 外部依赖导入
             self._set_state(status="启动失败：缺少 Playwright 依赖", last_error=str(e))
             return
 
@@ -141,7 +141,7 @@ class CreatorBrowserController:
                     self.user_data_dir,
                     headless=self.headless,
                     args=["--disable-blink-features=AutomationControlled"],
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",  # noqa: E501
                     locale="zh-CN",
                     viewport={"width": 1400, "height": 900},
                 )
@@ -149,26 +149,18 @@ class CreatorBrowserController:
                 self._page = pages[0] if pages else self._context.new_page()
 
                 def on_close(_):
-                    try:
+                    with contextlib.suppress(Exception):
                         self._set_state(status="浏览器窗口已关闭")
-                    except Exception:
-                        pass
-                    try:
+                    with contextlib.suppress(Exception):
                         self._stop_event.set()
-                    except Exception:
-                        pass
 
                 def on_request(req):
-                    try:
+                    with contextlib.suppress(Exception):
                         self._maybe_update_from_text(req.url)
-                    except Exception:
-                        pass
 
                 def on_nav(frame):
-                    try:
+                    with contextlib.suppress(Exception):
                         self._maybe_update_from_text(frame.url)
-                    except Exception:
-                        pass
 
                 self._page.on("request", on_request)
                 self._page.on("framenavigated", on_nav)
@@ -177,10 +169,10 @@ class CreatorBrowserController:
 
                 while not self._stop_event.is_set():
                     try:
-                        if self._page and hasattr(self._page, "is_closed") and self._page.is_closed():
+                        if self._page and hasattr(self._page, "is_closed") and self._page.is_closed():  # noqa: E501
                             self._set_state(status="浏览器窗口已关闭")
                             break
-                    except Exception:
+                    except (AttributeError, TypeError):  # 属性访问
                         pass
 
                     try:
@@ -195,9 +187,9 @@ class CreatorBrowserController:
                             url = cmd[1]
                             try:
                                 self._set_state(status=f"打开页面：{url}")
-                                self._page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                                self._page.goto(url, wait_until="domcontentloaded", timeout=45000)  # noqa: E501
                                 self._maybe_update_from_text(self._page.url)
-                            except Exception as e:
+                            except Exception as e:  # Playwright 外部 API 调用
                                 self._set_state(status="打开页面失败", last_error=str(e))
                         if cmd[0] == "category":
                             category = cmd[1]
@@ -205,46 +197,50 @@ class CreatorBrowserController:
                                 self._set_state(status=f"切换分类：{category}")
                                 self._page.evaluate(
                                     """(text) => {
-                                        const nodes = Array.from(document.querySelectorAll('a,button,div,span'));
-                                        const hit = nodes.find(n => (n.textContent || '').trim() === text);
+                                        const nodes = Array.from(
+                                            document.querySelectorAll('a,button,div,span')
+                                        );
+                                        const hit = nodes.find(
+                                            n => (n.textContent || '').trim() === text
+                                        );
                                         if (hit) { hit.click(); return true; }
                                         return false;
                                     }""",
                                     category,
                                 )
-                            except Exception as e:
+                            except Exception as e:  # Playwright 外部 API 调用
                                 self._set_state(status="切换分类失败", last_error=str(e))
                         if cmd[0] == "get_cookies":
                             token = cmd[1]
                             try:
-                                cookies = self._context.cookies() if self._context else []
+                                cookies = self._context.cookies() if self._context else []  # noqa: E501
                                 self._resp_q.put(("get_cookies", token, cookies))
-                            except Exception as e:
+                            except Exception as e:  # Playwright 外部 API 调用
                                 self._resp_q.put(("get_cookies", token, []))
                                 self._set_state(last_error=str(e))
                         if cmd[0] == "evaluate":
                             token = cmd[1]
                             js_code = cmd[2]
                             try:
-                                result = self._page.evaluate(js_code) if self._page else None
+                                result = self._page.evaluate(js_code) if self._page else None  # noqa: E501
                                 self._resp_q.put(("evaluate", token, result))
-                            except Exception as e:
+                            except Exception as e:  # Playwright 外部 API 调用
                                 self._resp_q.put(("evaluate", token, None))
                                 self._set_state(last_error=str(e))
 
 
                     try:
                         self._page.wait_for_timeout(250)
-                    except Exception as e:
+                    except Exception as e:  # Playwright 外部 API 调用
                         self._set_state(status="浏览器窗口已关闭", last_error=str(e))
                         break
 
-        except Exception as e:
+        except Exception as e:  # Playwright 外部 API 调用
             self._set_state(status="启动失败", last_error=str(e))
         finally:
             try:
                 if self._context:
                     self._context.close()
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 pass
             self._set_state(status="已停止")

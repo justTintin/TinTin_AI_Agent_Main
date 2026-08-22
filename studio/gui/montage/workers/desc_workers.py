@@ -1,11 +1,27 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 画面描述生成 Worker：批量镜头描述、本地视觉描述。"""
 import base64
+from typing import Any
+
+from gui.montage.utils_media import extract_keyframes
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
+from utils.llm_output_utils import extract_json_block
 from utils.logger_utils import log
-from gui.montage.utils_media import extract_keyframes
 
+
+def _make_mock_response(json_data: dict[str, Any], text: str = "") -> Any:
+    """构造一个模拟 HTTP 响应的对象，供本地调试使用。"""
+    class _MockResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, Any]:
+            return json_data
+
+        @property
+        def text(self) -> str:
+            return text
+
+    return _MockResponse()
 
 
 class BatchGenerateDescriptionsWorker(BaseWorker):
@@ -22,23 +38,22 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
     def run(self):
         try:
-            import requests
             import json
-            import re
 
-            log.info(f"BatchGenerateDescriptionsWorker - 启动整体镜头描述分析。视频分段数: {len(self.scenes)}")
-            
+            log.info(f"BatchGenerateDescriptionsWorker - 启动整体镜头描述分析。视频分段数: {len(self.scenes)}")  # noqa: E501
+
             desc_dict = {}
             # 有字幕时走文本模型（默认），无字幕时走服务端自选的视觉模型
             is_vision = not self.srt_text.strip()
-            
+
             # 1. Prepare scenes info
             scenes_info = []
             for idx, (scene_start, scene_end) in enumerate(self.scenes, 1):
-                scenes_info.append(f"镜头 {idx} 时间段: {scene_start:.2f}秒 --> {scene_end:.2f}秒")
+                scenes_info.append(f"镜头 {idx} 时间段: {scene_start:.2f}秒 --> {scene_end:.2f}秒")  # noqa: E501
             scenes_text = "\n".join(scenes_info)
-            
+
             # 2. Build system and user prompt
+            user_content_blocks: list[dict[str, Any]] = []
             if self.srt_text.strip():
                 # We have subtitles, perform global text alignment and optimization
                 system_prompt = (
@@ -47,7 +62,7 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                     "请将这段字幕文案合理、自然地拆分、分配并润色到各个对应的时间段镜头中，让每个镜头都有一句通顺、且有营销卖点的画面描述文案。\n"
                     "请注意：\n"
                     "1. 必须为【每个】镜头生成一句画面描述（控制在10-25字之间）。\n"
-                    "2. 如果某些时间段视频里没有说话声音（比如是背景镜头），请根据整体视频卖点设计一句合适的画面描述（如：产品细节特写、模特手持特写、大字提示卖点等）。\n"
+                    "2. 如果某些时间段视频里没有说话声音（比如是背景镜头），请根据整体视频卖点设计一句合适的画面描述（如：产品细节特写、模特手持特写、大字提示卖点等）。\n"  # noqa: E501
                     "3. 保持镜头描述在语意上的连贯性和整体性。\n"
                     "请严格以 JSON 格式输出，不得包含 markdown 标记或任何解释文字，格式如下：\n"
                     "[\n"
@@ -55,16 +70,19 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                     "  {\"index\": 2, \"description\": \"第二镜头的描述文案\"}\n"
                     "]"
                 )
-                user_content = (
-                    f"视频字幕背景内容：\n{self.srt_text}\n\n"
-                    f"镜头时间段列表：\n{scenes_text}\n\n"
-                    "请直接输出分配好后的 JSON 数组。"
-                )
+                user_content_blocks = [{
+                    "type": "text",
+                    "text": (
+                        f"视频字幕背景内容：\n{self.srt_text}\n\n"
+                        f"镜头时间段列表：\n{scenes_text}\n\n"
+                        "请直接输出分配好后的 JSON 数组。"
+                    ),
+                }]
             else:
                 # Silent video, we must generate description from visual keyframes
                 system_prompt = (
                     "你是一个视频画面描述专家。给定一个无声视频被分割出的所有镜头时间段，以及每个镜头的关键帧图片。\n"
-                    "请为每一个镜头设计一句简短的画面描述文案（字数控制在10-25字之间，用以说明该镜头展示了什么内容或概念，如：产品外观展示、运动特写、价格对比等）。\n"
+                    "请为每一个镜头设计一句简短的画面描述文案（字数控制在10-25字之间，用以说明该镜头展示了什么内容或概念，如：产品外观展示、运动特写、价格对比等）。\n"  # noqa: E501
                     "请注意镜头之间的衔接和整体文案的吸引力。\n"
                     "请严格以 JSON 格式输出，不得包含 markdown 标记或任何解释文字，格式如下：\n"
                     "[\n"
@@ -72,88 +90,66 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
                     "  {\"index\": 2, \"description\": \"第二镜头的描述文案\"}\n"
                     "]"
                 )
-                
+
                 # Extract keyframes for all scenes
-                user_content = []
-                user_content.append({"type": "text", "text": "以下是视频中所有分割镜头的关键帧图片：\n\n"})
+                user_content_blocks.append({"type": "text", "text": "以下是视频中所有分割镜头的关键帧图片：\n\n"})
                 for idx, (scene_start, scene_end) in enumerate(self.scenes, 1):
                     clip_path = ""
                     if idx - 1 < len(self.split_video_paths):
                         clip_path = self.split_video_paths[idx - 1]
-                    
+
                     keyframes = []
                     if clip_path:
                         try:
                             keyframes = extract_keyframes(clip_path)
-                            log.info(f"BatchGenerateDescriptionsWorker - 镜头 {idx} 成功抽帧 {len(keyframes)} 张关键图片。")
+                            log.info(f"BatchGenerateDescriptionsWorker - 镜头 {idx} 成功抽帧 {len(keyframes)} 张关键图片。")  # noqa: E501
                         except Exception as e:
                             log.warning(f"提取视频关键帧失败: {clip_path}, 错误: {e}")
-                    
-                    user_content.append({"type": "text", "text": f"镜头 {idx} ({scene_start:.2f}s --> {scene_end:.2f}s):\n"})
+
+                    user_content_blocks.append({"type": "text", "text": f"镜头 {idx} ({scene_start:.2f}s --> {scene_end:.2f}s):\n"})  # noqa: E501
                     if keyframes and is_vision:
                         for kf_b64 in keyframes:
-                            user_content.append({
+                            user_content_blocks.append({
                                 "type": "image_url",
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{kf_b64}"
                                 }
                             })
-                    user_content.append({"type": "text", "text": "\n\n"})
-                
+                    user_content_blocks.append({"type": "text", "text": "\n\n"})
+
             # Call LLM API
-            # 走服务端代理
-            from utils.llm_proxy import llm_chat
-            
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ],
-                "temperature": 0.2
-            }
-            
+            from utils.llm_proxy import llm_chat_messages
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content_blocks}
+            ]
+
             log.info("BatchGenerateDescriptionsWorker - 正在请求大模型 API，以整体方式生成镜头描述。")
-            res_json = llm_chat(payload["messages"][0]["content"], payload["messages"][1]["content"], model=(None if is_vision else ""), timeout=60)
-            class _R:
-                status_code = 200
-            res = _R()
-            res.json = lambda: {"choices": [{"message": {"content": res_json}}]}
+            res_json = llm_chat_messages(messages, model=(None if is_vision else ""), timeout=60)  # noqa: E501
+            res = _make_mock_response({"choices": [{"message": {"content": res_json}}]}, res_json)
             if res.status_code != 200:
-                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")
-            
+                raise RuntimeError(f"LLM API request failed: HTTP {res.status_code}, Response: {res.text}")  # noqa: E501
+
             data = res.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()  # noqa: E501
             log.info(f"BatchGenerateDescriptionsWorker - 大模型返回内容:\n{content}")
-            
-            # Clean markdown codeblocks
-            if content.startswith("```"):
-                lines = content.split("\n")
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                content = "\n".join(lines).strip()
-            
-            # Extract JSON array
-            if not content.startswith("["):
-                start_idx = content.find("[")
-                end_idx = content.rfind("]")
-                if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
-                    content = content[start_idx:end_idx+1]
-            
-            results = json.loads(content)
+
+            results = extract_json_block(content)
+            if not isinstance(results, list):
+                raise RuntimeError(
+                    f"BatchGenerateDescriptionsWorker - LLM 未返回 JSON 数组，原始返回:\n{content[:500]}")  # noqa: E501
             for item in results:
                 desc_dict[int(item["index"])] = item["description"]
-            
+
             # Fill missing indices with default
             for idx in range(1, len(self.scenes) + 1):
                 if idx not in desc_dict:
                     desc_dict[idx] = f"镜头片段 {idx}"
-                    
-            log.info(f"BatchGenerateDescriptionsWorker - 整体文案对齐生成成功，共 {len(desc_dict)} 个镜头描述。")
-            self.finished.emit(json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))
-            
+
+            log.info(f"BatchGenerateDescriptionsWorker - 整体文案对齐生成成功，共 {len(desc_dict)} 个镜头描述。")  # noqa: E501
+            self.finished.emit(json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))  # noqa: E501
+
         except Exception as e:
             log.exception("BatchGenerateDescriptionsWorker 运行发生异常")
             self.error.emit(str(e))
@@ -161,7 +157,8 @@ class BatchGenerateDescriptionsWorker(BaseWorker):
 
 
 class LocalVisionDescWorker(BaseWorker):
-    """调用服务端 /llm/chat/completions 视觉模型（模型名由服务端自动选择）分析每个分割镜头的画面内容，生成画面描述文案；客户端本地仅抽帧。
+    """调用服务端 /llm/chat/completions 视觉模型（模型名由服务端自动选择）
+    分析每个分割镜头的画面内容，生成画面描述文案；客户端本地仅抽帧。
 
     有字幕时：结合字幕文案 + 画面截图，生成带营销感的描述。
     无字幕时：纯画面视觉分析。
@@ -262,10 +259,10 @@ class LocalVisionDescWorker(BaseWorker):
                         [{"role": "system", "content": system_prompt},
                          {"role": "user", "content": [
                              {"type": "text", "text": user_text},
-                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}},
+                             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}},  # noqa: E501
                          ]}],
                         model=None, temperature=0.2, max_tokens=60, timeout=60)
-                    content = text.strip().strip("'\"\"'").split("\n")[0].strip()
+                    content = text.strip().strip("'\"\"'").split("\n")[0].strip()  # noqa: B005  # noqa: E501
                     if content:
                         desc_dict[idx] = content[:30]
                     else:
@@ -276,7 +273,7 @@ class LocalVisionDescWorker(BaseWorker):
 
             log.info(f"LocalVisionDescWorker - 完成 {len(desc_dict)}/{total} 个镜头画面分析"
                      + ("（结合字幕）" if has_subtitles else "（纯画面）"))
-            self.finished.emit(_json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))
+            self.finished.emit(_json.dumps({str(k): v for k, v in desc_dict.items()}, ensure_ascii=False))  # noqa: E501
         except Exception as e:
             log.exception("LocalVisionDescWorker 运行发生异常")
             self.error.emit(str(e))
@@ -289,14 +286,14 @@ class ServerDescribeWorker(BaseWorker):
 
     def __init__(self, clip_paths):
         super().__init__()
-        self.clip_paths = clip_paths
+        self.clip_paths: list = clip_paths
 
     def run(self):
         try:
-            from utils.montage_client import describe_shots
-            log.info(f"ServerDescribeWorker - 请求服务端分析: {len(self.clip_paths)} 个镜头")
+            from utils.montage_client import describe_shots  # type: ignore[attr-defined]
+            log.info(f"ServerDescribeWorker - 请求服务端分析: {len(self.clip_paths)} 个镜头")  # type: ignore[attr-defined]
             result = describe_shots(self.clip_paths)
             self.finished.emit(result)
         except Exception as e:
-            log.exception("ServerDescribeWorker 运行发生异常")
+            log.exception("ServerDescribeWorker 运行发生异常")  # type: ignore[attr-defined]
             self.error.emit(str(e))

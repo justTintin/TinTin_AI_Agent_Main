@@ -1,21 +1,25 @@
-# -*- coding: utf-8 -*-
 """统一视频播放器控件：等比显示 + 播放/暂停/停止 + 进度条 + 时间显示。
 
 全工程复用（模板预览、素材预览、混剪预览等），
 避免各处各写一套 QMediaPlayer/QVideoWidget 导致
 比例不识别、无控制条、行为不一致。
 """
+import contextlib
 import os
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtWidgets import (
-    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel,
-    QDialogButtonBox,
-)
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-
-from utils.gui_icons import icon_button, std_icon, mdi_icon
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.gui_icons import icon_button, mdi_icon, std_icon
 
 
 def _set_button_icon(btn, name):
@@ -128,10 +132,8 @@ class VideoPlayerWidget(QWidget):
 
     def set_volume(self, percent):
         """0-100。"""
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             self._audio.setVolume(max(0.0, min(100.0, float(percent))) / 100.0)
-        except (TypeError, ValueError):
-            pass
 
     def clear_source(self):
         self.stop()
@@ -175,7 +177,7 @@ class VideoPlayerWidget(QWidget):
                 self.lbl_time.setText(f"00:00 / {format_ms(self.player.duration())}")
             elif status == QMediaPlayer.MediaStatus.InvalidMedia:
                 self.lbl_time.setText("无法播放该视频")
-        except Exception:
+        except Exception:  # Qt 外部库
             pass
 
     def _on_error(self, _err, err_str):
@@ -207,6 +209,6 @@ class VideoPreviewDialog(QDialog):
     def set_source(self, path_or_url):
         self.player_widget.set_source(path_or_url)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         self.player_widget.stop()
         super().closeEvent(event)

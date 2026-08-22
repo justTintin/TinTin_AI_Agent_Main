@@ -1,31 +1,40 @@
-# -*- coding: utf-8 -*-
 import os
-import sys
 import shutil
-import subprocess
-import json
+from typing import Any
 
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QWidget, QGroupBox, QScrollArea, QListView,
-                               QSpinBox, QDialog)
-from PySide6.QtCore import Signal, QThread, Qt, QUrl
-from utils.base_worker import BaseWorker
-from utils.gui_icons import mdi_button, mdi_icon
-from utils.logger_utils import log
-from config.paths import PROJECT_ROOT, OUTPUTS_DIR
+from config.paths import OUTPUTS_DIR
+
+# Import workers and helper dialogs/widgets from video_montage_page to avoid duplicate definitions  # noqa: E501
+from gui.video_montage_page import DoubleClickLineEdit, TextEditDialog, VoiceCloneWorker, find_ffmpeg
 from gui.voice_samples_page import load_voice_samples
-from utils import voxcpm_client
-
-# Import workers and helper dialogs/widgets from video_montage_page to avoid duplicate definitions
-from gui.video_montage_page import (
-    VoiceCloneWorker,
-    DoubleClickLineEdit,
-    TextEditDialog,
-    find_ffmpeg
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListView,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-
+from utils import voxcpm_client
+from utils.base_worker import BaseWorker
+from utils.ffmpeg_utils import CREATE_NO_WINDOW, run
 from utils.file_dialog_utils import pick_directory, pick_file, pick_save_file
+from utils.gui_icons import mdi_button
+from utils.logger_utils import log
+
+
 class PunctuationLLMWorker(BaseWorker):
     finished = Signal(str)
 
@@ -37,12 +46,12 @@ class PunctuationLLMWorker(BaseWorker):
     def run(self):
         try:
             from utils.llm_proxy import llm_chat
-            system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"
-            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)
+            system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"  # noqa: E501
+            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)  # noqa: E501
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
-        except Exception as e:
+        except Exception as e:  # LLM API 调用
             self.error.emit(str(e))
 
 class SentenceSplitterLLMWorker(BaseWorker):
@@ -59,19 +68,19 @@ class SentenceSplitterLLMWorker(BaseWorker):
             system_prompt = (
                 "你是一个短视频文案拆句专家。请把输入的文本段落拆分成适合逐句进行克隆配音合成的句子列表。\n"
                 "规则：\n"
-                "1. 第一原则是【句意完整】与【长度合理】。每一行必须是一个语义完整、能独立朗读的句子，长度一般在 10~40 字之间为宜。\n"
+                "1. 第一原则是【句意完整】与【长度合理】。每一行必须是一个语义完整、能独立朗读的句子，长度一般在 10~40 字之间为宜。\n"  # noqa: E501
                 "2. 主要依据句号（。）、感叹号（！）、问号（？）以及换行进行拆分。\n"
-                "3. 【严禁拆得过碎】：绝对不要把一个连贯句子的半句、短促词、或仅 5~8 个字的残片单独拆成一行。宁可让某一行偏长一点，也不要为了多分行而把句子拆碎。\n"
-                "4. 只有当一个句子【确实过长】（明显超过 50 字、一口气无法顺畅朗读）时，才允许在自然的逗号、分号等停顿处切分；30 字并不是硬性上限，短一点或长一点都没关系，关键看是否通顺完整。\n"
+                "3. 【严禁拆得过碎】：绝对不要把一个连贯句子的半句、短促词、或仅 5~8 个字的残片单独拆成一行。宁可让某一行偏长一点，也不要为了多分行而把句子拆碎。\n"  # noqa: E501
+                "4. 只有当一个句子【确实过长】（明显超过 50 字、一口气无法顺畅朗读）时，才允许在自然的逗号、分号等停顿处切分；30 字并不是硬性上限，短一点或长一点都没关系，关键看是否通顺完整。\n"  # noqa: E501
                 "5. 输出格式：每行一句话，每行行首不要自己添加行号或序号（不要写 1. 2. 3. 这种）。\n"
-                "6. 【绝对忠实原文】：必须严格保持原文的每一个字，绝对不能漏字、改字、删字。特别强调——原文里【本来就有】的编号、序号、序数词（如“（一）”“（二）”“第一条”“其一”等）属于正文内容，必须原样保留在对应句子中，绝不允许删除或简化。\n"
+                "6. 【绝对忠实原文】：必须严格保持原文的每一个字，绝对不能漏字、改字、删字。特别强调——原文里【本来就有】的编号、序号、序数词（如“（一）”“（二）”“第一条”“其一”等）属于正文内容，必须原样保留在对应句子中，绝不允许删除或简化。\n"  # noqa: E501
                 "7. 只做合理的断句换行，不要对原文做任何总结、改写或润色。"
             )
-            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=120)
+            content = llm_chat(system_prompt, self.text, model=self.model, temperature=0.2, timeout=120)  # noqa: E501
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
-        except Exception as e:
+        except Exception as e:  # LLM API 调用
             self.error.emit(str(e))
 
 
@@ -91,29 +100,29 @@ class RemoteAsrWorker(BaseWorker):
 
     def do_work(self):
         try:
-            from utils.asr_client import transcribe_remote, read_asr_url
+            from utils.asr_client import read_asr_url, transcribe_remote
             asr_url = read_asr_url()
             segments = transcribe_remote(
                 self.audio_path, asr_url,
                 language=self.language or "",
             )
             self.finished.emit(segments)
-        except Exception as e:
+        except Exception as e:  # ASR 远程 API 调用
             self.error.emit(str(e))
 
-from gui.base_page import BasePage
-from gui.searchable_combo import SearchableComboBox
+from gui.base_page import BasePage  # noqa: E402
+from gui.searchable_combo import SearchableComboBox  # noqa: E402
 
 
 class VoiceClonePage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
-        
+
         # State variables
         self.voice_video_paths = []
         self.generated_voice_paths = {}  # maps video_path -> voice_wav_path
         self.dubbed_video_paths = {}     # maps video_path -> dubbed_video_path
-        
+
         self.row_edits = {}
         self.voice_worker = None
         self.dub_worker = None
@@ -138,7 +147,7 @@ class VoiceClonePage(BasePage):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        
+
         scroll_content = QWidget()
         scroll_content.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_content)
@@ -157,18 +166,18 @@ class VoiceClonePage(BasePage):
         lbl_ref_sample = QLabel("参考声音样本:")
         lbl_ref_sample.setFixedWidth(140)
         row_ref_audio.addWidget(lbl_ref_sample)
-        
+
         self.ref_audio_combo = SearchableComboBox(placeholder="输入声音名称搜索…")
         self.ref_audio_combo.setView(QListView())
         self.ref_audio_combo.setMinimumWidth(300)
-        self.ref_audio_combo.currentIndexChanged.connect(self._on_ref_audio_combo_changed)
+        self.ref_audio_combo.currentIndexChanged.connect(self._on_ref_audio_combo_changed)  # noqa: E501
         row_ref_audio.addWidget(self.ref_audio_combo)
-        
+
         btn_sel_ref = mdi_button("选择本地人声", "folder")
         btn_sel_ref.setObjectName("secondary_button")
         btn_sel_ref.clicked.connect(self._select_ref_audio)
         row_ref_audio.addWidget(btn_sel_ref)
-        
+
         self.btn_play_ref = mdi_button("", "volume")
         self.btn_play_ref.setToolTip("播放人声样本")
         self.btn_play_ref.setStyleSheet("padding: 0px; font-size: 14px;")
@@ -183,7 +192,7 @@ class VoiceClonePage(BasePage):
         lbl_ref_text = QLabel("参考样本文案 (可选):")
         lbl_ref_text.setFixedWidth(140)
         row_ref_text.addWidget(lbl_ref_text)
-        
+
         self.ref_text_input = QTextEdit()
         self.ref_text_input.setPlaceholderText("可选，填入参考声音样本对应的文字，支持换行...")
         self.ref_text_input.setFixedHeight(100)
@@ -207,7 +216,7 @@ class VoiceClonePage(BasePage):
         v_btn_layout = QVBoxLayout()
         v_btn_layout.setSpacing(6)
         v_btn_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.btn_transcribe_ref = mdi_button("识别参考音频文本", "edit")
         self.btn_transcribe_ref.setObjectName("secondary_button")
         self.btn_transcribe_ref.setFixedHeight(100)
@@ -223,7 +232,7 @@ class VoiceClonePage(BasePage):
         lbl_dir = QLabel(" 语音输出目录:")
         lbl_dir.setFixedWidth(140)
         row_vid_dir.addWidget(lbl_dir)
-        
+
         self.voice_video_dir_input = QLineEdit()
         self.voice_video_dir_input.setPlaceholderText("选择保存克隆生成语音的目录...")
         default_out_dir = os.path.abspath(os.path.join(OUTPUTS_DIR, "voice_clone"))
@@ -231,7 +240,7 @@ class VoiceClonePage(BasePage):
         self.voice_video_dir_input.setText(default_out_dir)
         self.voice_video_dir_input.textChanged.connect(self._on_voice_video_dir_changed)
         row_vid_dir.addWidget(self.voice_video_dir_input)
-        
+
         btn_sel_vid_dir = mdi_button("选择输出目录", "folder")
         btn_sel_vid_dir.setObjectName("secondary_button")
         btn_sel_vid_dir.clicked.connect(self._select_voice_video_dir)
@@ -248,7 +257,7 @@ class VoiceClonePage(BasePage):
         lbl_target_text = QLabel("待克隆整体文案:")
         lbl_target_text.setFixedWidth(140)
         row_target_text.addWidget(lbl_target_text)
-        
+
         self.clone_text_input = QTextEdit()
         self.clone_text_input.setPlaceholderText("填入需要整体克隆的全部视频/音频文案内容，支持换行...")
         self.clone_text_input.setFixedHeight(120)
@@ -274,20 +283,20 @@ class VoiceClonePage(BasePage):
         v_btn_clone_layout = QVBoxLayout()
         v_btn_clone_layout.setSpacing(6)
         v_btn_clone_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.btn_clone_whole = mdi_button("整体克隆人声", "voice")
         self.btn_clone_whole.setObjectName("primary_button")
         self.btn_clone_whole.setFixedHeight(40)
         self.btn_clone_whole.clicked.connect(self._clone_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_clone_whole)
-        
+
         self.btn_play_whole = mdi_button("播放克隆声音", "volume")
         self.btn_play_whole.setObjectName("secondary_button")
         self.btn_play_whole.setFixedHeight(40)
         self.btn_play_whole.setEnabled(False)
         self.btn_play_whole.clicked.connect(self._play_whole_audio)
         v_btn_clone_layout.addWidget(self.btn_play_whole)
-        
+
         row_target_text.addLayout(v_btn_clone_layout)
         card_layout.addLayout(row_target_text)
 
@@ -295,7 +304,7 @@ class VoiceClonePage(BasePage):
         row_table_header = QHBoxLayout()
         row_table_header.addWidget(QLabel(" 待合成人声音频列表与文案配置:"))
         row_table_header.addStretch()
-        
+
         self.btn_split_text = mdi_button("一键拆分填充", "clipboard")
         self.btn_split_text.setObjectName("secondary_button")
         self.btn_split_text.setStyleSheet("padding: 4px 10px; font-size: 12px;")
@@ -327,19 +336,19 @@ class VoiceClonePage(BasePage):
         btn_clear_table.setStyleSheet("padding: 4px 10px; font-size: 12px;")
         btn_clear_table.clicked.connect(self._clear_table)
         row_table_header.addWidget(btn_clear_table)
-        
+
         card_layout.addLayout(row_table_header)
 
         self.voice_table = QTableWidget()
         self.voice_table.setColumnCount(5)
-        self.voice_table.setHorizontalHeaderLabels(["序号", "生成的音频文件名", "配音文案 (双击输入，回车保存)", "克隆状态", "操作"])
-        self.voice_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.voice_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        self.voice_table.setHorizontalHeaderLabels(["序号", "生成的音频文件名", "配音文案 (双击输入，回车保存)", "克隆状态", "操作"])  # noqa: E501
+        self.voice_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # noqa: E501
+        self.voice_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)  # noqa: E501
         self.voice_table.setColumnWidth(1, 150)
         self.voice_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.voice_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+        self.voice_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)  # noqa: E501
         self.voice_table.setColumnWidth(3, 110)
-        self.voice_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
+        self.voice_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)  # noqa: E501
         self.voice_table.setColumnWidth(4, 120)
         self.voice_table.verticalHeader().setDefaultSectionSize(42)
         self.voice_table.verticalHeader().setMinimumSectionSize(35)
@@ -351,7 +360,7 @@ class VoiceClonePage(BasePage):
         row_subtitle_opt = QHBoxLayout()
         self.chk_add_subtitles = QCheckBox("在配音视频中同时添加/烧录字幕 (字号14px 微软雅黑 白色 50%透明背景)")
         self.chk_add_subtitles.setChecked(True)
-        self.chk_add_subtitles.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: bold;")
+        self.chk_add_subtitles.setStyleSheet("color: #e5e7eb; font-size: 13px; font-weight: bold;")  # noqa: E501
         self.chk_add_subtitles.setVisible(False)
         row_subtitle_opt.addWidget(self.chk_add_subtitles)
         card_layout.addLayout(row_subtitle_opt)
@@ -362,14 +371,14 @@ class VoiceClonePage(BasePage):
         self.btn_synthesize_split.setObjectName("action_button")
         self.btn_synthesize_split.setFixedHeight(35)
         self.btn_synthesize_split.setToolTip("按表格每一行文案，逐行单独克隆生成各自的声音文件。")
-        self.btn_synthesize_split.clicked.connect(lambda: self._run_synthesize(merge=False))
+        self.btn_synthesize_split.clicked.connect(lambda: self._run_synthesize(merge=False))  # noqa: E501
         row_actions.addWidget(self.btn_synthesize_split, 1)
 
         self.btn_synthesize_merge = mdi_button("合成克隆声音", "voice")
         self.btn_synthesize_merge.setObjectName("primary_button")
         self.btn_synthesize_merge.setFixedHeight(35)
-        self.btn_synthesize_merge.setToolTip("逐行克隆后，将所有声音合并为一个整体声音文件（voice_merged.wav）。")
-        self.btn_synthesize_merge.clicked.connect(lambda: self._run_synthesize(merge=True))
+        self.btn_synthesize_merge.setToolTip("逐行克隆后，将所有声音合并为一个整体声音文件（voice_merged.wav）。")  # noqa: E501
+        self.btn_synthesize_merge.clicked.connect(lambda: self._run_synthesize(merge=True))  # noqa: E501
         row_actions.addWidget(self.btn_synthesize_merge, 1)
         card_layout.addLayout(row_actions)
 
@@ -395,7 +404,7 @@ class VoiceClonePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         bottom_layout.addWidget(self.progress_bar)
-        
+
         main_layout.addWidget(bottom_status, 0)
 
         # Add a default row on startup
@@ -493,22 +502,22 @@ class VoiceClonePage(BasePage):
         if not selected_ranges:
             QMessageBox.warning(self.parent_widget, "提示", "请先在列表中选择要删除的行！")
             return
-        
+
         rows_to_delete = set()
         for r in selected_ranges:
             for i in range(r.topRow(), r.bottomRow() + 1):
                 rows_to_delete.add(i)
-                
+
         for i in sorted(rows_to_delete, reverse=True):
             self.voice_table.removeRow(i)
-            
+
         # Re-index remaining rows
         for idx in range(self.voice_table.rowCount()):
             item_idx = self.voice_table.item(idx, 0)
             if item_idx:
                 item_idx.setText(str(idx + 1))
             self._update_row_filename(idx)
-                
+
         new_row_edits = {}
         for idx in range(self.voice_table.rowCount()):
             widget = self.voice_table.cellWidget(idx, 2)
@@ -529,12 +538,12 @@ class VoiceClonePage(BasePage):
         item_idx.setFlags(item_idx.flags() & ~Qt.ItemIsEditable)
         item_idx.setTextAlignment(Qt.AlignCenter)
         self.voice_table.setItem(row_idx, 0, item_idx)
-        
+
         # 1: File name
         item_file = QTableWidgetItem("")
         item_file.setFlags(item_file.flags() & ~Qt.ItemIsEditable)
         self.voice_table.setItem(row_idx, 1, item_file)
-        
+
         # 2: Script text
         edit = DoubleClickLineEdit("")
         edit.setPlaceholderText("双击输入文案，留空则不进行克隆")
@@ -553,49 +562,49 @@ class VoiceClonePage(BasePage):
             }
         """
         edit.setStyleSheet(style)
-        edit.doubleClicked.connect(lambda w=edit: self._on_edit_double_clicked_widget(w))
-        edit.textChanged.connect(lambda text, w=edit: self._on_row_text_changed_widget(w, text))
+        edit.doubleClicked.connect(lambda w=edit: self._on_edit_double_clicked_widget(w))  # noqa: E501
+        edit.textChanged.connect(lambda text, w=edit: self._on_row_text_changed_widget(w, text))  # noqa: E501
         self.row_edits[row_idx] = edit
         self.voice_table.setCellWidget(row_idx, 2, edit)
-        
+
         # Now update row filename based on text
         self._update_row_filename(row_idx)
-        
+
         # 3: Cloned voice status
         lbl_status = QLabel("未生成")
         lbl_status.setAlignment(Qt.AlignCenter)
         lbl_status.setStyleSheet("color: #95a5a6; font-size: 12px; padding: 4px;")
         self.voice_table.setCellWidget(row_idx, 3, lbl_status)
-        
+
         # 4: Action row
         widget = QWidget()
         h_layout = QHBoxLayout(widget)
         h_layout.setContentsMargins(4, 2, 4, 2)
         h_layout.setSpacing(4)
-        
+
         btn_play = mdi_button("", "volume")
         btn_play.setToolTip("播放克隆的声音")
         btn_play.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_play.setFixedWidth(30)
         btn_play.setEnabled(False)
-        btn_play.clicked.connect(lambda checked=False, b=btn_play: self._on_btn_play_clicked_by_btn(b))
+        btn_play.clicked.connect(lambda checked=False, b=btn_play: self._on_btn_play_clicked_by_btn(b))  # noqa: E501
         h_layout.addWidget(btn_play)
-        
+
         btn_regen = mdi_button("", "refresh")
         btn_regen.setToolTip("仅重新生成该声音")
         btn_regen.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_regen.setFixedWidth(30)
-        btn_regen.clicked.connect(lambda checked=False, b=btn_regen: self._on_btn_regen_clicked_by_btn(b))
+        btn_regen.clicked.connect(lambda checked=False, b=btn_regen: self._on_btn_regen_clicked_by_btn(b))  # noqa: E501
         h_layout.addWidget(btn_regen)
-        
+
         btn_export = mdi_button("", "save")
         btn_export.setToolTip("导出该克隆声音")
         btn_export.setStyleSheet("padding: 0px; font-size: 12px;")
         btn_export.setFixedWidth(30)
         btn_export.setEnabled(False)
-        btn_export.clicked.connect(lambda checked=False, b=btn_export: self._on_btn_export_clicked_by_btn(b))
+        btn_export.clicked.connect(lambda checked=False, b=btn_export: self._on_btn_export_clicked_by_btn(b))  # noqa: E501
         h_layout.addWidget(btn_export)
-        
+
         self.voice_table.setCellWidget(row_idx, 4, widget)
 
     def _adjust_table_height(self):
@@ -603,36 +612,35 @@ class VoiceClonePage(BasePage):
 
     def _populate_ref_audio_samples(self):
         self.ref_audio_combo.clear()
-        
+
 
         samples = load_voice_samples()
-        
+
         # Sort by name
         samples.sort(key=lambda x: x.get("name", "").lower())
-        
+
         for s in samples:
             self.ref_audio_combo.addItem(s.get("name"), s.get("path"))
-            
+
         if not samples:
             self.ref_audio_combo.addItem("失败： 未找到预设声音样本", "")
-            
-        
+
+
         # Set default selection and fill its reference text.
         # SearchableComboBox.addItem 会以 blockSignals 选中第 0 项，
         # 因此这里需手动触发一次以填充默认样本的参考文案。
         if self.ref_audio_combo.count() > 0:
             self.ref_audio_combo.setCurrentIndex(0)
             self._on_ref_audio_combo_changed(0)
-            
+
     def _on_ref_audio_combo_changed(self, index):
-        data = self.ref_audio_combo.currentData()
         # Enable play and transcribe button if we have a valid path
         path = self.get_ref_audio_path()
         has_valid_path = bool(path and os.path.exists(path))
         self.btn_play_ref.setEnabled(has_valid_path)
         self.btn_transcribe_ref.setEnabled(has_valid_path)
-        
-        # Auto-fill reference script if it matches one of our saved samples, otherwise clear/refresh it
+
+        # Auto-fill reference script if it matches one of our saved samples, otherwise clear/refresh it  # noqa: E501
         self.ref_text_input.clear()
         if path:
             samples = load_voice_samples()
@@ -659,13 +667,13 @@ class VoiceClonePage(BasePage):
     def _set_custom_ref_audio(self, path):
         path = os.path.abspath(path)
         name = os.path.basename(path)
-        
+
         # Check if it is already in the combo to avoid duplicates
         for idx in range(self.ref_audio_combo.count()):
             if self.ref_audio_combo.itemData(idx) == path:
                 self.ref_audio_combo.setCurrentIndex(idx)
                 return
-        
+
         # Insert at index 0 and select it
         self.ref_audio_combo.insertItem(0, f" 本地: {name}", path)
         self.ref_audio_combo.setCurrentIndex(0)
@@ -685,7 +693,7 @@ class VoiceClonePage(BasePage):
             QMessageBox.warning(self.parent_widget, "未选择声音样本", "请先选择参考声音样本 (wav/mp3)！")
             return
         if not os.path.exists(ref_audio):
-            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在：\n{ref_audio}")
+            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在：\n{ref_audio}")  # noqa: E501
             return
 
         self.btn_transcribe_ref.setEnabled(False)
@@ -753,7 +761,7 @@ class VoiceClonePage(BasePage):
         try:
             max_chars = self._estimate_max_chars()
             chars_info = f"\n\n 当前样本推算的单行字数上限：约 {max_chars} 字（安全时长 15 秒）。"
-        except Exception:
+        except (ValueError, TypeError, ZeroDivisionError):
             chars_info = ""
 
         QMessageBox.information(
@@ -809,23 +817,23 @@ class VoiceClonePage(BasePage):
                     self.split_worker = SentenceSplitterLLMWorker(llm_model, text)
 
                     def on_split_done(result_text):
-                        lines = [line.strip() for line in result_text.split('\n') if line.strip()]
+                        lines = [line.strip() for line in result_text.split('\n') if line.strip()]  # noqa: E501
                         # 校验 LLM 是否漏字（如误删编号），漏字则退回本地规则拆分
                         fallback = self._validate_llm_split(text, lines)
                         if fallback is not None:
                             lines = fallback
                         lines = self._merge_short_fragments(lines)
-                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
+                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)  # noqa: E501
                         self.stage_label.setText("完成： 整体克隆语音智能拆分并裁切填充完成！")
-                        QMessageBox.information(self.parent_widget, "提示", f"成功通过 AI 智能拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
+                        QMessageBox.information(self.parent_widget, "提示", f"成功通过 AI 智能拆分大句，并裁切整段音频，填充 {len(lines)} 行。")  # noqa: E501
 
                     def on_split_err(err):
                         log.warning(f"AI 智能拆分失败: {err}，退回本地分句。")
                         lines = self._split_text_into_sentences(text)
                         lines = self._merge_short_fragments(lines)
-                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
+                        self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)  # noqa: E501
                         self.stage_label.setText("完成： 整体克隆语音本地拆分并裁切填充完成！")
-                        QMessageBox.information(self.parent_widget, "提示", f"AI 拆分失败，已通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
+                        QMessageBox.information(self.parent_widget, "提示", f"AI 拆分失败，已通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")  # noqa: E501
 
                     self.split_worker.finished.connect(on_split_done)
                     self.split_worker.error.connect(on_split_err)
@@ -833,15 +841,15 @@ class VoiceClonePage(BasePage):
                 else:
                     lines = self._split_text_into_sentences(text)
                     lines = self._merge_short_fragments(lines)
-                    self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)
+                    self._process_alignment_and_populate(lines, segments, whole_audio_path, out_voice_dir)  # noqa: E501
                     self.stage_label.setText("完成： 整体克隆语音本地拆分并裁切填充完成！")
-                    QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")
+                    QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地规则拆分大句，并裁切整段音频，填充 {len(lines)} 行。")  # noqa: E501
 
             def on_align_error(err):
                 self.btn_split_text.setEnabled(True)
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("失败： 识别音频时间戳失败")
-                QMessageBox.warning(self.parent_widget, "识别失败", f"分析整段音频失败，已退回纯文本拆分模式。\n错误：{err}")
+                QMessageBox.warning(self.parent_widget, "识别失败", f"分析整段音频失败，已退回纯文本拆分模式。\n错误：{err}")  # noqa: E501
                 self._split_and_populate_text_only(text)
 
             self.align_worker.finished.connect(on_align_finished)
@@ -897,9 +905,9 @@ class VoiceClonePage(BasePage):
                     max_chars = int(self._SAFE_DUR_SEC * chars_per_sec)
                     # 兜底保护：语速异常时也别太小或太大
                     max_chars = max(10, min(max_chars, 120))
-                    log.info(f"[拆分合并] 样本语速 {chars_per_sec:.2f} 字/秒 ({n}字/{dur:.1f}秒)，单行上限 {max_chars} 字")
+                    log.info(f"[拆分合并] 样本语速 {chars_per_sec:.2f} 字/秒 ({n}字/{dur:.1f}秒)，单行上限 {max_chars} 字")  # noqa: E501
                     return max_chars
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError) as e:
             log.warning(f"[拆分合并] 推算样本语速失败，用兜底 {self._FALLBACK_CHARS_PER_SEC} 字/秒: {e}")
         fallback = int(self._SAFE_DUR_SEC * self._FALLBACK_CHARS_PER_SEC)  # 60 字
         return fallback
@@ -921,23 +929,23 @@ class VoiceClonePage(BasePage):
         min_len = max(8, max_chars // 4)
 
         # 第1遍：贪心向后合并（相邻两行合起来不超 max_chars 就并）
-        merged = []
+        merged: list[str] = []
         for s in lines:
             s = s.strip()
             if not s:
                 continue
-            if merged and self._count_chars(merged[-1]) + self._count_chars(s) <= max_chars:
+            if merged and self._count_chars(merged[-1]) + self._count_chars(s) <= max_chars:  # noqa: E501
                 merged[-1] = merged[-1] + " " + s
             else:
                 merged.append(s)
 
         # 第2遍：清理仍过短的残片（并入相邻行）
         if len(merged) >= 2:
-            cleaned = []
+            cleaned: list[str] = []
             for s in merged:
                 if cleaned and self._count_chars(s) < min_len:
                     # 当前行过短：优先并入前句；若前句已满则并入后句（下一轮处理）
-                    if self._count_chars(cleaned[-1]) + self._count_chars(s) <= max_chars:
+                    if self._count_chars(cleaned[-1]) + self._count_chars(s) <= max_chars:  # noqa: E501
                         cleaned[-1] = cleaned[-1] + " " + s
                     else:
                         cleaned.append(s)
@@ -958,7 +966,7 @@ class VoiceClonePage(BasePage):
         判定为漏字，返回本地规则拆分结果作为兜底；否则返回 None 表示校验通过。
         """
         orig_count = self._count_chars(original_text)
-        llm_count = sum(self._count_chars(l) for l in llm_lines)
+        llm_count = sum(self._count_chars(line) for line in llm_lines)
         # 阈值 99%：严格防漏字。_count_chars 只数中文+字母数字，已排除空格和标点，
         # 所以标点/空白差异不会误判；只要 LLM 输出的实质文字少于原文 99% 即判定漏字，退回本地拆分。
         if orig_count > 0 and llm_count < orig_count * 0.99:
@@ -993,19 +1001,20 @@ class VoiceClonePage(BasePage):
                 from utils.wav_player import play_wav
                 play_wav(wav_path)
                 return
-            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
             if not self._media_player:
                 self._media_player = QMediaPlayer()
                 self._audio_output = QAudioOutput()
                 self._media_player.setAudioOutput(self._audio_output)
             if self._media_player.playbackState() == QMediaPlayer.PlayingState:
                 self._media_player.stop()
-                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):
+                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):  # noqa: E501
                     return
             self._media_player.setSource(QUrl.fromLocalFile(wav_path))
-            self._audio_output.setVolume(1.0)
+            if self._audio_output is not None:
+                self._audio_output.setVolume(1.0)
             self._media_player.play()
-        except Exception as e:
+        except Exception as e:  # Qt 外部库
             log.error(f"播放音频失败: {e}")
 
 
@@ -1013,7 +1022,7 @@ class VoiceClonePage(BasePage):
     def _on_edit_double_clicked(self, row_idx):
         edit = self.row_edits.get(row_idx)
         if edit:
-            dialog = TextEditDialog(f"编辑第 {row_idx + 1} 行配音文案", edit.text(), self.parent_widget)
+            dialog = TextEditDialog(f"编辑第 {row_idx + 1} 行配音文案", edit.text(), self.parent_widget)  # noqa: E501
             if dialog.exec() == QDialog.Accepted:
                 new_text = dialog.get_text()
                 edit.setText(new_text)
@@ -1021,7 +1030,7 @@ class VoiceClonePage(BasePage):
     def _on_edit_double_clicked_widget(self, edit):
         row_idx = self._get_widget_row(edit)
         if row_idx != -1:
-            dialog = TextEditDialog(f"编辑第 {row_idx + 1} 行配音文案", edit.text(), self.parent_widget)
+            dialog = TextEditDialog(f"编辑第 {row_idx + 1} 行配音文案", edit.text(), self.parent_widget)  # noqa: E501
             if dialog.exec() == QDialog.Accepted:
                 new_text = dialog.get_text()
                 edit.setText(new_text)
@@ -1079,7 +1088,13 @@ class VoiceClonePage(BasePage):
                 ratio = value / 100.0
                 style = f"""
                     QLineEdit {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(46, 204, 113, 0.35), stop:{ratio} rgba(46, 204, 113, 0.35), stop:{ratio} rgba(255, 255, 255, 0.05), stop:1 rgba(255, 255, 255, 0.05));
+                        background: qlineargradient(
+                            x1:0, y1:0, x2:1, y2:0,
+                            stop:0 rgba(46, 204, 113, 0.35),
+                            stop:{ratio} rgba(46, 204, 113, 0.35),
+                            stop:{ratio} rgba(255, 255, 255, 0.05),
+                            stop:1 rgba(255, 255, 255, 0.05)
+                        );
                         border: 1px solid rgba(255, 255, 255, 0.15);
                         border-radius: 4px;
                         color: #ecf0f1;
@@ -1098,7 +1113,7 @@ class VoiceClonePage(BasePage):
         wav_path = self.generated_voice_paths.get(row_idx, "")
         if not wav_path or not os.path.exists(wav_path):
             return
-        
+
         save_path, _ = pick_save_file(
             self.parent_widget,
             "导出克隆声音",
@@ -1108,8 +1123,8 @@ class VoiceClonePage(BasePage):
         if save_path:
             try:
                 shutil.copy2(wav_path, save_path)
-                QMessageBox.information(self.parent_widget, "导出成功", f"人声音频成功导出至：\n{save_path}")
-            except Exception as e:
+                QMessageBox.information(self.parent_widget, "导出成功", f"人声音频成功导出至：\n{save_path}")  # noqa: E501
+            except OSError as e:
                 QMessageBox.warning(self.parent_widget, "导出失败", f"无法导出文件: {e}")
 
     def _on_btn_regen_clicked_by_row(self, row_idx):
@@ -1118,20 +1133,20 @@ class VoiceClonePage(BasePage):
         if not text:
             QMessageBox.warning(self.parent_widget, "配音文案为空", "该行文案为空，无法生成克隆人声。")
             return
-        
+
         self._start_single_synthesize(row_idx, text)
 
     def _start_single_synthesize(self, row_idx, text):
         if self.voice_worker and self.voice_worker.isRunning():
             QMessageBox.warning(self.parent_widget, "合成中", "当前有克隆人声合成任务正在运行，请等待其完成。")
             return
-            
+
         ref_audio = self.get_ref_audio_path()
         if not ref_audio:
             QMessageBox.warning(self.parent_widget, "未选择声音样本", "请先选择参考声音样本！")
             return
         if not os.path.exists(ref_audio):
-            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")
+            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")  # noqa: E501
             return
 
         out_voice_dir = self.voice_video_dir_input.text().strip()
@@ -1159,7 +1174,7 @@ class VoiceClonePage(BasePage):
         filename = item_file.text() if item_file else f"voice_{row_idx + 1}.wav"
         out_wav_path = os.path.abspath(os.path.join(out_voice_dir, filename))
         tasks = [(row_idx, text, f"row_{row_idx}", out_wav_path)]
-        
+
         self.voice_worker = VoiceCloneWorker(
             tasks=tasks,
             voice_ref_audio=ref_audio,
@@ -1190,10 +1205,10 @@ class VoiceClonePage(BasePage):
 
         ref_audio = self.get_ref_audio_path()
         if not ref_audio:
-            QMessageBox.warning(self.parent_widget, "未上传声音样本", "请先上传/选择参考声音样本 (wav/mp3)！")
+            QMessageBox.warning(self.parent_widget, "未上传声音样本", "请先上传/选择参考声音样本 (wav/mp3)！")  # noqa: E501
             return
         if not os.path.exists(ref_audio):
-            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")
+            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")  # noqa: E501
             return
 
         out_voice_dir = self.voice_video_dir_input.text().strip()
@@ -1209,11 +1224,11 @@ class VoiceClonePage(BasePage):
                 if text:
                     item_file = self.voice_table.item(i, 1)
                     filename = item_file.text() if item_file else f"voice_{i+1}.wav"
-                    out_wav_path = os.path.abspath(os.path.join(out_voice_dir, filename))
+                    out_wav_path = os.path.abspath(os.path.join(out_voice_dir, filename))  # noqa: E501
                     tasks.append((i, text, f"row_{i}", out_wav_path))
 
         if not tasks:
-            QMessageBox.warning(self.parent_widget, "文案为空", "没有检测到任何配文。请在列表的“配音文案”栏输入内容。")
+            QMessageBox.warning(self.parent_widget, "文案为空", "没有检测到任何配文。请在列表的“配音文案”栏输入内容。")  # noqa: E501
             return
 
         for i in range(self.voice_table.rowCount()):
@@ -1268,14 +1283,14 @@ class VoiceClonePage(BasePage):
                 lbl_status = self.voice_table.cellWidget(row_idx, 3)
                 if isinstance(lbl_status, QLabel):
                     lbl_status.setText(os.path.basename(wav))
-                    lbl_status.setStyleSheet("color: #2ecc71; font-size: 12px; padding: 4px;")
+                    lbl_status.setStyleSheet("color: #2ecc71; font-size: 12px; padding: 4px;")  # noqa: E501
 
                 act_widget = self.voice_table.cellWidget(row_idx, 4)
                 if act_widget:
                     for btn in act_widget.findChildren(QPushButton):
                         if btn.text() in ("", ""):
                             btn.setEnabled(True)
-            except Exception as e:
+            except Exception as e:  # Qt 外部库
                 log.warning(f"更新行 {vid} 状态失败: {e}")
 
         # 仅当选择“合成克隆声音”时，才把所有分句音频合并为一个整体音频
@@ -1292,7 +1307,7 @@ class VoiceClonePage(BasePage):
                 text = self.clone_text_input.toPlainText().strip()
                 merged_filename = self._get_named_filename(text, "merged")
                 out_voice_dir = self.voice_video_dir_input.text().strip()
-                merged_wav_path = os.path.abspath(os.path.join(out_voice_dir, merged_filename))
+                merged_wav_path = os.path.abspath(os.path.join(out_voice_dir, merged_filename))  # noqa: E501
 
                 if self._merge_wav_files(valid_wav_paths, merged_wav_path):
                     merged_msg = f"\n\n已将所有分句音频合并导出为整体音频：\n{merged_filename}"
@@ -1315,30 +1330,30 @@ class VoiceClonePage(BasePage):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.stage_label.setText("失败： 合成失败")
-        if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:
+        if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:  # noqa: E501
             QMessageBox.critical(
                 self.parent_widget,
                 "服务未启动",
-                " 无法连接到 VoxCPM 服务。\n\n请前往「 大模型配置」→「声音克隆配置」页面检查：\n1. VoxCPM 服务是否已启动\n2. API 接口地址是否正确\n3. 模型路径是否正确"
+                " 无法连接到 VoxCPM 服务。\n\n请前往「 大模型配置」→「声音克隆配置」页面检查：\n1. VoxCPM 服务是否已启动\n2. API 接口地址是否正确\n3. 模型路径是否正确"  # noqa: E501
             )
         else:
             from gui.error_dialog import show_error_dialog
             show_error_dialog(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
 
-    def hideEvent(self, event):
+    def hideEvent(self, event):  # noqa: N802
         super().hideEvent(event)
 
     def _get_out_voice_dir(self, dir_path):
         dir_path = os.path.abspath(dir_path)
         path_str = dir_path.replace("\\", "/").rstrip("/")
-        
+
         if path_str.endswith("outputs/voice_clone"):
             return dir_path
         if "/outputs/voice_clone/" in path_str + "/":
             idx = path_str.find("/outputs/voice_clone")
             parent = path_str[:idx]
             return os.path.abspath(os.path.join(parent, "outputs", "voice_clone"))
-            
+
         base_parent = os.path.abspath(os.path.join(dir_path, ".."))
         return os.path.abspath(os.path.join(base_parent, "outputs", "voice_clone"))
 
@@ -1348,14 +1363,14 @@ class VoiceClonePage(BasePage):
             text = text[len(" 本地: "):]
         elif text.startswith("失败： ") or text.startswith(" ") or "未找到" in text:
             return ""
-        
+
         # Split by typical separators: '-', '_', ' '
         for sep in ['-', '_', ' ']:
             if sep in text:
                 prefix = text.split(sep)[0].strip()
                 if prefix:
                     return prefix
-        
+
         name, _ = os.path.splitext(text)
         return name
 
@@ -1415,9 +1430,8 @@ class VoiceClonePage(BasePage):
     def _get_button_row(self, button):
         for r in range(self.voice_table.rowCount()):
             cell_w = self.voice_table.cellWidget(r, 4)
-            if cell_w:
-                if button in cell_w.findChildren(QPushButton):
-                    return r
+            if cell_w and button in cell_w.findChildren(QPushButton):
+                return r
         return -1
 
     def _merge_wav_files(self, input_paths, output_path):
@@ -1433,33 +1447,33 @@ class VoiceClonePage(BasePage):
                     with wave.open(path, 'rb') as wav:
                         out_wav.writeframes(wav.readframes(wav.getnframes()))
             return True
-        except Exception as e:
+        except OSError as e:
             log.warning(f"使用 wave 模块合并 WAV 失败，尝试 ffmpeg: {e}")
             try:
                 ffmpeg_path = find_ffmpeg()
                 if not ffmpeg_path:
                     return False
-                
+
                 concat_txt = output_path + ".concat.txt"
                 with open(concat_txt, "w", encoding="utf-8") as f:
                     for path in input_paths:
                         safe_path = path.replace("\\", "/")
                         f.write(f"file '{safe_path}'\n")
-                
+
                 cmd = [
                     ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
                     "-c", "copy", output_path
                 ]
-                r = subprocess.run(
+                r = run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=CREATE_NO_WINDOW
                 )
                 try:
                     if os.path.exists(concat_txt):
                         os.remove(concat_txt)
-                except Exception:
+                except OSError:
                     pass
                 return r.returncode == 0
             except Exception as fe:
@@ -1471,13 +1485,13 @@ class VoiceClonePage(BasePage):
         if not text:
             QMessageBox.warning(self.parent_widget, "提示", "请先输入待克隆整体文案！")
             return
-            
+
         ref_audio = self.get_ref_audio_path()
         if not ref_audio:
             QMessageBox.warning(self.parent_widget, "未选择声音样本", "请先选择参考声音样本！")
             return
         if not os.path.exists(ref_audio):
-            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")
+            QMessageBox.warning(self.parent_widget, "声音样本不存在", f"参考声音样本文件不存在，请重新选择：\n{ref_audio}")  # noqa: E501
             return
 
         out_voice_dir = self.voice_video_dir_input.text().strip()
@@ -1503,7 +1517,7 @@ class VoiceClonePage(BasePage):
         out_wav_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
 
         tasks = [(-1, text, "whole", out_wav_path)]
-        
+
         self.voice_worker = VoiceCloneWorker(
             tasks=tasks,
             voice_ref_audio=ref_audio,
@@ -1518,7 +1532,7 @@ class VoiceClonePage(BasePage):
         )
         self.voice_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.voice_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
-        
+
         def on_whole_finished(results):
             self.btn_clone_whole.setEnabled(True)
             self.btn_clone_whole.setText("整体克隆人声")
@@ -1530,21 +1544,21 @@ class VoiceClonePage(BasePage):
                 "生成成功",
                 f"整体克隆人声音频生成完毕，已保存至：\n{out_wav_path}"
             )
-            
+
         def on_whole_error(err):
             self.btn_clone_whole.setEnabled(True)
             self.btn_clone_whole.setText("整体克隆人声")
             self.progress_bar.setValue(0)
             self.stage_label.setText("失败： 整体生成失败")
-            if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:
+            if "ConnectionRefusedError" in err or "Max retries exceeded" in err or "Failed to establish a new connection" in err or "ConnectionError" in err or "连接失败" in err:  # noqa: E501
                 QMessageBox.critical(
                     self.parent_widget,
                     "服务未启动",
-                    " 无法连接到 VoxCPM 服务。\n\n请前往「 大模型配置」→「声音克隆配置」页面检查：\n1. VoxCPM 服务是否已启动\n2. API 接口地址是否正确\n3. 模型路径是否正确"
+                    " 无法连接到 VoxCPM 服务。\n\n请前往「 大模型配置」→「声音克隆配置」页面检查：\n1. VoxCPM 服务是否已启动\n2. API 接口地址是否正确\n3. 模型路径是否正确"  # noqa: E501
                 )
             else:
                 QMessageBox.critical(self.parent_widget, "人声合成错误", f"处理过程中发生错误：\n{err}")
-            
+
         self.voice_worker.finished.connect(on_whole_finished)
         self.voice_worker.error.connect(on_whole_error)
         self.voice_worker.start()
@@ -1564,7 +1578,7 @@ class VoiceClonePage(BasePage):
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("完成： AI 智能拆分完成")
 
-                lines = [line.strip() for line in result_text.split('\n') if line.strip()]
+                lines = [line.strip() for line in result_text.split('\n') if line.strip()]  # noqa: E501
                 # 校验 LLM 是否漏字（如误删编号），漏字则退回本地规则拆分
                 fallback = self._validate_llm_split(text, lines)
                 if fallback is not None:
@@ -1580,29 +1594,29 @@ class VoiceClonePage(BasePage):
                     if edit:
                         edit.setText(s)
                 self._adjust_table_height()
-                QMessageBox.information(self.parent_widget, "提示", f"已通过 AI 智能拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")
+                QMessageBox.information(self.parent_widget, "提示", f"已通过 AI 智能拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")  # noqa: E501
 
             def on_split_err(err):
                 log.warning(f"AI 智能拆分失败: {err}，将使用本地分词规则进行拆分。")
                 self.btn_split_text.setEnabled(True)
                 self.btn_split_text.setText("一键拆分填充")
                 self.stage_label.setText("注意： AI 智能拆分失败，已自动使用本地规则")
-                
+
                 self._populate_sentences_to_table(text)
-                QMessageBox.information(self.parent_widget, "提示", f"AI 拆分失败，已自动通过本地规则拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")
+                QMessageBox.information(self.parent_widget, "提示", f"AI 拆分失败，已自动通过本地规则拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")  # noqa: E501
 
             self.split_worker.finished.connect(on_split_done)
             self.split_worker.error.connect(on_split_err)
             self.split_worker.start()
         else:
             self._populate_sentences_to_table(text)
-            QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地标点规则拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")
+            QMessageBox.information(self.parent_widget, "提示", f"已成功通过本地标点规则拆分并填入下方列表，共 {self.voice_table.rowCount()} 行。")  # noqa: E501
 
-    def _process_alignment_and_populate(self, lines, segments, whole_audio_path, out_voice_dir):
+    def _process_alignment_and_populate(self, lines, segments, whole_audio_path, out_voice_dir):  # noqa: E501
         # 优先用 segments 的 word 级时间戳做精确对齐
         alignments = self._get_alignments_from_segments(lines, segments)
 
-        if not alignments:
+        if not alignments:  # noqa: SIM102
             # 退回 segment 级线性插值（segments 本身已含 start/end/text）
             if segments:
                 alignments = self._align_segments(lines, segments)
@@ -1619,28 +1633,28 @@ class VoiceClonePage(BasePage):
                     edit.setText(s)
             self._adjust_table_height()
             return
-            
+
         self._clear_table()
         for idx, s in enumerate(lines):
             row_idx = self.voice_table.rowCount()
             self.voice_table.insertRow(row_idx)
             self._setup_row_widgets(row_idx)
-            
+
             edit = self.row_edits.get(row_idx)
             if edit:
                 edit.setText(s)
-                
+
             start_t, end_t = alignments[idx]
             if start_t != 0.0 or end_t != 0.0:
                 filename = self._get_row_filename(row_idx)
                 out_wav_path = os.path.abspath(os.path.join(out_voice_dir, filename))
-                
+
                 if self._cut_audio(whole_audio_path, start_t, end_t, out_wav_path):
                     self.generated_voice_paths[row_idx] = out_wav_path
                     lbl_status = self.voice_table.cellWidget(row_idx, 3)
                     if isinstance(lbl_status, QLabel):
                         lbl_status.setText(os.path.basename(out_wav_path))
-                        lbl_status.setStyleSheet("color: #2ecc71; font-size: 12px; padding: 4px;")
+                        lbl_status.setStyleSheet("color: #2ecc71; font-size: 12px; padding: 4px;")  # noqa: E501
                     act_widget = self.voice_table.cellWidget(row_idx, 4)
                     if act_widget:
                         for btn in act_widget.findChildren(QPushButton):
@@ -1652,17 +1666,17 @@ class VoiceClonePage(BasePage):
         import re
         segments = []
         pattern = re.compile(
-            r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)'
+            r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)'  # noqa: E501
         )
         matches = pattern.findall(srt_content)
         for m in matches:
             start_str = m[1]
             end_str = m[2]
             text = m[3].strip()
-            
+
             start_s = self._srt_time_to_seconds(start_str)
             end_s = self._srt_time_to_seconds(end_str)
-            
+
             segments.append({
                 'start': start_s,
                 'end': end_s,
@@ -1683,55 +1697,53 @@ class VoiceClonePage(BasePage):
         for seg in srt_segments:
             seg_text = seg.get('text', '')
             seg_clean = "".join(c for c in seg_text if c.isalnum()).lower()
-            
-            S = seg['start']
-            E = seg['end']
-            L = len(seg_clean)
+
+            S = seg['start']  # noqa: N806
+            E = seg['end']  # noqa: N806
+            L = len(seg_clean)  # noqa: N806
             if L > 0:
-                D = E - S
+                D = E - S  # noqa: N806
                 for k in range(L):
                     char_start = S + D * (k / L)
                     char_end = S + D * ((k + 1) / L)
                     char_times.append((char_start, char_end))
-                    
+
         alignment = []
         char_idx = 0
         total_chars = len(char_times)
-        
+
         for s_text in sentences:
             s_clean = "".join(c for c in s_text if c.isalnum()).lower()
             n = len(s_clean)
             if n == 0 or total_chars == 0:
                 alignment.append((0.0, 0.0))
                 continue
-                
+
             start_char_idx = min(char_idx, total_chars - 1)
             end_char_idx = min(char_idx + n - 1, total_chars - 1)
-            
+
             start_time = char_times[start_char_idx][0]
             end_time = char_times[end_char_idx][1]
-            
+
             # Apply padding
             start_time = max(0.0, start_time - 0.05)
             end_time = end_time + 0.05
-            
+
             if start_time >= end_time:
                 alignment.append((0.0, 0.0))
             else:
                 alignment.append((start_time, end_time))
             char_idx += n
-            
+
         return alignment
 
     def _cut_audio(self, input_path, start_time, end_time, output_path):
         from gui.video_montage_page import find_ffmpeg
-        import subprocess
-        import sys
         ffmpeg_path = find_ffmpeg()
         if not ffmpeg_path:
             log.error("未找到 ffmpeg，无法裁剪音频")
             return False
-            
+
         cmd = [
             ffmpeg_path, "-y",
             "-ss", f"{start_time:.3f}",
@@ -1742,16 +1754,16 @@ class VoiceClonePage(BasePage):
         ]
         log.info(f"执行裁剪命令: {' '.join(cmd)}")
         try:
-            r = subprocess.run(
+            r = run(
                 cmd,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=CREATE_NO_WINDOW
             )
             if r.returncode != 0:
-                log.error(f"裁剪音频失败 (返回码 {r.returncode}):\nSTDOUT: {r.stdout}\nSTDERR: {r.stderr}")
+                log.error(f"裁剪音频失败 (返回码 {r.returncode}):\nSTDOUT: {r.stdout}\nSTDERR: {r.stderr}")  # noqa: E501
                 return False
             return True
         except Exception as e:
@@ -1762,15 +1774,15 @@ class VoiceClonePage(BasePage):
         import json
         if not os.path.exists(json_path):
             return None
-            
+
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
+            with open(json_path, encoding="utf-8") as f:
                 result = json.load(f)
         except Exception as e:
             log.warning(f"读取 WhisperX JSON 失败: {e}")
             return None
-            
-        all_words = []
+
+        all_words: list[dict[str, Any]] = []
         for seg in result.get("segments", []):
             for word_info in seg.get("words", []):
                 if "start" in word_info and "end" in word_info:
@@ -1779,43 +1791,43 @@ class VoiceClonePage(BasePage):
                         'start': float(word_info['start']),
                         'end': float(word_info['end'])
                     })
-                    
+
         if not all_words:
             return None
-            
+
         alignments = []
         word_idx = 0
         num_words = len(all_words)
-        
+
         for s_text in lines:
             s_clean = "".join(c for c in s_text if c.isalnum()).lower()
             if not s_clean:
                 alignments.append((0.0, 0.0))
                 continue
-                
-            matched_words = []
+
+            matched_words: list[dict[str, Any]] = []
             accumulated_chars = ""
-            
+
             while word_idx < num_words:
                 word_info = all_words[word_idx]
                 w_text = word_info['word']
                 w_clean = "".join(c for c in w_text if c.isalnum()).lower()
-                
+
                 accumulated_chars += w_clean
                 matched_words.append(word_info)
                 word_idx += 1
-                
+
                 if len(accumulated_chars) >= len(s_clean) * 0.85:
                     break
-                    
+
             if matched_words:
                 start_time = matched_words[0]['start']
                 end_time = matched_words[-1]['end']
-                
+
                 # Add tiny padding
                 start_time = max(0.0, start_time - 0.05)
                 end_time = end_time + 0.05
-                
+
                 alignments.append((start_time, end_time))
             else:
                 alignments.append((0.0, 0.0))
@@ -1829,7 +1841,7 @@ class VoiceClonePage(BasePage):
         算法与 _get_alignments_from_json 相同：按字符数贪婪累积到目标句子的 85% 即取首尾 word 时间戳。
         若所有 segment 都无 words 字段，返回 None（调用方退回 SRT 级插值）。
         """
-        all_words = []
+        all_words: list[dict[str, Any]] = []
         for seg in segments or []:
             for word_info in (seg.get("words") or []):
                 if "start" in word_info and "end" in word_info:
@@ -1852,7 +1864,7 @@ class VoiceClonePage(BasePage):
                 alignments.append((0.0, 0.0))
                 continue
 
-            matched_words = []
+            matched_words: list[dict[str, Any]] = []
             accumulated_chars = ""
 
             while word_idx < num_words:
@@ -1895,6 +1907,6 @@ class VoiceClonePage(BasePage):
         text = self.clone_text_input.toPlainText().strip()
         whole_filename = self._get_named_filename(text, "whole")
         whole_audio_path = os.path.abspath(os.path.join(out_voice_dir, whole_filename))
-        
+
         if os.path.exists(whole_audio_path):
             self._play_audio(whole_audio_path)

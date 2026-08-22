@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """本地技能安装/管理：目录、zip、卸载、路径安全。"""
 import os
 import shutil
@@ -10,10 +9,10 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils import skill_manager as sm
-
+from utils import skill_manager as sm  # noqa: E402
 
 SKILL_MD = """---
 name: 文案风格改写

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """config_manager：JSON/INI 配置读写、容错。"""
 import os
 import sys
@@ -7,9 +6,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils import config_manager as cm
+from utils import config_manager as cm  # noqa: E402
 
 
 class TestConfigManager(unittest.TestCase):

@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
 import json
+
 from loguru import logger
 from playwright.sync_api import sync_playwright
+
 
 class PlaywrightFetcher:
     def __init__(self, headless=True):
@@ -16,27 +17,27 @@ class PlaywrightFetcher:
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                headless=self.headless, 
+                headless=self.headless,
                 args=['--disable-blink-features=AutomationControlled']
             )
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",  # noqa: E501
                 viewport={"width": 1920, "height": 1080}
             )
-            
-            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")  # noqa: E501
 
             page = context.new_page()
 
             def handle_response(response):
                 nonlocal video_data
-                if "aweme/v1/web/aweme/detail/" in response.url and response.status == 200:
+                if "aweme/v1/web/aweme/detail/" in response.url and response.status == 200:  # noqa: E501
                     try:
                         json_body = response.json()
                         if "aweme_detail" in json_body:
                             logger.info(f"aweme_id: {aweme_id} 成功拦截到 API 响应")
                             video_data = json_body
-                    except Exception as e:
+                    except json.JSONDecodeError as e:
                         logger.error(f"解析 API 响应失败: {e}")
 
             page.on("response", handle_response)
@@ -44,15 +45,15 @@ class PlaywrightFetcher:
             try:
                 logger.info(f"aweme_id: {aweme_id} 浏览器发起请求 {target_url} ...")
                 page.goto(target_url, wait_until="commit", timeout=timeout)
-                
+
                 with page.expect_response(
-                    lambda response: "aweme/v1/web/aweme/detail/" in response.url and "aweme_id=" in response.url, 
+                    lambda response: "aweme/v1/web/aweme/detail/" in response.url and "aweme_id=" in response.url,  # noqa: E501
                     timeout=timeout
-                ) as response_info:
+                ) as _response_info:
                     pass
-                
+
                 page.wait_for_timeout(500)
-            except Exception as e:
+            except Exception as e:  # 外部API调用（Playwright 浏览器等待网络响应）
                 logger.error(f"aweme_id: {aweme_id} 等待详情 API 网络响应超时或异常: {e}")
             finally:
                 browser.close()

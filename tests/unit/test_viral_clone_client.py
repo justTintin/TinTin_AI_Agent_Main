@@ -1,15 +1,17 @@
-# -*- coding: utf-8 -*-
 """仿爆款客户端（viral_clone_client）：flow/analyze/plan/素材浏览器下载引导/占位。"""
 import os
 import sys
 import unittest
 from unittest import mock
 
+import requests
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils import viral_clone_client as vcc
+from utils import viral_clone_client as vcc  # noqa: E402
 
 
 class _Resp:
@@ -48,7 +50,7 @@ class TestViralCloneAnalyze(unittest.TestCase):
     def test_analyze_http_error(self, m_post):
         self.assertIsNone(vcc.analyze(material_id=1))
 
-    @mock.patch.object(vcc, "http_post", side_effect=Exception("timeout"))
+    @mock.patch.object(vcc, "http_post", side_effect=requests.exceptions.RequestException("timeout"))
     def test_analyze_exception(self, m_post):
         self.assertIsNone(vcc.analyze(material_id=1))
 
@@ -140,7 +142,7 @@ class TestViralCloneSource(unittest.TestCase):
 
 class TestViralCloneAssetBrowser(unittest.TestCase):
     @mock.patch("utils.asset_browser_client.launch_for_topic",
-                return_value=(True, "已打开", "D:\media\爆款仿制"))
+                return_value=(True, "已打开", r"D:\media\爆款仿制"))
     def test_open_in_asset_browser_with_url(self, m_launch):
         ok, msg, dl = vcc.open_in_asset_browser("https://v.douyin.com/abc", topic="爆款仿制")
         self.assertTrue(ok)

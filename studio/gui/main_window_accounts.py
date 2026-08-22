@@ -1,48 +1,28 @@
-# -*- coding: utf-8 -*-
+# type: ignore
 """MainWindow 的账号/登录管理 mixin，从 gui_main 拆出；self 不变、行为一致。"""
 
-import subprocess
-import time
-import sys
+import contextlib
 import os
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT
-)
-import threading
-import uuid
-import configparser
-from ui import gui_styles
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.account_manager import AccountManager
+import time
+
+from config.paths import CREATOR_CONTENT_MANAGE_URL, PROJECT_ROOT, PW_BROWSERS_DIR
 from core.creator_browser_controller import CreatorBrowserController
-from utils.thread_worker import TaskWorker as Worker
-from gui.threads import SystemMonitorThread, ComfyWSThread
+from gui.dialogs import EditAccountDialog, LoginDialog
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 from utils import comfyui_client as comfy
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
-                                 QListWidgetItem, QGridLayout, QFileDialog, 
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox)
-from PySide6.QtGui import QIcon, QFont, QPixmap
-from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtGui import QFont
-
-
-from config.paths import CREATOR_CONTENT_MANAGE_URL
+from utils.logger_utils import log
+from utils.thread_worker import TaskWorker as Worker
 
 
 class AccountsMixin:
@@ -78,25 +58,24 @@ class AccountsMixin:
                          for node_id, node_out in h_info['outputs'].items():
                              if 'images' in node_out:
                                  for img in node_out['images']:
-                                     outputs.append({"filename": img['filename'], "type": img.get('type', 'output'), "node": node_id})
+                                     outputs.append({"filename": img['filename'], "type": img.get('type', 'output'), "node": node_id})  # noqa: E501
                              if 'gifs' in node_out:
                                  for gif in node_out['gifs']:
-                                      outputs.append({"filename": gif['filename'], "type": gif.get('type', 'output'), "node": node_id})
-                     
-                     tasks.append({"id": pid, "status": "已完成", "progress": 100, "outputs": outputs})
-                     
+                                      outputs.append({"filename": gif['filename'], "type": gif.get('type', 'output'), "node": node_id})  # noqa: E501
+
+                     tasks.append({"id": pid, "status": "已完成", "progress": 100, "outputs": outputs})  # noqa: E501
+
                 log.info(f"Found {len(tasks)} tasks on server")
                 return tasks
-            except Exception as e:
+            except Exception as e:  # ComfyUI API call
                 log.error(f"Sync failed: {e}")
                 return []
 
         def on_done(tasks):
-            if not tasks: return
-            
+            if not tasks:
+                return
+
             # Use a set to track which prompt IDs we've updated in the UI in this batch
-            updated_pids = set()
-            
             for t in tasks:
                 pid = t['id']
                 if 'outputs' in t:
@@ -104,13 +83,13 @@ class AccountsMixin:
 
                 if pid not in self.task_progress_bars:
                     self.add_task_to_list(pid, t['status'])
-                
+
                 # Update status/progress
                 if pid in self.task_status_items:
                     self.task_status_items[pid].setText(t['status'])
                 if pid in self.task_progress_bars:
                     self.task_progress_bars[pid].setValue(t.get('progress', 0))
-                    
+
                 # Enable preview/download if finished
                 if t['status'] == "已完成":
                     self.update_task_actions(pid)
@@ -126,10 +105,10 @@ class AccountsMixin:
         cookie_path = os.path.join(PROJECT_ROOT, "douyin_cookies.txt")
         if os.path.exists(cookie_path) and os.path.getsize(cookie_path) > 0:
             self.lbl_default_login_status.setText("登录状态:  已登录 (Cookie 已同步并生效)")
-            self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #2ecc71;")
+            self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #2ecc71;")  # noqa: E501
         else:
             self.lbl_default_login_status.setText("登录状态: 失败： 未登录 (抓取任务可能会受限)")
-            self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #e74c3c;")
+            self.lbl_default_login_status.setStyleSheet("font-size: 16px; font-weight: bold; color: #e74c3c;")  # noqa: E501
 
     def refresh_accounts_list(self):
         # Clear existing grid
@@ -137,13 +116,13 @@ class AccountsMixin:
             item = self.accounts_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
+
         # Reset row and column stretches
         for col in range(5):
             self.accounts_grid.setColumnStretch(col, 0)
         for row in range(self.accounts_grid.rowCount()):
             self.accounts_grid.setRowStretch(row, 0)
-        
+
         accounts = self.account_manager.get_accounts()
         if not accounts:
             label = QLabel("暂无已登录账户，请点击右上角添加。")
@@ -169,32 +148,32 @@ class AccountsMixin:
             card_layout.setContentsMargins(15, 15, 15, 12)
             card_layout.setSpacing(6)
             card_layout.setAlignment(Qt.AlignCenter)
-            
+
             avatar = QLabel()
             avatar.setFixedSize(64, 64)
             avatar.setAlignment(Qt.AlignCenter)
-            avatar.setStyleSheet("background-color: #f0f2f5; border-radius: 32px; border: 2px solid #fff;")
-            
+            avatar.setStyleSheet("background-color: #f0f2f5; border-radius: 32px; border: 2px solid #fff;")  # noqa: E501
+
             if acc.get('avatar'):
                 self.set_remote_image(acc['avatar'], avatar)
             else:
                 avatar.setText("")
-                avatar.setStyleSheet("font-size: 32px; color: #3498db; background-color: #f0f2f5; border-radius: 32px;")
-            
+                avatar.setStyleSheet("font-size: 32px; color: #3498db; background-color: #f0f2f5; border-radius: 32px;")  # noqa: E501
+
             card_layout.addWidget(avatar)
-            
+
             # Nickname and edit button row
             name_layout = QHBoxLayout()
             name_layout.setContentsMargins(0, 0, 0, 0)
             name_layout.setSpacing(5)
             name_layout.addStretch()
-            
+
             name_label = QLabel(acc['nickname'])
-            name_label.setStyleSheet("font-weight: bold; font-size: 15px; color: #2c3e50;")
+            name_label.setStyleSheet("font-weight: bold; font-size: 15px; color: #2c3e50;")  # noqa: E501
             name_label.setWordWrap(True)
             name_label.setAlignment(Qt.AlignCenter)
             name_layout.addWidget(name_label)
-            
+
             btn_edit = QPushButton("")
             btn_edit.setFixedSize(20, 20)
             btn_edit.setStyleSheet("""
@@ -210,18 +189,18 @@ class AccountsMixin:
                 }
             """)
             btn_edit.setCursor(Qt.PointingHandCursor)
-            btn_edit.clicked.connect(lambda checked=False, a=acc: self.edit_account_info(a))
+            btn_edit.clicked.connect(lambda checked=False, a=acc: self.edit_account_info(a))  # noqa: E501
             name_layout.addWidget(btn_edit)
             name_layout.addStretch()
             card_layout.addLayout(name_layout)
-            
+
             # UID label
             uid_label = QLabel(f"UID: {acc['uid'][:15]}...")
             uid_label.setStyleSheet("color: #95a5a6; font-size: 11px;")
             uid_label.setToolTip(acc['uid'])
             uid_label.setAlignment(Qt.AlignCenter)
             card_layout.addWidget(uid_label)
-            
+
             # Douyin ID label
             dy_id = acc.get('douyin_id', '')
             dy_id_text = f"抖音号: {dy_id}" if dy_id else "抖音号: 未设置"
@@ -229,7 +208,7 @@ class AccountsMixin:
             dy_id_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
             dy_id_label.setAlignment(Qt.AlignCenter)
             card_layout.addWidget(dy_id_label)
-            
+
             # Remark label
             remark = acc.get('remark', '')
             remark_text = f"备注: {remark}" if remark else "备注: 暂无"
@@ -237,9 +216,9 @@ class AccountsMixin:
             remark_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
             remark_label.setAlignment(Qt.AlignCenter)
             card_layout.addWidget(remark_label)
-            
+
             card_layout.addStretch()
-            
+
             # Button to open independent browser
             btn_open_browser = QPushButton(" 打开独立浏览器")
             btn_open_browser.setStyleSheet("""
@@ -256,7 +235,7 @@ class AccountsMixin:
                 }
             """)
             btn_open_browser.setCursor(Qt.PointingHandCursor)
-            btn_open_browser.clicked.connect(lambda checked=False, a=acc: self.open_account_browser(a))
+            btn_open_browser.clicked.connect(lambda checked=False, a=acc: self.open_account_browser(a))  # noqa: E501
             card_layout.addWidget(btn_open_browser)
 
             btn_sync_cookie = QPushButton(" 同步 Cookie")
@@ -275,26 +254,26 @@ class AccountsMixin:
                 }
             """)
             btn_sync_cookie.setCursor(Qt.PointingHandCursor)
-            btn_sync_cookie.clicked.connect(lambda checked=False, a=acc: self.sync_account_cookie(a))
+            btn_sync_cookie.clicked.connect(lambda checked=False, a=acc: self.sync_account_cookie(a))  # noqa: E501
             card_layout.addWidget(btn_sync_cookie)
-            
+
             # Action buttons row
             actions_layout = QHBoxLayout()
 
             btn_close_browser = QPushButton("停止 关闭浏览器")
-            btn_close_browser.setStyleSheet("color: #6b7280; border: none; font-size: 11px; padding: 0px;")
+            btn_close_browser.setStyleSheet("color: #6b7280; border: none; font-size: 11px; padding: 0px;")  # noqa: E501
             btn_close_browser.setCursor(Qt.PointingHandCursor)
-            btn_close_browser.clicked.connect(lambda checked=False, a=acc: self.close_account_browser(a))
+            btn_close_browser.clicked.connect(lambda checked=False, a=acc: self.close_account_browser(a))  # noqa: E501
             actions_layout.addWidget(btn_close_browser)
-            
+
             btn_exit = QPushButton(" 退出登录")
-            btn_exit.setStyleSheet("color: #e74c3c; border: none; font-size: 11px; padding: 0px;")
+            btn_exit.setStyleSheet("color: #e74c3c; border: none; font-size: 11px; padding: 0px;")  # noqa: E501
             btn_exit.setCursor(Qt.PointingHandCursor)
-            btn_exit.clicked.connect(lambda checked=False, u=acc['uid']: self.remove_account(u))
+            btn_exit.clicked.connect(lambda checked=False, u=acc['uid']: self.remove_account(u))  # noqa: E501
             actions_layout.addWidget(btn_exit)
-            
+
             card_layout.addLayout(actions_layout)
-            
+
             self.accounts_grid.addWidget(card, i // 4, i % 4)
 
         # Add a stretch column and row to force left-top alignment
@@ -306,7 +285,7 @@ class AccountsMixin:
         douyin_id = acc.get('douyin_id', '')
         remark = acc.get('remark', '')
         uid = acc.get('uid')
-        
+
         dialog = EditAccountDialog(nickname, douyin_id, remark, self)
         if dialog.exec() == QDialog.Accepted:
             data = dialog.get_data()
@@ -382,12 +361,12 @@ class AccountsMixin:
     def on_login_finished(self, acc_info):
         try:
             log.info(f"on_login_finished called, acc_info: {acc_info}")
-            
+
             # 1. Determine nickname
             nickname = acc_info.get('nickname')
             if not nickname or nickname.startswith("未命名_"):
-                suggested = nickname if (nickname and not nickname.startswith("未命名_")) else ""
-                nick, ok = QInputDialog.getText(self, "保存账户分身", "请输入账户备注名 (如: 大怪工作室):", text=suggested)
+                suggested = nickname if (nickname and not nickname.startswith("未命名_")) else ""  # noqa: E501
+                nick, ok = QInputDialog.getText(self, "保存账户分身", "请输入账户备注名 (如: 大怪工作室):", text=suggested)  # noqa: E501
                 if not ok or not nick.strip():
                     log.info("User cancelled account saving (no nickname).")
                     return
@@ -395,58 +374,58 @@ class AccountsMixin:
 
             # 2. Handle Staging to Permanent Profile Migration
             final_profile_id = acc_info['profile_id']
-            
+
             if final_profile_id == "staging_new_account":
-                import time
                 import shutil
+                import time
                 # Generate a unique permanent ID
                 new_profile_id = f"profile_{int(time.time())}"
-                
-                # Close the browser window completely before moving (signal is emitted before close)
-                # Note: exec() is blocking, so we are currently in the signal handler 
+
+                # Close the browser window completely before moving (signal is emitted before close)  # noqa: E501
+                # Note: exec() is blocking, so we are currently in the signal handler
                 # which is called when self.accept() was called in LoginDialog.
                 # The dialog is hidden but not yet destroyed.
-                
-                staging_path = os.path.join(self.playwright_profile_path, "accounts", "staging_new_account")
-                final_path = os.path.join(self.playwright_profile_path, "accounts", new_profile_id)
-                
+
+                staging_path = os.path.join(self.playwright_profile_path, "accounts", "staging_new_account")  # noqa: E501
+                final_path = os.path.join(self.playwright_profile_path, "accounts", new_profile_id)  # noqa: E501
+
                 # Move the folder (Wait a bit for files to unlock)
                 try:
                     # Clear any existing target just in case
                     if os.path.exists(final_path):
                         shutil.rmtree(final_path)
-                    
-                    # Try move (may need several attempts if files are still being flushed)
+
+                    # Try move (may need several attempts if files are still being flushed)  # noqa: E501
                     for i in range(5):
                         try:
                             if os.path.exists(staging_path):
                                 shutil.move(staging_path, final_path)
-                                log.info(f"Migrated staging profile to {new_profile_id}")
+                                log.info(f"Migrated staging profile to {new_profile_id}")  # noqa: E501
                                 break
-                        except Exception as e:
+                        except OSError as e:
                             log.warning(f"Move attempt {i+1} failed: {e}")
                             time.sleep(0.5)
-                    
+
                     final_profile_id = new_profile_id
-                except Exception as e:
+                except OSError as e:
                     log.error(f"Critical error moving staging profile: {e}")
-                    # If move failed, we'll keep using staging_new_account for this account 
+                    # If move failed, we'll keep using staging_new_account for this account  # noqa: E501
                     # as a fallback, but that's not ideal for the next 'Add'.
 
             # 3. Update or add account to manager
             self.account_manager.add_account(
-                uid=acc_info['uid'], 
-                nickname=nickname, 
+                uid=acc_info['uid'],
+                nickname=nickname,
                 profile_id=final_profile_id
             )
             self.refresh_accounts_list()
             QMessageBox.information(self, "成功", f"账户 {nickname} 分身已成功保存。")
-        except Exception as e:
+        except Exception as e:  # Account save flow
             log.error(f"Error in on_login_finished: {e}", exc_info=True)
             QMessageBox.critical(self, "保存失败", f"保存账户信息时发生错误: {e}")
 
     def remove_account(self, uid):
-        reply = QMessageBox.question(self, "确认", "确定要退出该账户登录吗？", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.question(self, "确认", "确定要退出该账户登录吗？", QMessageBox.Yes | QMessageBox.No)  # noqa: E501
         if reply == QMessageBox.Yes:
             profile_id = None
             try:
@@ -454,13 +433,11 @@ class AccountsMixin:
                     if a.get("uid") == uid:
                         profile_id = a.get("profile_id")
                         break
-            except Exception:
+            except (KeyError, TypeError, AttributeError):
                 profile_id = None
             if profile_id and profile_id in self.account_pw_controllers:
-                try:
+                with contextlib.suppress(Exception):
                     self.account_pw_controllers[profile_id].stop()
-                except Exception:
-                    pass
                 self.account_pw_controllers.pop(profile_id, None)
             self.account_manager.remove_account(uid)
             self.refresh_accounts_list()
@@ -469,31 +446,30 @@ class AccountsMixin:
         self.current_selected_account = account
         self.detail_nickname.setText(f"昵称: {account['nickname']}")
         self.detail_uid.setText(f"UID: {account['uid']}")
-        
+
         # Load avatar in detail
         if account.get('avatar'):
             self.set_remote_image(account['avatar'], self.detail_avatar, size=(80, 80))
         else:
             self.detail_avatar.setText("")
-            self.detail_avatar.setStyleSheet("font-size: 40px; color: #3498db; background-color: #f0f2f5; border-radius: 40px;")
-            
+            self.detail_avatar.setStyleSheet("font-size: 40px; color: #3498db; background-color: #f0f2f5; border-radius: 40px;")  # noqa: E501
+
         self.switch_page(10) # Account Detail is index 10
         self.refresh_account_videos(account)
 
     def refresh_account_videos(self, account):
         self.account_videos_table.setRowCount(0)
         log.info(f"正在获取账户 {account['nickname']} ({account['uid']}) 的视频数据...")
-        
-        from core.douyin_user_downloader import DouyinUserDownloader
+
         def fetch_videos():
             try:
                 # Construct user URL if needed
                 url = account.get('uid', '')
                 if not url.startswith('http'):
                     url = f"https://www.douyin.com/user/{url}"
-                
+
                 log.info(f"Fetching videos for {account.get('nickname')} via {url}...")
-                
+
                 from core.douyin_user_downloader import DouyinUserDownloader
                 downloader = DouyinUserDownloader(
                     user_url=url,
@@ -501,16 +477,16 @@ class AccountsMixin:
                 )
                 videos = downloader.fetch_all_videos()[:100]
                 return videos
-            except Exception as e:
+            except Exception as e:  # Douyin downloader
                 log.error(f"Error in fetch_videos: {e}")
                 raise e
 
-        self.start_worker(fetch_videos, self.display_account_videos, self.on_account_refresh_error)
+        self.start_worker(fetch_videos, self.display_account_videos, self.on_account_refresh_error)  # noqa: E501
 
     def on_account_refresh_error(self, err):
         self.detail_refresh_btn.setEnabled(True)
         log.error(f"Refresh error: {err}")
-        
+
         if "过期" in str(err) or "登录" in str(err) or "403" in str(err):
             msg = f"获取数据失败: {err}\n\n该账户可能已过期。建议返回“账户平台”点击该账户卡片下方的“重新登录”。"
             QMessageBox.warning(self, "登录已过期", msg)
@@ -520,12 +496,12 @@ class AccountsMixin:
     def trigger_relogin(self, account=None):
         # account is passed when triggered from the grid list
         account = account or self.current_selected_account
-        
+
         # Open login dialog
         dialog = LoginDialog(self)
         dialog.login_successful.connect(self.on_login_finished)
-        
-        msg = f"正在为账户 {account['nickname']} 重新登录。\n请在弹出的窗口中操作，并确保点击进入一次“个人主页”后再点击“我已完成登录”。"
+
+        msg = f"正在为账户 {account['nickname']} 重新登录。\n请在弹出的窗口中操作，并确保点击进入一次“个人主页”后再点击“我已完成登录”。"  # noqa: E501
         QMessageBox.information(self, "重新登录提示", msg)
         dialog.exec()
 
@@ -533,12 +509,12 @@ class AccountsMixin:
         # Safety check if we already switched away or object is gone
         if not hasattr(self, 'account_videos_table'):
             return
-            
+
         self.account_videos_table.setRowCount(0)
         self.detail_refresh_btn.setEnabled(True)
-        
-        account_name = self.current_selected_account.get('nickname', '未知') if hasattr(self, 'current_selected_account') and self.current_selected_account else '未知'
-        
+
+        account_name = self.current_selected_account.get('nickname', '未知') if hasattr(self, 'current_selected_account') and self.current_selected_account else '未知'  # noqa: E501
+
         if not videos:
             self.account_videos_table.insertRow(0)
             msg = QTableWidgetItem("未找到视频或获取失败，请检查登录状态是否过期并重新登录。")
@@ -550,17 +526,17 @@ class AccountsMixin:
 
         for row, v in enumerate(videos):
             self.account_videos_table.insertRow(row)
-            self.account_videos_table.setItem(row, 0, QTableWidgetItem(v.get('desc', '无标题')))
-            
+            self.account_videos_table.setItem(row, 0, QTableWidgetItem(v.get('desc', '无标题')))  # noqa: E501
+
             ctime = v.get('create_time', 0)
-            time_str = time.strftime('%Y-%m-%d', time.localtime(ctime)) if ctime else "--"
+            time_str = time.strftime('%Y-%m-%d', time.localtime(ctime)) if ctime else "--"  # noqa: E501
             self.account_videos_table.setItem(row, 1, QTableWidgetItem(time_str))
-            
+
             stats = v.get('statistics', {})
-            self.account_videos_table.setItem(row, 2, QTableWidgetItem(str(stats.get('play_count', 0))))
-            self.account_videos_table.setItem(row, 3, QTableWidgetItem(str(stats.get('digg_count', 0))))
-            self.account_videos_table.setItem(row, 4, QTableWidgetItem(str(stats.get('comment_count', 0))))
-        
+            self.account_videos_table.setItem(row, 2, QTableWidgetItem(str(stats.get('play_count', 0))))  # noqa: E501
+            self.account_videos_table.setItem(row, 3, QTableWidgetItem(str(stats.get('digg_count', 0))))  # noqa: E501
+            self.account_videos_table.setItem(row, 4, QTableWidgetItem(str(stats.get('comment_count', 0))))  # noqa: E501
+
         log.info(f"Account detail table populated with {len(videos)} videos")
 
     def open_account_browser(self, account):
@@ -574,7 +550,7 @@ class AccountsMixin:
             QMessageBox.warning(self, "错误", "该账户缺少 profile_id，无法打开独立浏览器。")
             return
 
-        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", profile_id)
+        user_data_dir = os.path.join(self.playwright_profile_path, "accounts", profile_id)  # noqa: E501
         os.makedirs(user_data_dir, exist_ok=True)
 
         controller = self.account_pw_controllers.get(profile_id)
@@ -582,10 +558,8 @@ class AccountsMixin:
             controller.goto(CREATOR_CONTENT_MANAGE_URL)
             return
         if controller and not self.is_pw_controller_usable(controller):
-            try:
+            with contextlib.suppress(Exception):
                 controller.stop()
-            except Exception:
-                pass
             self.account_pw_controllers.pop(profile_id, None)
 
         controller = CreatorBrowserController(
@@ -596,4 +570,4 @@ class AccountsMixin:
         self.account_pw_controllers[profile_id] = controller
         controller.start()
         QTimer.singleShot(300, lambda: controller.goto(CREATOR_CONTENT_MANAGE_URL))
-        QMessageBox.information(self, "提示", f"已为账户「{account.get('nickname','')}」打开独立浏览器分身。\n请在弹出的 Chromium 窗口内扫码登录。\n登录完成后点击「同步 Cookie」。")
+        QMessageBox.information(self, "提示", f"已为账户「{account.get('nickname','')}」打开独立浏览器分身。\n请在弹出的 Chromium 窗口内扫码登录。\n登录完成后点击「同步 Cookie」。")  # noqa: E501

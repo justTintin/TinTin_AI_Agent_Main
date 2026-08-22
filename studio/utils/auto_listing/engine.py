@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """抖店自动上架浏览器引擎（Playwright + 本地 Chrome CDP）。
 
 设计参考 git 历史中的 ai_skills/Automated_Listing_Skill/browser/*：
@@ -8,15 +7,15 @@
 
 本模块使用同步 Playwright，便于在 QThread Worker 中直接执行。
 """
+import contextlib
 import os
-import re
 import time
 
 from playwright.sync_api import sync_playwright
 
 from .chrome_manager import ensure_debug_chrome
 from .config import DOUYIN_STORES
-from .validation import PackageInfo, ValidationError, prepare_package
+from .validation import PackageInfo, prepare_package
 
 
 class ListingError(RuntimeError):
@@ -58,7 +57,7 @@ class AutoListingEngine:
     def _body_text(page) -> str:
         try:
             return (page.locator("body").inner_text(timeout=5000) or "")
-        except Exception:
+        except Exception:  # Playwright 外部 API 调用
             return ""
 
     @staticmethod
@@ -66,13 +65,13 @@ class AutoListingEngine:
         return """(el) => {
             if (!el) return false;
             const style = window.getComputedStyle(el);
-            if (!style || style.visibility === 'hidden' || style.display === 'none') return false;
+            if (!style || style.visibility === 'hidden' || style.display === 'none') return false;  # noqa: E501
             const rect = el.getBoundingClientRect();
             return rect.width > 0 && rect.height > 0;
         }"""
 
-    def run(self, input_path: str, shop_key: str, config: dict = None,
-            publish_after_save: bool = False, prepared_info: PackageInfo = None) -> dict:
+    def run(self, input_path: str, shop_key: str, config: dict | None = None,
+            publish_after_save: bool = False, prepared_info: PackageInfo | None = None) -> dict:  # noqa: E501
         config = config or {}
         if prepared_info is not None:
             info = prepared_info
@@ -84,7 +83,7 @@ class AutoListingEngine:
         port = int(config.get("debug_port") or 9222)
         user_data_dir = config.get("user_data_dir") or ""
         chrome_exe = config.get("chrome_exe") or ""
-        result_dir = config.get("result_dir") or os.path.join(os.path.dirname(user_data_dir), "results")
+        result_dir = config.get("result_dir") or os.path.join(os.path.dirname(user_data_dir), "results")  # noqa: E501
         os.makedirs(result_dir, exist_ok=True)
 
         self._emit("浏览器", f"检查/启动 Chrome 调试端口 {port}")
@@ -108,10 +107,8 @@ class AutoListingEngine:
                 self._try_publish(page)
 
             shot = os.path.join(result_dir, "final.png")
-            try:
+            with contextlib.suppress(Exception):
                 page.screenshot(path=shot, full_page=True)
-            except Exception:
-                pass
             return {
                 "saved": bool(saved),
                 "publish_attempted": bool(publish_after_save and saved),
@@ -129,13 +126,14 @@ class AutoListingEngine:
             raise ListingError("检测到抖店登录页。请在打开的 Chrome 中扫码登录后重试。")
 
     def _check_shop(self, page, info: PackageInfo):
-        text = self._body_text(page)
-        target = [info.shop_name] + DOUYIN_STORES.get(info.shop_key, {}).get("aliases", [])
+        text: str = self._body_text(page)
+        aliases = list(DOUYIN_STORES.get(info.shop_key, {}).get("aliases", []))
+        target: list[str] = [info.shop_name] + aliases
         for key, store in DOUYIN_STORES.items():
             if key == info.shop_key:
                 continue
             other_name = store.get("name", "")
-            if other_name and other_name in text and not any(a and a in text for a in target):
+            if other_name and other_name in text and not any(a and a in text for a in target):  # type: ignore[operator]  # noqa: E501
                 raise ListingError(
                     f"当前页面疑似店铺「{store.get('name')}」，与目标店铺「{info.shop_name}」不一致。")
 
@@ -150,12 +148,12 @@ class AutoListingEngine:
             try:
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
                 self._wait(2000)
-                if "login" in (page.url or "").lower() or "passport" in (page.url or "").lower():
+                if "login" in (page.url or "").lower() or "passport" in (page.url or "").lower():  # noqa: E501
                     continue
                 text = self._body_text(page)
                 if any(k in text for k in ("创建商品", "商品创建", "主图上传")):
                     return
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 continue
         raise ListingError("未能打开抖店商品创建页，请确认已登录且有商品创建权限。")
 
@@ -192,22 +190,24 @@ class AutoListingEngine:
         self._shot(page, result_dir, "other_info")
 
     def _shot(self, page, result_dir: str, name: str):
-        try:
-            page.screenshot(path=os.path.join(result_dir, f"{name}.png"), full_page=True)
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            page.screenshot(path=os.path.join(result_dir, f"{name}.png"), full_page=True)  # noqa: E501
 
-    def _click_text(self, page, text: str, exact: bool = False, timeout: int = 5000) -> bool:
+    def _click_text(self, page, text: str, exact: bool = False, timeout: int = 5000) -> bool:  # noqa: E501
         try:
             clicked = page.evaluate(
                 """({text, exact}) => {
                     const isVisible = (el) => {
                         const style = window.getComputedStyle(el);
-                        if (!style || style.visibility === 'hidden' || style.display === 'none') return false;
+                        if (!style ||
+                            style.visibility === 'hidden' ||
+                            style.display === 'none') return false;
                         const rect = el.getBoundingClientRect();
                         return rect.width > 0 && rect.height > 0;
                     };
-                    const els = Array.from(document.querySelectorAll('span,div,label,a,button,[role="button"]'));
+                    const els = Array.from(
+                        document.querySelectorAll('span,div,label,a,button,[role="button"]')
+                    );
                     for (const el of els) {
                         if (!isVisible(el)) continue;
                         const t = (el.textContent || '').trim();
@@ -227,7 +227,7 @@ class AutoListingEngine:
             loc = page.get_by_text(text, exact=exact).first
             loc.click(timeout=timeout, force=True)
             return True
-        except Exception:
+        except Exception:  # Playwright 外部 API 调用
             return False
 
     def _switch_tab(self, page, tab_name: str) -> bool:
@@ -239,25 +239,27 @@ class AutoListingEngine:
             tab.click(timeout=3000, force=True)
             self._wait(800)
             return True
-        except Exception:
+        except Exception:  # Playwright 外部 API 调用
             return False
 
     def _upload_main_images(self, page, images: list):
         if not images:
             raise ListingError("数据包没有主图")
-        try:
+        with contextlib.suppress(Exception):
             page.wait_for_selector('input[type="file"]', timeout=15000)
-        except Exception:
-            pass
         marked = page.evaluate(
             """() => {
                 const isVisible = (el) => {
                     const style = window.getComputedStyle(el);
-                    if (!style || style.visibility === 'hidden' || style.display === 'none') return false;
+                    if (!style ||
+                        style.visibility === 'hidden' ||
+                        style.display === 'none') return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
                 };
-                const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(isVisible);
+                const inputs = Array.from(
+                    document.querySelectorAll('input[type="file"]')
+                ).filter(isVisible);
                 const main = inputs.find(inp => {
                     let node = inp;
                     for (let i = 0; i < 8; i++) {
@@ -277,7 +279,7 @@ class AutoListingEngine:
             target = page.locator('input[data-als-main="1"]').first
             try:
                 target.set_input_files(images)
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 target.set_input_files(images[0])
             page.evaluate("""() => {
                 const el = document.querySelector('[data-als-main="1"]');
@@ -287,7 +289,7 @@ class AutoListingEngine:
             target = page.locator('input[type="file"]').first
             try:
                 target.set_input_files(images)
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 target.set_input_files(images[0])
         self._wait_upload_done(page)
 
@@ -308,8 +310,11 @@ class AutoListingEngine:
                         return true;
                     }
                 }
-                const labels = Array.from(document.querySelectorAll('label,span,div')).filter(el => {
-                    return (el.textContent || '').trim() === '商品标题' && el.getBoundingClientRect().width > 0;
+                const labels = Array.from(
+                    document.querySelectorAll('label,span,div')
+                ).filter(el => {
+                    return (el.textContent || '').trim() === '商品标题' &&
+                        el.getBoundingClientRect().width > 0;
                 });
                 for (const label of labels) {
                     let node = label;
@@ -317,7 +322,7 @@ class AutoListingEngine:
                         node = node.parentElement;
                         if (!node) break;
                         const input = node.querySelector('input:not([disabled])');
-                        if (input) { input.setAttribute('data-als-title', '1'); return true; }
+                        if (input) { input.setAttribute('data-als-title', '1'); return true; }  # noqa: E501
                     }
                 }
                 return false;
@@ -333,10 +338,8 @@ class AutoListingEngine:
                 if (el) el.removeAttribute('data-als-title');
             }""")
         else:
-            try:
+            with contextlib.suppress(Exception):
                 page.locator('input[placeholder*="请输入2-60"]').first.fill(title)
-            except Exception:
-                pass
 
     def _fill_text_by_label(self, page, label: str, value: str) -> bool:
         if not label or not value:
@@ -346,14 +349,20 @@ class AutoListingEngine:
             """({label, marker}) => {
                 const isVisible = (el) => {
                     const style = window.getComputedStyle(el);
-                    if (!style || style.visibility === 'hidden' || style.display === 'none') return false;
+                    if (!style ||
+                        style.visibility === 'hidden' ||
+                        style.display === 'none') return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
                 };
-                const labels = Array.from(document.querySelectorAll('label,span,div')).filter(el => {
+                const labels = Array.from(
+                    document.querySelectorAll('label,span,div')
+                ).filter(el => {
                     return isVisible(el) && (el.textContent || '').trim() === label;
                 });
-                const inputs = Array.from(document.querySelectorAll('input:not([disabled])')).filter(isVisible);
+                const inputs = Array.from(
+                    document.querySelectorAll('input:not([disabled])')
+                ).filter(isVisible);
                 let best = null;
                 let bestScore = 10 ** 9;
                 for (const lab of labels) {
@@ -368,7 +377,7 @@ class AutoListingEngine:
                         if (score < bestScore) { bestScore = score; best = input; }
                     }
                 }
-                if (best) { best.setAttribute('data-als-label-input', marker); return true; }
+                if (best) { best.setAttribute('data-als-label-input', marker); return true; }  # noqa: E501
                 return false;
             }""",
             {"label": label, "marker": marker},
@@ -380,16 +389,14 @@ class AutoListingEngine:
             inp.fill(value)
             inp.press("Tab")
             return True
-        except Exception:
+        except Exception:  # Playwright 外部 API 调用
             return False
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 page.evaluate("""(marker) => {
-                    const el = document.querySelector(`input[data-als-label-input="${marker}"]`);
+                    const el = document.querySelector(`input[data-als-label-input="${marker}"]`);  # noqa: E501
                     if (el) el.removeAttribute('data-als-label-input');
                 }""", marker)
-            except Exception:
-                pass
 
     def _fill_brand(self, page, info: PackageInfo):
         brand = (info.brand or "无品牌").strip()
@@ -410,9 +417,14 @@ class AutoListingEngine:
             return
         marked = page.evaluate(
             """() => {
-                const labels = Array.from(document.querySelectorAll('div,span,label')).filter(el => {
-                    const cls = (el.className && (el.className.baseVal !== undefined ? el.className.baseVal : el.className)) || '';
-                    return String(cls).includes('decorateImgEditTitle') && !String(cls).includes('Wrapper');
+                const labels = Array.from(
+                    document.querySelectorAll('div,span,label')
+                ).filter(el => {
+                    const cls = (el.className &&
+                        (el.className.baseVal !== undefined ?
+                            el.className.baseVal : el.className)) || '';
+                    return String(cls).includes('decorateImgEditTitle') &&
+                        !String(cls).includes('Wrapper');
                 });
                 for (const label of labels) {
                     let node = label;
@@ -420,12 +432,18 @@ class AutoListingEngine:
                         node = node.parentElement;
                         if (!node) break;
                         const input = node.querySelector('input[type="file"]');
-                        if (input) { input.setAttribute('data-als-detail', '1'); return true; }
+                        if (input) {
+                            input.setAttribute('data-als-detail', '1');
+                            return true;
+                        }
                     }
                 }
-                const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(el => {
+                const inputs = Array.from(
+                    document.querySelectorAll('input[type="file"]')
+                ).filter(el => {
                     const style = window.getComputedStyle(el);
-                    return style.display !== 'none' && el.getBoundingClientRect().width > 0;
+                    return style.display !== 'none' &&
+                        el.getBoundingClientRect().width > 0;
                 });
                 for (const input of inputs) {
                     let node = input;
@@ -456,7 +474,7 @@ class AutoListingEngine:
                 for img in images:
                     loc.set_input_files(img)
                     self._wait_upload_done(page, 60000)
-        except Exception as e:
+        except Exception as e:  # Playwright 外部 API 调用
             self._emit("图文信息", f"详情图上传异常：{e}")
         page.evaluate("""() => {
             const el = document.querySelector('[data-als-detail="1"]');
@@ -489,7 +507,7 @@ class AutoListingEngine:
                 inp.fill(name)
                 inp.press("Enter")
                 self._wait(300)
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 pass
 
         for sku in info.skus:
@@ -500,17 +518,25 @@ class AutoListingEngine:
                 """({val}) => {
                     const isVisible = (el) => {
                         const style = window.getComputedStyle(el);
-                        return style.display !== 'none' && el.getBoundingClientRect().width > 0;
+                        return style.display !== 'none' &&
+                        el.getBoundingClientRect().width > 0;
                     };
-                    const input = Array.from(document.querySelectorAll('input')).find(el =>
+                    const input = Array.from(
+                        document.querySelectorAll('input')
+                    ).find(el =>
                         isVisible(el) && (el.value || '').trim() === val);
                     if (!input) return false;
                     let node = input;
                     for (let i = 0; i < 8; i++) {
                         node = node.parentElement;
                         if (!node) break;
-                        const upload = node.querySelector('input[type="file"], .ant-upload input[type="file"]');
-                        if (upload) { upload.setAttribute('data-als-sku-upload', '1'); return true; }
+                        const upload = node.querySelector(
+                            'input[type="file"], .ant-upload input[type="file"]'
+                        );
+                        if (upload) {
+                            upload.setAttribute('data-als-sku-upload', '1');
+                            return true;
+                        }
                     }
                     return false;
                 }""",
@@ -518,9 +544,11 @@ class AutoListingEngine:
             )
             if marked:
                 try:
-                    page.locator('input[data-als-sku-upload="1"]').first.set_input_files(img)
+                    page.locator(
+                        'input[data-als-sku-upload="1"]'
+                    ).first.set_input_files(img)
                     self._wait_upload_done(page, 60000)
-                except Exception:
+                except Exception:  # Playwright 外部 API 调用
                     pass
                 page.evaluate("""() => {
                     const el = document.querySelector('[data-als-sku-upload="1"]');
@@ -533,21 +561,33 @@ class AutoListingEngine:
         for sku in info.skus:
             marked = page.evaluate(
                 """({val}) => {
-                    const norm = (s) => (s || '').toString().replace(/\\s+/g,'').replace(/（/g,'(').replace(/）/g,')').replace(/[－—–]/g,'-');
+                    const norm = (s) => (s || '').toString()
+                        .replace(/\\s+/g, '')
+                        .replace(/（/g, '(')
+                        .replace(/）/g, ')')
+                        .replace(/[－—–]/g, '-');
                     const target = norm(val);
                     const rows = Array.from(document.querySelectorAll('tr'));
                     for (const row of rows) {
                         const tds = Array.from(row.querySelectorAll('td'));
                         if (tds.length < 3) continue;
                         const first = norm(tds[0].textContent || '');
-                        if (!first || !(first === target || first.includes(target) || target.includes(first))) continue;
-                        const inputs = Array.from(row.querySelectorAll('input')).filter(el => {
+                        if (!first ||
+                            !(first === target ||
+                                first.includes(target) ||
+                                target.includes(first))) continue;
+                        const inputs = Array.from(
+                            row.querySelectorAll('input')
+                        ).filter(el => {
                             const style = window.getComputedStyle(el);
-                            return style.display !== 'none' && el.getBoundingClientRect().width > 0;
+                            return style.display !== 'none' &&
+                                el.getBoundingClientRect().width > 0;
                         });
                         if (inputs[0]) inputs[0].setAttribute('data-als-price', '1');
                         if (inputs[1]) inputs[1].setAttribute('data-als-inv', '1');
-                        const code = inputs.find(inp => (inp.placeholder || '').includes('编码') || (inp.placeholder || '').includes('erp'));
+                        const code = inputs.find(inp =>
+                            (inp.placeholder || '').includes('编码') ||
+                            (inp.placeholder || '').includes('erp'));
                         if (code) code.setAttribute('data-als-code', '1');
                         return inputs.length > 0;
                     }
@@ -565,10 +605,12 @@ class AutoListingEngine:
                 inv.fill("999")
                 if sku.merchant_code and code.count() > 0:
                     code.fill(sku.merchant_code)
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 pass
             page.evaluate("""() => {
-                document.querySelectorAll('[data-als-price],[data-als-inv],[data-als-code]').forEach(el => {
+                document.querySelectorAll(
+                            '[data-als-price],[data-als-inv],[data-als-code]'
+                        ).forEach(el => {
                     el.removeAttribute('data-als-price');
                     el.removeAttribute('data-als-inv');
                     el.removeAttribute('data-als-code');
@@ -612,14 +654,19 @@ class AutoListingEngine:
                 state = page.evaluate("""() => {
                     const errorTexts = ['必填', '不能为空', '保存失败', '请输入', '请上传', '校验不通过'];
                     const messages = Array.from(document.querySelectorAll(
-                        '.ant-message-notice, .arco-message, .arco-toast, .ant-notification-notice, .ant-form-item-explain-error'));
+                        '.ant-message-notice, .arco-message, .arco-toast, ' +
+                        '.ant-notification-notice, .ant-form-item-explain-error'
+                    ));
                     for (const m of messages) {
                         const t = (m.textContent || '').trim();
-                        if (errorTexts.some(e => t.includes(e))) return {kind: 'error', text: t};
+                        if (errorTexts.some(e => t.includes(e)))
+                            return {kind: 'error', text: t};
                     }
                     for (const m of messages) {
                         const t = (m.textContent || '').trim();
-                        if (t.includes('保存成功') || t.includes('草稿保存成功')) return {kind: 'success'};
+                        if (t.includes('保存成功') ||
+                            t.includes('草稿保存成功'))
+                            return {kind: 'success'};
                     }
                     return null;
                 }""")
@@ -632,7 +679,7 @@ class AutoListingEngine:
                 if "create" not in page.url:
                     success = True
                     break
-            except Exception:
+            except Exception:  # Playwright 外部 API 调用
                 pass
         if success:
             self._emit("保存草稿", "草稿保存成功")
@@ -648,7 +695,5 @@ class AutoListingEngine:
         self._emit("上架", "已点击上架，请到商品管理中确认最终状态")
 
     def _wait_upload_done(self, page, timeout_ms: int = 120000):
-        try:
-            page.locator("text=上传中").first.wait_for(state="detached", timeout=timeout_ms)
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            page.locator("text=上传中").first.wait_for(state="detached", timeout=timeout_ms)  # noqa: E501

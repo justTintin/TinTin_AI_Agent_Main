@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 LLM 代理客户端 — 文本 LLM 调用统一走服务端代理。
 
@@ -16,12 +15,14 @@ LLM 代理客户端 — 文本 LLM 调用统一走服务端代理。
     from utils.llm_proxy import llm_chat
     reply = llm_chat(system="你是文案专家", user="写一段产品介绍", model="deepseek-v4-flash")
 """
-import os
 import json
+import os
 
-from utils.logger_utils import log
-from utils.http_client import resilient_post, resilient_get
+import requests
+
 from utils.api_error import ApiError
+from utils.http_client import resilient_get, resilient_post
+from utils.logger_utils import log
 
 
 def _read_config() -> dict:
@@ -29,9 +30,9 @@ def _read_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return {}
 
@@ -52,7 +53,7 @@ def llm_chat(
     system: str,
     user: str,
     *,
-    model: str = "",
+    model: str | None = "",
     temperature: float = 0.4,
     timeout: int = 120,
     max_tokens: int = 0,
@@ -99,7 +100,7 @@ def llm_chat(
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
         raise ApiError(url, method="POST", params=payload,
-                       status_code=resp.status_code, response_text=resp.text, service="llm")
+                       status_code=resp.status_code, response_text=resp.text, service="llm")  # noqa: E501
 
     data = resp.json()
     # 兼容 OpenAI 格式和自定义格式
@@ -115,7 +116,7 @@ def llm_chat(
 def llm_chat_messages(
     messages: list,
     *,
-    model: str = "",
+    model: str | None = "",
     temperature: float = 0.4,
     timeout: int = 120,
     max_tokens: int = 0,
@@ -155,13 +156,13 @@ def llm_chat_messages(
     if max_tokens > 0:
         payload["max_tokens"] = max_tokens
 
-    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'} 消息数={len(messages)}")
+    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'} 消息数={len(messages)}")  # noqa: E501
     resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
         raise ApiError(url, method="POST", params=payload,
-                       status_code=resp.status_code, response_text=resp.text, service="llm")
+                       status_code=resp.status_code, response_text=resp.text, service="llm")  # noqa: E501
 
     data = resp.json()
     content = (
@@ -190,12 +191,12 @@ def llm_chat_json(
     t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.MULTILINE).strip()
     try:
         return json.loads(t)
-    except Exception:
+    except json.JSONDecodeError:
         m = re.search(r"(\[.*\]|\{.*\})", t, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
-            except Exception:
+            except json.JSONDecodeError:
                 pass
     return None
 
@@ -210,6 +211,6 @@ def list_llm_models(timeout: int = 10) -> list:
         if resp.status_code == 200:
             return resp.json().get("models") or []
         log.warning(f"[LLM代理] list_llm_models HTTP {resp.status_code}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[LLM代理] list_llm_models 失败: {e}")
     return []

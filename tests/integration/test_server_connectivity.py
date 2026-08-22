@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """服务端连通性集成测试（需要 --online，地址从 ai_config.compute_server_url 读取）。"""
 import os
 import sys

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """样本数据有效性（离线）：样本存在、格式可解析、生成器幂等。"""
 import os
 import subprocess

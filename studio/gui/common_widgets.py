@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """公共可复用控件。
 
 DropZone：可拖入文件或点击触发的放置区（无业务逻辑，行为由信号连接方决定）。
@@ -9,8 +8,8 @@ DropZone：可拖入文件或点击触发的放置区（无业务逻辑，行为
     dz.file_dropped.connect(lambda paths: handle(paths))
     dz.clicked.connect(open_picker)
 """
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
 
 class DropZone(QFrame):
@@ -44,26 +43,26 @@ class DropZone(QFrame):
         lay.addWidget(hint_lbl)
 
     # ── 交互 ──
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event):  # noqa: N802
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             if any(self._accepts(u.toLocalFile()) for u in urls):
                 event.acceptProposedAction()
                 self._set_active(True)
 
-    def dragMoveEvent(self, event):
+    def dragMoveEvent(self, event):  # noqa: N802
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dragLeaveEvent(self, event):
+    def dragLeaveEvent(self, event):  # noqa: N802
         self._set_active(False)
 
-    def dropEvent(self, event):
+    def dropEvent(self, event):  # noqa: N802
         paths = [u.toLocalFile() for u in event.mimeData().urls()]
         accepted = [p for p in paths if self._accepts(p)]
         if accepted:

@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """logger_utils 日志归档:启动切分/按日期保留/历史读取。"""
 import os
 import sys
-import time
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "studio"))

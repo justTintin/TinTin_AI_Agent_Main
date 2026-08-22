@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 素材下载浏览器（apps/asset-browser，Electron）客户端。
 
@@ -11,14 +10,15 @@
       "downloadDir": "<绝对路径>", "ts": <epoch> }
 浏览器启动时读取并消费（用后即删），据此打开搜索页 + 设定下载目录。
 """
+import json
 import os
 import re
-import json
-import time
 import shutil
 import subprocess
+import time
 
-from config.paths import ASSET_BROWSER_DIR, MATERIALS_DIR, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
+from config.paths import ASSET_BROWSER_DIR, KNOWLEDGE_MEDIA_DIR
+
 from utils.logger_utils import log
 from utils.platform_utils import create_no_window_flag
 
@@ -55,7 +55,7 @@ def _electron_exe() -> str | None:
             try:
                 if os.path.getsize(p) <= 0:
                     continue
-            except Exception:
+            except OSError:
                 continue
             return p
     return None
@@ -74,13 +74,13 @@ def _launch_asset_browser_process() -> tuple[bool, str]:
             if p.poll() is None:
                 return True, "ok"
             launch_errors.append(f"electron 进程异常退出(code={p.returncode})")
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             launch_errors.append(f"electron 启动失败: {e}")
 
     npm_candidates = []
     npm_candidates.extend([
         os.path.join(ASSET_BROWSER_DIR, "bin", "npm.cmd"),
-        os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),
+        os.path.join(ASSET_BROWSER_DIR, "bin", "node_modules", "npm", "bin", "npm-cli.js"),  # noqa: E501
         shutil.which("npm.cmd") or "",
     ])
 
@@ -90,15 +90,15 @@ def _launch_asset_browser_process() -> tuple[bool, str]:
                 node_exe = os.path.join(ASSET_BROWSER_DIR, "bin", "node.exe")
                 if not os.path.isfile(node_exe):
                     continue
-                p = subprocess.Popen([node_exe, npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)
+                p = subprocess.Popen([node_exe, npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)  # noqa: E501
             else:
-                p = subprocess.Popen([npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)
+                p = subprocess.Popen([npm, "start"], cwd=ASSET_BROWSER_DIR, creationflags=flags)  # noqa: E501
             time.sleep(1.0)
             if p.poll() is not None:
                 launch_errors.append(f"npm 进程异常退出(code={p.returncode})")
                 continue
             return True, "ok"
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             launch_errors.append(f"npm 启动失败({npm}): {e}")
 
     detail = "；".join(launch_errors) if launch_errors else "未找到可用的 electron 或 npm 启动器"
@@ -142,7 +142,7 @@ def launch_for_topic(topic: str, keyword: str | None = None,
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
             json.dump(handoff, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except OSError as e:
         return False, f"写入握手文件失败: {e}", ""
 
     ok_launch, msg_launch = _launch_asset_browser_process()
@@ -161,7 +161,7 @@ def launch() -> tuple[bool, str]:
     try:
         if os.path.exists(HANDOFF_FILE):
             os.remove(HANDOFF_FILE)
-    except Exception:
+    except OSError:
         pass
     ok_launch, msg_launch = _launch_asset_browser_process()
     if not ok_launch:
@@ -189,7 +189,7 @@ def launch_dreamina_assets(download_dir: str) -> tuple[bool, str, str]:
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
             json.dump(handoff, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except OSError as e:
         return False, f"写入握手文件失败: {e}", ""
 
     ok_launch, msg_launch = _launch_asset_browser_process()
@@ -206,9 +206,9 @@ def launch_hotspot_capture(auto_quit: bool = False) -> tuple[bool, str]:
         return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。"
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
-            json.dump({"mode": "hotspot", "autoQuit": auto_quit, "ts": int(time.time())},
+            json.dump({"mode": "hotspot", "autoQuit": auto_quit, "ts": int(time.time())},  # noqa: E501
                       f, ensure_ascii=False)
-    except Exception as e:
+    except OSError as e:
         return False, f"写入握手文件失败: {e}"
     ok_launch, msg_launch = _launch_asset_browser_process()
     if not ok_launch:
@@ -223,8 +223,8 @@ def launch_knowledge_sync() -> tuple[bool, str]:
         return False, f"未找到素材浏览器或其依赖（{ASSET_BROWSER_DIR}）。"
     try:
         with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
-            json.dump({"mode": "knowledge", "ts": int(time.time())}, f, ensure_ascii=False)
-    except Exception as e:
+            json.dump({"mode": "knowledge", "ts": int(time.time())}, f, ensure_ascii=False)  # noqa: E501
+    except OSError as e:
         return False, f"写入握手文件失败: {e}"
     ok_launch, msg_launch = _launch_asset_browser_process()
     if not ok_launch:

@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
 import json
+
 from utils.http_client import http_get, http_post
 from utils.logger_utils import log
+
 
 class RunningHubManager:
     """RunningHub API 客户端。
@@ -33,7 +34,7 @@ class RunningHubManager:
         url = f"{self.base_url}/uc/openapi/accountStatus"
         try:
             log.info(f"Testing RunningHub API Key via: {url}")
-            resp = http_post(url, headers=self._auth_header(), json={"apikey": self.api_key}, timeout=10)
+            resp = http_post(url, headers=self._auth_header(), json={"apikey": self.api_key}, timeout=10)  # noqa: E501
             log.info(f"Account status response [{resp.status_code}]: {resp.text[:150]}")
             if resp.status_code == 200:
                 data = resp.json()
@@ -49,12 +50,12 @@ class RunningHubManager:
         try:
             with open(file_path, 'rb') as f:
                 files = {'file': f}
-                resp = http_post(url, headers=self._auth_header(), files=files, timeout=60)
+                resp = http_post(url, headers=self._auth_header(), files=files, timeout=60)  # noqa: E501
             log.info(f"Upload response [{resp.status_code}]: {resp.text[:200]}")
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("code") == 0:
-                    return data.get("data", {}).get("download_url") or data.get("data", {}).get("fileName")
+                    return data.get("data", {}).get("download_url") or data.get("data", {}).get("fileName")  # noqa: E501
             log.error(f"Failed to upload file to RunningHub: {resp.text}")
         except Exception as e:
             log.error(f"Error uploading to RunningHub: {e}")
@@ -82,12 +83,12 @@ class RunningHubManager:
             log.error(f"Error fetching workflow JSON: {e}")
         return None
 
-    def run_workflow(self, workflow_id, node_info_list, add_metadata=True, instance_type="default",
+    def run_workflow(self, workflow_id, node_info_list, add_metadata=True, instance_type="default",  # noqa: E501
                     use_personal_queue=False, retain_seconds=None, webhook_url=None):
         """提交 ComfyUI 工作流任务。
 
         端点：POST /openapi/v2/run/workflow/{workflow_id}
-        返回 {"success": bool, "task_id": str, "error_code": str, "error_message": str, "raw": dict}。"""
+        返回 {"success": bool, "task_id": str, "error_code": str, "error_message": str, "raw": dict}。"""  # noqa: E501
         url = f"{self.base_url}/openapi/v2/run/workflow/{workflow_id}"
         payload = {
             "addMetadata": add_metadata,
@@ -100,7 +101,7 @@ class RunningHubManager:
         if webhook_url:
             payload["webhookUrl"] = webhook_url
         try:
-            log.info(f"Running workflow: {url} payload={json.dumps(payload, ensure_ascii=False)[:500]}")
+            log.info(f"Running workflow: {url} payload={json.dumps(payload, ensure_ascii=False)[:500]}")  # noqa: E501
             resp = http_post(url, headers=self._auth_header(), json=payload, timeout=30)
             log.info(f"Run workflow response [{resp.status_code}]: {resp.text[:500]}")
             if resp.status_code == 200:
@@ -110,7 +111,7 @@ class RunningHubManager:
                     error_code = str(data.get("errorCode") or "")
                     error_message = data.get("errorMessage") or ""
                     if task_id:
-                        return {"success": True, "task_id": task_id, "error_code": "", "error_message": "", "raw": data}
+                        return {"success": True, "task_id": task_id, "error_code": "", "error_message": "", "raw": data}  # noqa: E501
                     return {
                         "success": False,
                         "task_id": None,
@@ -127,13 +128,13 @@ class RunningHubManager:
             }
         except Exception as e:
             log.error(f"Error running workflow: {e}")
-            return {"success": False, "task_id": None, "error_code": "", "error_message": str(e), "raw": None}
+            return {"success": False, "task_id": None, "error_code": "", "error_message": str(e), "raw": None}  # noqa: E501
 
     def get_task_status(self, task_id):
         """查询任务结果 V2。"""
         url = f"{self.base_url}/openapi/v2/query"
         try:
-            resp = http_post(url, headers=self._auth_header(), json={"taskId": task_id}, timeout=10)
+            resp = http_post(url, headers=self._auth_header(), json={"taskId": task_id}, timeout=10)  # noqa: E501
             if resp.status_code == 200:
                 return resp.json()
             log.error(f"Failed to get task status (task_id={task_id}): {resp.text}")
@@ -145,23 +146,23 @@ class RunningHubManager:
     def get_workflow_list(self, page=1, size=50):
         """尝试读取当前 API Key 下的工作流/应用列表。优先 POST /api/openapi/getWorkflowList，失败回退 GET。"""
         endpoints = [
-            ("POST", f"{self.base_url}/api/openapi/getWorkflowList", {"apiKey": self.api_key, "page": page, "size": size}),
-            ("GET", f"{self.base_url}/api/openapi/getWorkflowList", {"apiKey": self.api_key, "page": page, "size": size}),
+            ("POST", f"{self.base_url}/api/openapi/getWorkflowList", {"apiKey": self.api_key, "page": page, "size": size}),  # noqa: E501
+            ("GET", f"{self.base_url}/api/openapi/getWorkflowList", {"apiKey": self.api_key, "page": page, "size": size}),  # noqa: E501
         ]
         for method, url, payload in endpoints:
             try:
                 log.info(f"Trying list workflows: {method} {url}")
                 if method == "POST":
-                    resp = http_post(url, headers=self._auth_header(), json=payload, timeout=10)
+                    resp = http_post(url, headers=self._auth_header(), json=payload, timeout=10)  # noqa: E501
                 else:
-                    resp = http_get(url, headers=self._auth_header(), params=payload, timeout=10)
-                log.info(f"List workflows response [{resp.status_code}]: {resp.text[:200]}")
+                    resp = http_get(url, headers=self._auth_header(), params=payload, timeout=10)  # noqa: E501
+                log.info(f"List workflows response [{resp.status_code}]: {resp.text[:200]}")  # noqa: E501
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("code") == 0:
                         items = data.get("data", {})
                         if isinstance(items, dict):
-                            items = items.get("list") or items.get("records") or items.get("items") or []
+                            items = items.get("list") or items.get("records") or items.get("items") or []  # noqa: E501
                         if isinstance(items, list):
                             return items
             except Exception as e:

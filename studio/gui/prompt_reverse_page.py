@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """提示词反推工具页（媒体工具 → 提示词反推）。
 
 两个子页面：
@@ -9,26 +8,31 @@
   POST /prompt/image  multipart: file | material_id → Florence-2 PromptGen + qwen2.5vl
   POST /prompt/video  multipart: file + start_sec/end_sec → 风格/运镜/光线/转场
 """
-import os
-import json
+import contextlib
 import glob
-import shutil
+import json
+import os
 import subprocess
 import tempfile
 
-from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QMouseEvent, QPaintEvent
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QTextEdit, QProgressBar, QWidget,
-)
-
+import requests.exceptions
 from gui.base_page import BasePage
+from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPaintEvent, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.base_worker import BaseWorker
-from utils.file_dialog_utils import pick_file
+from utils.ffmpeg_utils import CREATE_NO_WINDOW, run
 from utils.http_client import http_get, http_post
+from utils.json_utils import to_editor_text
 from utils.logger_utils import log
-
 
 # ── 工具函数 ──
 
@@ -40,12 +44,12 @@ def _get_server_url():
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 cfg = json.load(f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
         pass
     return ""
 
@@ -54,7 +58,7 @@ def _probe_duration(path):
     try:
         from utils.video_compiler import _probe_duration as _pd
         return _pd(path)
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return 0.0
 
 
@@ -62,7 +66,7 @@ def _find_ffmpeg():
     try:
         from utils.platform_utils import find_ffmpeg
         return find_ffmpeg()
-    except Exception:
+    except (OSError, FileNotFoundError):
         return ""
 
 
@@ -74,19 +78,17 @@ def _extract_frames(video, duration, count=16):
     out_dir = os.path.join(tempfile.gettempdir(), "prompt_reverse_frames")
     os.makedirs(out_dir, exist_ok=True)
     for old in glob.glob(os.path.join(out_dir, "frame_*.jpg")):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(old)
-        except OSError:
-            pass
     pattern = os.path.join(out_dir, "frame_%02d.jpg")
     step = duration / count
-    flags = 0x08000000 if os.name == "nt" else 0
+    flags = CREATE_NO_WINDOW
     try:
-        subprocess.run(
+        run(
             [ff, "-y", "-i", video, "-vf", f"scale=320:-2,fps=1/{step:.4f}",
              "-frames:v", str(count), "-q:v", "2", pattern],
             capture_output=True, creationflags=flags, timeout=60)
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return []
     return sorted(glob.glob(os.path.join(out_dir, "frame_*.jpg")))
 
@@ -117,10 +119,78 @@ def _format_result(data):
     engine = data.get("engine_used") or data.get("model_used")
     if engine:
         parts.append(f"【引擎】{engine}")
-    return "\n\n".join(parts) if parts else json.dumps(data, ensure_ascii=False, indent=2)
+    return "\n\n".join(parts) if parts else to_editor_text(data)
 
 
-from gui.common_widgets import DropZone as _DropZone
+from gui.common_widgets import DropZone as _DropZone  # noqa: E402
+
+
+def _poll_task_result(base_url, task_id, phase_signal=None, timeout=600, interval=3):
+    """轮询服务端任务结果直到完成、失败或超时。
+
+    优先 GET /tasks/unified/{task_id}；若失败则回退到 /scheduled/tasks/{task_id}。
+    兼容常见的响应包装：{data: {...}} / {...}；状态字段 status / state；
+    完成态 completed / done / success / finished；失败态 failed / error / cancelled。
+    """
+    import time
+    deadline = time.time() + timeout
+    last_log = 0
+    start_time = time.time()
+    last_status = ""
+    while time.time() < deadline:
+        time.sleep(interval)
+        task_obj = None
+        try:
+            for endpoint in (f"{base_url}/tasks/unified/{task_id}",
+                             f"{base_url}/scheduled/tasks/{task_id}"):
+                try:
+                    pr = http_get(endpoint, timeout=15)
+                    if pr.status_code == 200:
+                        pdata = pr.json()
+                        task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata  # noqa: E501
+                        break
+                except requests.exceptions.RequestException:
+                    continue
+        except Exception:  # 轮询过程中的意外响应格式等未知异常
+            continue
+        if not isinstance(task_obj, dict):
+            continue
+        status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
+        if status and status != last_status:
+            last_status = status
+            log.info(f"[提示词反推] task_id={task_id} status={status}")
+        prog = task_obj.get("progress")
+        if prog is not None and phase_signal is not None:
+            try:
+                pct = float(prog)
+                if pct <= 1.0:
+                    pct *= 100
+                phase_signal.emit(f"服务端处理中 {pct:.0f}%")
+            except (TypeError, ValueError):
+                pass
+        else:
+            elapsed = int(time.time() - start_time)
+            if elapsed - last_log >= 10:
+                last_log = elapsed
+                if phase_signal is not None:
+                    phase_signal.emit(f"等待服务端处理，已等待 {elapsed} 秒...")
+        if status in ("completed", "done", "success", "finished"):
+            result = task_obj.get("result") or task_obj
+            if isinstance(result, dict):
+                return result
+            return task_obj
+        if status in ("failed", "error", "cancelled"):
+            err = (task_obj.get("error_msg") or task_obj.get("error")
+                   or task_obj.get("message") or "未知错误")
+            raise RuntimeError(f"任务失败(task_id={task_id}): {err}")
+    raise RuntimeError(f"等待任务结果超时({timeout}s), task_id={task_id}")
+
+
+def _extract_task_id(data):
+    """从服务端响应中提取异步任务 ID，兼容 task_id / id / job_id。"""
+    if not isinstance(data, dict):
+        return ""
+    return (data.get("task_id") or data.get("id") or data.get("job_id") or "")
 
 class _FrameExtractWorker(BaseWorker):
     """后台抽取视频帧缩略图，供时间轴帧预览使用。"""
@@ -180,8 +250,8 @@ class _VideoTimeline(QWidget):
             ff = _find_ffmpeg()
             if ff:
                 tmp = tempfile.mktemp(suffix=".dat")
-                flags = 0x08000000 if os.name == "nt" else 0
-                subprocess.run(
+                flags = CREATE_NO_WINDOW
+                run(
                     [ff, "-i", path, "-vn", "-ac", "1",
                      "-filter:a", "aresample=120", "-map", "0:a",
                      "-f", "data", "-codec:a", "pcm_s16le", tmp],
@@ -201,7 +271,7 @@ class _VideoTimeline(QWidget):
                             self._waveform.append(min(1.0, amp * 1.8))
                         if len(self._waveform) >= bars // 2:
                             return
-        except Exception:
+        except (OSError, subprocess.SubprocessError, struct.error, ValueError):
             pass
         self._waveform = [random.uniform(0.12, 0.85) for _ in range(bars)]
 
@@ -229,7 +299,7 @@ class _VideoTimeline(QWidget):
             return "move"
         return None
 
-    def mousePressEvent(self, event: QMouseEvent):
+    def mousePressEvent(self, event: QMouseEvent):  # noqa: N802
         if event.button() != Qt.LeftButton or self._duration <= 0:
             return
         x = event.position().x()
@@ -244,7 +314,7 @@ class _VideoTimeline(QWidget):
             self._drag = "move"
             self.update()
 
-    def mouseMoveEvent(self, event: QMouseEvent):
+    def mouseMoveEvent(self, event: QMouseEvent):  # noqa: N802
         if self._drag is None or self._duration <= 0:
             return
         x = event.position().x()
@@ -265,11 +335,11 @@ class _VideoTimeline(QWidget):
             self._sel_end = new_start + win
         self.update()
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
+    def mouseReleaseEvent(self, event: QMouseEvent):  # noqa: N802
         self._drag = None
         self.range_changed.emit()
 
-    def paintEvent(self, event: QPaintEvent):
+    def paintEvent(self, event: QPaintEvent):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), QColor("#16161e"))
@@ -319,7 +389,7 @@ class _VideoTimeline(QWidget):
             in_sel = t1 > self._sel_start and t0 < self._sel_end
             rect = QRectF(inner_x + i * fw, y, fw, fh)
             p.fillRect(rect, QColor("#101018"))
-            scaled = img.scaled(int(fw), int(fh), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled = img.scaled(int(fw), int(fh), Qt.KeepAspectRatio, Qt.SmoothTransformation)  # noqa: E501
             ox = rect.x() + (rect.width() - scaled.width()) / 2
             oy = rect.y() + (rect.height() - scaled.height()) / 2
             p.drawImage(QRectF(ox, oy, scaled.width(), scaled.height()), scaled)
@@ -364,7 +434,7 @@ class _ImagePromptWorker(BaseWorker):
             return
         try:
             self.phase.emit("正在上传图片并分析…")
-            log.info(f"[图片反推] 请求 {base}/prompt/image file={os.path.basename(self.image_path)}")
+            log.info(f"[图片反推] 请求 {base}/prompt/image file={os.path.basename(self.image_path)}")  # noqa: E501
             with open(self.image_path, "rb") as f:
                 resp = http_post(
                     f"{base}/prompt/image",
@@ -372,9 +442,16 @@ class _ImagePromptWorker(BaseWorker):
                     timeout=180)
             if resp.status_code != 200:
                 raise RuntimeError(f"服务端返回 {resp.status_code}: {resp.text[:300]}")
+
             data = resp.json()
-            self.finished.emit(_format_result(data))
-        except Exception as e:
+            task_id = _extract_task_id(data)
+            if task_id:
+                self.phase.emit(f"已创建任务 {task_id}，等待服务端处理...")
+                result = _poll_task_result(base, task_id, self.phase, timeout=600)
+                self.finished.emit(_format_result(result))
+            else:
+                self.finished.emit(_format_result(data))
+        except requests.exceptions.RequestException as e:
             log.error(f"[图片反推] 失败: {type(e).__name__}: {e}")
             self.error.emit(str(e))
 
@@ -400,7 +477,7 @@ class _VideoPromptWorker(BaseWorker):
             self.phase.emit("正在上传视频并分析…")
             # 服务端 /prompt/video 支持 start_sec/end_sec 时间窗，直接传参，无需本地裁切
             # 视觉模型推理耗时较长（30s 窗口实测约 2 分钟），timeout 取 600s 留足余量
-            log.info(f"[视频反推] 请求 {base}/prompt/video file={os.path.basename(self.video)} "
+            log.info(f"[视频反推] 请求 {base}/prompt/video file={os.path.basename(self.video)} "  # noqa: E501
                      f"start_sec={self.start:.2f} end_sec={self.end:.2f}")
             with open(self.video, "rb") as f:
                 resp = http_post(
@@ -411,9 +488,16 @@ class _VideoPromptWorker(BaseWorker):
                     timeout=600)
             if resp.status_code != 200:
                 raise RuntimeError(f"服务端返回 {resp.status_code}: {resp.text[:300]}")
+
             data = resp.json()
-            self.finished.emit(_format_result(data))
-        except Exception as e:
+            task_id = _extract_task_id(data)
+            if task_id:
+                self.phase.emit(f"已创建任务 {task_id}，等待服务端处理...")
+                result = _poll_task_result(base, task_id, self.phase, timeout=600)
+                self.finished.emit(_format_result(result))
+            else:
+                self.finished.emit(_format_result(data))
+        except requests.exceptions.RequestException as e:
             log.error(f"[视频反推] 失败: {type(e).__name__}: {e}")
             self.error.emit(str(e))
 
@@ -598,7 +682,7 @@ class VideoPromptReversePage(BasePage):
         self.lbl_status.setText(
             f"已选择: {os.path.basename(path)} ({_fmt_sec(self._duration)})")
         # 后台抽帧供时间轴帧预览（失败时回退显示波形）
-        self._frame_worker = self.track_worker(_FrameExtractWorker(path, self._duration))
+        self._frame_worker = self.track_worker(_FrameExtractWorker(path, self._duration))  # noqa: E501
         self._frame_worker.finished.connect(self._on_frames_ready)
         self._frame_worker.start()
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """未定义名静态回归检查（防 `_json` 类局部别名泄漏 / 漏导入导致的 NameError）。
 
 背景（2026-08-02）：
@@ -19,7 +18,6 @@
 """
 import ast
 import builtins
-import io
 import os
 import sys
 import unittest
@@ -79,9 +77,7 @@ def _stmt_defs(body, names):
                 names.add(a.asname or a.name.split(".")[0])
         elif isinstance(node, ast.Assign):
             _add_targets(node.targets, names)
-        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            _add_targets([node.target], names)
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor)):
             _add_targets([node.target], names)
         elif isinstance(node, ast.With):
             for wi in node.items:
@@ -140,7 +136,7 @@ def _undefined_names(path):
     rel = os.path.relpath(path, STUDIO_DIR).replace("\\", "/")
     if rel in KNOWN_BROKEN:
         return []
-    with io.open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read())
     mod = _module_names(tree)
     issues = []
@@ -189,7 +185,7 @@ def _undefined_names(path):
 
 def _alias_leaks(path):
     """_json./_time. 别名在模块级或所在函数内均未定义 → 泄漏。返回 [(函数名, 别名, 行号)]。"""
-    with io.open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read())
     mod = set()
     for node in tree.body:
@@ -226,10 +222,9 @@ class TestUndefinedNames(unittest.TestCase):
         for path in _all_py_files():
             try:
                 for fn, name, ln in _undefined_names(path):
-                    bad.append("%s:%d %s(): 未定义名 %s" % (
-                        os.path.relpath(path, STUDIO_DIR), ln, fn, name))
+                    bad.append(f"{os.path.relpath(path, STUDIO_DIR)}:{ln} {fn}(): 未定义名 {name}")
             except SyntaxError as e:
-                bad.append("%s: 语法错误 %s" % (os.path.relpath(path, STUDIO_DIR), e))
+                bad.append(f"{os.path.relpath(path, STUDIO_DIR)}: 语法错误 {e}")
         if bad:
             self.fail("发现未定义名（可能 NameError）：\n  " + "\n  ".join(bad[:50]))
 
@@ -238,8 +233,7 @@ class TestUndefinedNames(unittest.TestCase):
         for path in _all_py_files():
             try:
                 for fn, alias, ln in _alias_leaks(path):
-                    bad.append("%s:%d %s(): 使用 %s. 但作用域内未定义" % (
-                        os.path.relpath(path, STUDIO_DIR), ln, fn, alias))
+                    bad.append(f"{os.path.relpath(path, STUDIO_DIR)}:{ln} {fn}(): 使用 {alias}. 但作用域内未定义")
             except SyntaxError:
                 continue
         if bad:

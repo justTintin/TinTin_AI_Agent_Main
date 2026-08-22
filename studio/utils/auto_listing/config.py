@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """自动上架配置：持久化、店铺映射、Chrome 检测。"""
 import json
 import os
@@ -30,7 +29,7 @@ DOUYIN_STORES = {
 
 def detect_chrome_exe() -> str:
     """返回已安装的 Chrome/Edge 可执行文件；找不到返回空串。"""
-    env = (os.environ.get("ALS_CHROME_EXE_PATH") or os.environ.get("CHROME_EXE_PATH") or "").strip()
+    env = (os.environ.get("ALS_CHROME_EXE_PATH") or os.environ.get("CHROME_EXE_PATH") or "").strip()  # noqa: E501
     if env and os.path.isfile(env):
         return env
 
@@ -38,8 +37,8 @@ def detect_chrome_exe() -> str:
     if found and os.path.isfile(found):
         return found
 
-    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-    pfx = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    pf = os.environ.get("PROGRAMFILES", r"C:\Program Files")  # noqa: SIM112
+    pfx = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")  # noqa: SIM112
     la = os.environ.get("LOCALAPPDATA", "")
     candidates = [
         os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
@@ -70,16 +69,16 @@ def load_config() -> dict:
     cfg = default_config()
     try:
         if os.path.isfile(AUTO_LISTING_CONFIG_FILE):
-            with open(AUTO_LISTING_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AUTO_LISTING_CONFIG_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 cfg.update(data)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return cfg
 
 
-def save_config(cfg: dict) -> None:
+def save_config(cfg: dict) -> dict:
     merged = default_config()
     merged.update(cfg or {})
     for d in (AUTO_LISTING_DIR, AUTO_LISTING_SYNC_DIR, AUTO_LISTING_RESULTS_DIR):

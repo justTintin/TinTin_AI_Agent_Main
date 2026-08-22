@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """定时任务管理页（侧边栏「定时任务」菜单，与「工作台」同级的主界面页面）。
 
 两个板块：
@@ -8,19 +7,30 @@
    智能体自动分解执行（能力清单可点「查看云端智能体」查看）。
 3. 服务端成片任务：一键成片/脚本成片的定时调度在服务端，此处提供快捷入口与最近任务概览。
 """
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QLineEdit, QComboBox, QTimeEdit, QCheckBox, QTabWidget,
-    QMessageBox, QDialog,
-)
-from PySide6.QtCore import QTime
-
-from utils.gui_icons import mdi_button, table_action_button
+from gui._tab_compat import setup_tab_widget
 from gui.elided_label import ElidedLabel
-from utils.logger_utils import log
+from PySide6.QtCore import Qt, QTime
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTimeEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils import local_scheduler as ls
+from utils.gui_icons import mdi_button, table_action_button
+from utils.logger_utils import log
 
 # 任务类型（大类）：hotspot=本地定时任务（不依赖服务端智能体）；agent=云端智能体（提交服务端执行）
 _TYPE_LABEL = {"hotspot": "本地定时任务", "agent": "云端智能体"}
@@ -69,16 +79,17 @@ class ScheduledTasksMgmtPage(QWidget):
         heading = QLabel("定时任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = ElidedLabel("本地定时任务（如热点采集，不依赖服务端智能体）与云端智能体（到点提交服务端自动分解执行）的统一管理。", max_lines=1)
+        sub = ElidedLabel("本地定时任务（如热点采集，不依赖服务端智能体）与云端智能体（到点提交服务端自动分解执行）的统一管理。", max_lines=1)  # noqa: E501
         sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._build_local_tab(), "本地定时任务")
-        tabs.addTab(self._build_server_tab(), "服务端任务")
-        root.addWidget(tabs, 1)
+        tab_bar, stack, tabs = setup_tab_widget(root, 1)
+        tab_bar.addTab(" 本地定时任务")
+        stack.addWidget(self._build_local_tab())
+        tab_bar.addTab(" 服务端任务")
+        stack.addWidget(self._build_server_tab())
 
     def _build_local_tab(self):
         """本地定时任务：新建区 + 已注册任务列表。"""
@@ -88,11 +99,15 @@ class ScheduledTasksMgmtPage(QWidget):
         lay.setSpacing(10)
 
         # ── 新建区 ──
-        create_card = QFrame(); create_card.setObjectName("card")
-        cl = QVBoxLayout(create_card); cl.setContentsMargins(12, 10, 12, 10); cl.setSpacing(8)
+        create_card = QFrame()
+        create_card.setObjectName("card")
+        cl = QVBoxLayout(create_card)
+        cl.setContentsMargins(12, 10, 12, 10)
+        cl.setSpacing(8)  # noqa: E501
         cl.addWidget(QLabel("＋ 新建本地定时任务"))
 
-        row = QHBoxLayout(); row.setSpacing(8)
+        row = QHBoxLayout()
+        row.setSpacing(8)
         row.addWidget(QLabel("任务名"))
         self.edit_name = QLineEdit("热点采集")
         self.edit_name.setFixedWidth(140)
@@ -105,7 +120,9 @@ class ScheduledTasksMgmtPage(QWidget):
         row.addWidget(self.combo_type)
         # 任务描述（云端智能体类型）：注册时 LLM 拆解 → 保存执行步骤，到点直接提交服务端
         self.goal_row = QWidget()
-        gl = QHBoxLayout(self.goal_row); gl.setContentsMargins(0, 0, 0, 0); gl.setSpacing(8)
+        gl = QHBoxLayout(self.goal_row)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.setSpacing(8)  # noqa: E501
         gl.addWidget(QLabel("任务描述"))
         self.edit_goal = QLineEdit("生成产品文案，做合规复检，再生成分镜脚本并评价")
         gl.addWidget(self.edit_goal, 1)
@@ -127,7 +144,9 @@ class ScheduledTasksMgmtPage(QWidget):
 
         # 拆解结果预览（云端智能体类型）：展示 LLM 拆出的执行步骤
         self.plan_row = QWidget()
-        pl = QHBoxLayout(self.plan_row); pl.setContentsMargins(0, 0, 0, 0); pl.setSpacing(8)
+        pl = QHBoxLayout(self.plan_row)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(8)  # noqa: E501
         pl.addWidget(QLabel("拆解步骤"))
         self.plan_preview = QLabel("（尚未拆解）")
         self.plan_preview.setObjectName("muted_text")
@@ -137,7 +156,8 @@ class ScheduledTasksMgmtPage(QWidget):
         # 类型初始状态（需在 goal_row/plan_row 创建之后，否则属性不存在）
         self._on_type_changed()
 
-        row2 = QHBoxLayout(); row2.setSpacing(8)
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
         row2.addWidget(QLabel("调度"))
         self.combo_mode = QComboBox()
         self.combo_mode.addItems(["每天", "每周"])
@@ -149,7 +169,9 @@ class ScheduledTasksMgmtPage(QWidget):
         row2.addWidget(self.time_edit)
         # 星期行（每周模式显示）
         self.week_row = QWidget()
-        wl = QHBoxLayout(self.week_row); wl.setContentsMargins(0, 0, 0, 0); wl.setSpacing(4)
+        wl = QHBoxLayout(self.week_row)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setSpacing(4)  # noqa: E501
         wl.addWidget(QLabel("星期"))
         self._day_checks = []
         for i, d in enumerate(["一", "二", "三", "四", "五", "六", "日"]):
@@ -169,8 +191,11 @@ class ScheduledTasksMgmtPage(QWidget):
         lay.addWidget(create_card)
 
         # ── 已注册任务列表 ──
-        list_card = QFrame(); list_card.setObjectName("card")
-        ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
+        list_card = QFrame()
+        list_card.setObjectName("card")
+        ll = QVBoxLayout(list_card)
+        ll.setContentsMargins(12, 10, 12, 10)
+        ll.setSpacing(8)  # noqa: E501
         list_header = QHBoxLayout()
         list_header.addWidget(QLabel(" 已注册任务（Windows 任务计划程序）"))
         list_header.addStretch()
@@ -204,15 +229,19 @@ class ScheduledTasksMgmtPage(QWidget):
         lay.setContentsMargins(8, 10, 8, 8)
         lay.setSpacing(10)
 
-        tip_card = QFrame(); tip_card.setObjectName("card")
-        tl = QVBoxLayout(tip_card); tl.setContentsMargins(12, 10, 12, 10); tl.setSpacing(8)
+        tip_card = QFrame()
+        tip_card.setObjectName("card")
+        tl = QVBoxLayout(tip_card)
+        tl.setContentsMargins(12, 10, 12, 10)
+        tl.setSpacing(8)  # noqa: E501
         tip = ElidedLabel(
             "「一键成片 / 脚本成片」的定时任务由服务端调度执行："
             "在「一键成片」页配置好产品与文案后，点「添加为定时任务」选择调度方式提交服务端即可。",
             max_lines=2,
         )
         tl.addWidget(tip)
-        btn_row = QHBoxLayout(); btn_row.setSpacing(8)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         btn_compile = mdi_button("去一键成片页添加定时任务", "rocket")
         btn_compile.setObjectName("primary_button")
         btn_compile.clicked.connect(lambda: self._goto_page(33))
@@ -225,8 +254,11 @@ class ScheduledTasksMgmtPage(QWidget):
         tl.addLayout(btn_row)
         lay.addWidget(tip_card)
 
-        list_card = QFrame(); list_card.setObjectName("card")
-        ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
+        list_card = QFrame()
+        list_card.setObjectName("card")
+        ll = QVBoxLayout(list_card)
+        ll.setContentsMargins(12, 10, 12, 10)
+        ll.setSpacing(8)  # noqa: E501
         ll.addWidget(QLabel(" 最近编排任务（服务端 /agent/tasks，等待确认的节点可在此继续）"))
         self.agent_table = QTableWidget(0, 5)
         self.agent_table.setHorizontalHeaderLabels(["目标", "状态", "进度", "创建时间", "操作"])
@@ -344,7 +376,7 @@ class ScheduledTasksMgmtPage(QWidget):
         w = Worker(lambda: abc.launch_hotspot_capture(auto_quit=True))
         w.finished.connect(lambda r: QMessageBox.information(
             self, "热点采集",
-            "已启动素材浏览器采集今日热点。\n" + (r[1] if isinstance(r, tuple) and r and r[0] else str(r))))
+            "已启动素材浏览器采集今日热点。\n" + (r[1] if isinstance(r, tuple) and r and r[0] else str(r))))  # noqa: E501
         w.error.connect(lambda e: QMessageBox.warning(self, "采集失败", str(e)))
         self._local_worker = w
         w.start()
@@ -352,7 +384,8 @@ class ScheduledTasksMgmtPage(QWidget):
     def _refresh_local(self):
         """后台刷新本地任务列表（schtasks 查询较慢，放线程）。"""
         from utils.thread_worker import TaskWorker as Worker
-        if getattr(self, "_local_worker", None) and self._local_worker.isRunning():
+        worker = getattr(self, "_local_worker", None)
+        if worker is not None and worker.isRunning():
             return
         w = Worker(ls.list_tasks)
         w.finished.connect(self._on_local_loaded)
@@ -366,15 +399,14 @@ class ScheduledTasksMgmtPage(QWidget):
             row = self.local_table.rowCount()
             self.local_table.insertRow(row)
             name = t.get("name", "")
-            task_name = t.get("task_name", "")
             if not t.get("registered"):
                 name = f"{name}（未注册）"
             self.local_table.setItem(row, 0, QTableWidgetItem(name))
-            self.local_table.setItem(row, 1, QTableWidgetItem(_TYPE_LABEL.get(t.get("type", ""), t.get("type", "—"))))
-            self.local_table.setItem(row, 2, QTableWidgetItem(ls._schedule_text(t.get("schedule"))))
+            self.local_table.setItem(row, 1, QTableWidgetItem(_TYPE_LABEL.get(t.get("type", ""), t.get("type", "—"))))  # noqa: E501
+            self.local_table.setItem(row, 2, QTableWidgetItem(ls._schedule_text(t.get("schedule"))))  # noqa: E501
             self.local_table.setItem(row, 3, QTableWidgetItem(t.get("next_run") or "—"))
             self.local_table.setItem(row, 4, QTableWidgetItem(t.get("last_run") or "—"))
-            self.local_table.setItem(row, 5, QTableWidgetItem(ls._result_text(t.get("last_result"))))
+            self.local_table.setItem(row, 5, QTableWidgetItem(ls._result_text(t.get("last_result"))))  # noqa: E501
             self.local_table.setCellWidget(row, 6, self._make_local_ops(t))
 
     def _make_local_ops(self, t):
@@ -384,10 +416,10 @@ class ScheduledTasksMgmtPage(QWidget):
         lay.setSpacing(6)
         if t.get("registered"):
             btn_run = table_action_button("播放", "立即运行一次")
-            btn_run.clicked.connect(lambda _=False, tn=t.get("task_name"): self._on_run_now(tn))
+            btn_run.clicked.connect(lambda _=False: self._on_run_now(t.get("task_name")))  # noqa: E501
             lay.addWidget(btn_run)
         btn_del = table_action_button("", "取消定时")
-        btn_del.clicked.connect(lambda _=False, n=t.get("name"): self._on_delete(n))
+        btn_del.clicked.connect(lambda _=False: self._on_delete(t.get("name")))
         lay.addWidget(btn_del)
         return w
 
@@ -403,9 +435,7 @@ class ScheduledTasksMgmtPage(QWidget):
         w.start()
 
     def _on_delete(self, name):
-        if not QMessageBox.question(self, "取消定时",
-                                    f"确定取消定时任务「{name}」吗？\n（任务计划程序中的注册项将一并删除）",
-                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+        if QMessageBox.question(self, "取消定时", f"确定取消定时任务「{name}」吗？\n（任务计划程序中的注册项将一并删除）", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:  # noqa: E501
             return
         from utils.thread_worker import TaskWorker as Worker
         w = Worker(lambda: ls.delete_task(name))
@@ -425,7 +455,8 @@ class ScheduledTasksMgmtPage(QWidget):
     # ── 服务端任务（成片 + 编排） ────────────────────────────────────────
     def _refresh_server(self):
         from utils.thread_worker import TaskWorker as Worker
-        if getattr(self, "_server_worker", None) and self._server_worker.isRunning():
+        worker = getattr(self, "_server_worker", None)
+        if worker is not None and worker.isRunning():
             return
         from utils import scheduled_task_client as stc
         w = Worker(lambda: stc.list_tasks(timeout=6))
@@ -440,7 +471,8 @@ class ScheduledTasksMgmtPage(QWidget):
     def _refresh_agent(self):
         """后台刷新最近编排任务（/agent/tasks 根任务）。"""
         from utils.thread_worker import TaskWorker as Worker
-        if getattr(self, "_agent_worker", None) and self._agent_worker.isRunning():
+        worker = getattr(self, "_agent_worker", None)
+        if worker is not None and worker.isRunning():
             return
         from utils import agent_client as ac
         w = Worker(lambda: ac.list_tasks(root_only=True, timeout=6))
@@ -457,10 +489,10 @@ class ScheduledTasksMgmtPage(QWidget):
             row = self.agent_table.rowCount()
             self.agent_table.insertRow(row)
             st = t.get("status") or t.get("derived_status") or ""
-            self.agent_table.setItem(row, 0, QTableWidgetItem(str(t.get("goal") or t.get("capability") or "—")))
-            self.agent_table.setItem(row, 1, QTableWidgetItem(_STATUS_LABEL.get(st, st or "—")))
-            self.agent_table.setItem(row, 2, QTableWidgetItem(f"{int(t.get('progress') or 0)}%"))
-            self.agent_table.setItem(row, 3, QTableWidgetItem(str(t.get("created_at") or "")[:16]))
+            self.agent_table.setItem(row, 0, QTableWidgetItem(str(t.get("goal") or t.get("capability") or "—")))  # noqa: E501
+            self.agent_table.setItem(row, 1, QTableWidgetItem(_STATUS_LABEL.get(st, st or "—")))  # noqa: E501
+            self.agent_table.setItem(row, 2, QTableWidgetItem(f"{int(t.get('progress') or 0)}%"))  # noqa: E501
+            self.agent_table.setItem(row, 3, QTableWidgetItem(str(t.get("created_at") or "")[:16]))  # noqa: E501
             self.agent_table.setCellWidget(row, 4, self._make_agent_ops(t))
 
     def _make_agent_ops(self, t):
@@ -512,11 +544,11 @@ class ScheduledTasksMgmtPage(QWidget):
             QMessageBox.warning(self, "加载失败", f"任务 {tid} 不存在或已删除。")
             return
         lines = [f"目标：{task.get('goal') or '—'}",
-                 f"状态：{_STATUS_LABEL.get(task.get('status') or task.get('derived_status') or '', '—')}",
+                 f"状态：{_STATUS_LABEL.get(task.get('status') or task.get('derived_status') or '', '—')}",  # noqa: E501
                  f"进度：{int(task.get('progress') or 0)}%"]
         for ch in (task.get("children") or [])[:8]:
             ch_st = ch.get("status") or ""
-            lines.append(f"· {ch.get('capability') or ch.get('id')}：{_STATUS_LABEL.get(ch_st, ch_st or '—')}"
+            lines.append(f"· {ch.get('capability') or ch.get('id')}：{_STATUS_LABEL.get(ch_st, ch_st or '—')}"  # noqa: E501
                          f" {int(ch.get('progress') or 0)}%")
         if task.get("children") and len(task["children"]) > 8:
             lines.append(f"· …… 共 {len(task['children'])} 个子任务")

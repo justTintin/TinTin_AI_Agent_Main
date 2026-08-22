@@ -1,7 +1,7 @@
 import os
-import sys
 import shutil
 import subprocess
+import sys
 
 IS_WIN = True  # 工程仅支持 Windows
 
@@ -106,7 +106,7 @@ def _ffmpeg_fallback_candidates(exe: str) -> list:
     """
     try:
         from config.paths import WORKSPACE_ROOT
-    except Exception:
+    except ImportError:
         return []
     return [
         os.path.join(WORKSPACE_ROOT, exe),

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MG 动画服务端客户端（按 OpenAPI /mg/* 实现）。
 
 当前服务端 /mg/*（2026-08-02 实测）：
@@ -17,8 +16,10 @@
 MGRequest schema 已包含 specs/bars/params（additionalProperties 开放），
 mg_benchmark 等模板可经 make_mg_request 的 kwargs 传入。
 """
+import json
 import os
-from datetime import datetime
+
+import requests
 
 from utils.http_client import http_get, http_post
 from utils.logger_utils import log
@@ -28,13 +29,15 @@ def _server_url():
     """读取 compute_server_url（与 scheduled_task_client 一致）。"""
     try:
         import json
+
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            cfg = json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            with open(AI_CONFIG_FILE, encoding="utf-8") as _f:
+                cfg = json.load(_f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
         pass
     return ""
 
@@ -53,7 +56,7 @@ def _safe_json(resp):
     """尝试解析响应 JSON，失败返回 {} 并记录。"""
     try:
         return resp.json()
-    except Exception as e:
+    except json.JSONDecodeError as e:
         log.warning(f"[MG] JSON parse failed: {e}")
         return {}
 
@@ -70,7 +73,7 @@ def list_templates(timeout=10):
             if isinstance(data, list):
                 return data
             return data.get("items") or data.get("data") or data.get("templates") or []
-    except Exception as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.warning(f"[MG] list_templates failed: {e}")
     return []
 
@@ -87,10 +90,10 @@ def submit_mg_task(request: dict, timeout=15):
         if r.status_code == 200:
             data = _safe_json(r)
             task_id = data.get("id") or data.get("task_id")
-            log.info(f"[MG] submit task_id={task_id}, template={request.get('template')}")
+            log.info(f"[MG] submit task_id={task_id}, template={request.get('template')}")  # noqa: E501
             return task_id
         log.warning(f"[MG] submit HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.warning(f"[MG] submit failed: {e}")
     return None
 
@@ -105,7 +108,7 @@ def get_mg_status(task_id, timeout=10):
         if r.status_code == 200:
             return _safe_json(r)
         log.warning(f"[MG] status HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.warning(f"[MG] status failed: {e}")
     return None
 

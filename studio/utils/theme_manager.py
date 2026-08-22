@@ -3,10 +3,10 @@
 """
 import json
 import os
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtWidgets import QApplication
 
 from config.paths import CONFIG_DIR
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QApplication
 
 _THEME_CONFIG_FILE = os.path.join(CONFIG_DIR, "theme.json")
 
@@ -21,7 +21,7 @@ def get_saved_theme() -> str:
         theme = data.get("theme", "dark")
         if theme in THEME_OPTIONS:
             return theme
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return "dark"
 

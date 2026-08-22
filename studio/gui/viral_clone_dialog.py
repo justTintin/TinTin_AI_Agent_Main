@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """爆款仿制（Viral Clone）：链接/素材 ID → 拆解结构 → 复刻脚本。
 
 - 拆解/复刻走服务端 /viral/clone/analyze + /viral/clone/plan（flow 一条调用优先）
@@ -9,17 +8,25 @@
 ViralClonePage：可复用 QWidget 组件（工作台对话框 / 一键成片 Tab 均使用）；
 ViralCloneDialog：对话框包装（工作台「爆款仿制」卡片入口）。
 """
-import json
-
+from gui.searchable_combo import SearchableComboBox
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QTextBrowser, QGroupBox, QGridLayout, QMessageBox, QApplication, QWidget,
+    QApplication,
+    QDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
 )
-from utils.gui_icons import mdi_button
-from utils.logger_utils import log
 from utils import viral_clone_client as vcc
-from gui.searchable_combo import SearchableComboBox
+from utils.gui_icons import mdi_button
+from utils.json_utils import to_editor_text
+from utils.logger_utils import log
 
 
 class CloneWorker(QThread):
@@ -36,7 +43,7 @@ class CloneWorker(QThread):
         try:
             res = vcc.run_clone(self.video_ref, self.product_info,
                                 on_log=self.progress.emit)
-        except Exception as e:
+        except Exception as e:  # 外部 API 调用
             log.exception(f"[仿爆款] 后台执行异常: {e}")
             res = {"ok": False, "error": f"客户端异常：{e}"}
         self.result.emit(res)
@@ -53,7 +60,7 @@ class _ProductLoader(QThread):
             from utils.product_library_manager import ProductLibraryManager
             mgr = ProductLibraryManager()
             items = list(mgr.all_items())[:300]
-        except Exception as e:
+        except Exception as e:  # 动态导入/外部库
             log.warning(f"[仿爆款] 产品库加载失败: {e}")
         self.loaded.emit((mgr, items))
 
@@ -84,7 +91,7 @@ class ViralClonePage(QWidget):
         title = QLabel("爆款仿制（Viral Clone）")
         title.setStyleSheet("font-size: 18px; font-weight: 700;")
         root.addWidget(title)
-        sub = QLabel("给一条爆款视频链接或素材 ID → 自动拆解结构（镜头/文案/节奏）→ 生成复刻脚本（保留结构、替换本店产品）。")
+        sub = QLabel("给一条爆款视频链接或素材 ID → 自动拆解结构（镜头/文案/节奏）→ 生成复刻脚本（保留结构、替换本店产品）。")  # noqa: E501
         sub.setStyleSheet("color:#8b93a3; font-size:12px;")
         sub.setWordWrap(True)
         root.addWidget(sub)
@@ -108,7 +115,7 @@ class ViralClonePage(QWidget):
         self.edit_material.setPlaceholderText("素材库 ID（数字；素材浏览器里可查）")
         src_lay.addWidget(QLabel("素材 ID："), 1, 0)
         src_lay.addWidget(self.edit_material, 1, 1)
-        hint = QLabel("提示：视频下载一律由客户端素材浏览器完成（不走服务端）。链接填好后点「在素材浏览器中下载」，下载入库后填素材 ID；服务端 output 区路径可直接填。")
+        hint = QLabel("提示：视频下载一律由客户端素材浏览器完成（不走服务端）。链接填好后点「在素材浏览器中下载」，下载入库后填素材 ID；服务端 output 区路径可直接填。")  # noqa: E501
         hint.setStyleSheet("color:#6b7280; font-size:11px;")
         hint.setWordWrap(True)
         src_lay.addWidget(hint, 2, 0, 1, 2)
@@ -159,7 +166,7 @@ class ViralClonePage(QWidget):
         self.output.setOpenExternalLinks(True)
         self.output.setStyleSheet(
             "QTextBrowser { background:#12141d; border:1px solid #2c3344;"
-            " border-radius:8px; padding:10px; font-family:Consolas,monospace; font-size:12px; }"
+            " border-radius:8px; padding:10px; font-family:Consolas,monospace; font-size:12px; }"  # noqa: E501
         )
         root.addWidget(self.output, 1)
 
@@ -185,9 +192,9 @@ class ViralClonePage(QWidget):
         mgr, items = payload
         self._product_mgr = mgr
         self.combo_product.setItems([
-            (f"{it.get('brand','')} / {it.get('model') or it.get('name') or it.get('title','')}".strip(" /"),
+            (f"{it.get('brand','')} / {it.get('model') or it.get('name') or it.get('title','')}".strip(" /"),  # noqa: E501
              it)
-            for it in items if it.get("brand") or it.get("model") or it.get("name") or it.get("title")
+            for it in items if it.get("brand") or it.get("model") or it.get("name") or it.get("title")  # noqa: E501
         ])
         if items:
             self.lbl_status.setText(f"就绪（产品库已加载 {len(items)} 条）")
@@ -218,7 +225,7 @@ class ViralClonePage(QWidget):
         if item is not None and self._product_mgr is not None:
             try:
                 return self._product_mgr.to_prompt_text(item)
-            except Exception:
+            except (KeyError, TypeError, AttributeError):
                 pass
         custom = self.edit_product.text().strip()
         if custom:
@@ -257,7 +264,7 @@ class ViralClonePage(QWidget):
         self._result = res
         if not res.get("ok"):
             if res.get("need_download"):
-                msg = (res.get("error") or "请先在客户端素材浏览器中下载视频") + "；点「在素材浏览器中下载」完成下载入库后，填素材 ID 重试"
+                msg = (res.get("error") or "请先在客户端素材浏览器中下载视频") + "；点「在素材浏览器中下载」完成下载入库后，填素材 ID 重试"  # noqa: E501
                 self.lbl_status.setText(msg)
                 self.output.append(f"\n{msg}")
             elif res.get("need_login") or res.get("captcha"):
@@ -273,10 +280,10 @@ class ViralClonePage(QWidget):
     def _render_result(self, res):
         parts = []
         parts.append("══ 爆款结构（structure）══")
-        parts.append(json.dumps(res.get("structure") or {}, ensure_ascii=False, indent=2))
+        parts.append(to_editor_text(res.get("structure") or {}))
         parts.append("")
         parts.append("══ 复刻脚本（script）══")
-        parts.append(json.dumps(res.get("script") or {}, ensure_ascii=False, indent=2))
+        parts.append(to_editor_text(res.get("script") or {}))
         self.output.setPlainText("\n".join(parts))
 
     def _on_generate(self):
@@ -300,7 +307,7 @@ class ViralClonePage(QWidget):
             QMessageBox.information(self, "复制", "暂无可复制的复刻脚本")
             return
         QApplication.clipboard().setText(
-            json.dumps(self._result["script"], ensure_ascii=False, indent=2))
+            to_editor_text(self._result["script"]))
         self.lbl_status.setText("复刻脚本已复制到剪贴板")
 
 

@@ -1,20 +1,22 @@
-# -*- coding: utf-8 -*-
 """OCR 后台 Worker（走服务端 POST /material/ocr）。
 
 替代各 OCR 页面里的 subprocess 本地 PaddleOCR 调用。
 信号签名与原 worker 完全一致，页面层 connect 无需改动：
-    progress_updated(int) / status_updated(str) / log_received(str) / finished(bool, str)
+    progress_updated(int) / status_updated(str) / log_received(str) / finished(bool, str)  # noqa: E501
 """
-import os
 import csv
+import os
 
 from PySide6.QtCore import Signal
 
 from utils.base_worker import BaseWorker
-from utils.ocr_client import (
-    ocr_image_file, ocr_image_crop, extract_value_for_key, extract_numbers,
-)
 from utils.logger_utils import log
+from utils.ocr_client import (
+    extract_numbers,
+    extract_value_for_key,
+    ocr_image_crop,
+    ocr_image_file,
+)
 
 
 class ImageFolderOcrWorker(BaseWorker):
@@ -68,9 +70,9 @@ class ImageFolderOcrWorker(BaseWorker):
 
                     if extracted is not None:
                         self.log_received.emit(
-                            f"[OCR] Image: {basename} | Extracted: {extracted} | Text Block: {raw_block}")
+                            f"[OCR] Image: {basename} | Extracted: {extracted} | Text Block: {raw_block}")  # noqa: E501
                     else:
-                        self.log_received.emit(f"[OCR] Image: {basename} | [未定位到关键词 '{self.key_text}']")
+                        self.log_received.emit(f"[OCR] Image: {basename} | [未定位到关键词 '{self.key_text}']")  # noqa: E501
 
                     results.append({
                         "image": basename,
@@ -78,7 +80,7 @@ class ImageFolderOcrWorker(BaseWorker):
                         "extracted": extracted or "",
                         "raw": raw_block or "",
                     })
-                except Exception as e:
+                except Exception as e:  # ocr_image_file 外部 API 调用
                     self.log_received.emit(f"[WARNING] OCR 失败 {basename}: {e}")
                     results.append({
                         "image": basename,
@@ -96,7 +98,7 @@ class ImageFolderOcrWorker(BaseWorker):
             self.log_received.emit(f"[SUCCESS] Results saved to: {saved_path}")
             self.finished.emit(True, saved_path)
 
-        except Exception as e:
+        except Exception as e:  # 顶层异常：混合文件 I/O + 外部 OCR API 调用
             log.error(f"[OCR] 图片文件夹批量任务异常: {e}")
             self.finished.emit(False, f"执行 OCR 时发生异常: {str(e)}")
 
@@ -111,7 +113,7 @@ class ImageFolderOcrWorker(BaseWorker):
                 with open(save_path, "a") as _f:
                     pass
                 break
-            except (IOError, PermissionError):
+            except (OSError, PermissionError):
                 save_path = f"{base}_{count}{ext}"
                 count += 1
                 if count > 100:
@@ -122,7 +124,7 @@ class ImageFolderOcrWorker(BaseWorker):
         if save_path.lower().endswith(".csv"):
             with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["图片名称", f"提取值 ({self.key_text})", "包含关键词文本块", "文件完整路径"])
+                writer.writerow(["图片名称", f"提取值 ({self.key_text})", "包含关键词文本块", "文件完整路径"])  # noqa: E501
                 for r in results:
                     writer.writerow([r["image"], r["extracted"], r["raw"], r["path"]])
         else:
@@ -148,7 +150,7 @@ class ImageOcrTestWorker(BaseWorker):
             texts = [ln.get("text", "") for ln in ret.get("lines", [])]
             recognized = " ".join(t for t in texts if t)
             self.finished.emit(True, recognized if recognized else "(无识别文本)")
-        except Exception as e:
+        except Exception as e:  # ocr_image_crop 外部 API 调用
             log.error(f"[OCR] 选区测试失败: {e}")
             self.finished.emit(False, str(e))
 
@@ -160,7 +162,7 @@ class VideoOcrWorker(BaseWorker):
     log_received = Signal(str)
     finished = Signal(bool, str)  # success, output_path_or_error
 
-    def __init__(self, video_path, box, sample_interval, filter_mode, output_path, preview_path):
+    def __init__(self, video_path, box, sample_interval, filter_mode, output_path, preview_path):  # noqa: E501
         """
         :param box: [ymin, ymax, xmin, xmax]
         """
@@ -183,7 +185,7 @@ class VideoOcrWorker(BaseWorker):
         self.status_updated.emit("正在连接 OCR 服务端...")
         self.log_received.emit("[INFO] 开始视频 OCR 识别任务（服务端模式）")
         self.log_received.emit(f"[INFO] 视频文件: {self.video_path}")
-        self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")
+        self.log_received.emit(f"[INFO] 框选选区: YMin={ymin}, YMax={ymax}, XMin={xmin}, XMax={xmax}")  # noqa: E501
 
         cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
@@ -225,9 +227,9 @@ class VideoOcrWorker(BaseWorker):
                         _y1 = max(0, min(int(ymax), img_h))
                         _x0 = max(0, min(int(xmin), img_w))
                         _x1 = max(0, min(int(xmax), img_w))
-                        roi = frame[_y0:_y1, _x0:_x1] if (_y1 > _y0 and _x1 > _x0) else frame
+                        roi = frame[_y0:_y1, _x0:_x1] if (_y1 > _y0 and _x1 > _x0) else frame  # noqa: E501
                         cv2.imwrite(self.preview_path, roi)
-                    except Exception:
+                    except OSError:
                         pass
 
                 try:
@@ -240,7 +242,7 @@ class VideoOcrWorker(BaseWorker):
 
                     if recognized.strip():
                         self.log_received.emit(
-                            f"[OCR] Frame: {frame_idx} | Time: {time_str} | Text: {recognized} | Extracted: {extracted}")
+                            f"[OCR] Frame: {frame_idx} | Time: {time_str} | Text: {recognized} | Extracted: {extracted}")  # noqa: E501
                         results.append({
                             "frame": frame_idx,
                             "time": time_str,
@@ -248,7 +250,7 @@ class VideoOcrWorker(BaseWorker):
                             "extracted_value": extracted,
                             "confidence": f"{ret_ocr.get('total', 0)}",
                         })
-                except Exception as e:
+                except Exception as e:  # ocr_image_crop 外部 API 调用
                     self.log_received.emit(f"[WARNING] OCR 失败 帧 {frame_idx}: {e}")
 
                 if total_frames > 0:
@@ -261,7 +263,7 @@ class VideoOcrWorker(BaseWorker):
             self.log_received.emit(f"[SUCCESS] Results saved to: {saved_path}")
             self.finished.emit(True, saved_path)
 
-        except Exception as e:
+        except Exception as e:  # 顶层异常：混合 cv2 帧读取 + 外部 OCR API 调用
             log.error(f"[OCR] 视频任务异常: {e}")
             self.finished.emit(False, f"执行 OCR 时发生异常: {str(e)}")
         finally:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 产品生图页面。
 
@@ -14,28 +13,36 @@
   GET  /comfyui/history            执行历史（轮询结果）
   GET  /comfyui/view?filename=xx   获取生成图片
 """
+import json
 import os
 import time
-import json
-import shutil
 from datetime import datetime
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QLineEdit,
-    QFrame, QWidget, QComboBox, QProgressBar, QFileDialog, QSplitter,
-    QScrollArea, QGridLayout, QSizePolicy,
-)
-from PySide6.QtCore import Signal, Qt, QSize
-from PySide6.QtGui import QPixmap
-
-from gui.base_page import BasePage
-from utils.base_worker import BaseWorker
-from utils.logger_utils import log
 from config.paths import OUTPUTS_DIR
+from gui.base_page import BasePage
 from gui.searchable_combo import SearchableComboBox
-
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.base_worker import BaseWorker
 from utils.file_dialog_utils import pick_file
 from utils.gui_icons import mdi_button
+from utils.json_utils import deep_copy
+from utils.logger_utils import log
+
 PRODUCT_IMAGE_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "product_images")
 
 
@@ -61,12 +68,8 @@ class LoadWorkflowsWorker(BaseWorker):
         self.server_url = server_url
 
     def do_work(self):
-        from utils.http_client import http_get
-        url = f"{self.server_url}/comfyui/workflows"
-        r = http_get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        workflows = data.get("workflows", [])
+        from utils.comfyui_client import list_workflows
+        workflows = list_workflows(self.server_url, timeout=10)
         self.finished.emit(workflows)
 
 
@@ -79,17 +82,15 @@ class ServerCheckWorker(BaseWorker):
         self.server_url = server_url
 
     def do_work(self):
-        from utils.http_client import http_get
+        from utils.comfyui_client import get_proxy_status
         try:
-            r = http_get(f"{self.server_url}/comfyui/status", timeout=5, quiet=True)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("online"):
-                    ver = data.get("version", "?")
-                    self.finished.emit(f"完成： ComfyUI 在线 (v{ver})")
-                    return
+            data = get_proxy_status(self.server_url, timeout=5)
+            if data.get("online"):
+                ver = data.get("version", "?")
+                self.finished.emit(f"完成： ComfyUI 在线 (v{ver})")
+                return
             self.finished.emit("失败： ComfyUI 离线")
-        except Exception:
+        except Exception:  # 外部API调用（ComfyUI 代理状态检测）
             self.finished.emit("失败： 服务端不可达")
 
 
@@ -108,17 +109,12 @@ class UploadAndRunWorker(BaseWorker):
         self.output_dir = output_dir
 
     def do_work(self):
-        from utils.http_client import http_get, http_post
+        from utils.comfyui_client import download_image, get_history, run_workflow, upload_image
 
         # 1. 上传产品图
         self.phase.emit("正在上传产品图…")
         self.progress.emit(10)
-        upload_url = f"{self.server_url}/comfyui/upload/image"
-        with open(self.image_path, "rb") as f:
-            resp = http_post(upload_url, files={"image": f},
-                             params={"overwrite": "true"}, timeout=60)
-        resp.raise_for_status()
-        uploaded_name = resp.json().get("name", os.path.basename(self.image_path))
+        uploaded_name = upload_image(self.server_url, self.image_path, timeout=60)
         log.info(f"[产品生图] 上传成功: {uploaded_name}")
 
         # 2. 注入参数到工作流
@@ -127,47 +123,37 @@ class UploadAndRunWorker(BaseWorker):
         workflow = self._inject_params(self.workflow_json, uploaded_name)
 
         # 3. 提交执行
-        run_url = f"{self.server_url}/comfyui/run"
-        payload = {"prompt": workflow, "client_id": "tintin-studio"}
-        resp = http_post(run_url, json=payload, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()
-        prompt_id = result.get("prompt_id") or result.get("id") or ""
+        prompt_id = run_workflow(self.server_url, workflow, timeout=30)
         if not prompt_id:
-            self.error.emit(f"提交失败：服务端未返回 prompt_id\n{json.dumps(result, ensure_ascii=False)[:300]}")
+            self.error.emit("提交失败：服务端未返回 prompt_id")
             return
         log.info(f"[产品生图] 任务已提交 prompt_id={prompt_id}")
 
         # 4. 轮询 history 等待完成
         self.phase.emit("生成中，等待 ComfyUI 出图…")
         self.progress.emit(40)
-        history_url = f"{self.server_url}/comfyui/history"
         output_files = []
         for i in range(60):  # 最多等 5 分钟
             time.sleep(5)
             try:
-                hr = http_get(history_url, timeout=10)
-                if hr.status_code != 200:
-                    continue
-                hist = hr.json()
-                task_hist = hist.get(prompt_id)
+                task_hist = get_history(self.server_url, prompt_id=prompt_id, timeout=10)  # type: ignore[call-arg]  # noqa: E501
                 if not task_hist:
                     self.progress.emit(40 + min(i, 20))
                     continue
                 status = task_hist.get("status", {})
                 if status.get("status_str") == "error":
                     msgs = status.get("messages", [])
-                    self.error.emit(f"ComfyUI 执行出错：{json.dumps(msgs, ensure_ascii=False)[:500]}")
+                    self.error.emit(f"ComfyUI 执行出错：{json.dumps(msgs, ensure_ascii=False)[:500]}")  # noqa: E501
                     return
                 outputs = task_hist.get("outputs", {})
                 if outputs:
                     # 收集所有输出图片
-                    for node_id, node_out in outputs.items():
+                    for _node_id, node_out in outputs.items():
                         for img in node_out.get("images", []):
                             output_files.append(img)
                     if output_files:
                         break
-            except Exception as e:
+            except Exception as e:  # 外部API调用（ComfyUI 任务轮询）
                 log.warning(f"[产品生图] 轮询异常: {e}")
             self.progress.emit(40 + min(i + 1, 20))
 
@@ -184,16 +170,13 @@ class UploadAndRunWorker(BaseWorker):
             fname = img_info.get("filename", f"result_{idx}.png")
             subfolder = img_info.get("subfolder", "")
             img_type = img_info.get("type", "output")
-            view_url = (f"{self.server_url}/comfyui/view"
-                        f"?filename={fname}&type={img_type}&subfolder={subfolder}")
             try:
-                ir = http_get(view_url, timeout=30)
-                if ir.status_code == 200:
-                    local_path = os.path.join(self.output_dir, fname)
-                    with open(local_path, "wb") as f:
-                        f.write(ir.content)
-                    downloaded.append(local_path)
-            except Exception as e:
+                content = download_image(self.server_url, fname, img_type, subfolder, timeout=30)  # noqa: E501
+                local_path = os.path.join(self.output_dir, fname)
+                with open(local_path, "wb") as f:
+                    f.write(content)
+                downloaded.append(local_path)
+            except Exception as e:  # 外部API调用（HTTP下载 + 文件写入）
                 log.warning(f"[产品生图] 下载 {fname} 失败: {e}")
 
         self.progress.emit(100)
@@ -208,20 +191,18 @@ class UploadAndRunWorker(BaseWorker):
         """
         if not isinstance(workflow, dict):
             return workflow
-        wf = json.loads(json.dumps(workflow))  # deep copy
+        wf = deep_copy(workflow)
         prompt_injected = False
-        for node_id, node in wf.items():
+        for _node_id, node in wf.items():
             if not isinstance(node, dict):
                 continue
             class_type = node.get("class_type", "")
             inputs = node.get("inputs", {})
-            # 替换 LoadImage 节点的图片
-            if "LoadImage" in class_type or "load_image" in class_type.lower():
-                if "image" in inputs:
-                    inputs["image"] = uploaded_image_name
+            if ("LoadImage" in class_type or "load_image" in class_type.lower()) and "image" in inputs:
+                inputs["image"] = uploaded_image_name
             # 注入 prompt 到第一个文本编码节点
-            if not prompt_injected and self.prompt_text:
-                if "CLIPTextEncode" in class_type or "text" in class_type.lower():
+            if not prompt_injected and self.prompt_text:  # noqa: SIM102
+                if "CLIPTextEncode" in class_type or "text" in class_type.lower():  # noqa: SIM102
                     if "text" in inputs:
                         inputs["text"] = self.prompt_text
                         prompt_injected = True
@@ -252,15 +233,12 @@ class ProductImagePage(BasePage):
         root.setContentsMargins(20, 16, 20, 16)
         root.setSpacing(12)
 
-        # 标题行：标题 + 服务端状态（介绍放标题后）
+        # 服务端状态行
         title_row = QHBoxLayout()
-        heading = QLabel(" 产品生图")
-        heading.setObjectName("heading")
-        title_row.addWidget(heading)
         self.lbl_server_status = QLabel("检测服务端…")
         self.lbl_server_status.setObjectName("muted_text")
         self.lbl_server_status.setWordWrap(True)
-        self.lbl_server_status.setMaximumWidth(1400)  # 一行显示，右侧留白避让资源监控
+        self.lbl_server_status.setMaximumWidth(1400)
         title_row.addWidget(self.lbl_server_status)
         title_row.addStretch()
         root.addLayout(title_row)
@@ -310,7 +288,7 @@ class ProductImagePage(BasePage):
         self.lbl_product_img.setMinimumSize(200, 200)
         self.lbl_product_img.setMaximumSize(300, 300)
         self.lbl_product_img.setStyleSheet(
-            "QLabel { border: 1px dashed #555; border-radius: 8px; background: rgba(255,255,255,0.03); }")
+            "QLabel { border: 1px dashed #555; border-radius: 8px; background: rgba(255,255,255,0.03); }")  # noqa: E501
         self.lbl_product_img.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         lay.addWidget(self.lbl_product_img)
 
@@ -552,13 +530,10 @@ class ProductImagePage(BasePage):
 
     def _fetch_workflow_and_run(self, wf_path, prompt_text):
         """获取工作流 JSON 后启动生成。"""
-        from utils.http_client import http_get
+        from utils.comfyui_client import get_workflow_json
         try:
-            url = f"{self._server_url}/comfyui/workflow"
-            r = http_get(url, params={"path": wf_path}, timeout=10)
-            r.raise_for_status()
-            workflow_json = r.json()
-        except Exception as e:
+            workflow_json = get_workflow_json(self._server_url, wf_path, timeout=10)
+        except Exception as e:  # 外部API调用（获取 ComfyUI 工作流 JSON）
             self.btn_generate.setEnabled(True)
             self.progress_bar.setVisible(False)
             self.show_error(f"获取工作流失败：{e}")
@@ -589,7 +564,7 @@ class ProductImagePage(BasePage):
     def _on_generate_error(self, err):
         self.btn_generate.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.lbl_status.setText(f"失败： 生成失败")
+        self.lbl_status.setText("失败： 生成失败")
         self.show_error(f"产品生图失败：\n{err}")
 
     def _show_results(self, files):
@@ -614,7 +589,6 @@ class ProductImagePage(BasePage):
 
     def _open_file(self, path):
         """用系统默认程序打开文件。"""
-        import subprocess
         os.startfile(path)
 
     def _open_output_dir(self):

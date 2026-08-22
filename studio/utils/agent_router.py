@@ -1,11 +1,9 @@
-# -*- coding: utf-8 -*-
 """工作台「一句话需求」路由：LLM 意图识别 + 关键词兜底。
 
 一句话 → (页面 index, tab index|None, 是否多智能体任务)。
 LLM 不可用/超时/解析失败时回退本地关键词匹配，保证路由始终可用。
 """
 import json
-import re
 
 from utils.logger_utils import log
 
@@ -109,7 +107,7 @@ def _llm_route(text):
         if intent in INTENT_MAP:
             page, tab = INTENT_MAP[intent]
             return {"page": page, "tab": tab, "intent": intent, "multi_agent": multi}
-    except Exception:
+    except Exception:  # 外部API调用（LLM 路由查询）
         pass
     return None
 
@@ -120,7 +118,7 @@ def _keyword_route(text):
         for k in keys:
             if k.lower() in low:
                 page, tab = target
-                return {"page": page, "tab": tab, "intent": keys[0], "multi_agent": False}
+                return {"page": page, "tab": tab, "intent": keys[0], "multi_agent": False}  # noqa: E501
     return {"page": 33, "tab": None, "intent": "一键成片", "multi_agent": False}
 
 
@@ -155,7 +153,7 @@ def build_plan(text, registry=None, timeout=20):
         "可用能力（capability id）：\n" + "\n".join(cap_lines) + "\n"
         "参数模板（无模板的能力按常见字段 prompt/content/text 给合理值）：\n"
         + "\n".join(tpl_lines) + "\n"
-        "plan 格式：{\"goal\": \"目标\", \"steps\": [{\"id\": \"s1\", \"capability\": \"能力id\", "
+        "plan 格式：{\"goal\": \"目标\", \"steps\": [{\"id\": \"s1\", \"capability\": \"能力id\", "  # noqa: E501
         "\"params\": {能力输入字段}, \"depends_on\": [], \"needs_user_input\": false}]}\n"
         "规则：\n"
         "1. 只使用上面列出的能力 id，能力不够就拆到最接近的一步，params 严格按参数模板给；\n"
@@ -174,6 +172,6 @@ def build_plan(text, registry=None, timeout=20):
                 log.warning(f"[智能体编排] plan 含未登记能力，拒绝: {s}")
                 return None
         return data
-    except Exception as e:
+    except Exception as e:  # 外部API调用（LLM plan 拆解）
         log.warning(f"[智能体编排] plan 拆解失败: {e}")
         return None

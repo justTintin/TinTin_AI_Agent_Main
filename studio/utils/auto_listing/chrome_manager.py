@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Chrome 调试模式启动与 CDP 端口检测。"""
 import os
 import subprocess
@@ -8,9 +7,9 @@ import urllib.request
 
 def is_cdp_ready(port: int, timeout: float = 1.0) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=timeout) as resp:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=timeout) as resp:  # noqa: E501
             return 200 <= getattr(resp, "status", 0) < 300
-    except Exception:
+    except Exception:  # urllib HTTP 请求
         return False
 
 
@@ -35,7 +34,7 @@ def ensure_debug_chrome(chrome_exe: str, port: int, user_data_dir: str) -> None:
         "--disable-blink-features=AutomationControlled",
         "about:blank",
     ]
-    kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     subprocess.Popen(args, **kwargs)

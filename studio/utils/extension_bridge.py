@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 浏览器扩展本地桥接服务（仿 Billfish/Eagle 的 localhost API）。
 
@@ -9,13 +8,14 @@
 接口：
     GET  /ping          连通性检测
     GET  /status        运行状态（保存目录/已采集计数）
-    POST /collect       采集单个素材 {"url", "media_type", "page_url", "page_title", "referer"}
+    POST /collect       采集单个素材 {"url", "media_type", "page_url", "page_title", "referer"}  # noqa: E501
     POST /collect_batch 批量采集 {"items": [...]}
 
 配置持久化在 data/extension_bridge.json，采集记录持久化在
 data/extension_collected.json（保留最近 200 条）。
 """
 
+import contextlib
 import json
 import os
 import queue
@@ -28,9 +28,10 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
+import requests
+from config.paths import AI_CONFIG_FILE, APPS_DIR, DATA_DIR, MATERIALS_DIR, TMP_DIR, get_bin
 from PySide6.QtCore import QObject, Signal
 
-from config.paths import AI_CONFIG_FILE, APPS_DIR, DATA_DIR, MATERIALS_DIR, TMP_DIR, get_bin
 from utils.logger_utils import log
 
 DEFAULT_PORT = 51233
@@ -40,7 +41,7 @@ SCAN_MIN_INTERVAL = 60.0  # 触发服务端扫描的最小间隔（秒）
 STALL_TIMEOUT = 90  # yt-dlp 无输出超时（秒）：超过则判定卡死（如 YouTube 反爬），主动终止
 
 
-class _DownloadStalled(RuntimeError):
+class _DownloadStalled(RuntimeError):  # noqa: N818
     """yt-dlp 下载卡死（无进度/解析阶段超时），需向上传播以跳过后续直链兜底。"""
 
 _CONFIG_FILE = os.path.join(DATA_DIR, "extension_bridge.json")
@@ -62,7 +63,7 @@ _HLS_RE = re.compile(r"\.m3u8(\?|#|$)", re.IGNORECASE)
 try:
     import socks  # noqa: F401  PySocks
     _HAS_PYSOCKS = True
-except Exception:
+except Exception:  # 可选依赖 socks (PySocks) 未安装
     _HAS_PYSOCKS = False
 
 # 平台识别（按页面域名归组素材目录）
@@ -107,7 +108,7 @@ def _find_ffmpeg() -> str:
         p = get_bin("ffmpeg")
         if os.path.isfile(p):
             return p
-    except Exception:
+    except Exception:  # get_bin 外部 API 调用失败
         pass
     c = os.path.join(APPS_DIR, "asset-browser", "bin", "ffmpeg.exe")
     if os.path.isfile(c):
@@ -196,9 +197,9 @@ def load_config() -> dict:
     cfg = default_config()
     try:
         if os.path.isfile(_CONFIG_FILE):
-            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(_CONFIG_FILE, encoding="utf-8") as f:
                 cfg.update(json.load(f))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return cfg
 
@@ -208,7 +209,7 @@ def save_config(cfg: dict):
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except OSError as e:
         log.error(f"[扩展桥接] 保存配置失败: {e}")
 
 
@@ -222,21 +223,21 @@ def _guess_extension(url: str, content_type: str) -> str:
     _, ext = os.path.splitext(path)
     if ext and 1 < len(ext) <= 6 and re.fullmatch(r"\.[A-Za-z0-9]+", ext):
         return ext.lower()
-    return _CONTENT_TYPE_EXT.get((content_type or "").split(";")[0].strip().lower(), ".bin")
+    return _CONTENT_TYPE_EXT.get((content_type or "").split(";")[0].strip().lower(), ".bin")  # noqa: E501
 
 
 def _compute_server_url() -> str:
     try:
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                return (json.load(f).get("compute_server_url") or "").strip().rstrip("/")
-    except Exception:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+                return (json.load(f).get("compute_server_url") or "").strip().rstrip("/")  # noqa: E501
+    except (OSError, json.JSONDecodeError):
         pass
     return ""
 
 
 class _Handler(BaseHTTPRequestHandler):
-    bridge = None  # 由 ExtensionBridge.start 注入
+    bridge: "ExtensionBridge | None" = None  # 由 ExtensionBridge.start 注入
 
     def log_message(self, fmt, *args):  # 静音默认 stderr 日志
         pass
@@ -262,7 +263,7 @@ class _Handler(BaseHTTPRequestHandler):
             return {}
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
-        except Exception:
+        except json.JSONDecodeError:
             return {}
 
     # ── 路由 ──
@@ -310,12 +311,12 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/collect_batch"):
             items = (self._read_json().get("items") or [])[:200]
             task_ids = [tid for tid in (b.enqueue(it) for it in items) if tid]
-            self._send_json({"ok": bool(task_ids), "queued": len(task_ids), "task_ids": task_ids})
+            self._send_json({"ok": bool(task_ids), "queued": len(task_ids), "task_ids": task_ids})  # noqa: E501
         elif self.path.startswith("/open_dir"):
             self._send_json({"ok": b.open_save_dir()})
         elif self.path.startswith("/collect"):
             tid = b.enqueue(self._read_json())
-            self._send_json({"ok": bool(tid), "queued": 1 if tid else 0, "task_id": tid})
+            self._send_json({"ok": bool(tid), "queued": 1 if tid else 0, "task_id": tid})  # noqa: E501
         else:
             self._send_json({"ok": False, "error": "not_found"}, 404)
 
@@ -330,9 +331,9 @@ class ExtensionBridge(QObject):
         super().__init__(parent)
         self._server = None
         self._thread = None
-        self._queue = queue.Queue()
+        self._queue: queue.Queue = queue.Queue()
         self._workers = []
-        self._records = deque(maxlen=MAX_RECORDS)
+        self._records: deque = deque(maxlen=MAX_RECORDS)
         self._seen_urls = set()
         self._lock = threading.Lock()
         self._dl_tasks = {}       # task_id -> 下载任务进度
@@ -373,7 +374,7 @@ class ExtensionBridge(QObject):
             return True, "已在运行"
         try:
             os.makedirs(self.save_dir, exist_ok=True)
-        except Exception as e:
+        except OSError as e:
             return False, f"采集保存目录不可用: {e}"
         try:
             _Handler.bridge = self
@@ -399,7 +400,7 @@ class ExtensionBridge(QObject):
             try:
                 self._server.shutdown()
                 self._server.server_close()
-            except Exception:
+            except Exception:  # HTTP 服务器外部 API 调用
                 pass
             self._server = None
             log.info("[扩展桥接] 服务已停止")
@@ -411,7 +412,7 @@ class ExtensionBridge(QObject):
             os.makedirs(self.save_dir, exist_ok=True)
             os.startfile(self.save_dir)
             return True
-        except Exception as e:
+        except OSError as e:
             log.error(f"[扩展桥接] 打开目录失败: {e}")
             return False
 
@@ -432,15 +433,15 @@ class ExtensionBridge(QObject):
             initial_name = _sanitize_filename(title)[:80] + ".mp4"
         elif url.startswith(("http://", "https://")):
             try:
-                base = os.path.splitext(os.path.basename(unquote(urlparse(url).path)))[0]
+                base = os.path.splitext(os.path.basename(unquote(urlparse(url).path)))[0]  # noqa: E501
                 if base and len(base) > 2:
                     initial_name = _sanitize_filename(base)[:80] + ".mp4"
-            except Exception:
+            except Exception:  # URL 解析外部 API 调用
                 pass
         with self._dl_lock:
             now = time.time()
             self._dl_tasks[task_id] = {
-                "id": task_id, "url": url, "media_type": item.get("media_type") or "file",
+                "id": task_id, "url": url, "media_type": item.get("media_type") or "file",  # noqa: E501
                 "filename": initial_name, "percent": -1, "received": 0, "total": 0,
                 "speed_str": "", "status": "queued", "error": "",
                 "ts": now,           # 任务创建时间（排序用）
@@ -471,11 +472,9 @@ class ExtensionBridge(QObject):
             t["error"] = "用户取消"
             t["status_ts"] = time.time()  # 标记变更时间，供 tasks_snapshot 清理
         if proc_id > 0:
-            try:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc_id)],
-                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            except Exception:
-                pass
+                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)  # noqa: E501
         return True
 
     def retry_task(self, task_id: str):
@@ -535,7 +534,7 @@ class ExtensionBridge(QObject):
             try:
                 self._upd_task(task_id, status="downloading")
                 self._download_one(requests, item, task_id)
-            except Exception as e:
+            except Exception as e:  # 下载整体异常（外部 API 调用）
                 log.error(f"[扩展桥接] 下载异常: {e}")
                 self._upd_task(task_id, status="fail", error=str(e)[:200])
             finally:
@@ -563,10 +562,9 @@ class ExtensionBridge(QObject):
             if not path:
                 try:
                     path = self._direct_download(requests, url, item, task_id)
-                except Exception as e:
-                    # 直链失效（签名过期/探测流）→ 自动回退整页解析，无需用户选择下载方式
+                except requests.exceptions.RequestException as e:
                     page = item.get("page_url") or item.get("referer") or ""
-                    if (item["media_type"] in ("video", "audio") and page.startswith("http")
+                    if (item["media_type"] in ("video", "audio") and page.startswith("http")  # noqa: E501
                             and page != url):
                         log.info(f"[扩展桥接] 直链下载失败({e})，回退整页解析: {page}")
                         self.log_message.emit("[扩展桥接] 流地址已失效，自动改用整页解析下载…")
@@ -583,7 +581,7 @@ class ExtensionBridge(QObject):
             self._sync_to_nas(path, rec)
             self._maybe_generate_subtitle(path, rec)
             self._maybe_trigger_server_scan()
-        except Exception as e:
+        except Exception as e:  # 下载整体异常（外部 API 调用）
             rec["error"] = str(e)[:200]
             self._upd_task(task_id, status="fail", error=str(e)[:200])
             self.failed_count += 1
@@ -604,7 +602,7 @@ class ExtensionBridge(QObject):
             n += 1
         return path
 
-    def _direct_download(self, requests, url: str, item: dict, task_id: str = "") -> str:
+    def _direct_download(self, requests, url: str, item: dict, task_id: str = "") -> str:  # noqa: E501
         """常规 HTTP 直链下载（图片/文件/单视频），返回保存路径。
 
         目录结构：保存目录/<平台>/_未分组/<文件名>_<日期>.<ext>
@@ -620,7 +618,7 @@ class ExtensionBridge(QObject):
         # （不影响 yt-dlp/ffmpeg 子进程——它们已通过运行环境 env 统一走代理）。
         # 显式传 {"http": None, "https": None} 可屏蔽 requests 对环境变量代理的回退，
         # 保证非 YouTube 下载是真实直连（与 _build_dl_env 剔除代理变量保持一致）。
-        proxies = {"http": None, "https": None}
+        proxies: dict[str, str | None] = {"http": None, "https": None}
         if proxy and not (proxy.startswith("socks") and not _HAS_PYSOCKS):
             proxies = {"http": proxy, "https": proxy}
         with http_get(url, headers=headers, stream=True,
@@ -634,7 +632,7 @@ class ExtensionBridge(QObject):
             ext = _guess_extension(url, ctype)
             base = os.path.splitext(os.path.basename(unquote(urlparse(url).path)))[0]
             if not base or len(base) < 2:
-                base = re.sub(r"\s+", "_", (item["page_title"] or "material").strip())[:40] or "material"
+                base = re.sub(r"\s+", "_", (item["page_title"] or "material").strip())[:40] or "material"  # noqa: E501
             platform = _platform_of(item.get("page_url") or item.get("referer") or url)
             sub_dir = os.path.join(self.save_dir, platform, "_未分组")
             os.makedirs(sub_dir, exist_ok=True)
@@ -657,19 +655,17 @@ class ExtensionBridge(QObject):
                     if task_id:
                         cap = int(resp.headers.get("Content-Length") or 0)
                         self._upd_task(task_id, received=total,
-                                       percent=round(total * 100 / cap, 1) if cap else -1)
+                                       percent=round(total * 100 / cap, 1) if cap else -1)  # noqa: E501
                         _speed_bytes += len(chunk)
                         now = time.time()
                         if now - _speed_ts > 0.5:
-                            self._upd_task_speed(task_id, _speed_bytes, cap, now - _speed_ts)
+                            self._upd_task_speed(task_id, _speed_bytes, cap, now - _speed_ts)  # noqa: E501
                             _speed_ts = now
                             _speed_bytes = 0
         # 媒体流体积校验：几十字节的"视频"必为无效响应，删除并报错
         if is_media and total < 100 * 1024:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(path)
-            except OSError:
-                pass
             raise RuntimeError(f"媒体文件异常小({total}B)，该流地址已失效；建议用「下载本页视频」整页解析")
         return path
 
@@ -683,7 +679,7 @@ class ExtensionBridge(QObject):
     def _media_out_base(self, item: dict, url: str) -> str:
         base = os.path.splitext(os.path.basename(unquote(urlparse(url).path)))[0]
         if not base or len(base) < 2 or base.lower() == "playlist":
-            base = re.sub(r"\s+", "_", (item["page_title"] or "video").strip())[:40] or "video"
+            base = re.sub(r"\s+", "_", (item["page_title"] or "video").strip())[:40] or "video"  # noqa: E501
         return _sanitize_filename(base)
 
     def _try_ytdlp(self, url: str, item: dict, task_id: str = "") -> str:
@@ -691,7 +687,7 @@ class ExtensionBridge(QObject):
         if not ytdlp:
             return ""
         platform = _platform_of(item.get("page_url") or item.get("referer") or url)
-        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")
+        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")  # noqa: E501
         # 目录结构：<保存目录>/<平台>/<UP主>/<标题>_[<上传日期>].<ext>
         out_tmpl = os.path.join(
             self.save_dir, platform, "%(uploader|unknown)s",
@@ -713,7 +709,7 @@ class ExtensionBridge(QObject):
 
         # JS 运行时（YouTube n 签名挑战求解必需）：
         # 新版 yt-dlp 默认只启用 deno 运行时，未装 deno 时 YouTube 的 n 参数签名无法解开，
-        # 导致 "n challenge solving failed" → 只拿到 storyboard 缩略图 → "Only images are available"。
+        # 导致 "n challenge solving failed" → 只拿到 storyboard 缩略图 → "Only images are available"。  # noqa: E501
         # 用内置 node.exe 作为 JS 运行时（yt_dlp_ejs 挑战求解脚本已内置，0.8.0）。
         # 注意：必须 --no-js-runtimes 先清默认，再显式启用 node，否则默认的 deno 优先级会盖过。
         node_bin = _find_node()
@@ -728,10 +724,10 @@ class ExtensionBridge(QObject):
         cookie_file = ""
         if item.get("cookies"):
             try:
-                cookie_file = os.path.join(TMP_DIR, f"ext_cookies_{abs(hash(url)) % 100000}.txt")
+                cookie_file = os.path.join(TMP_DIR, f"ext_cookies_{abs(hash(url)) % 100000}.txt")  # noqa: E501
                 with open(cookie_file, "w", encoding="utf-8") as f:
                     f.write(item["cookies"])
-            except Exception as e:
+            except OSError as e:
                 log.error(f"[扩展桥接] 写 cookies 临时文件失败: {e}")
                 cookie_file = ""
         cookie_tries = []
@@ -745,7 +741,7 @@ class ExtensionBridge(QObject):
         # 否则不强制 player_client —— 让 yt-dlp 用内置多客户端策略（实测最稳，能拿到格式）
         def _extractor_args(po_token):
             if po_token:
-                return ["--extractor-args", f"youtube:player-client=default;po_token=web+{po_token}"]
+                return ["--extractor-args", f"youtube:player-client=default;po_token=web+{po_token}"]  # noqa: E501
             return []  # 默认客户端：不传 extractor-args（web/tv_embedded/mweb 客户端实测拿不到格式）
 
         last_err = ""
@@ -766,21 +762,17 @@ class ExtensionBridge(QObject):
                     fsize = 0
                 if item["media_type"] in ("video", "audio") and fsize < 100 * 1024:
                     log.error(f"[扩展桥接] yt-dlp 产物异常小({fsize}B)，按无效流处理: {found}")
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(found)
-                    except OSError:
-                        pass
                     found = ""
             if found:
                 if cookie_file:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(cookie_file)
-                    except OSError:
-                        pass
                 return found
             last_err = self._ytdlp_last_error
             # 非校验类错误（如无此视频）不必再试其他 cookies
-            if last_err and not re.search(r"bot|sign in|cookies|403|429|private|login", last_err, re.I):
+            if last_err and not re.search(r"bot|sign in|cookies|403|429|private|login", last_err, re.I):  # noqa: E501
                 break
         # 所有带 token/cookies 的尝试均失败 → 最终兜底：默认客户端（不传 extractor-args）。
         # 注意：旧的 tv_embedded/android player_client 兜底已废弃 —— 这两个客户端在当前
@@ -796,23 +788,17 @@ class ExtensionBridge(QObject):
                 except OSError:
                     fsize = 0
                 if item["media_type"] in ("video", "audio") and fsize < 100 * 1024:
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(found)
-                    except OSError:
-                        pass
                     found = ""
         if found:
             if cookie_file:
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(cookie_file)
-                except OSError:
-                    pass
             return found
         if cookie_file:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(cookie_file)
-            except OSError:
-                pass
         if last_err:
             log.error(f"[扩展桥接] yt-dlp 失败: {last_err[:200]}")
         return ""
@@ -845,6 +831,7 @@ class ExtensionBridge(QObject):
             download_started = False  # 是否已进入实际下载（看到 [download] 进度）
             stalled = False
             while True:
+                assert proc.stdout is not None
                 line = proc.stdout.readline()
                 if line == "":
                     # EOF：进程输出结束
@@ -862,7 +849,7 @@ class ExtensionBridge(QObject):
                     tail.append(line)
                 m = re.search(r"\[download\]\s+([\d.]+)%", line)
                 if m and task_id:
-                    self._upd_task(task_id, percent=float(m.group(1)), status="downloading")
+                    self._upd_task(task_id, percent=float(m.group(1)), status="downloading")  # noqa: E501
                 # 解析速度: "at 1.2MiB/s" 或 "at 3.2 MB/s"
                 sm = re.search(r"at\s+([\d.]+)\s*(\w?i?B)/s", line)
                 if sm and task_id:
@@ -870,7 +857,7 @@ class ExtensionBridge(QObject):
                 if task_id and ("[Merger]" in line or "Merging formats" in line):
                     self._upd_task(task_id, status="merging")
                 # 标记已进入实际下载阶段（看到下载进度或 Destination 行）
-                if m or "[download]" in line or "[Merger]" in line or "Destination" in line:
+                if m or "[download]" in line or "[Merger]" in line or "Destination" in line:  # noqa: E501
                     download_started = True
                 # 场景2：有输出但长时间停留在解析阶段未进入下载
                 # （YouTube 反爬时反复输出 Downloading webpage，但永远到不了 download 阶段）
@@ -878,11 +865,9 @@ class ExtensionBridge(QObject):
                     stalled = True
                     break
             if stalled:
-                try:
+                with contextlib.suppress(OSError, subprocess.SubprocessError):
                     proc.kill()
-                except Exception:
-                    pass
-                self._ytdlp_last_error = f"下载卡住无响应（{STALL_TIMEOUT}秒无进度，可能被站点反爬拦截，建议配置 cookies）"
+                self._ytdlp_last_error = f"下载卡住无响应（{STALL_TIMEOUT}秒无进度，可能被站点反爬拦截，建议配置 cookies）"  # noqa: E501
                 log.error(f"[扩展桥接] yt-dlp 无进度超时终止: {self._ytdlp_last_error}")
                 # 抛专用异常向上传播：让 _download_one 直接标记 fail 并保留此错误信息，
                 # 避免后续 _direct_download 覆盖成"无效媒体响应"等无关错误
@@ -892,12 +877,12 @@ class ExtensionBridge(QObject):
                 found = self._find_new_file(start_ts)
                 if found:
                     if task_id:
-                        self._upd_task(task_id, filename=os.path.basename(found), percent=99)
+                        self._upd_task(task_id, filename=os.path.basename(found), percent=99)  # noqa: E501
                     return found
             self._ytdlp_last_error = tail[-1] if tail else "未知错误"
         except _DownloadStalled:
             raise  # stall 异常向上传播，由 _download_one 处理
-        except Exception as e:
+        except Exception as e:  # yt-dlp 外部进程异常
             self._ytdlp_last_error = str(e)
             log.error(f"[扩展桥接] yt-dlp 异常: {e}")
         return ""
@@ -923,7 +908,7 @@ class ExtensionBridge(QObject):
         if not ffmpeg:
             return ""
         platform = _platform_of(item.get("page_url") or item.get("referer") or url)
-        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")
+        use_proxy = _is_youtube(url, item.get("page_url") or "", item.get("referer") or "")  # noqa: E501
         sub_dir = os.path.join(self.save_dir, platform, "_未分组")
         os.makedirs(sub_dir, exist_ok=True)
         out_path = self._unique_path(
@@ -936,17 +921,15 @@ class ExtensionBridge(QObject):
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
                                creationflags=subprocess.CREATE_NO_WINDOW,
-                               env=_build_dl_env(self.config.get("proxy", "") if use_proxy else ""))
-            if r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+                               env=_build_dl_env(self.config.get("proxy", "") if use_proxy else ""))  # noqa: E501
+            if r.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:  # noqa: E501
                 return out_path
             tail = (r.stderr or "").strip().splitlines()
             log.error(f"[扩展桥接] ffmpeg HLS 失败: {(tail[-1] if tail else '未知')[:200]}")
             if os.path.isfile(out_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(out_path)
-                except OSError:
-                    pass
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             log.error(f"[扩展桥接] ffmpeg HLS 异常: {e}")
         return ""
 
@@ -963,7 +946,7 @@ class ExtensionBridge(QObject):
 
     def _do_generate_subtitle(self, video_path: str):
         try:
-            from utils.asr_client import transcribe_remote, read_asr_url, segments_to_srt
+            from utils.asr_client import read_asr_url, segments_to_srt, transcribe_remote
             asr_url = read_asr_url()
             if not asr_url:
                 log.warning("[扩展桥接] 未配置 Whisper/服务端地址，跳过字幕生成")
@@ -971,7 +954,7 @@ class ExtensionBridge(QObject):
             name = os.path.basename(video_path)
             self.log_message.emit(f"[扩展桥接] 正在生成字幕: {name}")
             log.info(f"[扩展桥接] 字幕生成开始: {video_path}")
-            segments = transcribe_remote(video_path, asr_url, language="zh", timeout=1800)
+            segments = transcribe_remote(video_path, asr_url, language="zh", timeout=1800)  # noqa: E501
             if not segments:
                 log.warning(f"[扩展桥接] 字幕生成为空: {name}")
                 return
@@ -983,7 +966,7 @@ class ExtensionBridge(QObject):
             self.log_message.emit(msg)
             # 字幕随视频同结构同步到 NAS
             self._sync_to_nas(srt_path, {"synced": "", "error": ""})
-        except Exception as e:
+        except Exception as e:  # ASR 远程外部 API 调用
             log.error(f"[扩展桥接] 字幕生成失败 {video_path}: {e}")
             self.log_message.emit(f"[扩展桥接] 字幕生成失败: {e}")
 
@@ -1013,7 +996,7 @@ class ExtensionBridge(QObject):
             msg = f"[扩展桥接] 已同步到 NAS: {dest}"
             log.info(msg)
             self.log_message.emit(msg)
-        except Exception as e:
+        except OSError as e:
             rec["error"] = (rec["error"] + f" | NAS同步失败: {e}").strip(" |")
             log.error(f"[扩展桥接] NAS 同步失败: {e}")
 
@@ -1026,7 +1009,7 @@ class ExtensionBridge(QObject):
         if now - self._last_scan_ts < SCAN_MIN_INTERVAL:
             return
         self._last_scan_ts = now
-        threading.Thread(target=self._do_server_scan, args=(scan_dir,), daemon=True).start()
+        threading.Thread(target=self._do_server_scan, args=(scan_dir,), daemon=True).start()  # noqa: E501
 
     def _do_server_scan(self, scan_dir: str):
         base = _compute_server_url()
@@ -1034,9 +1017,9 @@ class ExtensionBridge(QObject):
             return
         try:
             from utils.http_client import http_post
-            resp = http_post(f"{base}/material/scan", json={"path": scan_dir}, timeout=15)
+            resp = http_post(f"{base}/material/scan", json={"path": scan_dir}, timeout=15)  # noqa: E501
             log.info(f"[扩展桥接] 已触发服务端扫描 {scan_dir}: HTTP {resp.status_code}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.error(f"[扩展桥接] 触发服务端扫描失败: {e}")
 
     # ── 记录持久化 ──
@@ -1053,7 +1036,7 @@ class ExtensionBridge(QObject):
         try:
             with open(_RECORDS_FILE, "w", encoding="utf-8") as f:
                 json.dump({"records": snapshot}, f, ensure_ascii=False, indent=1)
-        except Exception:
+        except OSError:
             pass
         return removed
 
@@ -1071,14 +1054,14 @@ class ExtensionBridge(QObject):
         try:
             with open(_RECORDS_FILE, "w", encoding="utf-8") as f:
                 json.dump({"records": snapshot}, f, ensure_ascii=False, indent=1)
-        except Exception:
+        except OSError:
             pass
         return removed
 
     def _load_records(self):
         try:
             if os.path.isfile(_RECORDS_FILE):
-                with open(_RECORDS_FILE, "r", encoding="utf-8") as f:
+                with open(_RECORDS_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                 for rec in data.get("records", [])[-MAX_RECORDS:]:
                     self._records.append(rec)
@@ -1088,7 +1071,7 @@ class ExtensionBridge(QObject):
                         self.collected_count += 1
                     else:
                         self.failed_count += 1
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             pass
 
     def _append_record(self, rec: dict):
@@ -1098,7 +1081,7 @@ class ExtensionBridge(QObject):
         try:
             with open(_RECORDS_FILE, "w", encoding="utf-8") as f:
                 json.dump({"records": snapshot}, f, ensure_ascii=False, indent=1)
-        except Exception:
+        except OSError:
             pass
         self.record_added.emit(rec)
 

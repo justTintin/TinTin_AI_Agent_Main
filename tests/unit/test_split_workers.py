@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import requests
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
 
@@ -29,7 +31,7 @@ class FakeResponse:
         return self._payload() if callable(self._payload) else self._payload
 
     def raise_for_status(self):
-        if self.status_code >= 400:
+        if self.status_code >= 400:  # noqa: PLR2004
             raise RuntimeError(f"HTTP {self.status_code}")
 
     def iter_content(self, chunk_size=8192):
@@ -86,17 +88,16 @@ class TestServerSplitWorker(unittest.TestCase):
         w = self._worker()
         content = b"mp4data"
 
-        with mock.patch("requests.Session") as mock_session:
-            session = mock_session.return_value
-            session.post.return_value = FakeResponse(200, {
-                "task_id": "t1",
-                "total_shots": 2,
-                "shots": shots,
-            })
-            session.headers = {}
-            with mock.patch("utils.http_client.http_get",
-                            return_value=FakeResponse(200, content=content)) as mg:
-                w.run()
+        def _fake_download(url, path, timeout):
+            with open(path, "wb") as f:
+                f.write(content)
+            return path
+
+        with mock.patch("gui.montage.workers.split_workers.split",
+                        return_value={"task_id": "t1", "total_shots": 2, "shots": shots}), \
+             mock.patch("gui.montage.workers.split_workers.download_result",
+                        side_effect=_fake_download) as mg:
+            w.run()
 
         self.assertEqual(len(self.emitted["finished"]), 1)
         out_dir, count, scenes = self.emitted["finished"][0]
@@ -107,24 +108,30 @@ class TestServerSplitWorker(unittest.TestCase):
         # 信号顺序：analysis_ready 先于 finished
         self.assertEqual(len(self.emitted["analysis_ready"]), 1)
         self.assertEqual(self._emit_order, ["analysis_ready", "finished"])
-        # http_get 用 download_url 下载
+        # download_result 用 download_url 下载（URL 拼接了 server_url）
         self.assertEqual(mg.call_count, 2)
-        mg.assert_any_call("http://test-server/files/shot_1.mp4", stream=True, timeout=300)
-        mg.assert_any_call("http://test-server/files/shot_2.mp4", stream=True, timeout=300)
+        mg.assert_any_call("http://test-server/files/shot_1.mp4", mock.ANY, 300)
+        mg.assert_any_call("http://test-server/files/shot_2.mp4", mock.ANY, 300)
 
     def test_split_uses_connection_close_and_closes_session(self):
-        """必须避免连接池空闲/半开连接导致请求挂起。"""
+        """迁移到 montage_client 后 worker 不再持有 Session；每次请求由 http_client 一次性发完即释放，避免连接池空闲。"""
         shots = self._make_shots(1)
         w = self._worker()
-        with mock.patch("requests.Session") as mock_session:
-            session = mock_session.return_value
-            session.post.return_value = FakeResponse(200, {"shots": shots})
-            session.headers = {}
-            with mock.patch("utils.http_client.http_get",
-                            return_value=FakeResponse(200, content=b"x")):
-                w.run()
-        self.assertEqual(session.headers.get("Connection"), "close")
-        session.close.assert_called_once()
+
+        def _fake_download(url, path, timeout):
+            with open(path, "wb") as f:
+                f.write(b"x")
+            return path
+
+        with mock.patch("gui.montage.workers.split_workers.split",
+                        return_value={"shots": shots}) as ms, \
+             mock.patch("gui.montage.workers.split_workers.download_result",
+                        side_effect=_fake_download):
+            w.run()
+        # worker 不再直接管理 Session；split 调用一次，请求一次性完成
+        self.assertEqual(ms.call_count, 1)
+        self.assertEqual(len(self.emitted["finished"]), 1)
+        self.assertEqual(len(self.emitted["error"]), 0)
 
     def test_split_upload_file_closed_after_request(self):
         """上传大文件时句柄不能泄漏，否则 Windows 下二次写入会失败。"""
@@ -153,10 +160,8 @@ class TestServerSplitWorker(unittest.TestCase):
     def test_split_empty_shots_emits_zero_before_finished(self):
         """服务端未检测到镜头时，应正确结束而不是卡住。"""
         w = self._worker()
-        with mock.patch("requests.Session") as mock_session:
-            session = mock_session.return_value
-            session.post.return_value = FakeResponse(200, {"shots": []})
-            session.headers = {}
+        with mock.patch("gui.montage.workers.split_workers.split",
+                        return_value={"shots": []}):
             w.run()
         self.assertEqual(len(self.emitted["finished"]), 1)
         self.assertEqual(self.emitted["finished"][0][1], 0)
@@ -177,15 +182,12 @@ class TestServerSplitWorker(unittest.TestCase):
         """下载失败时，如果本地有源文件，应回退 ffmpeg 重裁。"""
         shots = self._make_shots(1, with_download=True)
         w = self._worker()
-        with mock.patch("requests.Session") as mock_session:
-            session = mock_session.return_value
-            session.post.return_value = FakeResponse(200, {"shots": shots})
-            session.headers = {}
-            # 下载接口永远失败
-            with (mock.patch("utils.http_client.http_get",
-                             side_effect=RuntimeError("network down")),
-                  mock.patch.object(w, "_local_cut", return_value=True) as mlc):
-                w.run()
+        with mock.patch("gui.montage.workers.split_workers.split",
+                        return_value={"shots": shots}), \
+             mock.patch("gui.montage.workers.split_workers.download_result",
+                        side_effect=requests.exceptions.RequestException("network down")), \
+             mock.patch.object(w, "_local_cut", return_value=True) as mlc:
+            w.run()
         # 本地重裁被调用
         mlc.assert_called_once()
         args, _ = mlc.call_args
@@ -196,15 +198,14 @@ class TestServerSplitWorker(unittest.TestCase):
     def test_split_material_id_does_not_upload_file(self):
         """素材库素材应传 material_id，而不是打开本地文件。"""
         w = self._worker(video_path="", material_id="mat_123")
-        with mock.patch("requests.Session") as mock_session:
-            session = mock_session.return_value
-            session.post.return_value = FakeResponse(200, {"shots": []})
-            session.headers = {}
+        with mock.patch("gui.montage.workers.split_workers.split",
+                        return_value={"shots": []}) as ms:
             w.run()
-        _, kwargs = session.post.call_args
-        self.assertEqual(kwargs["data"]["material_id"], "mat_123")
+        # split(server_url, files, data, timeout) — files 在第二个位置参数
+        _server, files, data, _timeout = ms.call_args.args
+        self.assertEqual(data["material_id"], "mat_123")
         # files 应为 None（未上传）
-        self.assertIsNone(kwargs.get("files"))
+        self.assertIsNone(files)
 
 
 if __name__ == "__main__":

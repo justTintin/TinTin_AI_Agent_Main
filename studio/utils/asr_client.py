@@ -1,19 +1,20 @@
-# -*- coding: utf-8 -*-
 """远程 ASR（语音转写）客户端。
 
 封装"提取音频 → 上传远程 Whisper 服务 → 拿回 segments → 格式化"全流程。
 与 ollama/VoxCPM 的 remote 模式一致：服务端由外部部署，客户端只负责对接。
 """
-import os
+import contextlib
 import json
+import os
 import subprocess
 import tempfile
 import uuid
-from typing import Optional, Callable
+from collections.abc import Callable
 
-from utils.logger_utils import log
+import requests
+
 from utils.api_error import ApiError
-
+from utils.logger_utils import log
 
 # ═══════════════════════════════════════════════════════════════
 #  配置读取
@@ -23,9 +24,9 @@ def _read_ai_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return {}
 
@@ -152,7 +153,7 @@ def transcribe_remote(
     language: str = "",
     task_id: str = "",
     timeout: int = 600,
-    progress_cb: Optional[Callable[[str], None]] = None,
+    progress_cb: Callable[[str], None] | None = None,
 ) -> list:
     """远程转写：提取音频 → POST 到远程 ASR 服务 → 返回 segments 列表。
 
@@ -182,7 +183,7 @@ def transcribe_remote(
         if progress_cb:
             progress_cb("正在提取音频...")
         tmp_wav = _extract_audio(video_path, ffmpeg_path)
-        log.info(f"[ASR][{task_id}] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")
+        log.info(f"[ASR][{task_id}] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")  # noqa: E501
 
         # 2. 确保模型已加载
         from utils.http_client import resilient_post
@@ -192,9 +193,9 @@ def transcribe_remote(
         try:
             ensure_url = f"{base}/models/ensure/whisper"
             log.info(f"[ASR][{task_id}] 确保模型加载: {ensure_url}")
-            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)
+            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)  # noqa: E501
             log.info(f"[ASR][{task_id}] 模型加载状态: HTTP {er.status_code}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.warning(f"[ASR][{task_id}] 确保模型加载失败(继续尝试转写): {e}")
 
         # 3. POST 到远程
@@ -210,16 +211,16 @@ def transcribe_remote(
             if language:
                 data["language"] = language
 
-            log.info(f"[ASR][{task_id}] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")
+            log.info(f"[ASR][{task_id}] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")  # noqa: E501
             if progress_cb:
                 progress_cb("正在等待服务端处理...")
-            resp = resilient_post(url, files=files, data=data, timeout=timeout, service="whisper")
-            log.info(f"[ASR][{task_id}] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")
+            resp = resilient_post(url, files=files, data=data, timeout=timeout, service="whisper")  # noqa: E501
+            log.info(f"[ASR][{task_id}] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")  # noqa: E501
 
         if resp.status_code != 200:
-            log.error(f"[ASR][{task_id}] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")
+            log.error(f"[ASR][{task_id}] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")  # noqa: E501
             raise ApiError(url, method="POST", params=data,
-                           status_code=resp.status_code, response_text=resp.text, service="whisper")
+                           status_code=resp.status_code, response_text=resp.text, service="whisper")  # noqa: E501
 
         result = resp.json()
         # 服务端可能以 HTTP 200 + {"error": "..."} 返回业务错误（如模型加载失败）。
@@ -229,8 +230,8 @@ def transcribe_remote(
             log.error(f"[ASR][{task_id}] 服务端返回业务错误: {err_msg}")
             raise RuntimeError(f"远程 ASR 服务异常[{task_id}]: {err_msg}")
 
-        segments = result.get("segments") or result.get("result", {}).get("segments") or []
-        if not segments:
+        segments = result.get("segments") or result.get("result", {}).get("segments") or []  # noqa: E501
+        if not segments:  # noqa: SIM102
             # 某些实现可能直接返回 {"text": "..."} 无 segments
             if result.get("text"):
                 segments = [{"start": 0, "end": 0, "text": result["text"]}]
@@ -240,7 +241,5 @@ def transcribe_remote(
 
     finally:
         if tmp_wav and os.path.isfile(tmp_wav):
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(tmp_wav)
-            except Exception:
-                pass

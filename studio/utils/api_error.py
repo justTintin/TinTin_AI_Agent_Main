@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一的接口错误格式化：所有调服务端接口失败的错误，必须显示
 「接口 URL + 请求参数 + 状态码 + 服务端响应」，不猜测原因。
 
@@ -12,7 +11,9 @@
 服务端返回了什么」，而不是看到笼统的"请检查服务端连接/可能显存不足"这类猜测。
 """
 from __future__ import annotations
-from typing import Any, Optional, Mapping
+
+from collections.abc import Mapping
+from typing import Any
 
 # 敏感字段名（小写匹配）——这些字段的值在错误信息里一律显示为 ***
 _SENSITIVE_KEYS = {
@@ -84,7 +85,7 @@ def mask_value(key: str, value: Any) -> str:
     return s
 
 
-def mask_params(params: Optional[Mapping[str, Any]]) -> str:
+def mask_params(params: Mapping[str, Any] | None) -> str:
     """把参数 dict 序列化成单行脱敏字符串，用于错误信息展示。
 
     例: {"text": "你好", "prompt_audio": "base64...", "speaker": "default"}
@@ -98,7 +99,7 @@ def mask_params(params: Optional[Mapping[str, Any]]) -> str:
     return ", ".join(items)
 
 
-def _truncate(text: Optional[str], limit: int = 500) -> str:
+def _truncate(text: str | None, limit: int = 500) -> str:
     """截断响应文本，保留有用信息又不过长。"""
     if not text:
         return "(无)"
@@ -166,11 +167,11 @@ def _extract_task_error(d) -> str:
 
 # 各服务对应的解析器（key=service 名，与 http_client 的 service 参数一致）
 _PARSERS = {
-    "voxcpm":  lambda d: (d.get("detail") or d.get("error") or d.get("message") or "") if isinstance(d, dict) else "",
-    "whisper": lambda d: (d.get("error") or d.get("detail") or d.get("message") or "") if isinstance(d, dict) else "",
+    "voxcpm":  lambda d: (d.get("detail") or d.get("error") or d.get("message") or "") if isinstance(d, dict) else "",  # noqa: E501
+    "whisper": lambda d: (d.get("error") or d.get("detail") or d.get("message") or "") if isinstance(d, dict) else "",  # noqa: E501
     "llm":     _extract_llm_error,
     "comfyui": _extract_comfyui_error,
-    "ocr":     lambda d: (d.get("detail") or d.get("error") or d.get("message") or "") if isinstance(d, dict) else "",
+    "ocr":     lambda d: (d.get("detail") or d.get("error") or d.get("message") or "") if isinstance(d, dict) else "",  # noqa: E501
     "score_clip": _extract_task_error,
     "beatmap": _extract_task_error,
     "vsr":     _extract_task_error,
@@ -178,7 +179,7 @@ _PARSERS = {
 }
 
 
-def normalize_response(service: Optional[str], response_text: Optional[str]) -> str:
+def normalize_response(service: str | None, response_text: str | None) -> str:
     """按服务类型解析服务端响应，提取可读错误消息。
 
     不同接口返回结构不同（detail/error/message/嵌套/task轮询），这里归一化成纯文本。
@@ -196,7 +197,7 @@ def normalize_response(service: Optional[str], response_text: Optional[str]) -> 
             msg = parser(data)
             if msg and str(msg).strip():
                 return str(msg).strip()
-        except Exception:
+        except Exception:  # 外部回调（专属解析器）
             pass  # 解析失败走兜底
 
     # 通用 JSON 解析（没匹配到专属解析器，或专属解析器返回空）
@@ -227,12 +228,12 @@ class ApiError(RuntimeError):
     """
 
     def __init__(self, url: str, *, method: str = "POST",
-                 params: Optional[Mapping[str, Any]] = None,
-                 status_code: Optional[int] = None,
-                 response_text: Optional[str] = None,
-                 cause: Optional[BaseException] = None,
-                 note: Optional[str] = None,
-                 service: Optional[str] = None):
+                 params: Mapping[str, Any] | None = None,
+                 status_code: int | None = None,
+                 response_text: str | None = None,
+                 cause: BaseException | None = None,
+                 note: str | None = None,
+                 service: str | None = None):
         self.url = url or "(未知接口)"
         self.method = (method or "POST").upper()
         self.params_str = mask_params(params)
@@ -242,7 +243,7 @@ class ApiError(RuntimeError):
         self.note = note  # 可选的额外说明（如"重试3次后仍失败"），不含猜测
         self.service = service  # 接口服务类型，用于归一化解析服务端响应
         # 归一化后的可读错误消息（从 response_text 按服务类型解析提取）
-        self.normalized_error = normalize_response(service, response_text) if response_text else ""
+        self.normalized_error = normalize_response(service, response_text) if response_text else ""  # noqa: E501
         super().__init__(self._build_message())
 
     def _build_message(self) -> str:
@@ -256,7 +257,7 @@ class ApiError(RuntimeError):
         elif self.response_text:
             # 归一化失败，回退到原始响应
             lines.append(f"响应: {_truncate(self.response_text)}")
-        if self.cause is not None and not self.normalized_error and not self.response_text:
+        if self.cause is not None and not self.normalized_error and not self.response_text:  # noqa: E501
             # 网络层错误（连不上/超时/熔断），没有 HTTP 状态码和响应体
             cause_msg = type(self.cause).__name__
             cause_text = str(self.cause).strip()

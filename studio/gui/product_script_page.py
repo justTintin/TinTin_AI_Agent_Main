@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 「产品文案创作」页（与「飞书选题文案」分开，互不干扰）。
 
@@ -10,22 +9,33 @@
 
 风格化调整：可在生成后单独调用风格 skill 对文案进行写法改写。
 """
-import os
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QFrame, QWidget,
-    QComboBox, QSplitter, QMessageBox, QCheckBox,
-    QProgressBar, QScrollArea,
-)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from typing import Any
 
-from utils.product_library_manager import ProductLibraryManager
-from gui.searchable_combo import SearchableComboBox
-from utils.my_knowledge_manager import MyKnowledgeManager, STYLIZATION_TYPE
 from gui.ai_script_page import LLMWorker
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
+from gui.searchable_combo import SearchableComboBox
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.my_knowledge_manager import STYLIZATION_TYPE, MyKnowledgeManager
+from utils.product_library_manager import ProductLibraryManager
 
 
 class ProductScriptPage(BasePage):
@@ -150,7 +160,7 @@ class ProductScriptPage(BasePage):
 
         style_row = QHBoxLayout()
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
-        self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
+        self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)  # noqa: E501
         style_row.addWidget(self.combo_stylization, 1)
         btn_refresh_style = QPushButton(" 重置")
         btn_refresh_style.setObjectName("secondary_button")
@@ -257,12 +267,12 @@ class ProductScriptPage(BasePage):
             QMessageBox.warning(self.parent_widget, "文案为空", "请先生成或填写文案，然后再进行分镜脚本设计。")
             return
         # 携带当前产品上下文（品牌/型号/产品类型），供分镜页素材检索使用
-        prod = {}
+        prod: dict[str, Any] = {}
         item_id = self.combo_product.currentData()
         if item_id:
             prod = self.kb.get(item_id) or {}
-        if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:
-            style_id = self._selected_stylization.get("id") if self._selected_stylization else None
+        if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:  # noqa: E501
+            style_id = self._selected_stylization.get("id") if self._selected_stylization else None  # noqa: E501
             self.main_window.storyboard_tool.set_copywriting(
                 copy_text, stylization_id=style_id, product=prod)
         self.main_window.switch_page(37)
@@ -312,12 +322,12 @@ class ProductScriptPage(BasePage):
 
     def _populate_products(self, keyword=""):
         items = self.kb.search(keyword) if keyword else self.kb.all_items()
-        items = sorted(items, key=lambda x: (x.get("category", ""), x.get("brand", ""), x.get("model", "")))
+        items = sorted(items, key=lambda x: (x.get("category", ""), x.get("brand", ""), x.get("model", "")))  # noqa: E501
         self.combo_product.blockSignals(True)
         self.combo_product.clear()
         self.combo_product.addItem("--- 请选择产品 ---", None)
         for it in items:
-            label = f"{it.get('brand','')} - {it.get('model','')}".strip(" -") or it.get("goods_no", "")
+            label = f"{it.get('brand','')} - {it.get('model','')}".strip(" -") or it.get("goods_no", "")  # noqa: E501
             cat = it.get("category", "").strip()
             if cat:
                 label = f"[{cat}] {label}"
@@ -452,7 +462,7 @@ class ProductScriptPage(BasePage):
             "对比式": "对比式：与同类产品或旧方案对比，突出优势",
             "倒叙悬念": "倒叙悬念：先给结果/反差，再回溯原因",
         }.get(self.combo_structure.currentText(), "黄金3秒开场")
-        tag_count = {"不生成": 0, "5 个": 5, "10 个": 10}.get(self.combo_tags.currentText(), 0)
+        tag_count = {"不生成": 0, "5 个": 5, "10 个": 10}.get(self.combo_tags.currentText(), 0)  # noqa: E501
 
         reqs = [
             "请根据以上信息，创作一篇 200-400 字的带货短视频文案。要求：",
@@ -479,7 +489,7 @@ class ProductScriptPage(BasePage):
             self.edit_copy.setPlainText(content)
             self.lbl_status.setText("文案已生成，可直接前往分镜脚本设计。")
 
-        self._run_llm(system_prompt, user_prompt, on_done, self.btn_gen_copy, "AI 正在创作文案…")
+        self._run_llm(system_prompt, user_prompt, on_done, self.btn_gen_copy, "AI 正在创作文案…")  # noqa: E501
 
     def _check_extreme_words(self):
         text = self.edit_copy.toPlainText()

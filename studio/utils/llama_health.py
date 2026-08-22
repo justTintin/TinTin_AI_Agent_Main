@@ -39,7 +39,7 @@ def sample_cpu_percent(pid: int, duration: float = 3.0) -> float | None:
 
 def probe_server(url: str, timeout: float = 5.0) -> dict:
     """探测服务端点，返回 {ok, status_code, elapsed_ms, error}。"""
-    result: dict[str, Any] = {"ok": False, "status_code": None, "elapsed_ms": None, "error": None}
+    result: dict[str, Any] = {"ok": False, "status_code": None, "elapsed_ms": None, "error": None}  # noqa: E501
     try:
         start = time.time()
         r = requests.get(url, timeout=timeout)
@@ -48,7 +48,7 @@ def probe_server(url: str, timeout: float = 5.0) -> dict:
         result["ok"] = r.status_code == 200
     except requests.Timeout:
         result["error"] = "timeout"
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         result["error"] = f"{type(e).__name__}: {e}"
     return result
 

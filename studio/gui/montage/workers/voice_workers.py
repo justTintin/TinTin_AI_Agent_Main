@@ -1,19 +1,18 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 配音阶段 Worker：声音克隆（TTS）。"""
+import base64
 import os
 import time
-import base64
-import subprocess
 import traceback
-import requests
-from utils.http_client import http_get, http_post
-from utils.voxcpm_client import repair_wav_bytes
-from PySide6.QtCore import Signal
-from utils.base_worker import BaseWorker
-from utils.logger_utils import log
-from utils.api_error import ApiError
-from gui.montage.utils_media import find_ffmpeg, get_media_duration
 
+import requests.exceptions
+from gui.montage.utils_media import get_media_duration
+from PySide6.QtCore import Signal
+from utils.api_error import ApiError
+from utils.base_worker import BaseWorker
+from utils.ffmpeg_utils import change_audio_speed
+from utils.http_client import http_get, http_post
+from utils.logger_utils import log
+from utils.voxcpm_client import repair_wav_bytes
 
 
 class VoiceCloneWorker(BaseWorker):
@@ -22,10 +21,10 @@ class VoiceCloneWorker(BaseWorker):
     row_progress = Signal(int, int) # row_idx, value (0-100)
     finished = Signal(dict)  # Outputs a dict mapping: video_path -> voice_wav_path
 
-    def __init__(self, tasks, voice_ref_audio, voice_ref_text, voice_mode, voice_api_url, voice_cli_checkpoint, temp_dir, task_type="video",
+    def __init__(self, tasks, voice_ref_audio, voice_ref_text, voice_mode, voice_api_url, voice_cli_checkpoint, temp_dir, task_type="video",  # noqa: E501
                  inference_timesteps=10, cfg_value=2.0, speed_min=0.9, speed_max=1.2):
         super().__init__()
-        self.tasks = tasks  # list of tuples: (row_idx, text, video_path, output_wav_path)
+        self.tasks = tasks  # list of tuples: (row_idx, text, video_path, output_wav_path)  # noqa: E501
         self.voice_ref_audio = voice_ref_audio
         self.voice_ref_text = voice_ref_text
         self.voice_mode = voice_mode
@@ -51,7 +50,7 @@ class VoiceCloneWorker(BaseWorker):
             p = urlparse(u)
             if p.scheme and p.netloc:
                 return f"{p.scheme}://{p.netloc}/health"
-        except Exception:
+        except (ValueError, TypeError):
             pass
         return None
 
@@ -67,7 +66,7 @@ class VoiceCloneWorker(BaseWorker):
                 r = http_get(health, timeout=3, quiet=True)
                 if r.status_code == 200 and r.json().get("loaded"):
                     return True
-            except Exception:
+            except requests.exceptions.RequestException:
                 pass
             time.sleep(2.0)
         return False
@@ -83,7 +82,7 @@ class VoiceCloneWorker(BaseWorker):
         """
         import re
 
-        CN_DIGITS = "零一二三四五六七八九"
+        CN_DIGITS = "零一二三四五六七八九"  # noqa: N806
 
         def int_to_cn(n: int) -> str:
             if n == 0:
@@ -114,13 +113,13 @@ class VoiceCloneWorker(BaseWorker):
                 int_part = int_to_cn(int(m.group(1)))
                 frac_part = int_to_cn(int(m.group(2)))
                 return f"{int_part}点{frac_part}"
-            except Exception:
+            except (ValueError, TypeError):
                 return m.group(0)
 
         def replace_int(m):
             try:
                 return int_to_cn(int(m.group(0)))
-            except Exception:
+            except (ValueError, TypeError):
                 return m.group(0)
 
         text = re.sub(r'\b(\d+)\.(\d+)\b', replace_decimal, text)
@@ -150,19 +149,19 @@ class VoiceCloneWorker(BaseWorker):
             "speaker": "default",
         }
         max_attempts = 3
-        last_err = None
+        last_err: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
                 res = http_post(self.voice_api_url, json=payload, timeout=180)
                 if res.status_code == 503:
                     # 503：服务端繁忙/资源不足，不猜测具体原因，只显示服务端响应
                     raise ApiError(self.voice_api_url, method="POST", params=payload,
-                                   status_code=503, response_text=res.text, service="voxcpm")
+                                   status_code=503, response_text=res.text, service="voxcpm")  # noqa: E501
                 if res.status_code != 200:
                     raise ApiError(self.voice_api_url, method="POST", params=payload,
-                                   status_code=res.status_code, response_text=res.text, service="voxcpm")
+                                   status_code=res.status_code, response_text=res.text, service="voxcpm")  # noqa: E501
                 return res.content
-            except requests.exceptions.RequestException as e:
+            except (OSError, ConnectionError) as e:
                 # 连接被重置/超时：服务可能崩溃，等待恢复后重试
                 last_err = e
                 if attempt < max_attempts:
@@ -173,7 +172,7 @@ class VoiceCloneWorker(BaseWorker):
                         time.sleep(2.0)
                     continue
                 raise ApiError(self.voice_api_url, method="POST", params=payload,
-                               cause=e, note=f"连接失败（已重试 {max_attempts} 次）", service="voxcpm")
+                               cause=e, note=f"连接失败（已重试 {max_attempts} 次）", service="voxcpm") from e  # noqa: E501
             except ApiError as e:
                 last_err = e
                 # 仅对 503（服务端繁忙）重试，其它确定性错误直接抛出
@@ -221,12 +220,14 @@ class VoiceCloneWorker(BaseWorker):
                     frames = w.readframes(w.getnframes())
                 if writer is None:
                     params = p
-                    writer = wave.open(out_io, "wb")
+                    if params is None:
+                        raise RuntimeError("无法读取音频参数")
+                    writer = wave.open(out_io, "wb")  # noqa: SIM115
                     writer.setparams(p)
                 writer.writeframes(frames)
-                if gap_sec > 0 and i < len(wav_list) - 1:
+                if gap_sec > 0 and i < len(wav_list) - 1 and params is not None:
                     nsil = int(gap_sec * params.framerate)
-                    writer.writeframes(b"\x00" * (nsil * params.sampwidth * params.nchannels))
+                    writer.writeframes(b"\x00" * (nsil * params.sampwidth * params.nchannels))  # noqa: E501
         finally:
             if writer is not None:
                 writer.close()
@@ -248,7 +249,7 @@ class VoiceCloneWorker(BaseWorker):
         try:
             with open(wav_path + ".timing.json", "w", encoding="utf-8") as f:
                 _json.dump(timing, f, ensure_ascii=False, indent=1)
-        except Exception:
+        except OSError:
             log.warning(f"写入句级时间轴失败: {wav_path}.timing.json")
 
     @staticmethod
@@ -259,14 +260,14 @@ class VoiceCloneWorker(BaseWorker):
         if not os.path.exists(p):
             return
         try:
-            with open(p, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 timing = _json.load(f)
             for t in timing:
                 t["start"] = round(float(t.get("start", 0)) * factor, 3)
                 t["end"] = round(float(t.get("end", 0)) * factor, 3)
             with open(p, "w", encoding="utf-8") as f:
                 _json.dump(timing, f, ensure_ascii=False, indent=1)
-        except Exception:
+        except (OSError, _json.JSONDecodeError):
             log.warning(f"缩放句级时间轴失败: {p}")
 
     def _synthesize_item(self, text, ref_audio_b64, out_wav_path, row_idx):
@@ -286,9 +287,9 @@ class VoiceCloneWorker(BaseWorker):
                 cursor = 0.0
                 for si, seg in enumerate(segs):
                     self.stage.emit(f"第 {row_idx + 1} 个声音逐句合成 {si + 1}/{len(segs)}...")
-                    wb = repair_wav_bytes(self._post_tts(seg, ref_audio_b64, row_idx, label="逐句"))
+                    wb = repair_wav_bytes(self._post_tts(seg, ref_audio_b64, row_idx, label="逐句"))  # noqa: E501
                     dur = self._wav_bytes_duration(wb)
-                    timing.append({"text": seg, "start": round(cursor, 3), "end": round(cursor + dur, 3)})
+                    timing.append({"text": seg, "start": round(cursor, 3), "end": round(cursor + dur, 3)})  # noqa: E501
                     cursor += dur + gap
                     wavs.append(wb)
                     time.sleep(0.2)
@@ -297,13 +298,13 @@ class VoiceCloneWorker(BaseWorker):
                     f.write(combined)
                 self._write_timing_sidecar(out_wav_path, timing)
                 return
-            except Exception:
+            except Exception:  # 逐句合成失败，回退整体合成
                 self.stage.emit(f"第 {row_idx + 1} 个声音逐句合成失败，回退整体合成...")
 
         # 整体合成（单句文案 / 逐句失败回退）
         merged_text = text.strip()
         if "\n" in merged_text:
-            lines = [l.strip() for l in merged_text.split("\n") if l.strip()]
+            lines = [line.strip() for line in merged_text.split("\n") if line.strip()]
             merged_text = "。".join(lines) + "。"
         content = repair_wav_bytes(self._post_tts(merged_text, ref_audio_b64, row_idx))
         with open(out_wav_path, "wb") as f:
@@ -311,19 +312,19 @@ class VoiceCloneWorker(BaseWorker):
         try:
             total_dur = self._wav_bytes_duration(content)
             if len(segs) <= 1:
-                timing = [{"text": merged_text, "start": 0.0, "end": round(total_dur, 3)}]
+                timing = [{"text": merged_text, "start": 0.0, "end": round(total_dur, 3)}]  # noqa: E501
             else:
                 # 回退场景：整段音频内按字数比例分配句时间（比无时间轴强）
                 char_counts = [max(1, len(s)) for s in segs]
                 total_chars = sum(char_counts)
                 timing = []
                 cursor = 0.0
-                for s, c in zip(segs, char_counts):
+                for s, c in zip(segs, char_counts, strict=False):
                     d = total_dur * c / total_chars
-                    timing.append({"text": s, "start": round(cursor, 3), "end": round(cursor + d, 3)})
+                    timing.append({"text": s, "start": round(cursor, 3), "end": round(cursor + d, 3)})  # noqa: E501
                     cursor += d
             self._write_timing_sidecar(out_wav_path, timing)
-        except Exception:
+        except OSError:
             pass
 
     def run(self):
@@ -331,26 +332,26 @@ class VoiceCloneWorker(BaseWorker):
             os.makedirs(self.temp_dir, exist_ok=True)
             voices_dir = os.path.join(self.temp_dir, "voices")
             os.makedirs(voices_dir, exist_ok=True)
-            
+
             results = {}
             total = len(self.tasks)
-            
+
             ref_audio_b64 = None
             if self.voice_ref_audio and os.path.exists(self.voice_ref_audio):
                 with open(self.voice_ref_audio, "rb") as f:
                     ref_audio_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-            for index, (row_idx, text, video_path, out_wav_path) in enumerate(self.tasks):
+            for index, (row_idx, text, video_path, out_wav_path) in enumerate(self.tasks):  # noqa: E501
                 if not text.strip():
                     continue
-                
+
                 if self.task_type == "voice":
-                    self.stage.emit(f"正在克隆第 {row_idx + 1} 个声音片段 ({index + 1}/{total})...")
+                    self.stage.emit(f"正在克隆第 {row_idx + 1} 个声音片段 ({index + 1}/{total})...")  # noqa: E501
                 else:
-                    self.stage.emit(f"正在合成第 {row_idx + 1} 个视频的克隆人声 ({index + 1}/{total})...")
+                    self.stage.emit(f"正在合成第 {row_idx + 1} 个视频的克隆人声 ({index + 1}/{total})...")  # noqa: E501
                 self.progress.emit(int(index / total * 100))
                 self.row_progress.emit(row_idx, 15)
-                
+
                 os.makedirs(os.path.dirname(out_wav_path), exist_ok=True)
 
                 try:
@@ -361,34 +362,26 @@ class VoiceCloneWorker(BaseWorker):
                     self.row_progress.emit(row_idx, 90)
 
                     # Adjust audio speed to match video duration.
-                    # Clamped to [speed_min, speed_max] to prevent extreme atempo distortion.
-                    # If the required ratio falls outside this range, audio is left as-is and
+                    # Clamped to [speed_min, speed_max] to prevent extreme atempo distortion.  # noqa: E501
+                    # If the required ratio falls outside this range, audio is left as-is and  # noqa: E501
                     # the final step (step 4) handles the remaining mismatch.
-                    if os.path.exists(video_path) and video_path.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v")):
+                    if os.path.exists(video_path) and video_path.lower().endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v")):  # noqa: E501
                         vid_dur = get_media_duration(video_path)
                         aud_dur = get_media_duration(out_wav_path)
-                        if vid_dur > 0 and aud_dur > 0 and abs(vid_dur - aud_dur) / vid_dur > 0.02:
+                        if vid_dur > 0 and aud_dur > 0 and abs(vid_dur - aud_dur) / vid_dur > 0.02:  # noqa: E501
                             speed_ratio = aud_dur / vid_dur
-                            # Clamp to allowed range — beyond this the distortion is unacceptable
-                            clamped = max(self.speed_min, min(self.speed_max, speed_ratio))
+                            # Clamp to allowed range — beyond this the distortion is unacceptable  # noqa: E501
+                            clamped = max(self.speed_min, min(self.speed_max, speed_ratio))  # noqa: E501
                             if abs(clamped - 1.0) > 0.005:
                                 temp_wav = out_wav_path + ".tmp.wav"
-                                ffmpeg_exe = find_ffmpeg()
-                                creationflags = 0x08000000
-                                speed_cmd = [
-                                    ffmpeg_exe, "-y", "-i", out_wav_path,
-                                    "-filter:a", f"atempo={clamped:.4f}",
-                                    temp_wav
-                                ]
-                                sr = subprocess.run(speed_cmd, capture_output=True, creationflags=creationflags)
-                                if sr.returncode == 0 and os.path.exists(temp_wav):
+                                if change_audio_speed(out_wav_path, clamped, temp_wav):
                                     os.replace(temp_wav, out_wav_path)
                                     # 音频变速后，句级时间轴同步缩放（atempo=X → 时长×1/X）
-                                    self._scale_timing_sidecar(out_wav_path, 1.0 / clamped)
+                                    self._scale_timing_sidecar(out_wav_path, 1.0 / clamped)  # noqa: E501
 
                     results[video_path] = out_wav_path
                     self.row_progress.emit(row_idx, 100)
-                except Exception as e:
+                except Exception as e:  # 单条声音克隆失败，记录并跳过
                     # 单条失败不再中断整批：记录失败、跳过，继续合成其余视频。
                     self.row_progress.emit(row_idx, 0)
                     log.exception(f"第 {row_idx + 1} 个声音克隆失败")
@@ -404,7 +397,7 @@ class VoiceCloneWorker(BaseWorker):
                 # 全部失败：逐条显示接口URL+参数+服务端错误（不猜测原因）
                 detail = "\n\n".join(
                     f"· 第 {r + 1} 个：\n{m}" for r, _v, m in self.failures[:8])
-                more = "" if len(self.failures) <= 8 else f"\n\n…… 等共 {len(self.failures)} 个失败"
+                more = "" if len(self.failures) <= 8 else f"\n\n…… 等共 {len(self.failures)} 个失败"  # noqa: E501
                 self.error.emit(
                     f"全部声音克隆均失败（共 {len(self.failures)} 个）。"
                     f"下方为每个失败请求的接口与错误详情：\n\n"
@@ -418,6 +411,6 @@ class VoiceCloneWorker(BaseWorker):
                 self.stage.emit("声音克隆合成成功")
             self.finished.emit(results)
 
-        except Exception:
+        except Exception:  # 声音克隆失败
             log.exception("声音克隆失败")
             self.error.emit(traceback.format_exc())

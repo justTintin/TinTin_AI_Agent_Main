@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MG / template driven pages shared helpers.
 
 Provides:
@@ -7,18 +6,26 @@ Provides:
 - A worker to load /mg/templates from the server
 - UI helpers for QListWidget based template libraries
 """
-import json
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QTextEdit,
-    QWidget, QListWidget, QListWidgetItem, QColorDialog,
-)
+import contextlib
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
-
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QLineEdit,
+    QListWidgetItem,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QWidget,
+)
 from utils.base_worker import BaseWorker
+from utils.json_utils import from_editor_text, parse_json_default
 from utils.mg_server_client import list_templates
-from utils.logger_utils import log
 
 RATIOS = ["9:16", "16:9", "1:1", "3:4", "4:3"]
 ANIMATIONS = ["fade", "slide_up", "scale", "typewriter", "pulse"]
@@ -27,11 +34,11 @@ CUSTOM_BACKENDS = [
 ]
 
 FALLBACK_TEMPLATES = [
-    {"id": "mg_scene", "name": "通用场景", "description": "通过 scenes 列表渲染多段文字", "is_builtin": True},
+    {"id": "mg_scene", "name": "通用场景", "description": "通过 scenes 列表渲染多段文字", "is_builtin": True},  # noqa: E501
     {"id": "mg_intro", "name": "片头", "description": "大标题 + 副标题开场", "is_builtin": True},
     {"id": "mg_outro", "name": "片尾", "description": "结尾文字 + 关注语", "is_builtin": True},
-    {"id": "mg_countdown", "name": "倒计时", "description": "数字倒计时，0 显示 GO", "is_builtin": True},
-    {"id": "mg_quote", "name": "名言金句", "description": "名言引用：金句 + 作者", "is_builtin": True},
+    {"id": "mg_countdown", "name": "倒计时", "description": "数字倒计时，0 显示 GO", "is_builtin": True},  # noqa: E501
+    {"id": "mg_quote", "name": "名言金句", "description": "名言引用：金句 + 作者", "is_builtin": True},  # noqa: E501
 ]
 
 BUILTIN_PARAM_META = {
@@ -84,20 +91,6 @@ def _default_for_builtin(key):
     return defaults.get(key, "")
 
 
-def _parse_json_default(value):
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, str):
-        try:
-            json.loads(value)
-            return value
-        except Exception:
-            return value
-    return str(value)
-
-
 def _param_meta(param):
     """Normalize a template param definition to (key, widget_type, label, default)."""
     if isinstance(param, str):
@@ -105,13 +98,13 @@ def _param_meta(param):
         meta = BUILTIN_PARAM_META.get(key, ("line", key))
         return key, meta[0], meta[1], _default_for_builtin(key)
     if isinstance(param, dict):
-        key = param.get("name") or param.get("key")
+        key = param.get("name") or param.get("key") or ""
         t = (param.get("type") or "string").lower()
         widget_type = CUSTOM_TYPE_MAP.get(t, "line")
         label = param.get("label") or param.get("desc") or key or "参数"
         default = param.get("default")
         if widget_type == "json":
-            default = _parse_json_default(default)
+            default = parse_json_default(default)
         return key, widget_type, label, default
     return None, None, None, None
 
@@ -137,7 +130,7 @@ def create_value_widget(wtype, default, parent=None):
         w.setRange(0, 99999)
         try:
             w.setValue(int(default or 0))
-        except Exception:
+        except (ValueError, TypeError):
             w.setValue(0)
         return w
     if wtype == "float":
@@ -146,7 +139,7 @@ def create_value_widget(wtype, default, parent=None):
         w.setSingleStep(0.5)
         try:
             w.setValue(float(default or 0))
-        except Exception:
+        except (ValueError, TypeError):
             w.setValue(0.0)
         return w
     if wtype == "color":
@@ -164,7 +157,7 @@ def create_value_widget(wtype, default, parent=None):
         return w
     if wtype == "json":
         w = QTextEdit(parent)
-        w.setPlainText(_parse_json_default(default))
+        w.setPlainText(parse_json_default(default))
         w.setMaximumHeight(120)
         return w
     # fallback
@@ -189,10 +182,8 @@ def widget_value(widget, wtype):
         return widget.isChecked()
     if wtype == "json":
         txt = widget.toPlainText().strip()
-        try:
-            return json.loads(txt)
-        except Exception:
-            return txt
+        parsed = from_editor_text(txt)
+        return parsed if parsed is not None else txt
     return None
 
 
@@ -201,15 +192,11 @@ def set_widget_value(widget, wtype, value):
     if wtype == "line":
         widget.setText(str(value))
     elif wtype == "int":
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             widget.setValue(int(value))
-        except Exception:
-            pass
     elif wtype == "float":
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             widget.setValue(float(value))
-        except Exception:
-            pass
     elif wtype == "color":
         widget.setText(str(value))
     elif wtype == "ratio":
@@ -218,7 +205,7 @@ def set_widget_value(widget, wtype, value):
     elif wtype == "bool":
         widget.setChecked(bool(value))
     elif wtype == "json":
-        widget.setPlainText(_parse_json_default(value))
+        widget.setPlainText(parse_json_default(value))
 
 
 def color_row(edit, parent=None):

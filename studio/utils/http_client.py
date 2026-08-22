@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 统一 HTTP 客户端封装 — 自动重试 + 指数退避 + 按服务名隔离的熔断器。
 
@@ -20,9 +19,11 @@
     resp = http_get(url, params=..., timeout=10)   # 每次请求自动打点：发起 → 状态/耗时
 """
 import time
+
 import requests
-from utils.logger_utils import log
+
 from utils.api_error import ApiError
+from utils.logger_utils import log
 
 # ── 熔断器 ─────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ def logged_request(method, url, *, timeout=30, quiet=False, **kwargs):
         log.info(f"[HTTP] → {method} {url} timeout={timeout}")
     try:
         resp = requests.request(method, url, timeout=timeout, **kwargs)
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.error(f"[HTTP] 失败 {method} {url} 请求失败: {e}")
         raise
     ms = int((time.perf_counter() - start) * 1000)
@@ -142,7 +143,7 @@ def _extract_params(kwargs):
     if "json" in kwargs and kwargs["json"]:
         try:
             params.update(kwargs["json"])
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             params["json"] = str(kwargs["json"])[:100]
     if "data" in kwargs and kwargs["data"]:
         d = kwargs["data"]
@@ -160,7 +161,7 @@ def _extract_params(kwargs):
                 else:
                     files_info[field] = str(val)[:50]
             params["_files"] = files_info
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             params["_files"] = "(文件)"
     if "headers" in kwargs and kwargs["headers"]:
         params["_headers"] = dict(kwargs["headers"])
@@ -202,11 +203,11 @@ def _do_request(method, url, *, service="default", timeout=10,
             last_err = e
             if attempt < _MAX_RETRIES - 1:
                 delay = _BASE_DELAY * (2 ** attempt)  # 1s → 2s → 4s
-                log.warning(f"[HTTP:{service}] {method} {url} 第 {attempt+1} 次失败: {e}，{delay}s 后重试")
+                log.warning(f"[HTTP:{service}] {method} {url} 第 {attempt+1} 次失败: {e}，{delay}s 后重试")  # noqa: E501
                 time.sleep(delay)
             else:
-                log.error(f"[HTTP:{service}] {method} {url} 重试 {_MAX_RETRIES} 次后仍失败: {e}")
-        except Exception as e:
+                log.error(f"[HTTP:{service}] {method} {url} 重试 {_MAX_RETRIES} 次后仍失败: {e}")  # noqa: E501
+        except requests.exceptions.RequestException:
             # 非网络错误，不重试，直接抛出
             raise
 

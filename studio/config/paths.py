@@ -1,3 +1,5 @@
+import contextlib
+import json
 import os
 import sys
 
@@ -25,9 +27,9 @@ if getattr(sys, "frozen", False):
     _BUNDLE_STUDIO_DIR = os.path.join(_BUNDLE_DIR, "studio")      # 打包进去的 studio/ 资源
 else:
     # 源码模式：保持原有行为
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # studio/
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # studio/  # noqa: E501
     WORKSPACE_ROOT = os.path.dirname(PROJECT_ROOT)                               # 工程根
-    _BUNDLE_DIR = PROJECT_ROOT                                                   # 资源也在 studio/
+    _BUNDLE_DIR = PROJECT_ROOT                                                   # 资源也在 studio/  # noqa: E501
     _BUNDLE_STUDIO_DIR = PROJECT_ROOT
 
 # Central runtime dir (studio/.runtime/)
@@ -46,13 +48,13 @@ def _resolve_outputs_dir():
     try:
         if os.path.isfile(_LOCAL_CFG_FILE):
             import json as _json
-            with open(_LOCAL_CFG_FILE, "r", encoding="utf-8") as f:
+            with open(_LOCAL_CFG_FILE, encoding="utf-8") as f:
                 data = _json.load(f)
             d = (data.get("output_dir") or data.get("cache_dir") or "").strip()
             if d:
                 os.makedirs(d, exist_ok=True)
                 return d
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return _DEFAULT_OUTPUTS_DIR
 
@@ -98,7 +100,7 @@ VSR_DIR = VSR_V14_DIR
 # 原 PADDLEOCR_VENV_DIR/PADDLEOCR_PYTHON/PADDLEOCR_SCRIPT/IMAGE_FOLDER_OCR_SCRIPT 已移除。
 REMBG_DIR = os.path.join(APPS_DIR, "rembg")
 # 只读资源：assets 下的内置浏览器包（frozen 时在 _BUNDLE_DIR）
-BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")
+BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")  # noqa: E501
 CREATOR_CONTENT_MANAGE_URL = "https://creator.douyin.com/creator-micro/content/manage"
 DREAMINA_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "dreamina")
 COVER_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "covers")
@@ -176,7 +178,7 @@ if os.path.exists(_kb_dir_cfg):
         _custom = (_kd.get("media_dir") or _kd.get("materials_dir") or "").strip()
         if _custom and os.path.isdir(_custom):
             KNOWLEDGE_MEDIA_DIR = _custom
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
 
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -193,7 +195,5 @@ os.makedirs(AUTO_LISTING_CHROME_USER_DATA, exist_ok=True)
 
 _old_product_file = os.path.join(DATA_DIR, "knowledge_base.json")
 if os.path.exists(_old_product_file) and not os.path.exists(PRODUCT_LIBRARY_FILE):
-    try:
+    with contextlib.suppress(OSError):
         os.rename(_old_product_file, PRODUCT_LIBRARY_FILE)
-    except OSError:
-        pass

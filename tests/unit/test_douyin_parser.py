@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """core.douyin_parser：抖音接口 JSON 解析。"""
 import os
 import sys
@@ -6,9 +5,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from core.douyin_parser import parse_video_detail_json
+from core.douyin_parser import parse_video_detail_json  # noqa: E402
 
 
 def _sample_detail(desc="测试视频标题"):

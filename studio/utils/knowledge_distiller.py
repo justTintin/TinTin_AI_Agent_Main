@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 风格化提炼：把「我的知识库」里从素材浏览器采集来的「风格参考样本」
 按多维度提炼为「风格化」条目——即 HOW to write（写法风格），而非 WHAT（内容知识点）。
@@ -19,13 +18,16 @@ LLM 复用 ai_config 的 llm_api_url/llm_api_key/llm_model。
 """
 import json
 import re
-
-import requests
+from typing import Any
 
 from utils.logger_utils import log
 from utils.my_knowledge_manager import (
-    REFERENCE_TYPE, STYLIZATION_TYPE, STYLE_DIMS,
-    CONTENT_TYPE_OPTIONS, PRODUCT_CAT_OPTIONS, INDUSTRY_OPTIONS,
+    CONTENT_TYPE_OPTIONS,
+    INDUSTRY_OPTIONS,
+    PRODUCT_CAT_OPTIONS,
+    REFERENCE_TYPE,
+    STYLE_DIMS,
+    STYLIZATION_TYPE,
     MyKnowledgeManager,
 )
 
@@ -50,12 +52,12 @@ def _parse_json(text):
     t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.MULTILINE).strip()
     try:
         return json.loads(t)
-    except Exception:
+    except json.JSONDecodeError:
         m = re.search(r"(\[.*\]|\{.*\})", t, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
-            except Exception:
+            except json.JSONDecodeError:
                 return None
     return None
 
@@ -78,7 +80,7 @@ def _tag_batch(cfg, batch):
         f"- content_type: 内容风格类型，只从[{ct_opts}]中选，可多个，没有则空数组\n"
         f"- product_cat: 产品品类，只从[{pc_opts}]中选，可多个，没有则空数组\n"
         f"- industry: 行业垂类，只从[{ind_opts}]中选，可多个，没有则空数组\n"
-        '只输出JSON数组，每元素形如 {"i":序号,"content_type":[],"product_cat":[],"industry":[]}，不要任何多余文字。'
+        '只输出JSON数组，每元素形如 {"i":序号,"content_type":[],"product_cat":[],"industry":[]}，不要任何多余文字。'  # noqa: E501
     )
     lines = [f"[{i}] {_sample_text(it)}" for i, it in enumerate(batch)]
     out = _chat(cfg, system, "\n".join(lines), temperature=0.2)
@@ -91,8 +93,8 @@ def _tag_batch(cfg, batch):
     res = []
     for i in range(len(batch)):
         el = by_i.get(i, {})
-        def _clean(key, allowed):
-            return [str(v).strip() for v in (el.get(key) or [])
+        def _clean(key, allowed, _el=el):
+            return [str(v).strip() for v in (_el.get(key) or [])
                     if str(v).strip() in allowed]
         res.append({
             "content_type": _clean("content_type", set(CONTENT_TYPE_OPTIONS)),
@@ -133,7 +135,8 @@ def distill_hotspots(hotspot_mgr, my_knowledge_mgr, cfg, progress_cb=None):
     把热点趋势库按 科技/数码/AI 分类，用 LLM 归纳成「选题方向」知识写入「我的知识库」。
     返回 (created, updated, msg)。
     """
-    import os as _os, time as _t
+    import os as _os
+    import time as _t
 
     def emit(m):
         if progress_cb:
@@ -160,7 +163,7 @@ def distill_hotspots(hotspot_mgr, my_knowledge_mgr, cfg, progress_cb=None):
                   "提炼成可直接用于选题决策的要点(分点，标注哪些是持续上榜的强趋势)。")
         try:
             content = _chat(cfg, system, "\n".join(lines), temperature=0.5).strip()
-        except Exception as e:
+        except Exception as e:  # _chat 外部 LLM API 调用
             log.error(f"热点归纳失败({cat}): {e}")
             continue
         if not content:
@@ -174,7 +177,7 @@ def distill_hotspots(hotspot_mgr, my_knowledge_mgr, cfg, progress_cb=None):
         else:
             my_knowledge_mgr.items.append({
                 "id": _os.urandom(8).hex(), "name": name, "type": "选题方向",
-                "content": content, "distilled": True, "dim": "hotspot", "dim_value": cat,
+                "content": content, "distilled": True, "dim": "hotspot", "dim_value": cat,  # noqa: E501
                 "source_count": len(topics),
                 "created_at": int(_t.time()), "updated_at": int(_t.time()),
             })
@@ -205,7 +208,7 @@ def run_distillation(manager, cfg, progress_cb=None):
         return 0, 0, "未配置 LLM 模型。"
 
     samples = [it for it in manager.all_items()
-               if it.get("type") == REFERENCE_TYPE and (it.get("content") or "").strip()]
+               if it.get("type") == REFERENCE_TYPE and (it.get("content") or "").strip()]  # noqa: E501
     if not samples:
         return 0, 0, "没有可提炼的「风格参考样本」。请先在素材浏览器同步收藏/点赞并导入。"
 
@@ -215,16 +218,16 @@ def run_distillation(manager, cfg, progress_cb=None):
         batch = samples[start:start + TAG_BATCH]
         try:
             tags = _tag_batch(cfg, batch)
-        except Exception as e:
+        except Exception as e:  # _tag_batch 含外部 LLM API 调用
             log.error(f"打标失败(批 {start}): {e}")
-            tags = [{"content_type": [], "product_cat": [], "industry": []} for _ in batch]
-        for it, tg in zip(batch, tags):
+            tags = [{"content_type": [], "product_cat": [], "industry": []} for _ in batch]  # noqa: E501
+        for it, tg in zip(batch, tags, strict=False):
             it["_style_tags"] = tg
         emit(f"打标进度 {min(start + TAG_BATCH, len(samples))}/{len(samples)}")
     manager.save()
 
     # ② 按四维度分组
-    groups = {"account": {}, "content_type": {}, "product_cat": {}, "industry": {}}
+    groups: dict[str, Any] = {"account": {}, "content_type": {}, "product_cat": {}, "industry": {}}
     for it in samples:
         # 账号维度：来自 source.creator
         creator = (it.get("source") or {}).get("creator", "").strip()
@@ -254,7 +257,7 @@ def run_distillation(manager, cfg, progress_cb=None):
             emit(f"提炼【{dim_label}：{value}】风格化（{len(items)} 条样本）…")
             try:
                 content = _extract_style(cfg, dim, value, items)
-            except Exception as e:
+            except Exception as e:  # _extract_style 外部 LLM API 调用
                 log.error(f"风格提炼失败({dim}:{value}): {e}")
                 continue
             if not content:
@@ -270,12 +273,13 @@ def run_distillation(manager, cfg, progress_cb=None):
                     "source_count": len(items), "source_urls": srcs,
                 })
                 # 重新提炼时按新样本量重算初始分，但保留用户反馈累积的差值
-                old_base = MyKnowledgeManager.initial_score(ex.get("source_count", len(items)))
+                old_base = MyKnowledgeManager.initial_score(ex.get("source_count", len(items)))  # noqa: E501
                 feedback_delta = round(ex.get("score", old_base) - old_base, 1)
                 ex["score"] = round(min(max(init_score + feedback_delta, 0.0), 10.0), 1)
                 updated += 1
             else:
-                import os, time
+                import os
+                import time
                 manager.items.append({
                     "id": os.urandom(8).hex(), "name": name,
                     "type": STYLIZATION_TYPE,

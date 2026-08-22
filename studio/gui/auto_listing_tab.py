@@ -1,22 +1,29 @@
-# -*- coding: utf-8 -*-
 """「自动上架」Tab：导入数据包、管理 Chrome 调试会话、执行抖店自动上架。"""
 import os
 
-from PySide6.QtCore import Qt, Signal
+from gui.elided_label import ElidedLabel
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QScrollArea,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-
 from utils.auto_listing import config as al_config
 from utils.auto_listing.chrome_manager import is_cdp_ready
-from utils.auto_listing.engine import AutoListingEngine, ListingError
-from utils.auto_listing.validation import ValidationError, prepare_package
+from utils.auto_listing.engine import AutoListingEngine
+from utils.auto_listing.validation import prepare_package
 from utils.base_worker import BaseWorker
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
-from utils.logger_utils import log
-from gui.elided_label import ElidedLabel
 
 
 class ValidateWorker(BaseWorker):
@@ -238,9 +245,9 @@ class AutoListingTab(QWidget):
     # ─────────────────────────── 配置 ───────────────────────────
     def _collect_cfg(self):
         return {
-            "chrome_exe": self.chrome_edit.text().strip() or al_config.detect_chrome_exe(),
+            "chrome_exe": self.chrome_edit.text().strip() or al_config.detect_chrome_exe(),  # noqa: E501
             "debug_port": self.port_spin.value(),
-            "user_data_dir": self.user_data_edit.text().strip() or al_config.AUTO_LISTING_CHROME_USER_DATA,
+            "user_data_dir": self.user_data_edit.text().strip() or al_config.AUTO_LISTING_CHROME_USER_DATA,  # noqa: E501
             "result_dir": al_config.AUTO_LISTING_RESULTS_DIR,
             "sync_dir": al_config.AUTO_LISTING_SYNC_DIR,
             "shop_key": self.shop_combo.currentData(),
@@ -248,7 +255,7 @@ class AutoListingTab(QWidget):
         }
 
     def _load_config_to_ui(self):
-        self.shop_combo.setCurrentIndex(max(0, self.shop_combo.findData(self._cfg.get("shop_key"))))
+        self.shop_combo.setCurrentIndex(max(0, self.shop_combo.findData(self._cfg.get("shop_key"))))  # noqa: E501
         self.chrome_edit.setText(self._cfg.get("chrome_exe") or "")
         self.port_spin.setValue(int(self._cfg.get("debug_port") or 9222))
         self.user_data_edit.setText(self._cfg.get("user_data_dir") or "")
@@ -277,7 +284,7 @@ class AutoListingTab(QWidget):
     def _check_cdp(self):
         try:
             ready = is_cdp_ready(self.port_spin.value(), timeout=0.3)
-        except Exception:
+        except Exception:  # 外部API调用（CDP 端口探测）
             ready = False
         self.cdp_status.setText("● 已就绪" if ready else "● 未启动")
         self.cdp_status.setStyleSheet("color: #2ecc71;" if ready else "color: #999;")
@@ -316,7 +323,7 @@ class AutoListingTab(QWidget):
             f"完成： 店铺：{data['shop_name']} | 标题：{data['title'] or '（未命名）'} | "
             f"SKU：{data['sku_count']} | 主图：{data['main_images']} | "
             f"详情：{data['detail_images']} | SKU图：{data['sku_images']}\n警告：{warns}")
-        self.log_view.append(f"[校验] 数据包校验通过：{data['title'] or '（未命名商品）'}，{data['sku_count']} 个SKU")
+        self.log_view.append(f"[校验] 数据包校验通过：{data['title'] or '（未命名商品）'}，{data['sku_count']} 个SKU")  # noqa: E501
 
     def _on_validate_error(self, msg):
         self.package_summary.setText(f"失败： 校验失败：{msg}")
@@ -357,13 +364,13 @@ class AutoListingTab(QWidget):
 
     def _on_progress(self, stage, msg):
         self.log_view.append(f"[{stage}] {msg}")
-        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())  # noqa: E501
 
     def _on_finished(self, result):
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self._worker = None
-        msg = f"任务完成：草稿保存={'成功' if result.get('saved') else '未确认'}；结果目录：{result.get('result_dir')}"
+        msg = f"任务完成：草稿保存={'成功' if result.get('saved') else '未确认'}；结果目录：{result.get('result_dir')}"  # noqa: E501
         self.log_view.append(f"[完成] {msg}")
         self._page.show_info(msg)
         self._check_cdp()

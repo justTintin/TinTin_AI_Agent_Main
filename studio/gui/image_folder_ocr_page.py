@@ -1,35 +1,44 @@
-# -*- coding: utf-8 -*-
+import contextlib
 import os
-import sys
-import subprocess
-import traceback
-from PIL import Image, ImageDraw
 
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy)
-from PySide6.QtCore import Signal, QThread, Qt, QSize
-from utils.base_worker import BaseWorker
-from PySide6.QtGui import QImage, QPixmap
-from utils.logger_utils import log
-from config.paths import TMP_DIR, OUTPUTS_DIR
-from utils.ocr_client import check_server_ocr
-from utils.ocr_workers import ImageFolderOcrWorker, ImageOcrTestWorker
-from gui.video_ocr_page import InteractivePreviewLabelOCR
+from config.paths import OUTPUTS_DIR
 
 # ImageFolderOcrWorker / ImageOcrTestWorker 已迁移至 utils.ocr_workers（走服务端 OCR）
-
-
 from gui.base_page import BasePage
-
-
+from gui.video_ocr_page import InteractivePreviewLabelOCR
+from PIL import Image, ImageDraw
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.file_dialog_utils import pick_directory, pick_save_file
 from utils.gui_icons import mdi_button
+from utils.logger_utils import log
+from utils.ocr_client import check_server_ocr
+from utils.ocr_workers import ImageFolderOcrWorker, ImageOcrTestWorker
+from utils.os_utils import open_in_explorer
+
+
 class ImageFolderOcrPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self.worker = None
         self.test_worker = None
-        
+
         self.template_image_path = ""
         self.image_files = []
         self.img_width = 1280
@@ -48,7 +57,7 @@ class ImageFolderOcrPage(BasePage):
         main_layout.addWidget(heading, 0)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
+        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")  # noqa: E501
         main_layout.addWidget(splitter, 1)
 
         # ─── Left Panel (Folder Selection & Interactive Preview) ───
@@ -114,7 +123,7 @@ class ImageFolderOcrPage(BasePage):
 
         # Title
         c_title = QLabel(" OCR 模板识别选区及设置")
-        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
+        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")  # noqa: E501
         controls_layout.addWidget(c_title)
 
         # Bounding Box Sliders Group
@@ -138,22 +147,22 @@ class ImageFolderOcrPage(BasePage):
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
-        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
+        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))  # noqa: E501
 
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
-        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))  # noqa: E501
 
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
-        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
+        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))  # noqa: E501
 
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
-        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))  # noqa: E501
 
         controls_layout.addWidget(box_group)
 
@@ -176,7 +185,7 @@ class ImageFolderOcrPage(BasePage):
         self.key_input = QLineEdit()
         self.key_input.setPlaceholderText("例如: 订单编码")
         key_label_row.addWidget(self.key_input)
-        
+
         self.btn_test_ocr = QPushButton(" 测试选区")
         self.btn_test_ocr.setObjectName("secondary_button")
         self.btn_test_ocr.setFixedWidth(90)
@@ -227,7 +236,7 @@ class ImageFolderOcrPage(BasePage):
                 height: 16px;
             }
             QProgressBar::chunk {
-                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);  # noqa: E501
                 border-radius: 5px;
             }
         """)
@@ -300,7 +309,7 @@ class ImageFolderOcrPage(BasePage):
             for file in os.listdir(path):
                 if file.lower().endswith(valid_exts):
                     self.image_files.append(os.path.join(path, file))
-        except Exception as e:
+        except OSError as e:
             log.error(f"遍历文件夹失败: {e}")
 
         if not self.image_files:
@@ -314,7 +323,7 @@ class ImageFolderOcrPage(BasePage):
         try:
             with Image.open(self.template_image_path) as img:
                 self.img_width, self.img_height = img.size
-                
+
             self.box = [
                 int(self.img_width * 0.25),
                 int(self.img_height * 0.25),
@@ -348,9 +357,9 @@ class ImageFolderOcrPage(BasePage):
             folder_name = os.path.basename(os.path.normpath(path))
             fmt = self.format_combo.currentData()
             ext = f".{fmt}"
-            self.output_path_input.setText(os.path.join(OUTPUTS_DIR, f"{folder_name}_ocr_result{ext}"))
+            self.output_path_input.setText(os.path.join(OUTPUTS_DIR, f"{folder_name}_ocr_result{ext}"))  # noqa: E501
 
-        except Exception as e:
+        except OSError as e:
             log.error(f"加载模板图片失败: {e}")
             self.preview_label.setText(f"模板图片加载失败: {e}")
 
@@ -379,7 +388,7 @@ class ImageFolderOcrPage(BasePage):
     def update_preview(self):
         if self.worker and self.worker.isRunning():
             return
-            
+
         x = self.x_slider.value()
         w = self.w_slider.value()
         y = self.y_slider.value()
@@ -414,16 +423,18 @@ class ImageFolderOcrPage(BasePage):
                     ratio = min(display_w / w_img, display_h / h_img)
                     target_w = int(w_img * ratio)
                     target_h = int(h_img * ratio)
-                    if target_w < 1: target_w = 1
-                    if target_h < 1: target_h = 1
+                    if target_w < 1:
+                        target_w = 1
+                    if target_h < 1:
+                        target_h = 1
 
                     self.preview_label.target_w = target_w
                     self.preview_label.target_h = target_h
                     self.preview_label.px_offset_x = (display_w - target_w) // 2
                     self.preview_label.px_offset_y = (display_h - target_h) // 2
 
-                    resized_img = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                    
+                    resized_img = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)  # noqa: E501
+
                     # Draw selection rectangle
                     draw = ImageDraw.Draw(resized_img)
                     rx0 = int(x * target_w / w_img)
@@ -434,9 +445,9 @@ class ImageFolderOcrPage(BasePage):
 
                     rgb_img = resized_img.convert("RGB")
                     data = rgb_img.tobytes("raw", "RGB")
-                    qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)
+                    qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)  # noqa: E501 N806
                     self.preview_label.setPixmap(QPixmap.fromImage(qImg))
-            except Exception as e:
+            except OSError as e:
                 log.error(f"绘图预览错误: {e}")
 
     def _on_label_bounds_changed(self, x, y, w, h):
@@ -501,7 +512,7 @@ class ImageFolderOcrPage(BasePage):
 
         if success:
             self._append_log(f"[INFO] 模板选区 OCR 测试成功！识别文本: {text_or_error}")
-            
+
             # Smart suggestion for the Key text field
             # Look for separators like :, ： or spaces to split key and value
             import re
@@ -511,17 +522,17 @@ class ImageFolderOcrPage(BasePage):
                 possible_key = match.group(1).strip()
                 if possible_key:
                     suggested_key = possible_key
-            
+
             # Fill the key text input field
             self.key_input.setText(suggested_key)
             QMessageBox.information(
                 self.parent_widget,
                 "测试成功",
-                f"选区识别成功！\n\n识别文本：\n{text_or_error}\n\n已自动为您提取定位关键词：\n\"{suggested_key}\""
+                f"选区识别成功！\n\n识别文本：\n{text_or_error}\n\n已自动为您提取定位关键词：\n\"{suggested_key}\""  # noqa: E501
             )
         else:
             self._append_log(f"[ERROR] 选区 OCR 测试失败: {text_or_error}")
-            QMessageBox.critical(self.parent_widget, "测试失败", f"选区测试失败，错误原因：\n{text_or_error}")
+            QMessageBox.critical(self.parent_widget, "测试失败", f"选区测试失败，错误原因：\n{text_or_error}")  # noqa: E501
 
     def start_batch_ocr(self):
         folder_path = self.folder_path_input.text().strip()
@@ -529,7 +540,7 @@ class ImageFolderOcrPage(BasePage):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择有效的输入图片文件夹。")
             return
         key_text = self.key_input.text().strip()
-        
+
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_test_ocr.setEnabled(False)
@@ -537,7 +548,7 @@ class ImageFolderOcrPage(BasePage):
         self.output_path_input.setEnabled(False)
         self.key_input.setEnabled(False)
         self.format_combo.setEnabled(False)
-        
+
         self.x_slider.setEnabled(False)
         self.w_slider.setEnabled(False)
         self.y_slider.setEnabled(False)
@@ -576,7 +587,7 @@ class ImageFolderOcrPage(BasePage):
         self.output_path_input.setEnabled(True)
         self.key_input.setEnabled(True)
         self.format_combo.setEnabled(True)
-        
+
         self.x_slider.setEnabled(True)
         self.w_slider.setEnabled(True)
         self.y_slider.setEnabled(True)
@@ -585,15 +596,13 @@ class ImageFolderOcrPage(BasePage):
         if success:
             self.status_lbl.setText("状态: 批量识别完成！")
             QMessageBox.information(
-                self.parent_widget, 
-                "任务成功", 
+                self.parent_widget,
+                "任务成功",
                 f"图片文件夹批量 OCR 扫描成功完成！\n\n数据结果已输出至电子表格：\n{result}"
             )
             # Try to select the output file in explorer
-            try:
-                subprocess.Popen(f'explorer /select,"{os.path.normpath(result)}"')
-            except Exception:
-                pass
+            with contextlib.suppress(OSError):
+                open_in_explorer(result, select=True)
         else:
             if self.worker and getattr(self.worker, 'is_aborted', False):
                 self.status_lbl.setText("状态: 已被用户终止。")
@@ -611,8 +620,8 @@ class ImageFolderOcrPage(BasePage):
             dir_path = os.path.dirname(os.path.abspath(path))
             if os.path.exists(dir_path):
                 try:
-                    subprocess.Popen(f'explorer "{os.path.normpath(dir_path)}"')
-                except Exception as e:
+                    open_in_explorer(dir_path, select=False)
+                except OSError as e:
                     log.error(f"无法打开目录: {e}")
             else:
                 QMessageBox.warning(self.parent_widget, "提示", "输出目录目前不存在，请先运行识别生成文件。")

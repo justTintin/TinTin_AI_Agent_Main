@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Windows WAV 播放器（基于 winsound）。
 
 背景：Qt 的 QMediaPlayer / QSoundEffect 在部分 Windows 环境会按元数据/时长驱动播放，
@@ -8,6 +7,7 @@ winsound.PlaySound 走系统原生播放通道，与第三方播放器行为一�
 
 说明：本项目仅支持 Windows，因此这里直接使用 winsound。
 """
+import contextlib
 import os
 import winsound
 
@@ -27,13 +27,11 @@ def play_wav(wav_path):
             winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
         )
         return True
-    except Exception:
+    except Exception:  # winsound 系统调用
         return False
 
 
 def stop_wav():
     """停止当前 winsound 播放（切换/离开页面时调用，避免声音残留）。"""
-    try:
+    with contextlib.suppress(Exception):
         winsound.PlaySound(None, winsound.SND_PURGE)
-    except Exception:
-        pass

@@ -1,16 +1,31 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 对话框：文本编辑、脚本对比、配音成品、合成成品、产品文案输入、配音行详情。"""
+import contextlib
 import os
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
-                               QListWidget, QListWidgetItem, QDialogButtonBox, QPlainTextEdit, QWidget,
-                               QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
-                               QLineEdit)
-from PySide6.QtCore import Qt
+
 from gui.elided_label import ElidedLabel
 from gui.montage.widgets import ReadOnlyDoubleClickLineEdit
-import subprocess
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.gui_icons import mdi_button
-
+from utils.os_utils import open_in_explorer
 
 
 class TextEditDialog(QDialog):
@@ -72,7 +87,7 @@ class ScriptCompareDialog(QDialog):
         self.setWindowTitle(" 配音文案对比")
         self.setMinimumSize(700, 400)
         self.resize(800, 480)
-        
+
         # Theme-consistent dialog style
         self.setStyleSheet("""
             QPlainTextEdit {
@@ -83,19 +98,19 @@ class ScriptCompareDialog(QDialog):
                 padding: 8px;
             }
         """)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
-        
+
         title_lbl = QLabel(" 左右对比：左侧为原视频文案，右侧为AI修改/当前配音文案")
         title_lbl.setStyleSheet("font-size: 14px; color: #60a5fa; font-weight: bold;")
         layout.addWidget(title_lbl)
-        
+
         # Splitter or side-by-side layout
         h_layout = QHBoxLayout()
         h_layout.setSpacing(12)
-        
+
         # Left: Original
         left_widget = QWidget()
         left_vbox = QVBoxLayout(left_widget)
@@ -107,7 +122,7 @@ class ScriptCompareDialog(QDialog):
         self.original_edit.setReadOnly(True)
         left_vbox.addWidget(self.original_edit)
         h_layout.addWidget(left_widget)
-        
+
         # Right: Current/Modified
         right_widget = QWidget()
         right_vbox = QVBoxLayout(right_widget)
@@ -118,32 +133,32 @@ class ScriptCompareDialog(QDialog):
         self.current_edit.setPlainText(current_text)
         right_vbox.addWidget(self.current_edit)
         h_layout.addWidget(right_widget)
-        
+
         layout.addLayout(h_layout)
-        
+
         # Bottom buttons
         btn_box = QHBoxLayout()
         btn_box.addStretch()
-        
+
         btn_use_original = mdi_button("还原为原始文案", "backward")
         btn_use_original.setObjectName("secondary_button")
         btn_use_original.clicked.connect(self._use_original)
         btn_box.addWidget(btn_use_original)
-        
+
         btn_save = mdi_button("保存修改", "save")
         btn_save.clicked.connect(self.accept)
         btn_box.addWidget(btn_save)
-        
+
         btn_cancel = QPushButton("取消")
         btn_cancel.setObjectName("secondary_button")
         btn_cancel.clicked.connect(self.reject)
         btn_box.addWidget(btn_cancel)
-        
+
         layout.addLayout(btn_box)
-        
+
     def _use_original(self):
         self.current_edit.setPlainText(self.original_edit.toPlainText())
-        
+
     def get_text(self):
         return self.current_edit.toPlainText().strip()
 
@@ -155,7 +170,7 @@ class DubbedVideosDialog(QDialog):
         self.setWindowTitle(" 配音替换完成")
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
@@ -189,11 +204,11 @@ class DubbedVideosDialog(QDialog):
             item_layout.addWidget(name_lbl, 1)
 
             btn_play = mdi_button("播放视频", "play")
-            btn_play.clicked.connect(lambda checked=False, path=dubbed_path: self._play_video(path))
+            btn_play.clicked.connect(lambda checked=False, path=dubbed_path: self._play_video(path))  # noqa: E501
             item_layout.addWidget(btn_play)
 
             btn_locate = mdi_button("打开所在目录", "folder")
-            btn_locate.clicked.connect(lambda checked=False, path=dubbed_path: self._locate_video(path))
+            btn_locate.clicked.connect(lambda checked=False, path=dubbed_path: self._locate_video(path))  # noqa: E501
             item_layout.addWidget(btn_locate)
 
             item.setSizeHint(item_widget.sizeHint())
@@ -205,7 +220,7 @@ class DubbedVideosDialog(QDialog):
 
         btn_open_all = mdi_button("打开整体输出文件夹", "folder")
         if results:
-            btn_open_all.clicked.connect(lambda checked=False, path=out_dir: self._open_dir(path))
+            btn_open_all.clicked.connect(lambda checked=False, path=out_dir: self._open_dir(path))  # noqa: E501
         footer_layout.addWidget(btn_open_all)
 
         btn_ok = QPushButton("确认并返回")
@@ -219,7 +234,7 @@ class DubbedVideosDialog(QDialog):
         if os.path.exists(path):
             try:
                 os.startfile(path)
-            except Exception as e:
+            except OSError as e:
                 QMessageBox.warning(self, "播放失败", f"无法播放该视频:\n{e}")
         else:
             QMessageBox.warning(self, "文件不存在", "视频文件未找到，请确认是否已被删除或移动。")
@@ -232,7 +247,7 @@ class DubbedVideosDialog(QDialog):
         if os.path.exists(path):
             try:
                 os.startfile(path)
-            except Exception as e:
+            except OSError as e:
                 QMessageBox.warning(self, "打开失败", f"无法打开该目录:\n{e}")
 
 
@@ -243,7 +258,7 @@ class FinalMixedVideosDialog(QDialog):
         self.setWindowTitle(" 最终合成视频列表")
         self.setMinimumSize(600, 400)
         self.resize(650, 450)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
@@ -280,7 +295,7 @@ class FinalMixedVideosDialog(QDialog):
             item_layout.addWidget(btn_play)
 
             btn_locate = mdi_button("打开所在目录", "folder")
-            btn_locate.clicked.connect(lambda checked=False, p=path: self._locate_video(p))
+            btn_locate.clicked.connect(lambda checked=False, p=path: self._locate_video(p))  # noqa: E501
             item_layout.addWidget(btn_locate)
 
             item.setSizeHint(item_widget.sizeHint())
@@ -292,7 +307,7 @@ class FinalMixedVideosDialog(QDialog):
 
         btn_open_all = mdi_button("打开整体输出文件夹", "folder")
         if paths:
-            btn_open_all.clicked.connect(lambda checked=False, p=out_dir: self._open_dir(p))
+            btn_open_all.clicked.connect(lambda checked=False, p=out_dir: self._open_dir(p))  # noqa: E501
         footer_layout.addWidget(btn_open_all)
 
         btn_ok = QPushButton("确认并返回")
@@ -306,7 +321,7 @@ class FinalMixedVideosDialog(QDialog):
         if os.path.exists(path):
             try:
                 os.startfile(path)
-            except Exception as e:
+            except OSError as e:
                 QMessageBox.warning(self, "播放失败", f"无法播放该视频:\n{e}")
         else:
             QMessageBox.warning(self, "文件不存在", "视频文件未找到，请确认是否已被删除或移动。")
@@ -314,8 +329,8 @@ class FinalMixedVideosDialog(QDialog):
     def _locate_video(self, path):
         if os.path.exists(path):
             try:
-                subprocess.Popen(f'explorer /select,"{path}"')
-            except Exception as e:
+                open_in_explorer(path, select=True)
+            except Exception as e:  # 外部API调用（资源管理器打开）
                 QMessageBox.warning(self, "定位失败", f"无法定位该视频:\n{e}")
         else:
             QMessageBox.warning(self, "文件不存在", "视频文件未找到，请确认是否已被删除或移动。")
@@ -324,7 +339,7 @@ class FinalMixedVideosDialog(QDialog):
         if os.path.exists(path):
             try:
                 os.startfile(path)
-            except Exception as e:
+            except OSError as e:
                 QMessageBox.warning(self, "打开失败", f"无法打开该目录:\n{e}")
 
 
@@ -342,11 +357,11 @@ class ProductCopyInputDialog(QDialog):
 
         def _row(lbl_text, placeholder):
             r = QHBoxLayout()
-            l = QLabel(lbl_text)
-            l.setFixedWidth(64)
+            lbl = QLabel(lbl_text)
+            lbl.setFixedWidth(64)
             e = QLineEdit()
             e.setPlaceholderText(placeholder)
-            r.addWidget(l)
+            r.addWidget(lbl)
             r.addWidget(e, 1)
             layout.addLayout(r)
             return e
@@ -382,12 +397,12 @@ class VoiceRowDetailWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
-        
+
         # Line 1: video filename + play original + status + action buttons
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(4)
-        
+
         lbl_video = QLabel(f" 视频: {basename}")
         lbl_video.setObjectName("card_title")
         lbl_video.setToolTip(filepath)
@@ -403,26 +418,26 @@ class VoiceRowDetailWidget(QWidget):
         if action_widgets:
             for w in action_widgets:
                 top_layout.addWidget(w, 0)
-        
+
         layout.addLayout(top_layout)
-        
+
         # Line 2: Original script + video duration
         row_original = QHBoxLayout()
         row_original.setContentsMargins(0, 0, 0, 0)
         lbl_orig_tag = QLabel(" 原文: ")
         lbl_orig_tag.setObjectName("muted_text")
         lbl_orig_tag.setFixedWidth(48)
-        orig_val = ReadOnlyDoubleClickLineEdit(original_text if original_text else "(无)")
+        orig_val = ReadOnlyDoubleClickLineEdit(original_text if original_text else "(无)")  # noqa: E501
         row_original.addWidget(lbl_orig_tag)
         row_original.addWidget(orig_val, 1)
         if video_duration_sec > 0:
-            vid_dur_str = f"{int(video_duration_sec // 60)}:{int(video_duration_sec % 60):02d}"
+            vid_dur_str = f"{int(video_duration_sec // 60)}:{int(video_duration_sec % 60):02d}"  # noqa: E501
             lbl_vid_dur = QLabel(f"{vid_dur_str}")
-            lbl_vid_dur.setStyleSheet("color: #f1c40f; font-size: 11px; font-weight: bold;")
+            lbl_vid_dur.setStyleSheet("color: #f1c40f; font-size: 11px; font-weight: bold;")  # noqa: E501
             lbl_vid_dur.setFixedWidth(60)
             row_original.addWidget(lbl_vid_dur)
         layout.addLayout(row_original)
-        
+
         # Line 3: AI-modified script + voice duration
         row_edit = QHBoxLayout()
         row_edit.setContentsMargins(0, 0, 0, 0)
@@ -432,7 +447,7 @@ class VoiceRowDetailWidget(QWidget):
         row_edit.addWidget(edit, 1)
         voice_dur_str = ""
         if voice_duration_sec > 0:
-            voice_dur_str = f"{int(voice_duration_sec // 60)}:{int(voice_duration_sec % 60):02d}"
+            voice_dur_str = f"{int(voice_duration_sec // 60)}:{int(voice_duration_sec % 60):02d}"  # noqa: E501
             voice_dur_style = "color: #2ecc71; font-size: 11px; font-weight: bold;"
         else:
             voice_dur_str = "--:--"
@@ -467,7 +482,7 @@ class ClipSelectionDialog(QDialog):
 
         self.table = QTableWidget()
         self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["选择", "序号", "视频片段", "时间戳", "画面文案描述", "评分"])
+        self.table.setHorizontalHeaderLabels(["选择", "序号", "视频片段", "时间戳", "画面文案描述", "评分"])  # noqa: E501
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setMinimumHeight(300)
         self.table.setWordWrap(False)
@@ -523,8 +538,8 @@ class ClipSelectionDialog(QDialog):
             score = clip.get("score", -1.0)
 
             chk_item = QTableWidgetItem()
-            chk_item.setFlags(chk_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            chk_item.setCheckState(Qt.Checked if path in self.selected_paths else Qt.Unchecked)
+            chk_item.setFlags(chk_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)  # noqa: E501
+            chk_item.setCheckState(Qt.Checked if path in self.selected_paths else Qt.Unchecked)  # noqa: E501
             chk_item.setData(Qt.UserRole, path)
             self.table.setItem(idx, 0, chk_item)
 
@@ -716,10 +731,8 @@ class ArrangeMaterialsDialog(QDialog):
 
     def _delete_one(self, path):
         """删除指定路径的素材（如有重复仅删首个匹配）。"""
-        try:
+        with contextlib.suppress(ValueError):
             self._paths.remove(path)
-        except ValueError:
-            pass
         self._rebuild_list()
         self._refresh_counts()
 

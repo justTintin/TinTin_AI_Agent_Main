@@ -1,8 +1,9 @@
-# -*- coding: utf-8 -*-
 """
 暗色主题 QSS · 螺丝钉-电商智能体矩阵 v3.0
 设计系统：Luosiding Design Library
-背景：--luosiding-slate-950 #0b0c10；主色：--luosiding-indigo-400 #6366f1；强调：--luosiding-violet-500 #8b5cf6
+背景：--luosiding-slate-950 #0b0c10；
+主色：--luosiding-indigo-400 #6366f1；
+强调：--luosiding-violet-500 #8b5cf6
 """
 import os
 
@@ -916,15 +917,21 @@ QGroupBox::title {
     letter-spacing: 0.6px;
 }
 
+QTabBar {
+    border: none;
+    background: transparent;
+}
+
 QTabWidget::pane {
-    border: 1px solid #2b3040 /* --border */;
+    border: none;
     background-color: #151722 /* --surface */;
     border-radius: 0 0 12px 12px;
+    top: -1px;
 }
 
 QTabBar::tab {
     background-color: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-bottom: 2px solid transparent;
     color: #9ca1b1 /* --luosiding-slate-200 */;
     padding: 10px 20px;
@@ -943,6 +950,10 @@ QTabBar::tab:selected {
 QTabBar::tab:hover:!selected {
     color: #f0f1f7 /* --foreground */;
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+QTabBar::tab:!selected {
+    border-bottom: 2px solid transparent;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1072,43 +1083,59 @@ QSplitter::handle:vertical {
     font-weight: 500;
 }
 
-#status_overlay QLabel#ov_value {
+QLabel#ov_value {
     color: #f0f1f7 /* --foreground */;
     font-weight: 700;
 }
 
-#status_overlay QLabel#ov_value[level="ok"] {
+QLabel#ov_value[level="ok"] {
     color: #34d399 /* --color-success */;
+    font-weight: 700;
 }
 
-#status_overlay QLabel#ov_value[level="warn"] {
+QLabel#ov_value[level="warn"] {
     color: #fbbf24 /* --color-warning */;
+    font-weight: 700;
 }
 
-#status_overlay QLabel#ov_value[level="bad"] {
+QLabel#ov_value[level="bad"] {
     color: #f87171 /* --color-error */;
+    font-weight: 700;
 }
 
-#status_overlay QLabel#ov_value[level="idle"] {
+QLabel#ov_value[level="idle"] {
     color: #5f6475 /* --luosiding-slate-400 */;
+    font-weight: 700;
 }
 
-#status_overlay QLabel#ov_service {
+QLabel#ov_service {
     color: #9ca1b1 /* --luosiding-slate-200 */;
     font-weight: 500;
 }
 
-#status_overlay QLabel#ov_service[state="ok"] {
+QLabel#ov_service[state="ok"] {
     color: #34d399 /* --color-success */;
     font-weight: 600;
 }
 
-#status_overlay QLabel#ov_service[state="bad"] {
+QLabel#ov_service[state="bad"] {
     color: #f87171 /* --color-error */;
     font-weight: 600;
 }
 
-#status_overlay QLabel#ov_service[state="unknown"] {
+QLabel#ov_service[state="unknown"] {
+    color: #5f6475 /* --luosiding-slate-400 */;
+}
+
+QLabel#ov_server_dot[state="ok"] {
+    color: #34d399 /* --color-success */;
+}
+
+QLabel#ov_server_dot[state="bad"] {
+    color: #f87171 /* --color-error */;
+}
+
+QLabel#ov_server_dot {
     color: #5f6475 /* --luosiding-slate-400 */;
 }
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 可搜索下拉选择框（SearchableComboBox）。
 
@@ -35,7 +34,7 @@ class SearchableComboBox(QComboBox):
         self.setCompleter(completer)
         completer.activated.connect(self._on_completer_activated)
 
-    def setItems(self, items):
+    def setItems(self, items):  # noqa: N802
         """批量填充 [(label, data), ...]，期间不触发 currentIndexChanged。"""
         self.blockSignals(True)
         self.clear()
@@ -49,11 +48,11 @@ class SearchableComboBox(QComboBox):
         """setItems 的小写别名。"""
         return self.setItems(items)
 
-    def setView(self, view):
+    def setView(self, view):  # noqa: N802
         """页面更换弹出视图：仅透传给 QComboBox；completer 使用自己的独立弹窗。"""
         super().setView(view)
 
-    def showPopup(self):
+    def showPopup(self):  # noqa: N802
         """点击下拉箭头：显示完整列表供选择（重置过滤为空），不要求先输入。
 
         说明：若把 completer 的弹窗设成 QComboBox 自己的视图，箭头点击会被
@@ -66,7 +65,7 @@ class SearchableComboBox(QComboBox):
         else:
             super().showPopup()
 
-    def addItem(self, text, userData=None):
+    def addItem(self, text, userData=None):  # noqa: N802, N803
         """保留 QComboBox 语义：可编辑模式下首个 addItem 自动选中第 0 项。"""
         was_blocked = self.signalsBlocked()
         if userData is None:

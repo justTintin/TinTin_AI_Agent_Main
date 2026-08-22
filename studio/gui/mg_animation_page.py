@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 MG 动画页（服务端渲染版，按 OpenAPI /mg/* 实现）。
 业务流：
@@ -10,38 +9,55 @@ MG 动画页（服务端渲染版，按 OpenAPI /mg/* 实现）。
 analyze-video、templates/{id} 等端点，因此本页不再提供预览与自定义模板
 保存/删除。mg_benchmark 需服务端在 MGRequest 中新增 specs/bars 字段后启用。
 """
+import contextlib
 import os
-import json
-import uuid
 from datetime import datetime
-
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFrame,
-    QComboBox, QSpinBox, QFormLayout, QColorDialog, QProgressBar,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QWidget, QMessageBox, QDoubleSpinBox, QTextEdit, QGroupBox,
-    QListWidget, QListWidgetItem, QSplitter, QScrollArea, QCheckBox,
-)
-from PySide6.QtCore import Signal, Qt, QTimer
 
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
-from gui.searchable_combo import SearchableComboBox
-from utils.base_worker import BaseWorker
-from utils.logger_utils import log
 from gui.mg_render_worker import MGServerRenderWorker
-from config.paths import MG_OUTPUT_DIR
-from utils.mg_server_client import (
-    list_templates, submit_mg_task, make_mg_request, make_mg_scene,
+from gui.searchable_combo import SearchableComboBox
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
+from utils.base_worker import BaseWorker
+from utils.json_utils import from_editor_text, parse_json_default, to_editor_text
+from utils.llm_output_utils import safe_json_parse
+from utils.mg_server_client import (
+    list_templates,
+)
+from utils.template_param_builder import build_mg_request
 
 # 内置模板兜底（id 需与服务端保持一致）
 FALLBACK_TEMPLATES = [
-    {"id": "mg_scene", "name": "通用场景", "description": "基于 scenes 列表渲染多段文字动画", "is_builtin": True},
+    {"id": "mg_scene", "name": "通用场景", "description": "基于 scenes 列表渲染多段文字动画", "is_builtin": True},  # noqa: E501
     {"id": "mg_intro", "name": "片头", "description": "大标题 + 副标题开场", "is_builtin": True},
     {"id": "mg_outro", "name": "片尾", "description": "结束语 + 引导关注", "is_builtin": True},
-    {"id": "mg_countdown", "name": "倒计时", "description": "数字倒计时，0 表示 GO", "is_builtin": True},
-    {"id": "mg_quote", "name": "金句引用", "description": "名言金句：引用 + 作者", "is_builtin": True},
+    {"id": "mg_countdown", "name": "倒计时", "description": "数字倒计时，0 表示 GO", "is_builtin": True},  # noqa: E501
+    {"id": "mg_quote", "name": "金句引用", "description": "名言金句：引用 + 作者", "is_builtin": True},  # noqa: E501
 ]
 
 RATIOS = ["9:16", "16:9", "1:1", "3:4", "4:3"]
@@ -100,20 +116,6 @@ def _default_for_builtin(key):
     return defaults.get(key, "")
 
 
-def _parse_json_default(value):
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, str):
-        try:
-            json.loads(value)
-            return value
-        except Exception:
-            return value
-    return str(value)
-
-
 def _param_meta(param):
     """统一把模板参数转成 (key, widget_type, label, default)。"""
     if isinstance(param, str):
@@ -121,13 +123,13 @@ def _param_meta(param):
         meta = BUILTIN_PARAM_META.get(key, ("line", key))
         return key, meta[0], meta[1], _default_for_builtin(key)
     if isinstance(param, dict):
-        key = param.get("name") or param.get("key")
+        key = param.get("name") or param.get("key") or ""
         t = (param.get("type") or "string").lower()
         widget_type = CUSTOM_TYPE_MAP.get(t, "line")
         label = param.get("label") or param.get("desc") or key or "参数"
         default = param.get("default")
         if widget_type == "json":
-            default = _parse_json_default(default)
+            default = parse_json_default(default)
         return key, widget_type, label, default
     return None, None, None, None
 
@@ -190,15 +192,9 @@ class MGScriptAIWorker(BaseWorker):
             "请直接返回 JSON，不要解释。"
         )
         reply = llm_chat(system=system, user=user, temperature=0.3)
-        cleaned = reply.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`").strip()
-            if cleaned.lower().startswith("json"):
-                cleaned = cleaned[4:].strip()
-        try:
-            props = json.loads(cleaned)
-        except Exception as e:
-            raise RuntimeError(f"LLM 返回不是合法 JSON: {e}\n{reply[:300]}")
+        props = safe_json_parse(reply)
+        if props is None:
+            raise RuntimeError(f"LLM 返回不是合法 JSON:\n{reply[:300]}")
         if not isinstance(props, dict):
             raise RuntimeError("LLM 返回不是 JSON 对象")
         self.finished.emit(props)
@@ -217,21 +213,22 @@ class MGAnimationPage(BasePage):
         self._current_template = None
         self._form_widgets = {}  # {key: (widget_type, widget)}
 
-    def setup(self):
+    def setup(self, show_heading=True):
         root = QVBoxLayout(self.parent_widget)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(12)
 
-        hdr = QHBoxLayout()
-        heading = QLabel(" MG 动画")
-        heading.setObjectName("heading")
-        hdr.addWidget(heading)
+        if show_heading:
+            hdr = QHBoxLayout()
+            heading = QLabel(" MG 动画")
+            heading.setObjectName("heading")
+            hdr.addWidget(heading)
 
-        sub = ElidedLabel("选择模板、填写参数，服务端渲染 MG 动画。", max_lines=1)
-        sub.setObjectName("muted_text")
-        hdr.addWidget(sub)
-        hdr.addStretch()
-        root.addLayout(hdr)
+            sub = ElidedLabel("选择模板、填写参数，服务端渲染 MG 动画。", max_lines=1)
+            sub.setObjectName("muted_text")
+            hdr.addWidget(sub)
+            hdr.addStretch()
+            root.addLayout(hdr)
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._build_left_panel())
@@ -416,7 +413,7 @@ class MGAnimationPage(BasePage):
         task_group = QGroupBox("渲染任务")
         tgl = QVBoxLayout(task_group)
         self.table_tasks = QTableWidget(0, 7)
-        self.table_tasks.setHorizontalHeaderLabels(["时间", "任务ID", "模板", "比例", "状态", "进度", "操作"])
+        self.table_tasks.setHorizontalHeaderLabels(["时间", "任务ID", "模板", "比例", "状态", "进度", "操作"])  # noqa: E501
         self.table_tasks.horizontalHeader().setStretchLastSection(True)
         self.table_tasks.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_tasks.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -443,7 +440,7 @@ class MGAnimationPage(BasePage):
 
     def _pick_color(self, edit):
         from PySide6.QtGui import QColor
-        c = QColorDialog.getColor(QColor(edit.text() or "#FFFFFF"), self.parent_widget, "选择颜色")
+        c = QColorDialog.getColor(QColor(edit.text() or "#FFFFFF"), self.parent_widget, "选择颜色")  # noqa: E501
         if c.isValid():
             edit.setText(c.name().upper())
 
@@ -459,8 +456,8 @@ class MGAnimationPage(BasePage):
         w.start()
 
     def _fill_template_list(self):
-        builtins = [t for t in self._templates if t.get("is_builtin") or t.get("builtin")]
-        customs = [t for t in self._templates if not (t.get("is_builtin") or t.get("builtin"))]
+        builtins = [t for t in self._templates if t.get("is_builtin") or t.get("builtin")]  # noqa: E501
+        customs = [t for t in self._templates if not (t.get("is_builtin") or t.get("builtin"))]  # noqa: E501
         items = []
         for t in builtins + customs:
             label = t.get("name", t.get("id", ""))
@@ -494,7 +491,7 @@ class MGAnimationPage(BasePage):
                     t["description"] = fallback.get("description")
             merged[tid] = t
         self._templates = list(merged.values())
-        current_id = self._current_template.get("id") if self._current_template else None
+        current_id = self._current_template.get("id") if self._current_template else None  # noqa: E501
         self._fill_template_list()
         if current_id:
             self._select_template_by_id(current_id)
@@ -516,7 +513,6 @@ class MGAnimationPage(BasePage):
         self._apply_template_to_editor(template)
 
     def _apply_template_to_editor(self, template):
-        builtin = bool(template.get("is_builtin") or template.get("builtin"))
         self.edit_meta_id.setText(template.get("id", ""))
         self.edit_meta_name.setText(template.get("name", ""))
         self.edit_meta_desc.setText(template.get("description", ""))
@@ -527,7 +523,7 @@ class MGAnimationPage(BasePage):
 
         # 元信息只读显示
         params = template.get("params") or []
-        self.edit_meta_params.setPlainText(json.dumps(params, ensure_ascii=False, indent=2))
+        self.edit_meta_params.setPlainText(to_editor_text(params))
 
         self._build_form(template)
         self._apply_default_common_values(template)
@@ -587,7 +583,7 @@ class MGAnimationPage(BasePage):
             w.setRange(0, 99999)
             try:
                 w.setValue(int(default or 0))
-            except Exception:
+            except (ValueError, TypeError):
                 w.setValue(0)
             return w
         if wtype == "float":
@@ -596,7 +592,7 @@ class MGAnimationPage(BasePage):
             w.setSingleStep(0.5)
             try:
                 w.setValue(float(default or 0))
-            except Exception:
+            except (ValueError, TypeError):
                 w.setValue(0.0)
             return w
         if wtype == "color":
@@ -614,7 +610,7 @@ class MGAnimationPage(BasePage):
             return w
         if wtype == "json":
             w = QTextEdit()
-            w.setPlainText(_parse_json_default(default))
+            w.setPlainText(parse_json_default(default))
             w.setMaximumHeight(120)
             return w
         # fallback
@@ -643,10 +639,8 @@ class MGAnimationPage(BasePage):
             return widget.isChecked()
         if wtype == "json":
             txt = widget.toPlainText().strip()
-            try:
-                return json.loads(txt)
-            except Exception:
-                return txt
+            parsed = from_editor_text(txt)
+            return parsed if parsed is not None else txt
         return None
 
     def _collect_scenes(self):
@@ -666,7 +660,7 @@ class MGAnimationPage(BasePage):
         if self.list_scenes.count() >= 30:
             self.show_warning("最多 30 段 scenes。")
             return
-        display = f"{scene.get('animation', 'fade')} {scene.get('duration', 2)}s | {text[:30]}"
+        display = f"{scene.get('animation', 'fade')} {scene.get('duration', 2)}s | {text[:30]}"  # noqa: E501
         item = QListWidgetItem(display)
         item.setData(Qt.UserRole, {
             "text": text,
@@ -696,32 +690,6 @@ class MGAnimationPage(BasePage):
         for item in self.list_scenes.selectedItems():
             self.list_scenes.takeItem(self.list_scenes.row(item))
 
-    def _build_request(self):
-        if not self._current_template:
-            raise ValueError("请先选择模板")
-        template = self._current_template
-        backend = _template_backend(template)
-        values = self._collect_form_values()
-        common = {
-            "ratio": self.combo_ratio.currentText(),
-            "scale": self.spin_scale.value(),
-            "color": self.edit_color.text().strip() or "#FFFFFF",
-            "bg": self.edit_bg.text().strip() or "#101418",
-            "font_size": self.spin_font_size.value(),
-            "duration": self.spin_duration.value(),
-        }
-        # 合并，模板参数优先
-        req = make_mg_request(template=backend, **common)
-        for k, v in values.items():
-            if v is not None and v != "":
-                req[k] = v
-        # scenes
-        if self.scenes_group.isVisible():
-            scenes = self._collect_scenes()
-            if scenes:
-                req["scenes"] = scenes
-        return req
-
     def _apply_param_values(self, values):
         """将 AI 生成的参数值回填到表单和 scenes。"""
         if not values:
@@ -741,29 +709,21 @@ class MGAnimationPage(BasePage):
             elif key == "bg":
                 self.edit_bg.setText(str(val))
             elif key == "fontSize":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     self.spin_font_size.setValue(int(val))
-                except Exception:
-                    pass
             elif key == "duration":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     self.spin_duration.setValue(float(val))
-                except Exception:
-                    pass
 
     def _set_widget_value(self, widget, wtype, value):
         if wtype == "line":
             widget.setText(str(value))
         elif wtype == "int":
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 widget.setValue(int(value))
-            except Exception:
-                pass
         elif wtype == "float":
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 widget.setValue(float(value))
-            except Exception:
-                pass
         elif wtype == "color":
             widget.setText(str(value))
         elif wtype == "ratio":
@@ -772,7 +732,7 @@ class MGAnimationPage(BasePage):
         elif wtype == "bool":
             widget.setChecked(bool(value))
         elif wtype == "json":
-            widget.setPlainText(_parse_json_default(value))
+            widget.setPlainText(parse_json_default(value))
 
 
     def _generate_script(self):
@@ -801,9 +761,27 @@ class MGAnimationPage(BasePage):
 
 
     def _on_render(self):
+        if not self._current_template:
+            self.show_warning("请先选择模板。")
+            return
         try:
-            request = self._build_request()
-        except Exception as e:
+            values = self._collect_form_values()
+            common = {
+                "ratio": self.combo_ratio.currentText(),
+                "scale": self.spin_scale.value(),
+                "color": self.edit_color.text().strip() or "#FFFFFF",
+                "bg": self.edit_bg.text().strip() or "#101418",
+                "font_size": self.spin_font_size.value(),
+                "duration": self.spin_duration.value(),
+            }
+            scenes = self._collect_scenes() if self.scenes_group.isVisible() else None
+            request = build_mg_request(
+                template=self._current_template,
+                values=values,
+                common=common,
+                scenes=scenes,
+            )
+        except (KeyError, TypeError, ValueError) as e:
             self.show_warning(str(e))
             return
         has_content = bool(
@@ -818,7 +796,7 @@ class MGAnimationPage(BasePage):
         self.pbar.setVisible(True)
         self.pbar.setValue(0)
         self.status.setText("正在提交 MG 渲染任务...")
-        title = f"MG-{request.get('template', 'scene')}-{datetime.now().strftime('%m%d%H%M')}"
+        title = f"MG-{request.get('template', 'scene')}-{datetime.now().strftime('%m%d%H%M')}"  # noqa: E501
         self.worker = MGServerRenderWorker(request, title=title)
         self.worker.phase.connect(self.status.setText)
         self.worker.progress.connect(self.pbar.setValue)
@@ -834,7 +812,7 @@ class MGAnimationPage(BasePage):
         self.pbar.setVisible(False)
         self.status.setText(f"完成： MG 素材已生成: {os.path.basename(local_path)}")
         self.lbl_result.setText(f"成片路径: {local_path}")
-        template_id = self._current_template.get("id", "") if self._current_template else ""
+        template_id = self._current_template.get("id", "") if self._current_template else ""  # noqa: E501
         self._add_task_record(
             task_id=self.worker.task_id if self.worker else "",
             template=template_id,
@@ -852,7 +830,7 @@ class MGAnimationPage(BasePage):
         self.status.setText(" 失败")
         self.show_error(str(e), "MG 处理失败")
 
-    def _add_task_record(self, task_id, template, ratio, status, progress, local_path=""):
+    def _add_task_record(self, task_id, template, ratio, status, progress, local_path=""):  # noqa: E501
         self._tasks.insert(0, {
             "time": datetime.now().strftime("%m-%d %H:%M"),
             "task_id": task_id,
@@ -868,12 +846,12 @@ class MGAnimationPage(BasePage):
         self.table_tasks.setRowCount(len(self._tasks))
         for i, rec in enumerate(self._tasks):
             self.table_tasks.setItem(i, 0, QTableWidgetItem(rec["time"]))
-            self.table_tasks.setItem(i, 1, QTableWidgetItem(str(rec.get("task_id", ""))))
+            self.table_tasks.setItem(i, 1, QTableWidgetItem(str(rec.get("task_id", ""))))  # noqa: E501
             self.table_tasks.setItem(i, 2, QTableWidgetItem(rec["template"]))
             self.table_tasks.setItem(i, 3, QTableWidgetItem(rec["ratio"]))
             self.table_tasks.setItem(i, 4, QTableWidgetItem(rec["status"]))
             self.table_tasks.setItem(i, 5, QTableWidgetItem(f"{rec['progress']}%"))
-            action = "打开" if rec["local_path"] and os.path.isfile(rec["local_path"]) else ""
+            action = "打开" if rec["local_path"] and os.path.isfile(rec["local_path"]) else ""  # noqa: E501
             self.table_tasks.setItem(i, 6, QTableWidgetItem(action))
         self.table_tasks.resizeColumnsToContents()
 
@@ -894,4 +872,4 @@ class MGAnimationPage(BasePage):
         self._select_template_by_id(template_id)
 
     def get_last_output(self):
-        return self._last_out if self._last_out and os.path.isfile(self._last_out) else ""
+        return self._last_out if self._last_out and os.path.isfile(self._last_out) else ""  # noqa: E501

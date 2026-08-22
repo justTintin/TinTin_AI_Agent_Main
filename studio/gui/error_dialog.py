@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一错误弹窗：可滚动显示长错误信息（不撑满屏幕）+ 一键复制日志按钮。
 
 用于替代 QMessageBox.critical 显示长错误（traceback、多失败项拼接、接口响应等）。
@@ -11,10 +10,9 @@ QMessageBox 无法滚动、无法复制、长信息会撑满屏幕，故改用�
   · 等宽字体 → traceback / 接口错误对齐易读
   · 暗色主题 → 与工程其它弹窗一致
 """
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QPlainTextEdit, QPushButton,
-                                QLabel, QHBoxLayout, QApplication)
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFont, QGuiApplication
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
 
 class ErrorDialog(QDialog):
@@ -42,7 +40,7 @@ class ErrorDialog(QDialog):
                 geo = screen.availableGeometry()
                 self.setMaximumHeight(int(geo.height() * 0.7))
                 self.setMaximumWidth(int(geo.width() * 0.9))
-        except Exception:
+        except Exception:  # Qt 屏幕几何计算可能失败
             pass
 
         self.setStyleSheet("""
@@ -110,7 +108,7 @@ class ErrorDialog(QDialog):
             clipboard = QApplication.clipboard()
             if clipboard:
                 clipboard.setText(self._message)
-        except Exception:
+        except Exception:  # Qt 剪贴板操作可能失败
             pass
         # 按钮文字短暂变为"已 已复制"，1.5 秒后恢复
         original = self.btn_copy.text()

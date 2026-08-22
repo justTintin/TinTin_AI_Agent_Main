@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """共用测试工具：路径设置、样本路径、服务端地址解析。"""
 import os
 import sys

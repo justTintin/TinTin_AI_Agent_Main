@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 定时任务服务端客户端：封装 /scheduled/tasks 接口。
 
@@ -15,8 +14,8 @@
     created_at, updated_at, completed_at
 """
 import requests
-from utils.http_client import http_get, http_post, http_delete
 
+from utils.http_client import http_delete, http_get, http_post
 from utils.logger_utils import log
 
 
@@ -24,14 +23,16 @@ def _server_url():
     """读取 compute_server_url（与 vector_search_page / compile_video_page 一致）。"""
     try:
         import json
-        from config.paths import AI_CONFIG_FILE
         import os
+
+        from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            cfg = json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            with open(AI_CONFIG_FILE, encoding="utf-8") as _f:
+                cfg = json.load(_f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return ""
 
@@ -45,7 +46,7 @@ def list_tasks(timeout=10):
             data = r.json()
             return data.get("items") or data.get("data") or []
         log.warning(f"[定时任务] list_tasks HTTP {r.status_code}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] list_tasks 失败: {e}")
     return []
 
@@ -60,14 +61,14 @@ def get_task(task_id, timeout=10):
         r = http_get(f"{_server_url()}/tasks/unified/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] unified get_task({task_id}) 失败: {e}")
 
     try:
         r = http_get(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] get_task({task_id}) 失败: {e}")
     return None
 
@@ -78,7 +79,8 @@ def create_task(task_type, title, params, schedule=None, timeout=15):
     task_type: 服务端执行器类型，一键成片用 'product_montage'（命名规范 NAMING-CONVENTIONS）
     title: 任务标题
     params: 客户端完整参数 dict（产品/素材/配音/字幕/条数/时长...，服务端按需取用）
-    schedule: 定时配置 dict（None 或不含调度字段 = 立即执行）；含 mode/time/date/weekdays/interval_hours 等 = 定时执行
+    schedule: 定时配置 dict（None 或不含调度字段 = 立即执行）；
+        含 mode/time/date/weekdays/interval_hours 等 = 定时执行
     """
     body = {
         "task_type": task_type,
@@ -94,7 +96,7 @@ def create_task(task_type, title, params, schedule=None, timeout=15):
             log.info(f"[定时任务] create_task 成功, task_id={new_id}, type={task_type}")
             return new_id
         log.warning(f"[定时任务] create_task HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] create_task 失败: {e}")
     return None
 
@@ -104,7 +106,7 @@ def delete_task(task_id, timeout=10):
     try:
         r = http_delete(f"{_server_url()}/scheduled/tasks/{task_id}", timeout=timeout)
         return r.status_code == 200
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] delete_task({task_id}) 失败: {e}")
         return False
 
@@ -123,8 +125,8 @@ def evolution_feedback(task_id, feedback, timeout=10):
                       timeout=timeout)
         if r.status_code == 200:
             return r.json().get("status") == "updated"
-        log.warning(f"[定时任务] evolution_feedback task_id={task_id} HTTP {r.status_code}: {r.text[:120]}")
-    except Exception as e:
+        log.warning(f"[定时任务] evolution_feedback task_id={task_id} HTTP {r.status_code}: {r.text[:120]}")  # noqa: E501
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] evolution_feedback task_id={task_id} 失败: {e}")
     return False
 
@@ -134,9 +136,78 @@ def evolution_stats(timeout=10):
     返回 {total_generations, strategies:[{script_style,pacing,count,avg_score,max_score}],
           good_feedback, bad_feedback}。失败返回 {}。"""
     try:
-        r = http_get(f"{_server_url()}/scheduled/tasks/evolution/stats", timeout=timeout)
+        r = http_get(f"{_server_url()}/scheduled/tasks/evolution/stats", timeout=timeout)  # noqa: E501
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[定时任务] evolution_stats 失败: {e}")
     return {}
+
+
+# ── 深度评审 ─────────────────────────────────────────────────────────────────
+def evaluate_by_task(task_id, timeout=10):
+    """GET /evaluate/by-task/{task_id} → 返回评价 dict，失败返回 None。
+
+    成片类任务完成后服务端自动投递评价。
+    """
+    try:
+        r = http_get(f"{_server_url()}/evaluate/by-task/{task_id}", timeout=timeout)
+        if r.status_code == 200:
+            ev = (r.json() or {}).get("evaluation")
+            if isinstance(ev, dict) and ev.get("total") is not None:
+                return ev
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[定时任务] evaluate_by_task({task_id}) 失败: {e}")
+    return None
+
+
+# ── 维度化反馈 ─────────────────────────────────────────────────────────────────
+def submit_dimension_feedback(task_id, dimension_scores, timeout=10):
+    """POST /evaluate/feedback/dimensions → 逐维改分提交。
+
+    task_id: 成片任务 id
+    dimension_scores: dict like {"technical": 8, "editing": 7, "aesthetic": 9}
+    返回 True 表示服务端已更新；False 表示失败。
+    """
+    try:
+        r = http_post(f"{_server_url()}/evaluate/feedback/dimensions",
+                      json={"task_id": str(task_id), "dimensions": dimension_scores},
+                      timeout=timeout)
+        if r.status_code == 200:
+            return True
+        log.warning(f"[定时任务] submit_dimension_feedback task_id={task_id} HTTP {r.status_code}: {r.text[:120]}")  # noqa: E501
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[定时任务] submit_dimension_feedback task_id={task_id} 失败: {e}")
+    return False
+
+
+# ── 结果下载 ─────────────────────────────────────────────────────────────────
+def download_result_file(url, path, timeout=180):
+    """下载服务端文件到本地。
+
+    流式写文件；若端点返回 JSON（如 {url:...}）则取其地址重试一次。
+    """
+    import os
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    r = http_get(url, timeout=timeout, stream=True)
+    try:
+        if r.status_code != 200:
+            raise RuntimeError(f"服务端返回 HTTP {r.status_code}")
+        ct = (r.headers.get("Content-Type") or "").lower()
+        if "json" in ct:
+            data = r.json()
+            inner = (data.get("url") or data.get("video_url")
+                     or data.get("output_url") or data.get("file_url") or "")
+            if not inner:
+                raise RuntimeError("结果端点返回 JSON 但无视频地址字段")
+            base = _server_url()
+            if isinstance(inner, str) and inner.startswith("/") and base:
+                inner = base + inner
+            return download_result_file(inner, path, timeout=timeout)
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    f.write(chunk)
+    finally:
+        r.close()
+    return path

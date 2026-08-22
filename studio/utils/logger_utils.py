@@ -1,12 +1,12 @@
-# -*- coding: utf-8 -*-
-import sys
-import os
+import contextlib
 import glob
-import time
+import os
 import re
-from loguru import logger
+import sys
+import time
 
 from config.paths import LOG_DIR
+from loguru import logger
 
 # 日志轮转参数（不用 loguru 内置 rotation/retention：
 # 内置轮转通过 os.rename 实现，文件被其他进程（多开客户端/残留进程）
@@ -65,10 +65,8 @@ def _cleanup_old_logs(log_dir):
         if mtime is None:
             continue
         if now - mtime > _RETENTION_DAYS * 86400:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(p)
-            except OSError:
-                pass
 
 
 def _try_rotate(message, file):
@@ -100,10 +98,8 @@ def setup_logger():
     # 确保 sys.stdout 和 sys.stderr 在遇到无法编码的字符（如 Emoji）时不会抛出 UnicodeEncodeError 崩溃
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
-            try:
+            with contextlib.suppress(AttributeError, TypeError):
                 stream.reconfigure(errors="backslashreplace")
-            except Exception:
-                pass
 
     os.makedirs(LOG_DIR, exist_ok=True)
     # 启动切分：上次会话的 app.log 归档为 app-{启动时刻}.log
@@ -114,7 +110,7 @@ def setup_logger():
     logger.remove()
 
     # 添加控制台处理器
-    logger.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
+    logger.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")  # noqa: E501
 
     # 添加文件处理器（轮转/retention 自实现，避免多进程占用时轮转失败丢日志）
     logger.add(log_file,
@@ -122,7 +118,7 @@ def setup_logger():
                encoding="utf-8",
                backtrace=True,
                diagnose=True,
-               format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")
+               format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}")  # noqa: E501
 
     return logger
 
@@ -177,7 +173,7 @@ def get_last_logs(limit=100, path=None):
         file_size = os.path.getsize(log_file)
         # Read the last 64KB block of the file
         read_size = min(file_size, 65536)
-        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+        with open(log_file, encoding="utf-8", errors="ignore") as f:
             f.seek(file_size - read_size)
             content = f.read()
             lines = content.splitlines()
@@ -185,5 +181,5 @@ def get_last_logs(limit=100, path=None):
             if read_size < file_size and lines:
                 lines = lines[1:]
             return "\n".join(lines[-limit:])
-    except Exception as e:
+    except OSError as e:
         return f"读取日志失败: {e}"

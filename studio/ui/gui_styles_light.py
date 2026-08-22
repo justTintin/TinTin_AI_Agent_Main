@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 浅色主题 QSS · 螺丝钉-电商智能体矩阵 v3.0
 设计系统：Luosiding Design Library
@@ -515,19 +514,19 @@ QPushButton:disabled {
 }
 
 QPushButton#primary_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
     border: 1px solid rgba(79, 70, 229, 0.5);
     color: #ffffff /* --primary-foreground */;
     font-weight: 600;
 }
 
 QPushButton#primary_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1 /* --luosiding-indigo-400 */, stop:1 #a78bfa /* --luosiding-violet-400 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1 /* --luosiding-indigo-400 */, stop:1 #a78bfa /* --luosiding-violet-400 */);  # noqa: E501
     color: #ffffff /* --primary-foreground */;
 }
 
 QPushButton#primary_button:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4338ca /* --luosiding-indigo-600 */, stop:1 #7c3aed /* --luosiding-violet-600 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4338ca /* --luosiding-indigo-600 */, stop:1 #7c3aed /* --luosiding-violet-600 */);  # noqa: E501
 }
 
 QPushButton#primary_button:disabled {
@@ -579,14 +578,14 @@ QPushButton#icon_only_button:disabled {
 }
 
 QPushButton#action_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);  # noqa: E501
     border: 1px solid rgba(5, 150, 105, 0.5);
     color: #ffffff /* --primary-foreground */;
     font-weight: 600;
 }
 
 QPushButton#action_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);  # noqa: E501
     color: #ffffff /* --primary-foreground */;
 }
 
@@ -619,7 +618,7 @@ QPushButton#pill_button:checked {
 }
 
 QPushButton#floating_action_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);  # noqa: E501
     border: none;
     color: #ffffff /* --primary-foreground */;
     font-weight: 700;
@@ -629,7 +628,7 @@ QPushButton#floating_action_button {
 }
 
 QPushButton#floating_action_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);  # noqa: E501
 }
 
 QPushButton#floating_action_button:disabled {
@@ -818,7 +817,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
     border-radius: 4px;
 }
 
@@ -1005,7 +1004,7 @@ QSlider::handle:horizontal:hover {
 }
 
 QSlider::sub-page:horizontal {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
     border-radius: 3px;
 }
 
@@ -1353,7 +1352,7 @@ QSplitter::handle:vertical {
 }
 
 #model_groupbox[section="llm"]::title     { color: #3b82f6 /* --color-info */; }
-#model_groupbox[section="vox"]::title     { color: #7c3aed /* --luosiding-violet-600 */; }
+#model_groupbox[section="vox"]::title     { color: #7c3aed /* --luosiding-violet-600 */; }  # noqa: E501
 #model_groupbox[section="whisper"]::title { color: #10b981 /* --color-success */; }
 #model_groupbox[section="ocr"]::title     { color: #f59e0b /* --color-warning */; }
 
@@ -1652,17 +1651,17 @@ QLabel.badge {
 }
 
 QLabel#badge.success,
-QLabel.badge.success { background-color: #10b981 /* --color-success */; color: #ffffff; }
+QLabel.badge.success { background-color: #10b981 /* --color-success */; color: #ffffff; }  # noqa: E501
 QLabel#badge.warning,
-QLabel.badge.warning { background-color: #f59e0b /* --color-warning */; color: #151722; }
+QLabel.badge.warning { background-color: #f59e0b /* --color-warning */; color: #151722; }  # noqa: E501
 QLabel#badge.error,
 QLabel.badge.error { background-color: #ef4444 /* --color-error */; color: #ffffff; }
 QLabel#badge.info,
 QLabel.badge.info { background-color: #3b82f6 /* --color-info */; color: #ffffff; }
 QLabel#badge.platform,
-QLabel.badge.platform { background-color: #f0f1f7 /* --surface-dim */; color: #151722; border-radius: 8px; }
+QLabel.badge.platform { background-color: #f0f1f7 /* --surface-dim */; color: #151722; border-radius: 8px; }  # noqa: E501
 QLabel#badge.tag,
-QLabel.badge.tag { background-color: #c3c6d2 /* --surface-container */; color: #151722; border-radius: 8px; }
+QLabel.badge.tag { background-color: #c3c6d2 /* --surface-container */; color: #151722; border-radius: 8px; }  # noqa: E501
 
 /* ═══════════════════════════════════════════════════════════════
    Tab 按钮 / Tab Button
@@ -1690,4 +1689,4 @@ QPushButton#tab_button[active="true"] {
     font-weight: 700;
     border-bottom: 2px solid #4f46e5 /* --primary */;
 }
-""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)
+""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)  # noqa: E501

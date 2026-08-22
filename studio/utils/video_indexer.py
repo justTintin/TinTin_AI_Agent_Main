@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 视频索引流水线（NAS 视频 → 哈希 → 抽帧 → 上传 RustFS → AI 标签 → Whisper 转写）。
 
@@ -7,17 +6,16 @@ VideoIndexWorker 是一个 BaseWorker，对单个视频文件走完整流水线�
 
 各阶段均可单独跳过（已有数据时）或独立触发（如仅补充转写）。
 """
+import base64
+import json
 import os
 import re
-import json
-import time
-import base64
 import tempfile
+
+from PySide6.QtCore import Signal
 
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from PySide6.QtCore import Signal
-
 
 # ─── 灰片/Log 检测 ──────────────────────────────────────────────────
 
@@ -37,7 +35,7 @@ _LOG_TRANSFERS = {
 _10BIT_PIX_FMTS = {
     "yuv420p10le", "yuv422p10le", "yuv444p10le",
     "yuv420p10be", "yuv422p10be", "yuv444p10be",
-    "gbrp10le", "gbrp10le",
+    "gbrp10le",
 }
 
 
@@ -75,7 +73,7 @@ def probe_color_metadata(video_path: str, ffprobe_path: str = "") -> dict:
         data = json.loads(r.stdout)
         streams = data.get("streams", [])
         return streams[0] if streams else {}
-    except Exception:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return {}
 
 
@@ -101,12 +99,13 @@ def probe_media_size(path):
                 w, h = im.size
             if w and h:
                 return int(w), int(h)
-        except Exception:
+        except Exception:  # PIL 外部库
             return None
         return None
 
     # ── 视频：ffprobe（复用 probe_color_metadata 的二进制解析套路）──
     import subprocess
+
     from utils.platform_utils import find_ffprobe
     ffprobe_path = find_ffprobe()
     if not ffprobe_path or not os.path.isfile(ffprobe_path):
@@ -133,7 +132,7 @@ def probe_media_size(path):
         h = int(streams[0].get("height") or 0)
         if w and h:
             return w, h
-    except Exception:
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return None
     return None
 
@@ -205,7 +204,7 @@ def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
         meta_score += 0.25
         reasons.append(f"10-bit 像素格式 {pix_fmt}（常见于 Log 素材）")
 
-    if color_space and color_space != "bt709" and color_space != "unknown":
+    if color_space and color_space != "bt709" and color_space != "unknown":  # noqa: SIM102
         if "bt2020" in color_space or "smpte" in color_space:
             meta_score += 0.15
             reasons.append(f"广色域 {color_space}")
@@ -253,7 +252,7 @@ def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
                     meta_score -= 0.1  # 高对比度，不像灰片
     except ImportError:
         pass  # cv2 不可用，跳过帧分析
-    except Exception:
+    except Exception:  # cv2 外部库
         pass
 
     meta_score = max(0.0, min(1.0, meta_score))
@@ -268,7 +267,7 @@ def detect_log_video(video_path: str, sample_frames: int = 5) -> dict:
 # ─── 抽帧（复用 video_ai_rename_page 的 cv2 方案）──────────────────────────
 
 def extract_frames_to_files(video_path: str, num_frames: int = 8,
-                             out_dir: str = None) -> list[str]:
+                             out_dir: str | None = None) -> list[str]:
     """
     从视频抽取 num_frames 帧，保存为 JPG 文件，返回文件路径列表。
     均匀采样 10%–90% 区间，首帧（0%）强制包含。
@@ -323,7 +322,7 @@ def frame_to_b64(path: str) -> str:
 
 # ─── 视觉 LLM：提取 AI 标签（语义标签列表，区别于重命名页的品牌/型号）─────────
 
-def call_vision_for_tags(frames_b64: list[str]) -> list[str]:
+def call_vision_for_tags(frames_b64: list[str], model: str = "") -> list[str]:
     """
     把多帧 base64 图片一次发给视觉模型，提取画面语义标签列表。
     返回 ["键盘", "机械轴", "俯拍", "客制化"] 格式。
@@ -339,8 +338,8 @@ def call_vision_for_tags(frames_b64: list[str]) -> list[str]:
             "只返回 JSON 数组，不要任何其他内容，例如：\n"
             "[\"键盘\", \"机械轴\", \"客制化\", \"俯拍\", \"白色\", \"特写\"]"
         )
-        content = [{"type": "text", "text": "请分析以下视频关键帧，返回语义标签数组："}]
-        for i, b64 in enumerate(frames_b64[:6]):   # 最多 6 帧，防止 token 超限
+        content: list[dict] = [{"type": "text", "text": "请分析以下视频关键帧，返回语义标签数组："}]
+        for _i, b64 in enumerate(frames_b64[:6]):   # 最多 6 帧，防止 token 超限
             content.append({
                 "type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
@@ -357,7 +356,7 @@ def call_vision_for_tags(frames_b64: list[str]) -> list[str]:
             raw = m.group(0)
         tags = json.loads(raw)
         return [str(t).strip() for t in tags if str(t).strip()]
-    except Exception as e:
+    except Exception as e:  # 外部API调用
         log.error(f"视觉 LLM 标签提取失败: {e}")
         return []
 
@@ -373,15 +372,35 @@ def transcribe_audio(video_path: str, models_dir: str,
     models_dir / model_name 参数仅为兼容调用方签名保留，本模式下不再使用。
     """
     try:
-        from utils.asr_client import read_asr_url, transcribe_remote, segments_to_plain
+        from utils.asr_client import read_asr_url, segments_to_plain, transcribe_remote
         asr_url = read_asr_url()
         if not asr_url:
             log.warning("未配置远程 ASR 服务地址，跳过转写")
             return ""
         segments = transcribe_remote(video_path, asr_url, language="zh")
         return segments_to_plain(segments)
-    except Exception as e:
+    except Exception as e:  # 外部API调用
         log.warning(f"远程 ASR 转写失败（跳过）: {e}")
+        return ""
+
+
+# ─── 视频哈希 ──────────────────────────────────────────────────────────────
+
+def compute_video_hash(video_path: str) -> str:
+    """计算视频文件的 MD5 哈希，返回 32 位十六进制字符串。失败返回空字符串。"""
+    import hashlib
+    if not video_path or not os.path.isfile(video_path):
+        return ""
+    try:
+        h = hashlib.md5()
+        with open(video_path, "rb") as f:
+            while True:
+                chunk = f.read(8192)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
         return ""
 
 
@@ -416,10 +435,10 @@ class VideoIndexWorker(BaseWorker):
 
     def do_work(self):
         from config.paths import AI_CONFIG_FILE, WHISPER_MODELS_DIR
+
         from utils.rustfs_manager import _build_client, _ensure_bucket, get_rustfs_config
 
         vpath = self.video_path
-        # mgr = VideoIndexManager()  # removed with material mgmt
 
         # ── 1. 哈希 ──────────────────────────────────────────────
         self._log(f"[1/5] 计算哈希：{os.path.basename(vpath)}")
@@ -427,12 +446,8 @@ class VideoIndexWorker(BaseWorker):
         if not video_id:
             raise RuntimeError("哈希计算失败，文件可能不可读")
 
-        if self.skip_if_indexed:
-            existing = mgr.get_by_id(video_id)
-            if existing and existing.get("frame_count", 0) > 0:
-                self._log(f"  已索引（{video_id}），跳过")
-                self.finished.emit(existing)
-                return
+        # skip_if_indexed 检查已禁用（VideoIndexManager 已移除）
+        # 如需跳过已索引视频，请在调用方自行实现缓存检查
 
         # ── 2. 读取视频元信息 ──────────────────────────────────────
         self._log("[2/5] 读取视频元信息")
@@ -448,7 +463,7 @@ class VideoIndexWorker(BaseWorker):
                 h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 resolution = f"{w}x{h}" if w and h else ""
             cap.release()
-        except Exception as e:
+        except Exception as e:  # cv2 外部库
             self._log(f"  元信息读取失败（跳过）: {e}")
 
         # ── 3. 抽帧 + 上传 RustFS ──────────────────────────────────
@@ -470,7 +485,7 @@ class VideoIndexWorker(BaseWorker):
                 client.upload_file(fp, bucket, obj_key)
                 frame_count += 1
                 self._log(f"  已 上传 {os.path.basename(fp)}")
-        except Exception as e:
+        except Exception as e:  # 外部API调用
             self._log(f"  注意： RustFS 上传失败（继续建索引）: {e}")
 
         # ── 4. AI 标签（视觉 LLM）────────────────────────────────
@@ -480,20 +495,21 @@ class VideoIndexWorker(BaseWorker):
             ai_cfg = {}
             with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 ai_cfg = json.load(f)
+            vision_model = ai_cfg.get("vision_llm_model", "") or ai_cfg.get("llm_model", "")  # noqa: E501
             if frame_paths:
                 frames_b64 = [frame_to_b64(p) for p in frame_paths[:6]]
-                ai_tags = call_vision_for_tags(frames_b64)
+                ai_tags = call_vision_for_tags(frames_b64, model=vision_model)
                 self._log(f"  标签: {ai_tags}")
             else:
                 self._log("  视觉模型未配置，跳过标签提取")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             self._log(f"  标签提取失败（跳过）: {e}")
 
         # ── 5. Whisper 转写（可选）────────────────────────────────
         audio_script = ""
         if self.run_whisper:
             self._log("[5/5] Whisper 音频转写")
-            audio_script = transcribe_audio(vpath, WHISPER_MODELS_DIR, self.whisper_model)
+            audio_script = transcribe_audio(vpath, WHISPER_MODELS_DIR, self.whisper_model)  # noqa: E501
             self._log(f"  转写完成，{len(audio_script)} 字")
         else:
             self._log("[5/5] 跳过 Whisper 转写（可后续单独触发）")
@@ -502,10 +518,11 @@ class VideoIndexWorker(BaseWorker):
         try:
             import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
+        except OSError:
             pass
 
         # ── 写入映射表 ────────────────────────────────────────────
+        # 注意：VideoIndexManager 已移除，此处直接通过 finished.emit 传递结果
         entry = {
             "video_id":        video_id,
             "nas_smb_path":    vpath,
@@ -519,31 +536,32 @@ class VideoIndexWorker(BaseWorker):
             "resolution":      resolution,
             "file_size":       os.path.getsize(vpath) if os.path.exists(vpath) else 0,
         }
-        saved = mgr.upsert(entry)
         self._log(f"完成： 索引完成 video_id={video_id}")
-        self.finished.emit(saved)
+        self.finished.emit(entry)
 
 
 class WhisperFillWorker(BaseWorker):
-    """仅对已索引但无转写的条目补充 Whisper 转写，不重新抽帧。"""
+    """仅对已索引但无转写的条目补充 Whisper 转写，不重新抽帧。
+
+    注意：VideoIndexManager 已移除，本 Worker 不再依赖数据库查询。
+    调用方需要传入已有的 entry 字典，Worker 会在其上补充 audio_script 字段。
+    """
     stage_log = Signal(str)
     finished  = Signal(dict)
 
-    def __init__(self, video_id: str, video_path: str, whisper_model: str = "small"):
+    def __init__(self, entry: dict, whisper_model: str = "small"):
         super().__init__()
-        self.video_id = video_id
-        self.video_path = video_path
+        self.entry = entry
         self.whisper_model = whisper_model
 
     def do_work(self):
         from config.paths import WHISPER_MODELS_DIR
-        # mgr = VideoIndexManager()  # removed with material mgmt
-        entry = mgr.get_by_id(self.video_id)
-        if not entry:
-            raise RuntimeError(f"未找到 video_id={self.video_id}")
-        self.stage_log.emit(f"Whisper 转写：{os.path.basename(self.video_path)}")
-        script = transcribe_audio(self.video_path, WHISPER_MODELS_DIR, self.whisper_model)
-        entry["audio_script"] = script
-        mgr.upsert(entry)
+        video_path = self.entry.get("nas_smb_path", "")
+        if not video_path:
+            raise RuntimeError("entry 中缺少 nas_smb_path 字段")
+
+        self.stage_log.emit(f"Whisper 转写：{os.path.basename(video_path)}")
+        script = transcribe_audio(video_path, WHISPER_MODELS_DIR, self.whisper_model)
+        self.entry["audio_script"] = script
         self.stage_log.emit(f"转写完成，{len(script)} 字")
-        self.finished.emit(entry)
+        self.finished.emit(self.entry)

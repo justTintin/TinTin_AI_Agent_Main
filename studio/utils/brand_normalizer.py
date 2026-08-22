@@ -3,8 +3,6 @@
 AI 识别出的品牌经此归一化后，合并大小写/中英文/拼写变体。
 """
 import json
-import os
-from typing import Optional
 
 from config.paths import BRAND_DICTIONARY_FILE
 
@@ -20,7 +18,7 @@ def _load() -> None:
     try:
         with open(_dict_path, encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         _loaded = True
         return
     brands = data.get("brands", {})
@@ -34,7 +32,7 @@ def _load() -> None:
     _loaded = True
 
 
-def canonical_name(raw_brand: Optional[str]) -> Optional[str]:
+def canonical_name(raw_brand: str | None) -> str | None:
     """Return the canonical brand name for a raw AI-recognized brand string."""
     if not raw_brand or not raw_brand.strip():
         return raw_brand

@@ -1,23 +1,28 @@
-# -*- coding: utf-8 -*-
 import os
-from datetime import datetime
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QLineEdit,
-    QFileDialog, QListWidget, QListWidgetItem, QTextEdit,
-)
-
+from config.paths import MATERIALS_DIR
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
-from config.paths import MATERIALS_DIR
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+)
 
 # 常见媒体文件后缀
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
-VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv"}
+VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv"}  # noqa: E501
 
 _THUMB_SIZE = QSize(160, 160)
 _CELL_SIZE = QSize(185, 215)  # 与素材库页保持一致
@@ -152,7 +157,7 @@ class DreaminaAssetsPage(BasePage):
                 self.log_box.append(f"完成： {msg}\n下载目录：{d}")
             else:
                 self.show_warning(msg, "无法打开素材浏览器")
-        except Exception as e:
+        except Exception as e:  # 外部API调用（素材浏览器进程启动）
             self.show_error(f"打开素材浏览器失败：\n{e}")
 
     def _scan_local_files(self):
@@ -181,7 +186,7 @@ class DreaminaAssetsPage(BasePage):
         if ext in IMAGE_EXTS:
             pm = QPixmap(fp)
             if not pm.isNull():
-                return QPixmap(pm.scaled(_THUMB_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                return QPixmap(pm.scaled(_THUMB_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
         # 视频或加载失败时返回一个纯色占位
         pm = QPixmap(_THUMB_SIZE)
         pm.fill(Qt.transparent)

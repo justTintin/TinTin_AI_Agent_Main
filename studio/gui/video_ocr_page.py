@@ -1,76 +1,85 @@
-# -*- coding: utf-8 -*-
 import os
-import sys
-import shutil
 import subprocess
-import traceback
-import time
-from PIL import Image, ImageDraw
 
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy, QListWidget)
-from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
-from utils.base_worker import BaseWorker
-from PySide6.QtGui import QImage, QPixmap, QIcon
+from config.paths import OUTPUTS_DIR
+from gui.elided_label import ElidedLabel
+from PIL import Image, ImageDraw
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.file_dialog_utils import pick_file
+from utils.gui_icons import mdi_button
 from utils.logger_utils import log
-from config.paths import TMP_DIR, VSR_V14_DIR, OUTPUTS_DIR
 from utils.ocr_client import check_server_ocr
 from utils.ocr_workers import VideoOcrWorker
+from utils.os_utils import open_in_explorer
 
 
-from utils.file_dialog_utils import pick_file
-from gui.elided_label import ElidedLabel
-from utils.gui_icons import mdi_button
 class InteractivePreviewLabelOCR(QLabel):
-    boundsChanged = Signal(int, int, int, int) # x, y, w, h
+    boundsChanged = Signal(int, int, int, int)  # noqa: N815 # x, y, w, h
     resized = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")
+        self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")  # noqa: E501
         self.setMinimumSize(400, 300)
         self.setMouseTracking(True)
-        
+
         self.box = [0, 0, 0, 0] # [x, y, w, h]
-        
+
         self.frame_w = 0
         self.frame_h = 0
         self.target_w = 0
         self.target_h = 0
         self.px_offset_x = 0
         self.px_offset_y = 0
-        
+
         self.drag_mode = None
         self.drag_start_pos = None
-        self.drag_start_rect = None
+        self.drag_start_rect: list[int] | None = None
 
-    def sizeHint(self):
+    def sizeHint(self):  # noqa: N802
         return QSize(400, 300)
 
     def set_box(self, box):
         self.box = box
 
     def get_handle_under_mouse(self, pos):
-        if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0 or not self.box:
+        if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0 or not self.box:  # noqa: E501
             return None
-            
+
         mx, my = pos.x(), pos.y()
         w_ratio = self.target_w / self.frame_w
         h_ratio = self.target_h / self.frame_h
         threshold = 10 # px threshold for grab handle
-        
+
         x, y, w, h = self.box
         rx0 = self.px_offset_x + x * w_ratio
         ry0 = self.px_offset_y + y * h_ratio
         rx1 = self.px_offset_x + (x + w) * w_ratio
         ry1 = self.px_offset_y + (y + h) * h_ratio
-        
+
         near_left = abs(mx - rx0) < threshold
         near_right = abs(mx - rx1) < threshold
         near_top = abs(my - ry0) < threshold
         near_bottom = abs(my - ry1) < threshold
-        
+
         if near_left and near_top:
             return 'top-left'
         if near_right and near_top:
@@ -79,7 +88,7 @@ class InteractivePreviewLabelOCR(QLabel):
             return 'bottom-left'
         if near_right and near_bottom:
             return 'bottom-right'
-            
+
         if near_left and ry0 <= my <= ry1:
             return 'left'
         if near_right and ry0 <= my <= ry1:
@@ -88,13 +97,13 @@ class InteractivePreviewLabelOCR(QLabel):
             return 'top'
         if near_bottom and rx0 <= mx <= rx1:
             return 'bottom'
-        
+
         if rx0 < mx < rx1 and ry0 < my < ry1:
             return 'move'
-            
+
         return None
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             handle = self.get_handle_under_mouse(event.pos())
             if handle is not None:
@@ -102,19 +111,21 @@ class InteractivePreviewLabelOCR(QLabel):
                 self.drag_start_pos = event.pos()
                 self.drag_start_rect = list(self.box)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event):  # noqa: N802
         if self.drag_mode is not None and self.drag_start_pos is not None:
             delta_x_widget = event.pos().x() - self.drag_start_pos.x()
             delta_y_widget = event.pos().y() - self.drag_start_pos.y()
-            
+
             w_ratio = self.frame_w / self.target_w
             h_ratio = self.frame_h / self.target_h
-            
+
             delta_x = int(delta_x_widget * w_ratio)
             delta_y = int(delta_y_widget * h_ratio)
-            
+
+            if self.drag_start_rect is None:
+                return
             sx, sy, sw, sh = self.drag_start_rect
-            
+
             if self.drag_mode == 'move':
                 nx = sx + delta_x
                 ny = sy + delta_y
@@ -126,9 +137,9 @@ class InteractivePreviewLabelOCR(QLabel):
                 y0 = sy
                 x1 = sx + sw
                 y1 = sy + sh
-                
+
                 min_size = 10
-                
+
                 if 'left' in self.drag_mode:
                     x0 = max(0, min(x0 + delta_x, x1 - min_size))
                 if 'right' in self.drag_mode:
@@ -137,9 +148,9 @@ class InteractivePreviewLabelOCR(QLabel):
                     y0 = max(0, min(y0 + delta_y, y1 - min_size))
                 if 'bottom' in self.drag_mode:
                     y1 = min(self.frame_h, max(y1 + delta_y, y0 + min_size))
-                    
+
                 self.box = [x0, y0, x1 - x0, y1 - y0]
-                
+
             self.boundsChanged.emit(self.box[0], self.box[1], self.box[2], self.box[3])
         else:
             handle = self.get_handle_under_mouse(event.pos())
@@ -156,18 +167,20 @@ class InteractivePreviewLabelOCR(QLabel):
             else:
                 self.setCursor(Qt.ArrowCursor)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             self.drag_mode = None
             self.drag_start_pos = None
             self.drag_start_rect = None
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self.resized.emit()
 
 
-from gui.base_page import BasePage
+import contextlib  # noqa: E402
+
+from gui.base_page import BasePage  # noqa: E402
 
 
 class VideoOcrPage(BasePage):
@@ -181,7 +194,6 @@ class VideoOcrPage(BasePage):
         self.box = [0, 0, 0, 0] # [x, y, w, h]
 
     def setup(self):
-        tmp_dir = TMP_DIR
         # Main Page layout
         main_layout = QVBoxLayout(self.parent_widget)
         main_layout.setContentsMargins(20, 20, 20, 20)
@@ -193,7 +205,7 @@ class VideoOcrPage(BasePage):
         main_layout.addWidget(heading, 0)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
+        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")  # noqa: E501
         main_layout.addWidget(splitter, 1)
 
         # ─── Left Panel (Video Picker & Preview) ───
@@ -243,7 +255,7 @@ class VideoOcrPage(BasePage):
         # Video progress slider for scrubbing
         seek_row = QHBoxLayout()
         seek_row.setSpacing(8)
-        
+
         button_style = """
             QPushButton {
                 background-color: #1a1a24;
@@ -270,7 +282,7 @@ class VideoOcrPage(BasePage):
         self.btn_prev_frame.setStyleSheet(button_style)
         self.btn_prev_frame.clicked.connect(self._step_prev_frame)
         seek_row.addWidget(self.btn_prev_frame)
-        
+
         self.seek_slider = QSlider(Qt.Horizontal)
         self.seek_slider.setRange(0, 1000)
         self.seek_slider.setValue(0)
@@ -305,13 +317,13 @@ class VideoOcrPage(BasePage):
             }
         """)
         seek_row.addWidget(self.seek_slider)
-        
+
         self.btn_next_frame = QPushButton("播放")
         self.btn_next_frame.setFixedWidth(30)
         self.btn_next_frame.setStyleSheet(button_style)
         self.btn_next_frame.clicked.connect(self._step_next_frame)
         seek_row.addWidget(self.btn_next_frame)
-        
+
         self.lbl_seek_time = QLabel("00:00 / 00:00")
         self.lbl_seek_time.setFixedWidth(90)
         self.lbl_seek_time.setAlignment(Qt.AlignCenter)
@@ -349,7 +361,7 @@ class VideoOcrPage(BasePage):
 
         # Title
         c_title = QLabel(" OCR 模板识别选区及设置")
-        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")
+        c_title.setStyleSheet("font-weight: bold; font-size: 14px; padding-left: 20px; color: #3b82f6;")  # noqa: E501
         controls_layout.addWidget(c_title)
 
         # Bounding Box Sliders Group
@@ -373,22 +385,22 @@ class VideoOcrPage(BasePage):
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
-        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
+        box_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))  # noqa: E501
 
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
-        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域宽 W:", self.w_slider, self.w_val_lbl))  # noqa: E501
 
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
-        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
+        box_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))  # noqa: E501
 
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
-        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))
+        box_layout.addLayout(create_slider_row("识别区域高 H:", self.h_slider, self.h_val_lbl))  # noqa: E501
 
         controls_layout.addWidget(box_group)
 
@@ -455,7 +467,7 @@ class VideoOcrPage(BasePage):
                 height: 16px;
             }
             QProgressBar::chunk {
-                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);  # noqa: E501
                 border-radius: 5px;
             }
         """)
@@ -502,7 +514,7 @@ class VideoOcrPage(BasePage):
             " **大模型与本地 OCR 提示**:\n"
             "PaddleOCR 使用本地内置的深度学习模型进行文本提取，完全免费且离线运行，**不需要下载大语言模型 (LLM)**。 "
             "权重会自动从百度官方国内镜像下载。\n"
-            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「 大模型配置」** 页面来接入国内主流大模型 API 服务。",
+            "如果您需要更高级的提取功能（如将识别数据翻译、分类或交给大模型分析），请使用主菜单的 **「 大模型配置」** 页面来接入国内主流大模型 API 服务。",  # noqa: E501
             max_lines=2,
         )
         help_lbl.setStyleSheet("font-size: 11px; line-height: 16px; color: #a1a1aa;")
@@ -542,12 +554,12 @@ class VideoOcrPage(BasePage):
             video_stream = next(s for s in container.streams if s.type == 'video')
             self.frame_width = video_stream.width
             self.frame_height = video_stream.height
-            
+
             # Read first frame
             for frame in container.decode(video_stream):
                 self.original_frame = frame.to_image()
                 break
-            
+
             total_sec = container.duration / 1000000.0 if container.duration else 0.0
             self.lbl_seek_time.setText(f"00:00 / {self._format_time(total_sec)}")
             container.close()
@@ -586,13 +598,13 @@ class VideoOcrPage(BasePage):
 
             self._sync_sliders_to_box()
             self.update_preview()
-            
+
             # Set default output path
             vd_name = os.path.splitext(os.path.basename(path))[0]
             default_out = os.path.join(OUTPUTS_DIR, f"{vd_name}_ocr_result.csv")
             self.output_path_input.setText(default_out)
 
-        except Exception as e:
+        except Exception as e:  # Qt/cv2 外部库
             log.error(f"加载视频预览失败: {e}")
             self.original_frame = None
             self.preview_label.setText(f"视频预览加载失败: {e}")
@@ -627,7 +639,7 @@ class VideoOcrPage(BasePage):
     def update_preview(self):
         if self.worker and self.worker.isRunning():
             return
-            
+
         x = self.x_slider.value()
         w = self.w_slider.value()
         y = self.y_slider.value()
@@ -659,16 +671,18 @@ class VideoOcrPage(BasePage):
             ratio = min(display_w / w_img, display_h / h_img)
             target_w = int(w_img * ratio)
             target_h = int(h_img * ratio)
-            if target_w < 1: target_w = 1
-            if target_h < 1: target_h = 1
+            if target_w < 1:
+                target_w = 1
+            if target_h < 1:
+                target_h = 1
 
             self.preview_label.target_w = target_w
             self.preview_label.target_h = target_h
             self.preview_label.px_offset_x = (display_w - target_w) // 2
             self.preview_label.px_offset_y = (display_h - target_h) // 2
 
-            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            
+            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)  # noqa: E501
+
             # Draw green bounding box on image
             draw = ImageDraw.Draw(resized_img)
             rx0 = int(x * target_w / w_img)
@@ -679,7 +693,7 @@ class VideoOcrPage(BasePage):
 
             rgb_img = resized_img.convert("RGB")
             data = rgb_img.tobytes("raw", "RGB")
-            qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)
+            qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)  # noqa: N806
             self.preview_label.setPixmap(QPixmap.fromImage(qImg))
 
     def _on_label_bounds_changed(self, x, y, w, h):
@@ -709,7 +723,7 @@ class VideoOcrPage(BasePage):
         # Get settings
         sample_interval = self.rate_combo.currentData()
         filter_mode = self.filter_combo.currentData()
-        
+
         # Bounding box is in ymin, ymax, xmin, xmax
         x, y, w, h = self.box
         ymin = y
@@ -770,7 +784,7 @@ class VideoOcrPage(BasePage):
         self.w_slider.setEnabled(True)
         self.y_slider.setEnabled(True)
         self.h_slider.setEnabled(True)
-        
+
         # Restore seek controls
         video_path = self.video_path_input.text().strip()
         self.seek_slider.setEnabled(bool(video_path))
@@ -780,33 +794,31 @@ class VideoOcrPage(BasePage):
         if success:
             self.status_lbl.setText("状态: 扫描识别已完成！")
             QMessageBox.information(
-                self.parent_widget, 
-                "任务成功", 
+                self.parent_widget,
+                "任务成功",
                 f"视频 OCR 框选扫描已全部完成！\n\n结果已输出至电子表格：\n{result}"
             )
             # Try to select the output file in explorer
-            try:
-                subprocess.Popen(f'explorer /select,"{os.path.normpath(result)}"')
-            except Exception:
-                pass
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                open_in_explorer(result, select=True)
         else:
             if self.worker and self.worker.is_aborted:
                 self.status_lbl.setText("状态: 已被用户终止。")
                 return
 
-            self.status_lbl.setText(f"状态: OCR 识别中断或出错。")
+            self.status_lbl.setText("状态: OCR 识别中断或出错。")
             QMessageBox.critical(self.parent_widget, "扫描失败", f"OCR 扫描失败：\n{result}")
 
     def _seek_to_ratio(self, ratio):
         path = self.video_path_input.text().strip()
         if not path or not os.path.exists(path):
             return
-            
+
         try:
             import av
             container = av.open(path)
             video_stream = next(s for s in container.streams if s.type == 'video')
-            
+
             duration = video_stream.duration
             if duration is None or duration <= 0:
                 duration_sec = container.duration / 1000000.0
@@ -814,24 +826,24 @@ class VideoOcrPage(BasePage):
                 target_ts = int(target_sec / float(video_stream.time_base))
             else:
                 target_ts = int(ratio * duration)
-                
+
             container.seek(target_ts, stream=video_stream)
-            
+
             frame_found = False
             for frame in container.decode(video_stream):
                 self.original_frame = frame.to_image()
                 frame_found = True
                 break
-                
+
             total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
-            
+
             if frame_found:
                 self.update_preview()
                 curr_sec = ratio * total_sec
-                self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
-                
-        except Exception as e:
+                self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")  # noqa: E501
+
+        except Exception as e:  # PyAV 外部库
             log.error(f"Seek failed: {e}")
 
     def _format_time(self, seconds):
@@ -862,7 +874,7 @@ class VideoOcrPage(BasePage):
                 new_ratio = max(0.0, (val / 1000.0) - ratio_step)
                 self.seek_slider.setValue(int(new_ratio * 1000))
                 self._seek_to_ratio(new_ratio)
-        except Exception:
+        except Exception:  # Qt 外部库
             pass
 
     def _step_next_frame(self):
@@ -880,5 +892,5 @@ class VideoOcrPage(BasePage):
                 new_ratio = min(1.0, (val / 1000.0) + ratio_step)
                 self.seek_slider.setValue(int(new_ratio * 1000))
                 self._seek_to_ratio(new_ratio)
-        except Exception:
+        except Exception:  # Qt 外部库
             pass

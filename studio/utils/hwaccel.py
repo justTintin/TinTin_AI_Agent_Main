@@ -1,5 +1,5 @@
-import subprocess
 import logging
+import subprocess
 from functools import lru_cache
 
 from utils.platform_utils import find_ffmpeg, run_subprocess
@@ -60,7 +60,7 @@ def _test_encoder(ffmpeg_path: str, encoder: str) -> bool:
             capture_output=True, text=True, timeout=15,
         )
         return r.returncode == 0
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
@@ -88,7 +88,7 @@ def _detect():
                 log.info("hwaccel: 检测到 %s 并验证通过，使用 %s", name, name)
                 return result
         log.info("hwaccel: 未检测到可用 GPU 编码器，回退 libx264")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         log.warning("hwaccel 检测失败，回退 libx264: %s", e)
     return result
 
@@ -97,7 +97,7 @@ def get_encoder() -> str:
     return _detect()["encoder"]
 
 
-def get_video_encode_args(crf: int = 23, preset: str = "fast", force_software: bool = False) -> list[str]:
+def get_video_encode_args(crf: int = 23, preset: str = "fast", force_software: bool = False) -> list[str]:  # noqa: E501
     if force_software:
         enc = "libx264"
     else:

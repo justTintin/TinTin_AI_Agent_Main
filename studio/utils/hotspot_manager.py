@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 热点趋势库：把素材浏览器每天采集的各平台热榜快照（hotspots_sync.json）
 合并成**持久 + 带历史**的趋势库（data/hotspots.json），并按 科技/数码/AI 分类。
@@ -6,12 +5,13 @@
 趋势：同一话题（平台+标题）每天上榜就往 history 追加 {date,rank,hot}，
 据此得到 上榜天数 / 最佳排名 / 最新排名 / 首末出现日期。
 """
+import json
 import os
 import re
-import json
 import time
 
 from config.paths import HOTSPOTS_FILE, HOTSPOTS_MATERIALS_DIR
+
 from utils.logger_utils import log
 
 # 科技/数码/AI 关键词（命中即归类；可多类）
@@ -49,9 +49,9 @@ class HotspotManager:
     def load(self):
         if os.path.exists(self.file_path):
             try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
+                with open(self.file_path, encoding="utf-8") as f:
                     self.topics = json.load(f)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 log.error(f"加载热点库失败: {e}")
                 self.topics = []
         else:
@@ -71,13 +71,13 @@ class HotspotManager:
         合并采集清单到趋势库（按 平台+标题 去重，按日期追加 history）。
         返回 (new_topics, updated_topics, snapshots, msg)。幂等：同(话题,日期)不重复记。
         """
-        path = manifest_path or os.path.join(HOTSPOTS_MATERIALS_DIR, "hotspots_sync.json")
+        path = manifest_path or os.path.join(HOTSPOTS_MATERIALS_DIR, "hotspots_sync.json")  # noqa: E501
         if not os.path.exists(path):
             return 0, 0, 0, f"未找到采集清单：{path}\n请先在素材浏览器点「 抓取今日热点」。"
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 snaps = json.load(f)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             return 0, 0, 0, f"读取采集清单失败：{e}"
         if not isinstance(snaps, list):
             return 0, 0, 0, "采集清单格式异常（应为数组）。"
@@ -122,10 +122,10 @@ class HotspotManager:
                     topic["categories"] = classify(title)
                 upd_n += 1
             # 维护派生字段
-            ranks = [h["rank"] for h in topic["history"] if isinstance(h.get("rank"), int)]
-            topic["days_on_board"] = len({h["date"] for h in topic["history"] if h.get("date")})
+            ranks = [h["rank"] for h in topic["history"] if isinstance(h.get("rank"), int)]  # noqa: E501
+            topic["days_on_board"] = len({h["date"] for h in topic["history"] if h.get("date")})  # noqa: E501
             topic["best_rank"] = min(ranks) if ranks else None
-            topic["latest_rank"] = topic["history"][-1].get("rank") if topic["history"] else None
+            topic["latest_rank"] = topic["history"][-1].get("rank") if topic["history"] else None  # noqa: E501
         self.save()
         msg = f"导入完成：新增话题 {new_n}，更新 {upd_n}（{len(dates)} 个日期快照）。"
         return new_n, upd_n, len(dates), msg
@@ -147,5 +147,5 @@ class HotspotManager:
             out.append(t)
         # 排序：上榜天数降序、最新排名升序
         out.sort(key=lambda t: (-(t.get("days_on_board") or 0),
-                                t.get("latest_rank") if isinstance(t.get("latest_rank"), int) else 9999))
+                                t.get("latest_rank") if isinstance(t.get("latest_rank"), int) else 9999))  # noqa: E501
         return out

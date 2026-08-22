@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 MG 动画服务端渲染 Worker（按 OpenAPI /mg/generate + /mg/status + /mg/result 实现）。
 """
@@ -6,11 +5,11 @@ import os
 import time
 from datetime import datetime
 
-from PySide6.QtCore import Signal
-
-from utils.base_worker import BaseWorker
-from utils.mg_server_client import submit_mg_task, get_mg_status, download_mg_result, _ensure_url
 from config.paths import MG_OUTPUT_DIR
+from PySide6.QtCore import Signal
+from utils.base_worker import BaseWorker
+from utils.http_download_utils import download_file
+from utils.mg_server_client import _ensure_url, download_mg_result, get_mg_status, submit_mg_task
 
 
 class MGServerRenderWorker(BaseWorker):
@@ -49,28 +48,21 @@ class MGServerRenderWorker(BaseWorker):
                     or data.get("url")
                     or data.get("video_url")
                 )
-                filename = f"mg_{self.request.get('template', 'scene')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+                filename = f"mg_{self.request.get('template', 'scene')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"  # noqa: E501
                 local_path = os.path.join(MG_OUTPUT_DIR, filename)
                 self.phase.emit("正在下载 MG 成片…")
                 try:
                     if output_url:
-                        import requests
                         full = _ensure_url(output_url)
-                        r = requests.get(full, stream=True, timeout=120)
-                        r.raise_for_status()
-                        if r.status_code != 200:
-                            raise RuntimeError(f"下载失败 HTTP {r.status_code}: {r.text[:200]}")
                         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                        with open(local_path, "wb") as f:
-                            for chunk in r.iter_content(chunk_size=8192):
-                                if chunk:
-                                    f.write(chunk)
+                        if not download_file(full, local_path, timeout=120, stream=True):  # noqa: E501
+                            raise RuntimeError(f"下载失败 HTTP: {full}")
                     else:
                         download_mg_result(self.task_id, local_path)
-                except Exception as e:
-                    raise RuntimeError(f"下载 MG 成片失败：{e}")
+                except Exception as e:  # 外部API调用（MG 成片下载涉及 HTTP + 文件 I/O）
+                    raise RuntimeError(f"下载 MG 成片失败：{e}") from e
                 self.finished.emit(local_path)
                 return
             if status in ("failed", "error"):
-                msg = data.get("error_msg") or data.get("error") or data.get("message") or "未知错误"
+                msg = data.get("error_msg") or data.get("error") or data.get("message") or "未知错误"  # noqa: E501
                 raise RuntimeError(f"MG 渲染失败：{msg}")

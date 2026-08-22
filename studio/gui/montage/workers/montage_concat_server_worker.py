@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 服务端镜头合成 Worker。
 
 按 /guide 2.10 调用 POST /montage/concat（multipart/form-data）：
@@ -8,17 +7,16 @@
 
 提交后通过 GET /scheduled/tasks/{id} 轮询，下载成品到本地。
 """
+import json
 import os
 import time
-import json
 from contextlib import ExitStack
-import requests
-from utils.http_client import http_get, http_post
-from PySide6.QtCore import Signal
 
+from PySide6.QtCore import Signal
+from utils import scheduled_task_client as stc  # type: ignore[attr-defined]
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-from utils import scheduled_task_client as stc
+from utils.montage_client import concat, download_result
 
 
 class MontageConcatServerWorker(BaseWorker):
@@ -42,7 +40,7 @@ class MontageConcatServerWorker(BaseWorker):
     # 上传最低网速估算 500KB/s
     _UPLOAD_SPEED_BPS = 500 * 1024
 
-    def __init__(self, local_output_path, clips, options=None, lut_path=None, task_id=None,
+    def __init__(self, local_output_path, clips, options=None, lut_path=None, task_id=None,  # noqa: E501
                  source_clips=None, clip_urls=None):
         super().__init__()
         self.local_output_path = local_output_path
@@ -67,7 +65,6 @@ class MontageConcatServerWorker(BaseWorker):
         server = stc._server_url()
         if not server:
             raise RuntimeError("未配置 compute_server_url")
-        url = f"{server}/montage/concat"
 
         total_size = 0
         for path in self.clips:
@@ -89,7 +86,7 @@ class MontageConcatServerWorker(BaseWorker):
         with ExitStack() as stack:
             files = []
             for i, path in enumerate(self.clips):
-                self.stage.emit(f"正在上传镜头 {i + 1}/{len(self.clips)}: {os.path.basename(path)}")
+                self.stage.emit(f"正在上传镜头 {i + 1}/{len(self.clips)}: {os.path.basename(path)}")  # noqa: E501
                 f = stack.enter_context(open(path, "rb"))
                 files.append(("files", (os.path.basename(path), f)))
             if self.lut_path:
@@ -99,15 +96,9 @@ class MontageConcatServerWorker(BaseWorker):
             self.stage.emit("正在提交 montage_concat 合成任务...")
             timeout = max(60, int(total_size / self._UPLOAD_SPEED_BPS) + 30)
             try:
-                r = http_post(url, data=data, files=files, timeout=timeout)
-                r.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                raise RuntimeError(f"提交 montage_concat 失败: {e}")
-
-        try:
-            resp = r.json()
-        except Exception as e:
-            raise RuntimeError(f"montage_concat 返回解析失败: {e}")
+                resp = concat(server, files, data, timeout)
+            except Exception as e:
+                raise RuntimeError(f"提交 montage_concat 失败: {e}") from e
 
         task_id = resp.get("id")
         if not task_id:
@@ -132,12 +123,12 @@ class MontageConcatServerWorker(BaseWorker):
 
             if status == "completed":
                 result = task.get("result") or {}
-                video_url = result.get("video_url") or result.get("url") or result.get("output_url")
+                video_url = result.get("video_url") or result.get("url") or result.get("output_url")  # noqa: E501
                 if not video_url:
                     raise RuntimeError("服务端合成完成，但结果中未返回 video_url/url/output_url")
                 self._download(video_url)
                 self._write_sources_file()
-                self.stage.emit(f"完成： 服务端合成完成：{os.path.basename(self.local_output_path)}")
+                self.stage.emit(f"完成： 服务端合成完成：{os.path.basename(self.local_output_path)}")  # noqa: E501
                 self.progress.emit(100)
                 self.concat_finished.emit(self.local_output_path)
                 return
@@ -161,15 +152,8 @@ class MontageConcatServerWorker(BaseWorker):
             full_url = stc._server_url() + video_url
 
         self.stage.emit("正在下载成片...")
-        r = http_get(full_url, stream=True, timeout=self._DOWNLOAD_TIMEOUT)
-        r.raise_for_status()
-
-        with open(self.local_output_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-
-        if not os.path.isfile(self.local_output_path) or os.path.getsize(self.local_output_path) < 1024:
+        saved = download_result(full_url, self.local_output_path, self._DOWNLOAD_TIMEOUT)  # noqa: E501
+        if not saved or not os.path.isfile(self.local_output_path) or os.path.getsize(self.local_output_path) < 1024:  # noqa: E501
             raise RuntimeError("下载后的成片文件无效或过小")
 
     def _write_sources_file(self):

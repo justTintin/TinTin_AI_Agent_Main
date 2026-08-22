@@ -1,15 +1,15 @@
-# -*- coding: utf-8 -*-
 """
 视频评价预测数据层：保存每次「视频评价预测」的结果，以及发布后回填的
 真实播放量 / 平台评价；这些「预测 vs 实际」对照会反哺下次预测（在 prompt 里做校准）。
 
 存储：data/video_predictions.json（Manager + JSON 模式）。
 """
-import os
 import json
+import os
 import time
 
 from config.paths import VIDEO_PREDICTIONS_FILE
+
 from utils.logger_utils import log
 
 # 投放平台（与素材浏览器/热点一致）
@@ -31,7 +31,7 @@ class VideoPredictionManager:
     def load(self):
         if os.path.exists(self.file_path):
             try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
+                with open(self.file_path, encoding="utf-8") as f:
                     self.items = json.load(f)
             except Exception as e:
                 log.error(f"加载视频预测库失败: {e}")

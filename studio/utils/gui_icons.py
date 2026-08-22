@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
 """图标名到文字标签的映射（qtawesome 可用时使用 MDI 图标，否则回退为文字标签）。
 
 用法：
     btn = mdi_button("播放", "play")
     icon = mdi_icon("save")
 """
-from PySide6.QtWidgets import QPushButton, QLabel, QApplication, QStyle
-from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QPushButton, QStyle
 
 # ── Qt 标准图标映射（不依赖 qtawesome，保证所有平台都有图标）──
 _STD_ICON_MAP = {
@@ -170,7 +169,7 @@ def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
     if _HAS_QTA:
         # 部分别名：历史代码用了非标准 mdi 图标名，这里统一映射到有效名，
         # 避免逐个改各页面调用点。映射不命中则原样加 mdi. 前缀。
-        _ALIAS = {
+        _ALIAS = {  # noqa: N806
             "audio": "volume-high", "backward": "skip-backward",
             "balance-scale": "scale", "celebration": "party-popper",
             "cut": "content-cut", "edit": "pencil", "gear": "cog",
@@ -183,7 +182,7 @@ def mdi_icon(name: str, color: str = "#8b90a3") -> QIcon:
         mdi_name = "mdi." + normalized
         try:
             return qta.icon(mdi_name, color=color)
-        except Exception:
+        except Exception:  # qtawesome 外部API调用：图标名在当前字体版本不存在
             # 图标名在当前字体版本不存在（如 magic 已被新版 MDI 移除）：
             # 回退空图标，避免异常穿透导致页面构建崩溃（懒加载失败后页面永久空白）
             pass
@@ -214,7 +213,7 @@ def mdi_button(text: str, icon_name: str = "", parent=None,
     return QPushButton(text, parent)
 
 
-def icon_button(name: str, tooltip: str = "", parent=None, size: int = 20) -> QPushButton:
+def icon_button(name: str, tooltip: str = "", parent=None, size: int = 20) -> QPushButton:  # noqa: E501
     """创建纯图标按钮（无文字）。优先 Qt 标准图标，其次 MDI，最后回退文字标签。
 
     用于播放/暂停/停止/翻页等空间受限的控件，避免中文标签被截断。

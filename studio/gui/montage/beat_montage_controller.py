@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """卡点成片控制器（一键成片 → 卡点成片 tab）。
 
 自包含业务逻辑：选音乐 + 多选镜头素材 → 检测卡点（/audio/beatmap 返回片段用于波形显示）
@@ -8,20 +7,20 @@
 本类充当 StepBeatView 的 "main_page" 角色：StepBeatView 会把界面控件挂载到本类实例上，
 并把按钮/卡片信号连接到本类的 _beat_* 方法（与旧版挂载到 VideoMontagePage 的模式一致）。
 """
+import contextlib
 import os
 import shutil
 import tempfile
 
-from PySide6.QtCore import QObject
-from PySide6.QtWidgets import QFileDialog, QMessageBox
-
-from utils.logger_utils import log
-from gui.montage.workers.split_workers import BeatDetectWorker, BeatVideoGenWorker
 from gui.montage.dialogs import ArrangeMaterialsDialog
-from utils.video_indexer import probe_media_size, classify_aspect
-
-
+from gui.montage.workers.split_workers import BeatDetectWorker, BeatVideoGenWorker
+from PySide6.QtCore import QObject
+from PySide6.QtWidgets import QMessageBox
 from utils.file_dialog_utils import pick_directory, pick_file, pick_files
+from utils.logger_utils import log
+from utils.video_indexer import classify_aspect, probe_media_size
+
+
 class BeatMontageController(QObject):
     """卡点成片业务控制器（自包含，不依赖智能混剪页面）。"""
 
@@ -61,16 +60,17 @@ class BeatMontageController(QObject):
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             pass
         try:
-            from config.paths import AI_CONFIG_FILE
             import json as _json
+
+            from config.paths import AI_CONFIG_FILE
             if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                     cfg = _json.load(f)
                 return (cfg.get("compute_server_url") or "").strip().rstrip("/")
-        except Exception:
+        except Exception:  # 文件 I/O + JSON 解析，涉及多类异常
             pass
         return ""
 
@@ -86,7 +86,7 @@ class BeatMontageController(QObject):
         if not view:
             return None
         for c in getattr(view, "segment_cards", []):
-            if not getattr(c, "is_full_track", False) and getattr(c, "index", -1) == index:
+            if not getattr(c, "is_full_track", False) and getattr(c, "index", -1) == index:  # noqa: E501
                 return c
         return None
 
@@ -117,7 +117,7 @@ class BeatMontageController(QObject):
             "图片文件 (*.jpg *.jpeg *.png *.bmp *.webp);;所有文件 (*.*)")
         if not file_paths:
             return
-        existing = set(os.path.abspath(p) for p in self._beat_clips_list)
+        existing = {os.path.abspath(p) for p in self._beat_clips_list}
         added = 0
         for p in file_paths:
             ap = os.path.abspath(p)
@@ -273,7 +273,7 @@ class BeatMontageController(QObject):
             real_dur = get_media_duration(music_path)
             if real_dur and real_dur > 0:
                 duration = real_dur
-        except Exception:
+        except Exception:  # ffmpeg_utils 外部调用（get_media_duration）
             pass
 
         self._beat_data_full = list(beats)
@@ -298,7 +298,7 @@ class BeatMontageController(QObject):
             return
 
         segments = []
-        global_beats = []
+        global_beats: list[float] = []
         for ci, c in enumerate(clips):
             s = float(c.get("start", 0.0))
             e = float(c.get("end", 0.0))
@@ -327,7 +327,7 @@ class BeatMontageController(QObject):
 
         if hasattr(self, "step_beat"):
             peaks = getattr(self.step_beat, "_full_peaks", [])
-            self.step_beat.build_segment_cards(segments, peaks, duration, full_beats=beats)
+            self.step_beat.build_segment_cards(segments, peaks, duration, full_beats=beats)  # noqa: E501
 
         self.btn_beat_confirm.setEnabled(False)
         self.beat_status_lbl.setText(
@@ -399,7 +399,7 @@ class BeatMontageController(QObject):
         image_duration = 2.0
         beats = sorted(getattr(self, "_beat_data_full", []) or [])
         if len(beats) > 1:
-            intervals = [b2 - b1 for b1, b2 in zip(beats, beats[1:]) if b2 > b1]
+            intervals = [b2 - b1 for b1, b2 in zip(beats, beats[1:], strict=False) if b2 > b1]  # noqa: E501
             if intervals:
                 image_duration = max(2.0, min(4.0, max(intervals) + 0.05))
 
@@ -412,7 +412,7 @@ class BeatMontageController(QObject):
             "min_duration": 0.8,
             "max_duration": 3.0,
             "image_duration": round(image_duration, 2),
-            "aspect_ratio": (self.beat_aspect_combo.currentData() or "1:1") if hasattr(self, "beat_aspect_combo") else "1:1",
+            "aspect_ratio": (self.beat_aspect_combo.currentData() or "1:1") if hasattr(self, "beat_aspect_combo") else "1:1",  # noqa: E501
         }
 
         self._beat_video_files = [None] * n_variants
@@ -423,7 +423,7 @@ class BeatMontageController(QObject):
         log.info(f"[卡点成片] 提交 1 个 /montage/beat 任务, variant_count={n_variants}, "
                  f"转场={transition}, time_limit={time_limit}")
 
-        self._beat_gen_worker = BeatVideoGenWorker(server_url, spec, self._beat_work_dir)
+        self._beat_gen_worker = BeatVideoGenWorker(server_url, spec, self._beat_work_dir)  # noqa: E501
         self._beat_gen_worker.progress.connect(self._beat_on_gen_progress)
         self._beat_gen_worker.video_ready.connect(self._beat_on_video_ready)
         self._beat_gen_worker.all_done.connect(self._beat_on_gen_done)
@@ -485,7 +485,7 @@ class BeatMontageController(QObject):
 
     def _beat_on_card_play_started(self, card):
         """某卡片开始播放：更新预览标题，并把视频输出路由到共享 QVideoWidget。"""
-        if getattr(card, "_in_video_mode", False) and hasattr(self, "beat_preview_video"):
+        if getattr(card, "_in_video_mode", False) and hasattr(self, "beat_preview_video"):  # noqa: E501
             card.set_video_output(self.beat_preview_video)
         if not hasattr(self, "beat_preview_title"):
             return
@@ -505,20 +505,20 @@ class BeatMontageController(QObject):
     # ═══════════════════════════════════════════════════════════
 
     def _beat_export_videos(self):
-        videos = [v for v in getattr(self, "_beat_video_files", []) if v and os.path.isfile(v)]
+        videos = [v for v in getattr(self, "_beat_video_files", []) if v and os.path.isfile(v)]  # noqa: E501
         if not videos:
             QMessageBox.warning(self.parent_widget, "无可导出视频",
                                 "尚未生成任何卡点视频，请先点击「检测卡点」生成。")
             return
 
-        out_dir = self.beat_out_dir_input.text().strip() if hasattr(self, "beat_out_dir_input") else ""
+        out_dir = self.beat_out_dir_input.text().strip() if hasattr(self, "beat_out_dir_input") else ""  # noqa: E501
         if not out_dir:
             out_dir = pick_directory(self.parent_widget, "选择视频导出目录")
             if not out_dir:
                 return
         try:
             os.makedirs(out_dir, exist_ok=True)
-        except Exception as e:
+        except OSError as e:
             QMessageBox.critical(self.parent_widget, "目录错误", f"无法创建导出目录：{e}")
             return
 
@@ -528,16 +528,14 @@ class BeatMontageController(QObject):
             try:
                 shutil.copy2(v, dst)
                 copied.append(dst)
-            except Exception as e:
+            except OSError as e:
                 log.warning(f"[卡点成片] 导出复制失败 {v}: {e}")
 
         if copied:
             self.beat_status_lbl.setText(f" 已导出 {len(copied)} 个视频到 {out_dir}")
             QMessageBox.information(self.parent_widget, "导出完成",
                                     f"已导出 {len(copied)} 个卡点视频到：\n{out_dir}")
-            try:
+            with contextlib.suppress(OSError):
                 os.startfile(out_dir)  # noqa
-            except Exception:
-                pass
         else:
             QMessageBox.warning(self.parent_widget, "导出失败", "没有视频复制成功，请查看日志。")

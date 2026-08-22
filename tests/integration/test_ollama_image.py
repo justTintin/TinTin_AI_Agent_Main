@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Ollama 图片识别集成测试（需要 --online 且能访问局域网 Ollama）。"""
 import os
 import subprocess

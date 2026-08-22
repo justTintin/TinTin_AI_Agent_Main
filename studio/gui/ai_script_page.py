@@ -1,23 +1,36 @@
-# -*- coding: utf-8 -*-
-import os
-import sys
-import json
 import configparser
-import traceback
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
-                               QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFrame,
-                               QSplitter, QWidget, QScrollArea, QProgressBar, QComboBox)
-from PySide6.QtCore import Signal, QThread, Qt
+
+import requests.exceptions
+from config.paths import CONFIG_INI_FILE
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils import material_client
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from utils.my_knowledge_manager import MyKnowledgeManager
-from config.paths import CONFIG_INI_FILE
+
 
 class FeishuSyncWorker(BaseWorker):
     finished = Signal(list)
 
-    def __init__(self, app_id, app_secret, app_token, table_id, topic_field, script_field):
+    def __init__(self, app_id, app_secret, app_token, table_id, topic_field, script_field):  # noqa: E501
         super().__init__()
         self.app_id = app_id
         self.app_secret = app_secret
@@ -28,54 +41,53 @@ class FeishuSyncWorker(BaseWorker):
 
     def run(self):
         try:
-            import requests
             from utils.http_client import http_get, http_post
-            token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"
+            token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"  # noqa: E501
             payload = {"app_id": self.app_id, "app_secret": self.app_secret}
             res = http_post(token_url, json=payload, timeout=10)
             if res.status_code != 200:
-                raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")
+                raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")  # noqa: E501
             token_data = res.json()
             if token_data.get("code") != 0:
                 raise RuntimeError(f"获取飞书 token 失败: {token_data.get('msg')}")
             access_token = token_data.get("app_access_token")
 
-            records_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"
+            records_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records"  # noqa: E501
             headers = {"Authorization": f"Bearer {access_token}"}
             params = {"page_size": 100}
             res = http_get(records_url, headers=headers, params=params, timeout=15)
             if res.status_code != 200:
                 raise RuntimeError(f"获取多维表格记录失败: HTTP {res.status_code} - {res.text}")
-            
+
             data = res.json()
             if data.get("code") != 0:
                 raise RuntimeError(f"获取记录失败: {data.get('msg')}")
-                
+
             items = data.get("data", {}).get("items", [])
-            parsed_records = []
+            parsed_records: list[dict] = []
             for item in items:
                 record_id = item.get("record_id")
                 fields = item.get("fields", {})
-                
+
                 # Debug: log available field names on first record
                 if not parsed_records:
                     log.info(f"飞书表格可用字段: {list(fields.keys())}")
-                    log.info(f"正在查找的题字段: '{self.topic_field}', 脚本字段: '{self.script_field}'")
-                
+                    log.info(f"正在查找的题字段: '{self.topic_field}', 脚本字段: '{self.script_field}'")  # noqa: E501
+
                 topic_val = fields.get(self.topic_field, "")
                 if isinstance(topic_val, list):
-                    topic_text = "".join([str(x.get("text", "")) if isinstance(x, dict) else str(x) for x in topic_val])
+                    topic_text = "".join([str(x.get("text", "")) if isinstance(x, dict) else str(x) for x in topic_val])  # noqa: E501
                 else:
                     topic_text = str(topic_val) if topic_val else ""
-                
+
                 script_val = fields.get(self.script_field, "")
                 if isinstance(script_val, list):
-                    script_text = "".join([str(x.get("text", "")) if isinstance(x, dict) else str(x) for x in script_val])
+                    script_text = "".join([str(x.get("text", "")) if isinstance(x, dict) else str(x) for x in script_val])  # noqa: E501
                 else:
                     script_text = str(script_val)
-                    
+
                 status_text = str(fields.get("状态", "未开始"))
-                
+
                 parsed_records.append({
                     "id": record_id,
                     "topic": topic_text.strip(),
@@ -83,7 +95,7 @@ class FeishuSyncWorker(BaseWorker):
                     "script": script_text.strip()
                 })
             self.finished.emit(parsed_records)
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             self.error.emit(str(e))
 
 class WebSearchWorker(BaseWorker):
@@ -110,29 +122,19 @@ class WebSearchWorker(BaseWorker):
             return
         try:
             self.finished.emit(self._search_duckduckgo())
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             self.error.emit(str(e))
 
     # ── 服务端在线素材搜索（/guide「在线素材搜索 Stock Material」）──
     def _search_via_server(self):
-        from utils.http_client import http_post
-        base = self._server_url()
-        if not base:
-            raise _ServerUnavailable("未配置服务端地址")
-        res = http_post(f"{base}/material/stock_search",
-                        json={"query": self.query.strip(), "kind": self.kind,
-                              "page": 1, "per": 10},
-                        timeout=20)
-        if res.status_code == 503:
-            raise RuntimeError(
-                "服务端在线素材搜索未启用（HTTP 503）：需服务端 config.yaml 配置 "
-                "stock.pexels_api_key / stock.pixabay_api_key 后重试。")
-        if res.status_code != 200:
-            raise _ServerUnavailable(f"HTTP {res.status_code}")
-        items = (res.json() or {}).get("items") or []
+        res = material_client.stock_search(self.query.strip(), self.kind, timeout=20)
+        if res is None:
+            # material_client 已记录具体错误（含 HTTP 状态码），这里统一回退
+            raise _ServerUnavailable("服务端 stock_search 不可达")
+        items = (res or {}).get("items") or []
         if not items:
             return "未找到相关在线素材，可换关键词重试。"
-        provider = (res.json() or {}).get("provider", "")
+        provider = (res or {}).get("provider", "")
         lines = [f"以下在线素材免版权可商用（来源：{provider or 'Pexels/Pixabay'}）：", ""]
         for it in items:
             meta = []
@@ -150,28 +152,15 @@ class WebSearchWorker(BaseWorker):
             lines.append("")
         return "\n".join(lines)
 
-    @staticmethod
-    def _server_url():
-        try:
-            from config.paths import AI_CONFIG_FILE
-            if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
-                if url:
-                    return url
-        except Exception:
-            pass
-        return ""
-
     # ── 回退：客户端直连 DuckDuckGo（国内网络可能不通）──
     def _search_duckduckgo(self):
-        from utils.http_client import http_get
-        from lxml import html
         import urllib.parse
 
+        from lxml import html
+        from utils.http_client import http_get
+
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"  # noqa: E501
         }
         q = self.query.strip()
         url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q)}"
@@ -195,7 +184,7 @@ class WebSearchWorker(BaseWorker):
         return "\n---\n".join(results)
 
 
-class _ServerUnavailable(Exception):
+class _ServerUnavailable(Exception):  # noqa: N818
     """服务端不可达/无此接口 → 允许回退直连；区别于服务端明确报错（不回退）。"""
 
 class LLMWorker(BaseWorker):
@@ -215,13 +204,13 @@ class LLMWorker(BaseWorker):
                 model=self.model, temperature=0.7, timeout=60
             )
             self.finished.emit(content)
-        except Exception as e:
+        except Exception as e:  # LLM API call
             self.error.emit(str(e))
 
 class FeishuUploadWorker(BaseWorker):
     finished = Signal(str)
 
-    def __init__(self, app_id, app_secret, mode, app_token, table_id, record_id, script_field, script_text, folder_token=None, topic_name=None):
+    def __init__(self, app_id, app_secret, mode, app_token, table_id, record_id, script_field, script_text, folder_token=None, topic_name=None):  # noqa: E501
         super().__init__()
         self.app_id = app_id
         self.app_secret = app_secret
@@ -236,13 +225,12 @@ class FeishuUploadWorker(BaseWorker):
 
     def run(self):
         try:
-            import requests
-            from utils.http_client import http_get, http_post, http_put
-            token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"
+            from utils.http_client import http_post, http_put
+            token_url = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal"  # noqa: E501
             payload = {"app_id": self.app_id, "app_secret": self.app_secret}
             res = http_post(token_url, json=payload, timeout=10)
             if res.status_code != 200:
-                raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")
+                raise RuntimeError(f"获取飞书 token 失败: HTTP {res.status_code} - {res.text}")  # noqa: E501
             token_data = res.json()
             if token_data.get("code") != 0:
                 raise RuntimeError(f"获取飞书 token 失败: {token_data.get('msg')}")
@@ -253,7 +241,7 @@ class FeishuUploadWorker(BaseWorker):
             }
 
             if self.mode == 'bitable':
-                url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records/{self.record_id}"
+                url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/records/{self.record_id}"  # noqa: E501
                 payload = {
                     "fields": {
                         self.script_field: self.script_text
@@ -273,18 +261,18 @@ class FeishuUploadWorker(BaseWorker):
                 }
                 if self.folder_token:
                     doc_payload["folder_token"] = self.folder_token
-                res = http_post(create_url, headers=headers, json=doc_payload, timeout=15)
+                res = http_post(create_url, headers=headers, json=doc_payload, timeout=15)  # noqa: E501
                 if res.status_code != 200:
                     raise RuntimeError(f"创建文档失败: HTTP {res.status_code} - {res.text}")
                 create_data = res.json()
                 if create_data.get("code") != 0:
                     raise RuntimeError(f"创建文档失败: {create_data.get('msg')}")
-                
+
                 doc_info = create_data.get("data", {}).get("document", {})
                 document_id = doc_info.get("document_id")
-                
-                blocks_url = f"https://open.feishu.cn/open-apis/docx/v1/documents/{document_id}/blocks/{document_id}/children"
-                
+
+                blocks_url = f"https://open.feishu.cn/open-apis/docx/v1/documents/{document_id}/blocks/{document_id}/children"  # noqa: E501
+
                 children_blocks = []
                 children_blocks.append({
                     "block_type": 1,
@@ -298,7 +286,7 @@ class FeishuUploadWorker(BaseWorker):
                         ]
                     }
                 })
-                
+
                 lines = self.script_text.split("\n")
                 for line in lines:
                     if line.strip():
@@ -314,20 +302,20 @@ class FeishuUploadWorker(BaseWorker):
                                 ]
                             }
                         })
-                
+
                 for i in range(0, len(children_blocks), 100):
                     batch = children_blocks[i:i+100]
-                    res = http_post(blocks_url, headers=headers, json={"children": batch}, timeout=15)
-                
+                    res = http_post(blocks_url, headers=headers, json={"children": batch}, timeout=15)  # noqa: E501
+
                 doc_url = f"https://open.feishu.cn/docx/{document_id}"
                 self.finished.emit(f"生成飞书云文档成功！\n文档链接: {doc_url}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             self.error.emit(str(e))
 
-from utils.my_knowledge_manager import STYLIZATION_TYPE
+from gui.base_page import BasePage  # noqa: E402
+from gui.searchable_combo import SearchableComboBox  # noqa: E402
+from utils.my_knowledge_manager import STYLIZATION_TYPE  # noqa: E402
 
-from gui.base_page import BasePage
-from gui.searchable_combo import SearchableComboBox
 
 class AIScriptPage(BasePage):
     def __init__(self, parent_widget, main_window):
@@ -348,7 +336,7 @@ class AIScriptPage(BasePage):
         layout.addWidget(heading, 0)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 4px; }")
+        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 4px; }")  # noqa: E501
 
         # ── 左侧 ──
         left_scroll = QScrollArea()
@@ -383,7 +371,7 @@ class AIScriptPage(BasePage):
         self.table_topics.setColumnCount(3)
         self.table_topics.setHorizontalHeaderLabels(["选题名称", "状态", "ID"])
         self.table_topics.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_topics.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table_topics.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)  # noqa: E501
         self.table_topics.setSelectionBehavior(QTableWidget.SelectRows)
         self.table_topics.setSelectionMode(QTableWidget.SingleSelection)
         self.table_topics.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -440,7 +428,7 @@ class AIScriptPage(BasePage):
         sl.addLayout(style_hdr)
 
         self.combo_stylization = SearchableComboBox(placeholder="输入风格名称搜索…")
-        self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)
+        self.combo_stylization.currentIndexChanged.connect(self._on_stylization_selected)  # noqa: E501
         sl.addWidget(self.combo_stylization)
 
         self.text_style_portrait = QTextEdit()
@@ -619,7 +607,7 @@ class AIScriptPage(BasePage):
         self.lbl_status.setText("AI 正在创作视频文案，请稍候…")
         self.pbar.setVisible(True)
 
-        self.llm_worker = LLMWorker(llm_api_url, llm_api_key, llm_model, system_prompt, user_prompt)
+        self.llm_worker = LLMWorker(llm_api_url, llm_api_key, llm_model, system_prompt, user_prompt)  # noqa: E501
 
         def on_done(content):
             self.btn_gen_draft.setEnabled(True)
@@ -646,16 +634,16 @@ class AIScriptPage(BasePage):
         if not copy_text:
             QMessageBox.warning(self.parent_widget, "文案为空", "请先生成或填写文案，然后再进行分镜脚本设计。")
             return
-        
+
         # Pass copywriting text and Feishu record info to Storyboard Page
-        if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:
-            style_id = self._selected_stylization.get("id") if self._selected_stylization else None
+        if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:  # noqa: E501
+            style_id = self._selected_stylization.get("id") if self._selected_stylization else None  # noqa: E501
             self.main_window.storyboard_tool.set_copywriting(
                 copy_text,
                 feishu_record=self.selected_record,
                 stylization_id=style_id,
             )
-        
+
         # Switch to storyboard page (index 38)
         self.main_window.switch_page(37)
 
@@ -724,13 +712,13 @@ class AIScriptPage(BasePage):
                 topicfield = config.get('Feishu', 'TopicField', fallback="选题")
                 scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
                 foldertoken = config.get('Feishu', 'FolderToken', fallback="")
-        except Exception:
+        except OSError:
             pass
         return appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken
 
     def _sync_feishu_topics(self):
         """从飞书多维表格同步选题列表。"""
-        appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken = self._get_feishu_config()
+        appid, appsecret, apptoken, tableid, topicfield, scriptfield, foldertoken = self._get_feishu_config()  # noqa: E501
         if not appid or not appsecret or not apptoken or not tableid:
             QMessageBox.warning(self.parent_widget, "配置未完成",
                                 "请先在「环境配置」页配置好飞书 AppID/Secret/AppToken/TableID。")
@@ -738,7 +726,7 @@ class AIScriptPage(BasePage):
         self.btn_sync_topics.setEnabled(False)
         self.lbl_status.setText("正在连接飞书并获取选题数据...")
         self.pbar.setVisible(True)
-        self.sync_worker = FeishuSyncWorker(appid, appsecret, apptoken, tableid, topicfield, scriptfield)
+        self.sync_worker = FeishuSyncWorker(appid, appsecret, apptoken, tableid, topicfield, scriptfield)  # noqa: E501
 
         def on_done(records):
             self.btn_sync_topics.setEnabled(True)

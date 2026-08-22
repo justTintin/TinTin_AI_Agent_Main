@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 统一配置读写入口（config_manager）。
 
@@ -15,15 +14,19 @@
     parser = cm.load_ini()
     cm.save_ini(parser)
 """
+import configparser
 import json
 import os
-import configparser
 
 from config.paths import (
-    CONFIG_DIR, DATA_DIR, AI_CONFIG_FILE, VIDEO_CONFIG_FILE, ERP_CONFIG_FILE,
-    UPDATE_CONFIG_FILE, CONFIG_INI_FILE,
+    AI_CONFIG_FILE,
+    CONFIG_DIR,
+    CONFIG_INI_FILE,
+    DATA_DIR,
+    ERP_CONFIG_FILE,
+    UPDATE_CONFIG_FILE,
+    VIDEO_CONFIG_FILE,
 )
-
 
 # JSON 配置文件注册表：逻辑名 → 实际路径（新增配置文件时在这里登记）
 _JSON_FILES = {
@@ -52,11 +55,11 @@ def load_config(name, default=None):
     try:
         p = _path_of(name)
         if os.path.isfile(p):
-            with open(p, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 return data
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return default
 
@@ -71,7 +74,7 @@ def save_config(name, data):
             json.dump(data, f, indent=4, ensure_ascii=False)
         os.replace(tmp, p)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -94,7 +97,7 @@ def clear_config(name):
         if os.path.exists(p):
             os.remove(p)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -114,7 +117,7 @@ def load_ini():
     try:
         if os.path.isfile(CONFIG_INI_FILE):
             parser.read(CONFIG_INI_FILE, encoding="utf-8")
-    except Exception:
+    except OSError:
         pass
     return parser
 
@@ -125,5 +128,5 @@ def save_ini(parser):
         with open(CONFIG_INI_FILE, "w", encoding="utf-8") as f:
             parser.write(f)
         return True
-    except Exception:
+    except OSError:
         return False

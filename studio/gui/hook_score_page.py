@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
  视频评价预测页（由「开头黄金3秒评分」升级而来）。
 
@@ -9,33 +8,41 @@
 依赖：视觉模型（大模型配置里的 llm_vision_*）、自带 ffmpeg。
 数据层见 utils/video_prediction_manager.py。
 """
-import os
-import json
 import base64
-import shutil
-import subprocess
+import contextlib
 import glob
 import math
+import os
+import shutil
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFrame,
-    QFileDialog, QProgressBar, QTextEdit, QScrollArea, QWidget, QGridLayout,
-    QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-)
-from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QPen, QBrush, QPolygonF
-from PySide6.QtCore import Signal, Qt, QPointF, QRectF
-
+from config.paths import TMP_DIR
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.base_worker import BaseWorker
-from utils.video_compiler import _find, _probe_duration
-from utils.platform_utils import find_ffmpeg
-from utils.video_prediction_manager import (
-    VideoPredictionManager, PLATFORMS, DIMENSIONS, PLAY_LEVELS)
-from config.paths import TMP_DIR
-
+from utils.ffmpeg_utils import extract_frame
 from utils.file_dialog_utils import pick_file
 from utils.gui_icons import mdi_button
+from utils.llm_output_utils import safe_json_parse
+from utils.video_compiler import _probe_duration
+from utils.video_prediction_manager import DIMENSIONS, PLATFORMS, VideoPredictionManager
+
 DIM_COLORS = {
     "吸睛力": "#e74c3c", "画面冲击": "#3498db", "悬念信息": "#f1c40f",
     "节奏": "#9b59b6", "完播预测": "#2ecc71", "平台适配": "#e67e22",
@@ -67,7 +74,7 @@ class VisionModelTestWorker(BaseWorker):
         try:
             llm_chat("", "Hi", model=self.model, max_tokens=5, timeout=8)
             self.finished.emit(True, " 连接成功")
-        except Exception:
+        except Exception:  # 外部API调用（LLM 连接测试）
             self.finished.emit(False, " 无法连接")
 
 
@@ -76,19 +83,21 @@ class DimScoreCard(QFrame):
         super().__init__(parent)
         self.setObjectName("dim_score_card")
         self.setStyleSheet(f"""
-            QFrame {{ border: 2px solid {color_hex}; border-radius: 12px; background-color: #1a1a2a; }}
-            QLabel {{ border: none; background-color: transparent; }}
+            QFrame {{ border: 2px solid {color_hex}; border-radius: 12px; background-color: #1a1a2a; }}  # noqa: E501
+            QLabel {{ border: none
+            background-color: transparent
+            }}
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignCenter)
         self.lbl_title = QLabel(title)
-        self.lbl_title.setStyleSheet("font-size: 12px; color: #a0aec0; font-weight: bold;")
+        self.lbl_title.setStyleSheet("font-size: 12px; color: #a0aec0; font-weight: bold;")  # noqa: E501
         self.lbl_title.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_title)
         self.lbl_score = QLabel("—")
-        self.lbl_score.setStyleSheet(f"font-size: 30px; font-weight: bold; color: {color_hex};")
+        self.lbl_score.setStyleSheet(f"font-size: 30px; font-weight: bold; color: {color_hex};")  # noqa: E501
         self.lbl_score.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_score)
 
@@ -101,7 +110,7 @@ class RadarChartWidget(QWidget):
     def __init__(self, dims=None, parent=None):
         super().__init__(parent)
         self.dims = dims or list(DIMENSIONS)
-        self.scores = {d: 0 for d in self.dims}
+        self.scores = dict.fromkeys(self.dims, 0)
         # 缩小到约 1/3，避免占用过多空间
         self.setMinimumSize(170, 170)
         self.setMaximumSize(170, 170)
@@ -111,7 +120,7 @@ class RadarChartWidget(QWidget):
         self.scores = scores or {}
         self.update()
 
-    def paintEvent(self, event):
+    def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
@@ -126,12 +135,12 @@ class RadarChartWidget(QWidget):
             poly = QPolygonF()
             for i in range(n):
                 a = -math.pi / 2.0 + i * (2.0 * math.pi / n)
-                poly.append(QPointF(cx + r_max * step * math.cos(a), cy + r_max * step * math.sin(a)))
+                poly.append(QPointF(cx + r_max * step * math.cos(a), cy + r_max * step * math.sin(a)))  # noqa: E501
             p.drawPolygon(poly)
         p.setPen(QPen(QColor("#4a4a5a"), 1))
         for i in range(n):
             a = -math.pi / 2.0 + i * (2.0 * math.pi / n)
-            p.drawLine(QPointF(cx, cy), QPointF(cx + r_max * math.cos(a), cy + r_max * math.sin(a)))
+            p.drawLine(QPointF(cx, cy), QPointF(cx + r_max * math.cos(a), cy + r_max * math.sin(a)))  # noqa: E501
         poly = QPolygonF()
         for i, d in enumerate(dims):
             v = max(0, min(100, self.scores.get(d, 0) or 0))
@@ -148,7 +157,7 @@ class RadarChartWidget(QWidget):
             xl = cx + (r_max + 13.0) * math.cos(a)
             yl = cy + (r_max + 13.0) * math.sin(a)
             p.setPen(QPen(QColor(DIM_COLORS.get(d, "#ffffff"))))
-            p.drawText(QRectF(xl - 34.0, yl - 15.0, 68.0, 30.0), Qt.AlignCenter, f"{d}\n{v}")
+            p.drawText(QRectF(xl - 34.0, yl - 15.0, 68.0, 30.0), Qt.AlignCenter, f"{d}\n{v}")  # noqa: E501
 
 
 class HookScoreWorker(BaseWorker):
@@ -174,14 +183,10 @@ class HookScoreWorker(BaseWorker):
         shutil.rmtree(frames_dir, ignore_errors=True)
         os.makedirs(frames_dir, exist_ok=True)
         frames = []
-        ffmpeg = find_ffmpeg()
-        flags = 0x08000000 if os.name == "nt" else 0
         for i, t in enumerate(times):
             self.phase.emit(f"抽帧 {i + 1}/{len(times)}（{t}s）…")
             out = os.path.join(frames_dir, f"f{i:02d}_{t}s.jpg")
-            subprocess.run([ffmpeg, "-y", "-ss", str(t), "-i", self.video,
-                            "-vframes", "1", "-vf", "scale=512:-2", "-q:v", "4", out],
-                           capture_output=True, creationflags=flags)
+            extract_frame(self.video, t, out, scale="512:-2")
             if os.path.isfile(out):
                 frames.append(out)
         if not frames:
@@ -203,35 +208,25 @@ class HookScoreWorker(BaseWorker):
             '"comment":"一句话总评","suggestions":["建议1","建议2","建议3"]}\n'
             "total=综合预测分；play_level=预测表现量级；完播预测=预计完播表现；"
             "平台适配=与该平台调性/算法的契合度。")
-        content = [{"type": "text",
+        content: list[dict[str, Any]] = [{"type": "text",
                     "text": f"目标平台：{self.platform}；视频标题：{title}。以下为该视频的关键帧（按时间先后）："}]
         for fr in frames:
             with open(fr, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
-            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})  # noqa: E501
         try:
             text = llm_chat_messages(
                 [{"role": "system", "content": sys_prompt},
                  {"role": "user", "content": content}],
                 model=model, temperature=0.4, timeout=180)
         except RuntimeError as e:
-            raise RuntimeError(f"无法连接视觉模型：{e}\n请检查『大模型配置』里的服务端地址。")
+            raise RuntimeError(f"无法连接视觉模型：{e}\n请检查『大模型配置』里的服务端地址。") from e
         if not text:
             raise RuntimeError("视觉模型返回空内容（请确认所选模型支持图片/视觉输入）。")
         body = text
-        if body.startswith("```"):
-            body = body.strip("`")
-            if body.lower().startswith("json"):
-                body = body[4:]
-            body = body.strip()
-        try:
-            result = json.loads(body)
-        except json.JSONDecodeError:
-            import re
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            if not m:
-                raise RuntimeError("视觉模型没有按要求输出 JSON，原始返回：\n" + text[:500])
-            result = json.loads(m.group())
+        result = safe_json_parse(body)
+        if result is None:
+            raise RuntimeError("视觉模型没有按要求输出 JSON，原始返回：\n" + text[:500])
         self.finished.emit(result)
 
 
@@ -264,59 +259,95 @@ class HookScorePage(BasePage):
         root.addWidget(warning_lbl)
 
         # 视觉模型状态
-        self.model_status_card = QFrame(); self.model_status_card.setObjectName("card")
-        self.model_status_card.setStyleSheet("background-color:#1a1a26; border:1px solid #3a3a4a; border-radius:8px;")
-        m = QHBoxLayout(self.model_status_card); m.setContentsMargins(16, 10, 16, 10)
+        self.model_status_card = QFrame()
+        self.model_status_card.setObjectName("card")
+        self.model_status_card.setStyleSheet("background-color:#1a1a26; border:1px solid #3a3a4a; border-radius:8px;")  # noqa: E501
+        m = QHBoxLayout(self.model_status_card)
+        m.setContentsMargins(16, 10, 16, 10)
         self.lbl_model_info = QLabel("视频大模型：正在加载配置...")
-        self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")
+        self.lbl_model_info.setStyleSheet("font-size:13px; font-weight:bold; color:#e0e0e0;")  # noqa: E501
         m.addWidget(self.lbl_model_info)
-        self.lbl_model_status = QLabel(" 未检测"); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")
-        m.addWidget(self.lbl_model_status); m.addStretch()
-        self.btn_test_model = QPushButton("测试连接"); self.btn_test_model.setObjectName("secondary_button")
-        self.btn_test_model.setFixedHeight(30); self.btn_test_model.clicked.connect(self._test_vision_model)
+        self.lbl_model_status = QLabel(" 未检测")
+        self.lbl_model_status.setStyleSheet("font-weight:bold; color:#a0aec0;")  # noqa: E501
+        m.addWidget(self.lbl_model_status)
+        m.addStretch()
+        self.btn_test_model = QPushButton("测试连接")
+        self.btn_test_model.setObjectName("secondary_button")  # noqa: E501
+        self.btn_test_model.setFixedHeight(30)
+        self.btn_test_model.clicked.connect(self._test_vision_model)  # noqa: E501
         m.addWidget(self.btn_test_model)
         root.addWidget(self.model_status_card)
 
         # 输入条：平台 + 视频 + 操作
-        bar = QFrame(); bar.setObjectName("card")
-        h = QHBoxLayout(bar); h.setContentsMargins(20, 12, 20, 12)
+        bar = QFrame()
+        bar.setObjectName("card")
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(20, 12, 20, 12)
         h.addWidget(QLabel("投放平台"))
-        self.cmb_platform = QComboBox(); self.cmb_platform.addItems(PLATFORMS); self.cmb_platform.setFixedWidth(110)
+        self.cmb_platform = QComboBox()
+        self.cmb_platform.addItems(PLATFORMS)
+        self.cmb_platform.setFixedWidth(110)  # noqa: E501
         h.addWidget(self.cmb_platform)
-        self.in_video = QLineEdit(); self.in_video.setPlaceholderText("选择要预测的视频…")
+        self.in_video = QLineEdit()
+        self.in_video.setPlaceholderText("选择要预测的视频…")
         h.addWidget(self.in_video, 1)
-        b = mdi_button("浏览…", "folder"); b.setObjectName("secondary_button"); b.clicked.connect(self._browse)
+        b = mdi_button("浏览…", "folder")
+        b.setObjectName("secondary_button")
+        b.clicked.connect(self._browse)  # noqa: E501
         h.addWidget(b)
-        self.btn_run = QPushButton(" 开始预测"); self.btn_run.setObjectName("primary_button")
-        self.btn_run.clicked.connect(self._run); h.addWidget(self.btn_run)
-        self.pbar = QProgressBar(); self.pbar.setVisible(False); self.pbar.setRange(0, 0); self.pbar.setMaximumWidth(120)
+        self.btn_run = QPushButton(" 开始预测")
+        self.btn_run.setObjectName("primary_button")  # noqa: E501
+        self.btn_run.clicked.connect(self._run)
+        h.addWidget(self.btn_run)
+        self.pbar = QProgressBar()
+        self.pbar.setVisible(False)
+        self.pbar.setRange(0, 0)
+        self.pbar.setMaximumWidth(120)  # noqa: E501
         h.addWidget(self.pbar)
         root.addWidget(bar)
 
         # 抽帧预览
-        self.frames_scroll = QScrollArea(); self.frames_scroll.setWidgetResizable(True)
-        self.frames_scroll.setFixedHeight(124); self.frames_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.frames_host = QWidget(); self.frames_box = QHBoxLayout(self.frames_host)
-        self.frames_box.setContentsMargins(4, 4, 4, 4); self.frames_box.setSpacing(6)
-        self.frames_scroll.setWidget(self.frames_host); self.frames_scroll.setVisible(False)
+        self.frames_scroll = QScrollArea()
+        self.frames_scroll.setWidgetResizable(True)
+        self.frames_scroll.setFixedHeight(124)
+        self.frames_scroll.setFrameShape(QScrollArea.NoFrame)  # noqa: E501
+        self.frames_host = QWidget()
+        self.frames_box = QHBoxLayout(self.frames_host)
+        self.frames_box.setContentsMargins(4, 4, 4, 4)
+        self.frames_box.setSpacing(6)
+        self.frames_scroll.setWidget(self.frames_host)
+        self.frames_scroll.setVisible(False)  # noqa: E501
         root.addWidget(self.frames_scroll)
 
         # 结果区
-        self.result_card = QFrame(); self.result_card.setObjectName("card")
-        rc = QVBoxLayout(self.result_card); rc.setContentsMargins(24, 20, 24, 20); rc.setSpacing(10)
+        self.result_card = QFrame()
+        self.result_card.setObjectName("card")
+        rc = QVBoxLayout(self.result_card)
+        rc.setContentsMargins(24, 20, 24, 20)
+        rc.setSpacing(10)  # noqa: E501
         top = QHBoxLayout()
-        self.lbl_total = QLabel("—"); self.lbl_total.setStyleSheet("font-size:46px; font-weight:bold;")
+        self.lbl_total = QLabel("—")
+        self.lbl_total.setStyleSheet("font-size:46px; font-weight:bold;")  # noqa: E501
         top.addWidget(self.lbl_total)
         tv = QVBoxLayout()
-        self.lbl_total_cap = QLabel("综合预测分"); self.lbl_total_cap.setObjectName("muted_text"); tv.addWidget(self.lbl_total_cap)
-        self.lbl_level = QLabel(""); self.lbl_level.setStyleSheet("font-size:18px; font-weight:bold;"); tv.addWidget(self.lbl_level)
-        self.lbl_golden = QLabel(""); tv.addWidget(self.lbl_golden)
-        top.addLayout(tv); top.addStretch()
+        self.lbl_total_cap = QLabel("综合预测分")
+        self.lbl_total_cap.setObjectName("muted_text")
+        tv.addWidget(self.lbl_total_cap)  # noqa: E501
+        self.lbl_level = QLabel("")
+        self.lbl_level.setStyleSheet("font-size:18px; font-weight:bold;")
+        tv.addWidget(self.lbl_level)  # noqa: E501
+        self.lbl_golden = QLabel("")
+        tv.addWidget(self.lbl_golden)
+        top.addLayout(tv)
+        top.addStretch()
         rc.addLayout(top)
 
-        dims_section = QWidget(); dims_layout = QHBoxLayout(dims_section)
-        dims_layout.setContentsMargins(0, 10, 0, 10); dims_layout.setSpacing(20)
-        grid = QGridLayout(); grid.setSpacing(10)
+        dims_section = QWidget()
+        dims_layout = QHBoxLayout(dims_section)
+        dims_layout.setContentsMargins(0, 10, 0, 10)
+        dims_layout.setSpacing(20)
+        grid = QGridLayout()
+        grid.setSpacing(10)
         self.dim_cards = {}
         for i, d in enumerate(DIMENSIONS):
             card = DimScoreCard(d, DIM_COLORS.get(d, "#888"))
@@ -328,29 +359,47 @@ class HookScorePage(BasePage):
         rc.addWidget(dims_section)
 
         rc.addWidget(QLabel("总评"))
-        self.lbl_comment = QLabel(""); self.lbl_comment.setWordWrap(True); rc.addWidget(self.lbl_comment)
+        self.lbl_comment = QLabel("")
+        self.lbl_comment.setWordWrap(True)
+        rc.addWidget(self.lbl_comment)  # noqa: E501
         rc.addWidget(QLabel("改进建议"))
-        self.txt_sugg = QTextEdit(); self.txt_sugg.setReadOnly(True); self.txt_sugg.setFixedHeight(110); rc.addWidget(self.txt_sugg)
+        self.txt_sugg = QTextEdit()
+        self.txt_sugg.setReadOnly(True)
+        self.txt_sugg.setFixedHeight(110)
+        rc.addWidget(self.txt_sugg)  # noqa: E501
         self.result_card.setVisible(False)
         root.addWidget(self.result_card)
 
         # 反馈数据（发布后回填，紧跟在预测结果下方；用于校准下次预测）
-        self.feedback_card = QFrame(); self.feedback_card.setObjectName("card")
-        fc = QVBoxLayout(self.feedback_card); fc.setContentsMargins(24, 14, 24, 14); fc.setSpacing(8)
+        self.feedback_card = QFrame()
+        self.feedback_card.setObjectName("card")
+        fc = QVBoxLayout(self.feedback_card)
+        fc.setContentsMargins(24, 14, 24, 14)
+        fc.setSpacing(8)  # noqa: E501
         fc.addWidget(QLabel(" 反馈数据（发布后回填，模型据此校准下次预测）"))
         frow = QHBoxLayout()
         frow.addWidget(QLabel("真实播放量"))
-        self.fb_play = QLineEdit(); self.fb_play.setPlaceholderText("如 12.5万 / 8000"); frow.addWidget(self.fb_play, 1)
+        self.fb_play = QLineEdit()
+        self.fb_play.setPlaceholderText("如 12.5万 / 8000")
+        frow.addWidget(self.fb_play, 1)  # noqa: E501
         frow.addWidget(QLabel("平台评价/标签"))
-        self.fb_eval = QLineEdit(); self.fb_eval.setPlaceholderText("如：被推荐 / 限流 / 上热门 / 完播率低"); frow.addWidget(self.fb_eval, 2)
-        self.btn_save_fb = QPushButton("保存反馈"); self.btn_save_fb.setObjectName("primary_button")
-        self.btn_save_fb.clicked.connect(self._save_feedback); frow.addWidget(self.btn_save_fb)
+        self.fb_eval = QLineEdit()
+        self.fb_eval.setPlaceholderText("如：被推荐 / 限流 / 上热门 / 完播率低")
+        frow.addWidget(self.fb_eval, 2)  # noqa: E501
+        self.btn_save_fb = QPushButton("保存反馈")
+        self.btn_save_fb.setObjectName("primary_button")  # noqa: E501
+        self.btn_save_fb.clicked.connect(self._save_feedback)
+        frow.addWidget(self.btn_save_fb)  # noqa: E501
         fc.addLayout(frow)
-        self.fb_status = QLabel(""); self.fb_status.setObjectName("muted_text"); fc.addWidget(self.fb_status)
+        self.fb_status = QLabel("")
+        self.fb_status.setObjectName("muted_text")
+        fc.addWidget(self.fb_status)  # noqa: E501
         self.feedback_card.setVisible(False)
         root.addWidget(self.feedback_card)
 
-        self.status = QLabel(""); self.status.setObjectName("muted_text"); root.addWidget(self.status)
+        self.status = QLabel("")
+        self.status.setObjectName("muted_text")
+        root.addWidget(self.status)  # noqa: E501
         root.addStretch()
         self.update_vision_model_display()
 
@@ -370,16 +419,17 @@ class HookScorePage(BasePage):
             self.btn_test_model.setEnabled(False)
 
     def _test_vision_model(self):
-        ai = getattr(self.main_window, "ai_config", {}) or {}
         self.btn_test_model.setEnabled(False)
-        self.lbl_model_status.setText(" 正在测试..."); self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")
+        self.lbl_model_status.setText(" 正在测试...")
+        self.lbl_model_status.setStyleSheet("font-weight:bold; color:#f1c40f;")  # noqa: E501
         self.test_worker = VisionModelTestWorker(None)
 
         def on_finished(success, message):
             self.btn_test_model.setEnabled(True)
             self.lbl_model_status.setText(message)
-            self.lbl_model_status.setStyleSheet(f"font-weight:bold; color:{'#2ecc71' if success else '#e74c3c'};")
-        self.test_worker.finished.connect(on_finished); self.test_worker.start()
+            self.lbl_model_status.setStyleSheet(f"font-weight:bold; color:{'#2ecc71' if success else '#e74c3c'};")  # noqa: E501
+        self.test_worker.finished.connect(on_finished)
+        self.test_worker.start()
 
     # ---------- 预测 ----------
     def _browse(self):
@@ -395,13 +445,16 @@ class HookScorePage(BasePage):
             return
         platform = self.cmb_platform.currentText()
         calib = self.manager.calibration_text(platform=platform)
-        self.btn_run.setEnabled(False); self.pbar.setVisible(True); self.status.setText("预测中…")
-        self.worker = HookScoreWorker(video, self.ai_config, platform=platform, calibration=calib)
+        self.btn_run.setEnabled(False)
+        self.pbar.setVisible(True)
+        self.status.setText("预测中…")  # noqa: E501
+        self.worker = HookScoreWorker(video, self.ai_config, platform=platform, calibration=calib)  # noqa: E501
         self.worker.phase.connect(self.status.setText)
         self.worker.frames.connect(self._show_frames)
         self.worker.finished.connect(self._done)
         self.worker.error.connect(self._err)
-        self.track_worker(self.worker); self.worker.start()
+        self.track_worker(self.worker)
+        self.worker.start()
 
     def _show_frames(self, paths):
         while self.frames_box.count():
@@ -409,11 +462,14 @@ class HookScorePage(BasePage):
             if it.widget():
                 it.widget().setParent(None)
         for p in paths:
-            lbl = QLabel(); pm = QPixmap(p)
+            lbl = QLabel()
+            pm = QPixmap(p)
             if not pm.isNull():
                 lbl.setPixmap(pm.scaledToHeight(104, Qt.SmoothTransformation))
-            lbl.setToolTip(os.path.basename(p)); self.frames_box.addWidget(lbl)
-        self.frames_box.addStretch(); self.frames_scroll.setVisible(True)
+            lbl.setToolTip(os.path.basename(p))
+            self.frames_box.addWidget(lbl)
+        self.frames_box.addStretch()
+        self.frames_scroll.setVisible(True)
 
     def show_result(self, video, data):
         """供「一键成片」自检后跳转复用。"""
@@ -426,28 +482,30 @@ class HookScorePage(BasePage):
         self.status.setText("（来自一键成片的自检结果，可重新预测）")
 
     def _done(self, data):
-        self.btn_run.setEnabled(True); self.pbar.setVisible(False); self.status.setText("预测完成。")
+        self.btn_run.setEnabled(True)
+        self.pbar.setVisible(False)
+        self.status.setText("预测完成。")  # noqa: E501
         self._render(data)
         # 持久化预测，记下 id 供下方「反馈数据」回填 + 校准
         self._last_pred_id = None
-        try:
+        with contextlib.suppress(Exception):
             self._last_pred_id = self.manager.add_prediction(
                 self.in_video.text().strip(), self.cmb_platform.currentText(), data)
-        except Exception:
-            pass
-        self.fb_play.clear(); self.fb_eval.clear(); self.fb_status.setText("")
+        self.fb_play.clear()
+        self.fb_eval.clear()
+        self.fb_status.setText("")
         self.feedback_card.setVisible(bool(self._last_pred_id))
 
     def _render(self, data):
         total = data.get("total", "—")
         self.lbl_total.setText(str(total))
         color = "#2ecc71" if isinstance(total, (int, float)) and total >= 80 else \
-                "#f1c40f" if isinstance(total, (int, float)) and total >= 60 else "#e74c3c"
-        self.lbl_total.setStyleSheet(f"font-size:46px; font-weight:bold; color:{color};")
+                "#f1c40f" if isinstance(total, (int, float)) and total >= 60 else "#e74c3c"  # noqa: E501
+        self.lbl_total.setStyleSheet(f"font-size:46px; font-weight:bold; color:{color};")  # noqa: E501
         level = data.get("play_level", "")
-        lv_color = {"爆款": "#2ecc71", "优质": "#3498db", "普通": "#f1c40f", "偏弱": "#e74c3c"}.get(level, "#a0aec0")
+        lv_color = {"爆款": "#2ecc71", "优质": "#3498db", "普通": "#f1c40f", "偏弱": "#e74c3c"}.get(level, "#a0aec0")  # noqa: E501
         self.lbl_level.setText(f"预测表现：{level}" if level else "")
-        self.lbl_level.setStyleSheet(f"font-size:18px; font-weight:bold; color:{lv_color};")
+        self.lbl_level.setStyleSheet(f"font-size:18px; font-weight:bold; color:{lv_color};")  # noqa: E501
         g = data.get("golden3s")
         self.lbl_golden.setText("完成： 前3秒合格" if g else "注意： 前3秒待加强")
         dims = data.get("dims", {}) or {}
@@ -456,11 +514,13 @@ class HookScorePage(BasePage):
         self.radar_chart.set_scores(dims)
         self.lbl_comment.setText(str(data.get("comment", "")))
         sugg = data.get("suggestions", []) or []
-        self.txt_sugg.setPlainText("\n".join(f"• {s}" for s in sugg) if isinstance(sugg, list) else str(sugg))
+        self.txt_sugg.setPlainText("\n".join(f"• {s}" for s in sugg) if isinstance(sugg, list) else str(sugg))  # noqa: E501
         self.result_card.setVisible(True)
 
     def _err(self, e):
-        self.btn_run.setEnabled(True); self.pbar.setVisible(False); self.status.setText("预测失败。")
+        self.btn_run.setEnabled(True)
+        self.pbar.setVisible(False)
+        self.status.setText("预测失败。")  # noqa: E501
         self.show_error(str(e), "视频预测失败")
 
     # ---------- 反馈数据（内联，紧跟预测结果下方）----------

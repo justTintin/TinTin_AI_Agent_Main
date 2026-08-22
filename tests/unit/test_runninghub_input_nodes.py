@@ -1,14 +1,15 @@
-# -*- coding: utf-8 -*-
 """RunningHub workflow JSON 输入节点解析单元测试。"""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-import unittest
-from gui.main_window_aigen import _classify_runninghub_input_nodes
+import unittest  # noqa: E402
+
+from gui.main_window_aigen import _classify_runninghub_input_nodes  # noqa: E402
 
 
 class TestRunningHubInputNodes(unittest.TestCase):

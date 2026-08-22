@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 工程数据登记表 —— 所有「值得备份/迁移」的数据在这里统一声明（唯一真相源）。
 
@@ -13,13 +12,23 @@
   sensitive : 是否含密钥/登录态（导出时可选排除）
   kind      : "file" | "dir"
 """
+import contextlib
 import os
 
 from config.paths import (
-    PROJECT_ROOT, AI_CONFIG_FILE, ERP_CONFIG_FILE, CONFIG_INI_FILE,
-    PRODUCT_LIBRARY_FILE, MY_KNOWLEDGE_FILE, MEDIA_LIBRARY_FILE,
-    ACCOUNTS_DIR, VOICE_SAMPLES_DIR, OUTPUTS_DIR,
-    VIDEO_CONFIG_FILE, CONFIG_DIR, SKILLS_DIR,
+    ACCOUNTS_DIR,
+    AI_CONFIG_FILE,
+    CONFIG_DIR,
+    CONFIG_INI_FILE,
+    ERP_CONFIG_FILE,
+    MEDIA_LIBRARY_FILE,
+    MY_KNOWLEDGE_FILE,
+    OUTPUTS_DIR,
+    PRODUCT_LIBRARY_FILE,
+    PROJECT_ROOT,
+    SKILLS_DIR,
+    VIDEO_CONFIG_FILE,
+    VOICE_SAMPLES_DIR,
 )
 
 DATA_ITEMS = [
@@ -28,7 +37,7 @@ DATA_ITEMS = [
      "category": "config", "sensitive": True, "kind": "file"},
     {"key": "video_config", "label": "视频配置(LUT映射)", "path": VIDEO_CONFIG_FILE,
      "category": "config", "sensitive": False, "kind": "file"},
-    {"key": "local_config", "label": "本地配置(缓存目录)", "path": os.path.join(CONFIG_DIR, "local_config.json"),
+    {"key": "local_config", "label": "本地配置(缓存目录)", "path": os.path.join(CONFIG_DIR, "local_config.json"),  # noqa: E501
      "category": "config", "sensitive": False, "kind": "file"},
     {"key": "erp_config", "label": "旺店通ERP配置", "path": ERP_CONFIG_FILE,
      "category": "config", "sensitive": True, "kind": "file"},
@@ -80,9 +89,7 @@ def summarize():
             else:
                 for root, _d, files in os.walk(p):
                     for f in files:
-                        try:
+                        with contextlib.suppress(OSError):
                             size += os.path.getsize(os.path.join(root, f))
-                        except OSError:
-                            pass
         out.append({**it, "exists": exists, "size": size})
     return out

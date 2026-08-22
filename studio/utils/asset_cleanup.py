@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """资产清理：应用启动时清理中间产物，释放 NAS/本地空间。
 
 设计原则：
@@ -9,12 +8,14 @@
 
 纯函数式，不依赖 Qt，可在任意线程调用（启动时建议后台线程，避免阻塞 UI）。
 """
+import contextlib
 import os
-import time
 import shutil
-import fnmatch
+import time
+from typing import Any
 
-from config.paths import TMP_DIR, OUTPUTS_DIR
+from config.paths import OUTPUTS_DIR, TMP_DIR
+
 from utils.logger_utils import log
 
 # 最终产物前缀——这些是用户成品，清理时一律跳过（白名单保护）
@@ -42,10 +43,7 @@ def _is_final_product(name):
     for p in _FINAL_PREFIXES:
         if name.startswith(p):
             return True
-    for s in _FINAL_SUFFIXES:
-        if name.endswith(s):
-            return True
-    return False
+    return any(name.endswith(s) for s in _FINAL_SUFFIXES)
 
 
 def _file_age_days(path):
@@ -74,15 +72,13 @@ def _safe_rmtree(path, stats):
         size = 0
         for root_d, _, files in os.walk(path):
             for f in files:
-                try:
+                with contextlib.suppress(OSError):
                     size += os.path.getsize(os.path.join(root_d, f))
-                except OSError:
-                    pass
         shutil.rmtree(path, ignore_errors=True)
         if not os.path.exists(path):
             stats["deleted"] += 1
             stats["bytes"] += size
-    except Exception as e:
+    except OSError as e:
         stats["errors"].append(f"rmtree {os.path.basename(path)}: {e}")
 
 
@@ -151,7 +147,7 @@ def _cleanup_aged_cache(root_dir, max_age_days, stats):
         return
 
     # 1) 遍历子目录，找名为 splits/ 或 voices/ 的目录
-    for root_d, dirs, files in os.walk(root_dir):
+    for root_d, dirs, _files in os.walk(root_dir):
         for d in list(dirs):
             if d not in ("splits", "voices"):
                 continue
@@ -191,9 +187,9 @@ def _cleanup_aged_subdir(sub_dir, dir_name, max_age_days, stats):
                 continue
             if dir_name == "splits":
                 # 只删分镜片段命名（shot_*），其它命名不动
-                if not (name.startswith("shot_") and name.lower().endswith((".mp4", ".m4v"))):
+                if not (name.startswith("shot_") and name.lower().endswith((".mp4", ".m4v"))):  # noqa: E501
                     continue
-            elif dir_name == "voices":
+            elif dir_name == "voices":  # noqa: SIM102
                 # 只删 voice_*.wav 和 *.timing.json
                 if not (name.lower().endswith(".wav") or name.endswith(".timing.json")):
                     continue
@@ -212,7 +208,7 @@ def cleanup_on_startup(max_age_days=7, tmp_max_age_days=1):
     max_age_days: 缓存型中间产物（splits/voices/_shots.json）的保留天数
     tmp_max_age_days: 临时目录文件的保留天数（默认 1 天，过期即清）
     """
-    stats = {"deleted": 0, "bytes": 0, "errors": []}
+    stats: dict[str, Any] = {"deleted": 0, "bytes": 0, "errors": []}
     log.info(f"[启动清理] 开始（tmp>{tmp_max_age_days}d, cache>{max_age_days}d）")
 
     try:
@@ -221,10 +217,10 @@ def cleanup_on_startup(max_age_days=7, tmp_max_age_days=1):
         _cleanup_temp_concat_and_norm(OUTPUTS_DIR, stats)
         # 第二层：缓存型按年龄
         _cleanup_aged_cache(OUTPUTS_DIR, max_age_days, stats)
-    except Exception as e:
+    except Exception as e:  # 启动清理整体异常
         stats["errors"].append(f"cleanup_on_startup: {e}")
         log.exception(f"[启动清理] 发生未预期异常: {e}")
 
     freed_mb = stats["bytes"] // 1024 // 1024
-    log.info(f"[启动清理] 完成: 删除 {stats['deleted']} 项, 释放 {freed_mb}MB, 错误 {len(stats['errors'])} 项")
+    log.info(f"[启动清理] 完成: 删除 {stats['deleted']} 项, 释放 {freed_mb}MB, 错误 {len(stats['errors'])} 项")  # noqa: E501
     return stats

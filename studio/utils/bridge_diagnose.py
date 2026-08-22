@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """桥接服务连接诊断脚本。
 
 用法：在【客户端正在运行 + 插件显示"未连接客户端"】的状态下，双击运行：
@@ -26,7 +25,7 @@ def _read_config_port():
             import json
             with open(cfg, encoding="utf-8") as f:
                 return int(json.load(f).get("port") or DEFAULT_PORT), cfg
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         return None, f"读取配置失败: {e}"
     return None, cfg + "（不存在，用默认端口）"
 
@@ -37,7 +36,7 @@ def _port_listening(port):
     try:
         s.connect(("127.0.0.1", port))
         return True
-    except Exception:
+    except OSError:
         return False
     finally:
         s.close()
@@ -47,7 +46,7 @@ def _ping(port):
     try:
         r = urllib.request.urlopen(f"http://127.0.0.1:{port}/ping", timeout=2)
         return r.status, r.read().decode("utf-8", "ignore")[:200]
-    except Exception as e:
+    except Exception as e:  # urllib HTTP 请求
         return None, str(e)[:120]
 
 
@@ -60,7 +59,7 @@ def main():
     print(f"\n[1] 客户端配置端口: {cfg_port or DEFAULT_PORT}")
     print(f"    配置来源: {cfg_info}")
 
-    print(f"\n[2] 逐端口探测（监听 + /ping）:")
+    print("\n[2] 逐端口探测（监听 + /ping）:")
     listened = []
     for p in sorted(set([cfg_port or DEFAULT_PORT] + CANDIDATE_PORTS)):
         listening = _port_listening(p)
@@ -81,7 +80,7 @@ def main():
         print("       建议：在客户端'扩展采集'页点'启动服务'，看是否报错。")
     elif cfg_port and cfg_port not in listened:
         print(f"    注意： 配置端口 {cfg_port} 未监听，但其它端口在监听: {listened}")
-        print(f"       → 客户端可能因端口冲突换了端口，但插件还连旧端口。")
+        print("       → 客户端可能因端口冲突换了端口，但插件还连旧端口。")
         print(f"       建议：把插件端口改为 {listened[0]}，或在客户端把端口改回 {cfg_port} 重启。")
     elif cfg_port in listened:
         p = cfg_port
@@ -103,7 +102,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
+    except Exception as e:  # 诊断脚本顶层兜底
         print(f"\n诊断脚本异常: {e}")
         input("按回车关闭...")
         sys.exit(1)

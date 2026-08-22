@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """config.paths：路径常量与目录结构。"""
 import os
 import sys
@@ -6,9 +5,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from config import paths
+from config import paths  # noqa: E402
 
 
 class TestPaths(unittest.TestCase):

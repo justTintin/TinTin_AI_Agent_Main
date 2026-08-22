@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 所有功能页的公共基类。
 
@@ -15,14 +14,13 @@ BasePage 收敛了各页重复的构造样板，并提供通用能力：
 子类只需实现 setup()。若子类重写 __init__，请调用 super().__init__(parent_widget, main_window)。
 """
 from PySide6.QtWidgets import QMessageBox
-
 from utils.logger_utils import log
 
 
 def _show_dev_only(parent_widget):
     """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示"""
-    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
     if parent_widget is None:
         return
     layout = parent_widget.layout()
@@ -94,7 +92,7 @@ class BasePage:
     def track_worker(self, worker):
         """持有 worker 引用防止被 GC；worker 结束后自动移除。返回 worker 本身。"""
         self._workers.append(worker)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
+        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)  # noqa: E501
         return worker
 
     # ---------- 日志 ----------

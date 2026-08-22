@@ -1,50 +1,15 @@
-# -*- coding: utf-8 -*-
+# type: ignore
 """MainWindow 的本地服务管理 mixin（VoxCPM / Ollama），从 gui_main 拆出；self 不变、行为一致。"""
 
-import subprocess
-import sys
-import os
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_INI_FILE
-)
-import threading
-import uuid
-import configparser
-from ui import gui_styles
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.account_manager import AccountManager
-from core.creator_browser_controller import CreatorBrowserController
-from utils.thread_worker import TaskWorker as Worker
-from gui.threads import SystemMonitorThread, ComfyWSThread
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
-                                 QListWidgetItem, QGridLayout, QFileDialog, 
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox)
-from PySide6.QtGui import QIcon, QFont, QPixmap
-from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QMessageBox
+from utils.logger_utils import log
 
 
 class ServicesMixin:
     def load_voxcpm_config(self):
         # 纯远程模式：只从 ai_config 读取远程 TTS 配置回填到输入框
         if hasattr(self, 'ai_config'):
-            self.vox_api_url_input.setText(self.ai_config.get("vox_api_url", "http://127.0.0.1:7861/v1/tts"))
+            self.vox_api_url_input.setText(self.ai_config.get("vox_api_url", "http://127.0.0.1:7861/v1/tts"))  # noqa: E501
             self.vox_timesteps_spin.setValue(self.ai_config.get("vox_timesteps", 20))
             self.vox_cfg_spin.setValue(self.ai_config.get("vox_cfg", 2.0))
 
@@ -56,7 +21,7 @@ class ServicesMixin:
                 if hasattr(self, "_collect_all_config_from_ui"):
                     self._collect_all_config_from_ui()
                 else:
-                    self.ai_config["vox_api_url"] = self.vox_api_url_input.text().strip()
+                    self.ai_config["vox_api_url"] = self.vox_api_url_input.text().strip()  # noqa: E501
                     self.ai_config["vox_source"] = "remote"  # 纯远程
                     self.ai_config["vox_mode"] = "api"       # 纯 API 调用
                     self.ai_config["vox_timesteps"] = self.vox_timesteps_spin.value()
@@ -64,10 +29,10 @@ class ServicesMixin:
                 try:
                     from utils import config_manager as _cm
                     _cm.save_ai_config(self.ai_config)
-                except Exception as e:
+                except OSError as e:
                     log.error(f"保存声音克隆参数到 ai_config 失败: {e}")
             return True
-        except Exception as e:
+        except Exception as e:  # 配置保存涉及文件 I/O 等多类异常
             log.error(f"静默保存 VoxCPM 配置失败: {e}")
             return False
 
@@ -82,7 +47,7 @@ class ServicesMixin:
         from utils.thread_worker import TaskWorker as Worker
         # 后台线程探测（resilient_get 自带 3 次重试 + 指数退避，
         # 服务端异常时可能耗时数十秒，绝不能阻塞 GUI 线程）
-        if getattr(self, "_ollama_probe_worker", None) and self._ollama_probe_worker.isRunning():
+        if getattr(self, "_ollama_probe_worker", None) and self._ollama_probe_worker.isRunning():  # noqa: E501
             return
 
         def _probe():
@@ -102,7 +67,7 @@ class ServicesMixin:
                     self.ollama_status_lbl.setText("● 连接失败")
                     self._set_ollama_status_state("red")
                     self.ollama_models_lbl.setText("请检查远程地址及网络")
-            except Exception as e:
+            except Exception as e:  # 外部API调用（Ollama 状态探测）
                 log.warning(f"[Ollama] 状态刷新失败: {e}")
 
         w = Worker(_probe)

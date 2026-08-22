@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QFrame, QListWidget, QWidget, QSlider)
+from gui.montage.base_step_view import BaseStepView
 from PySide6.QtCore import Qt
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from gui.montage.base_step_view import BaseStepView
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QSlider, QVBoxLayout, QWidget
 from utils.gui_icons import mdi_button
+
 
 class Step4FinalView(BaseStepView):
     """步骤 4: 最终音视频合成与剪映草稿导出界面"""
@@ -29,7 +28,7 @@ class Step4FinalView(BaseStepView):
         self.main_page.bgm_input.setPlaceholderText("选择混剪背景音乐 (mp3/wav)，选空则无BGM...")
         self.main_page.bgm_input.setReadOnly(True)
         row_bgm.addWidget(self.main_page.bgm_input)
-        
+
         btn_sel_bgm = mdi_button("选择背景音乐", "folder")
         btn_sel_bgm.setObjectName("secondary_button")
         btn_sel_bgm.clicked.connect(self.main_page._select_bgm)
@@ -92,11 +91,11 @@ class Step4FinalView(BaseStepView):
             }
         """)
         row_bgm_play.addWidget(self.main_page.bgm_progress_slider)
-        
+
         # Connect position and duration signals for the BGM preview player
-        self.main_page._bgm_player.positionChanged.connect(self.main_page._on_bgm_position_changed)
-        self.main_page._bgm_player.durationChanged.connect(self.main_page._on_bgm_duration_changed)
-        self.main_page.bgm_progress_slider.sliderMoved.connect(self.main_page._set_bgm_position)
+        self.main_page._bgm_player.positionChanged.connect(self.main_page._on_bgm_position_changed)  # noqa: E501
+        self.main_page._bgm_player.durationChanged.connect(self.main_page._on_bgm_duration_changed)  # noqa: E501
+        self.main_page.bgm_progress_slider.sliderMoved.connect(self.main_page._set_bgm_position)  # noqa: E501
 
         self.main_page.lbl_bgm_time = QLabel("00:00 / 00:00")
         self.main_page.lbl_bgm_time.setFixedWidth(90)
@@ -109,12 +108,12 @@ class Step4FinalView(BaseStepView):
         self.main_page.btn_final_assemble = mdi_button("开始混音合成", "celebration")
         self.main_page.btn_final_assemble.setObjectName("action_button")
         self.main_page.btn_final_assemble.setFixedHeight(40)
-        self.main_page.btn_final_assemble.clicked.connect(self.main_page._start_final_mix)
+        self.main_page.btn_final_assemble.clicked.connect(self.main_page._start_final_mix)  # noqa: E501
         card_layout.addWidget(self.main_page.btn_final_assemble)
 
         # Output results
         result_box = QFrame()
-        result_box.setStyleSheet("background-color: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;")
+        result_box.setStyleSheet("background-color: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;")  # noqa: E501
         res_layout = QHBoxLayout(result_box)
         res_layout.setContentsMargins(10, 10, 10, 10)
         res_layout.setSpacing(12)
@@ -128,7 +127,7 @@ class Step4FinalView(BaseStepView):
         left_vbox.addWidget(QLabel("最终合成生成的视频文件:"))
         self.main_page.final_video_list = QListWidget()
         self.main_page.final_video_list.setFixedHeight(150)
-        self.main_page.final_video_list.itemDoubleClicked.connect(self.main_page._preview_final_video)
+        self.main_page.final_video_list.itemDoubleClicked.connect(self.main_page._preview_final_video)  # noqa: E501
         left_vbox.addWidget(self.main_page.final_video_list)
 
         # Action layout for buttons
@@ -138,34 +137,34 @@ class Step4FinalView(BaseStepView):
         self.main_page.btn_open_final_dir = mdi_button("打开视频输出目录", "folder")
         self.main_page.btn_open_final_dir.setObjectName("secondary_button")
         self.main_page.btn_open_final_dir.setEnabled(False)
-        self.main_page.btn_open_final_dir.clicked.connect(self.main_page._open_output_dir)
+        self.main_page.btn_open_final_dir.clicked.connect(self.main_page._open_output_dir)  # noqa: E501
         btn_layout.addWidget(self.main_page.btn_open_final_dir, 1)
 
         # 新增按钮：导出剪映专业版草稿
         self.main_page.btn_export_jianying = mdi_button("一键导出到剪映草稿", "share")
         self.main_page.btn_export_jianying.setObjectName("primary_button")
         self.main_page.btn_export_jianying.setEnabled(False)
-        self.main_page.btn_export_jianying.clicked.connect(self.main_page._export_to_jianying_draft)
+        self.main_page.btn_export_jianying.clicked.connect(self.main_page._export_to_jianying_draft)  # noqa: E501
         btn_layout.addWidget(self.main_page.btn_export_jianying, 1)
         # 新增按钮：导出全部到时间轴（带转场）
         self.main_page.btn_export_jianying_all = mdi_button("导出全部到时间轴(带转场)", "film")
         self.main_page.btn_export_jianying_all.setObjectName("secondary_button")
         self.main_page.btn_export_jianying_all.setEnabled(False)
-        self.main_page.btn_export_jianying_all.setToolTip("将合成列表中的所有视频按顺序导出为一条剪映时间轴，片段之间自动添加所选转场，每个片段携带各自字幕")
-        self.main_page.btn_export_jianying_all.clicked.connect(self.main_page._export_all_to_jianying_draft)
+        self.main_page.btn_export_jianying_all.setToolTip("将合成列表中的所有视频按顺序导出为一条剪映时间轴，片段之间自动添加所选转场，每个片段携带各自字幕")  # noqa: E501
+        self.main_page.btn_export_jianying_all.clicked.connect(self.main_page._export_all_to_jianying_draft)  # noqa: E501
         btn_layout.addWidget(self.main_page.btn_export_jianying_all, 1)
 
         left_vbox.addLayout(btn_layout)
 
         # Right: video preview
         right_container = QWidget()
-        right_container.setStyleSheet("background-color: #000000; border-radius: 6px; border: 1px solid #27272a;")
+        right_container.setStyleSheet("background-color: #000000; border-radius: 6px; border: 1px solid #27272a;")  # noqa: E501
         right_vbox = QVBoxLayout(right_container)
         right_vbox.setContentsMargins(4, 4, 4, 4)
         right_vbox.setSpacing(4)
 
         self.main_page.final_preview_title = QLabel(" 视频预览")
-        self.main_page.final_preview_title.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold;")
+        self.main_page.final_preview_title.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold;")  # noqa: E501
         right_vbox.addWidget(self.main_page.final_preview_title)
 
         self.main_page.final_video_widget = QVideoWidget()
@@ -175,12 +174,14 @@ class Step4FinalView(BaseStepView):
         right_vbox.addWidget(self.main_page.final_video_widget, 1)
 
         # Connect preview output
-        self.main_page.final_preview_player.setVideoOutput(self.main_page.final_video_widget)
+        self.main_page.final_preview_player.setVideoOutput(self.main_page.final_video_widget)  # noqa: E501
+        self.main_page.final_preview_player.mediaStatusChanged.connect(
+            self.main_page._on_final_preview_media_status_changed)
 
         res_layout.addWidget(left_container, 1)
         res_layout.addWidget(right_container, 1)
         card_layout.addWidget(result_box)
-        
+
         card_layout.addStretch()
         layout.addWidget(card, 1)
 

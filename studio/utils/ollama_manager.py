@@ -1,23 +1,26 @@
-# -*- coding: utf-8 -*-
 """Ollama 远程客户端（纯远程模式，不再管理本地进程）。
 
 所有推理请求走 llm_vision_api_url 配置的远程 Ollama 服务。
 本模块仅保留远程只读 API：连通性检测、模型列表、配置读取。
 """
+import json
 import os
+
 import requests
-from utils.logger_utils import log
+
 from utils.http_client import resilient_get
+from utils.logger_utils import log
 
 
 def _read_ai_config() -> dict:
     try:
-        from config.paths import AI_CONFIG_FILE
         import json
+
+        from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return {}
 
@@ -58,7 +61,7 @@ class OllamaManager:
             ok = r.status_code == 200
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
             return ok
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.warning(f"[Ollama] GET {url} 失败: {e}")
             return False
 
@@ -72,7 +75,7 @@ class OllamaManager:
                 data = r.json()
                 models = data.get("models") or data.get("data") or []
                 return [m.get("name", m.get("model", str(m))) for m in models]
-        except Exception:
+        except (requests.exceptions.RequestException, json.JSONDecodeError):
             pass
         return []
 

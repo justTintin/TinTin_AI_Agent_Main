@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """卡点成片界面（一键成片 → 卡点成片 tab）
 
 流程：选择音乐 + 镜头素材目录 → 检测卡点（/audio/beatmap 返回片段）→ 按片段生成 N 个波形卡片
@@ -7,19 +6,29 @@
 """
 import os
 import struct
-import subprocess
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QFrame, QComboBox, QWidget, QScrollArea, QSizePolicy, QSpinBox,
-                               QProgressBar)
-from PySide6.QtCore import Qt, Signal, QRectF, QThread, QUrl, QPointF
-from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QFont,
-                           QLinearGradient, QPolygonF, QPixmap)
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
+
 from gui.montage.base_step_view import BaseStepView
+from PySide6.QtCore import QPointF, QRectF, Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen, QPolygonF
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.ffmpeg_utils import DEVNULL, PIPE, popen
 from utils.gui_icons import mdi_button
 from utils.logger_utils import log
-
 
 # ═══════════════════════════════════════════════════════════
 # 波形峰值提取（后台线程，ffmpeg 解码）
@@ -41,13 +50,16 @@ class WaveformPeakWorker(QThread):
 
     def run(self):
         try:
-            from utils.platform_utils import find_ffmpeg, create_no_window_flag
+            from utils.platform_utils import create_no_window_flag, find_ffmpeg
             ffmpeg_exe = find_ffmpeg()
             cmd = [ffmpeg_exe, "-i", self.audio_path,
                    "-ac", "1", "-f", "s16le", "-acodec", "pcm_s16le", "-"]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL,
+            proc = popen(cmd, stdout=PIPE,
+                                    stderr=DEVNULL,
                                     creationflags=create_no_window_flag())
+            if proc.stdout is None:
+                self.error.emit("音频解码失败，无法提取波形")
+                return
             raw = proc.stdout.read()
             proc.wait()
             if not raw or len(raw) < 4:
@@ -71,7 +83,7 @@ class WaveformPeakWorker(QThread):
 
             log.info(f"[音乐卡点] 波形提取完成: {len(peaks)} 个峰值, 时长 {duration:.1f}s")
             self.peaks_ready.emit(peaks, duration)
-        except Exception as e:
+        except Exception as e:  # 外部库调用（librosa/numpy 波形提取）
             log.error(f"[音乐卡点] 波形提取异常: {e}")
             self.error.emit(f"波形提取失败: {e}")
 
@@ -113,7 +125,7 @@ class SegmentWaveformWidget(QWidget):
 
     # ─── 数据接口 ───
 
-    def set_data(self, full_peaks, full_duration, seg_start, seg_end, beats_abs, slot_start):
+    def set_data(self, full_peaks, full_duration, seg_start, seg_end, beats_abs, slot_start):  # noqa: E501
         self._full_peaks = list(full_peaks or [])
         self._full_duration = float(full_duration or 0.0)
         self._seg_start = float(seg_start)
@@ -168,7 +180,7 @@ class SegmentWaveformWidget(QWidget):
 
     # ─── 绘制 ───
 
-    def paintEvent(self, event):
+    def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
         w, h = self.width(), self.height()
@@ -187,7 +199,7 @@ class SegmentWaveformWidget(QWidget):
         painter.drawLine(0, wave_bottom, w, wave_bottom)
 
         # 青色波形（从整轨峰值按片段范围切片）
-        if self._full_peaks and self._full_duration > 0 and self._seg_end > self._seg_start:
+        if self._full_peaks and self._full_duration > 0 and self._seg_end > self._seg_start:  # noqa: E501
             n_peaks = len(self._full_peaks)
             idx_start = int(self._seg_start / self._full_duration * n_peaks)
             idx_end = int(self._seg_end / self._full_duration * n_peaks) + 1
@@ -256,7 +268,7 @@ class SegmentWaveformWidget(QWidget):
 
     # ─── 鼠标交互：拖动游标定位 / 点击槽位分配 ───
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         x = int(event.position().x())
         w = self.width()
         px = self._time_to_x(self._play_pos, w)
@@ -266,16 +278,16 @@ class SegmentWaveformWidget(QWidget):
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event):  # noqa: N802
         if self._dragging:
-            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))
+            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))  # noqa: E501
             return
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event):  # noqa: N802
         if self._dragging:
             self._dragging = False
-            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))
+            self.seek_requested.emit(self._x_to_time(int(event.position().x()), self.width()))  # noqa: E501
             return
         if self._slots_enabled:
             idx = self._x_to_global_slot(int(event.position().x()), self.width())
@@ -328,7 +340,7 @@ class BeatSegmentCard(QFrame):
             else:
                 title_text = f" 全曲预览（{self.seg_start:.1f}s ~ {self.seg_end:.1f}s）"
         else:
-            title_text = (f" 片段 {index + 1}：{self.seg_start:.1f}s ~ {self.seg_end:.1f}s  "
+            title_text = (f" 片段 {index + 1}：{self.seg_start:.1f}s ~ {self.seg_end:.1f}s  "  # noqa: E501
                           f"({self.seg_end - self.seg_start:.1f}s) → 将生成视频 {index + 1}")
         title = QLabel(title_text)
         title.setStyleSheet("color: #f9c74f; font-weight: bold; font-size: 12px;")
@@ -397,7 +409,7 @@ class BeatSegmentCard(QFrame):
         """将播放器视频输出路由到共享预览控件（QVideoWidget）。"""
         try:
             self._player.setVideoOutput(video_widget)
-        except Exception as e:
+        except Exception as e:  # Qt 视频输出设置可能失败
             log.warning(f"[音乐卡点] 设置视频输出失败: {e}")
 
     # ─── 播放控制 ───
@@ -494,7 +506,7 @@ class BeatSegmentCard(QFrame):
             span = self.seg_end - self.seg_start
             abs_sec = self.seg_start + ratio * span
             self.waveform.set_play_pos(abs_sec)
-            self.time_lbl.setText(f"{self._fmt(rel)} / {self._fmt(vdur if vdur > 0.1 else rel)}")
+            self.time_lbl.setText(f"{self._fmt(rel)} / {self._fmt(vdur if vdur > 0.1 else rel)}")  # noqa: E501
             self.position_changed.emit(self, abs_sec)
             return
         # 音乐模式：pos 是整轨绝对时间
@@ -563,12 +575,12 @@ class StepBeatView(BaseStepView):
         music_row = QHBoxLayout()
         music_row.addWidget(QLabel("卡点音乐:"))
         self.main_page.beat_music_path = QLineEdit()
-        self.main_page.beat_music_path.setPlaceholderText("选择音乐文件（mp3/wav/m4a/aac/flac）...")
+        self.main_page.beat_music_path.setPlaceholderText("选择音乐文件（mp3/wav/m4a/aac/flac）...")  # noqa: E501
         self.main_page.beat_music_path.setReadOnly(True)
         music_row.addWidget(self.main_page.beat_music_path, 1)
         self.main_page.btn_beat_browse = QPushButton("选择音乐")
         self.main_page.btn_beat_browse.setObjectName("secondary_button")
-        self.main_page.btn_beat_browse.clicked.connect(self.main_page._beat_browse_music)
+        self.main_page.btn_beat_browse.clicked.connect(self.main_page._beat_browse_music)  # noqa: E501
         music_row.addWidget(self.main_page.btn_beat_browse)
         card_layout.addLayout(music_row)
 
@@ -576,7 +588,7 @@ class StepBeatView(BaseStepView):
         dir_row = QHBoxLayout()
         dir_row.addWidget(QLabel("镜头素材:"))
         self.main_page.beat_materials_input = QLineEdit()
-        self.main_page.beat_materials_input.setPlaceholderText("选择一个或多个视频/图片素材（图片默认 2 秒，随音乐卡点变化）...")
+        self.main_page.beat_materials_input.setPlaceholderText("选择一个或多个视频/图片素材（图片默认 2 秒，随音乐卡点变化）...")  # noqa: E501
         self.main_page.beat_materials_input.setReadOnly(True)
         dir_row.addWidget(self.main_page.beat_materials_input, 1)
         btn_sel_materials = mdi_button("选择素材", "folder")
@@ -624,7 +636,7 @@ class StepBeatView(BaseStepView):
         self.main_page.beat_aspect_combo.setFixedWidth(110)
         self.main_page.beat_aspect_combo.setToolTip("成片画面比例（选择素材后自动检测；不一致时需手动选择）")
         self.main_page.beat_aspect_combo.currentIndexChanged.connect(
-            lambda _i: self._beat_apply_preview_aspect(self.main_page.beat_aspect_combo.currentData() or "1:1"))
+            lambda _i: self._beat_apply_preview_aspect(self.main_page.beat_aspect_combo.currentData() or "1:1"))  # noqa: E501
         settings_row.addWidget(self.main_page.beat_aspect_combo)
 
         settings_row.addSpacing(12)
@@ -648,14 +660,14 @@ class StepBeatView(BaseStepView):
         self.main_page.beat_video_count_spin.setRange(1, 5)
         self.main_page.beat_video_count_spin.setValue(3)
         self.main_page.beat_video_count_spin.setFixedWidth(60)
-        self.main_page.beat_video_count_spin.setToolTip("要生成的卡点视频数量（一次上传，服务端 variant_count 上限 5）")
+        self.main_page.beat_video_count_spin.setToolTip("要生成的卡点视频数量（一次上传，服务端 variant_count 上限 5）")  # noqa: E501
         settings_row.addWidget(self.main_page.beat_video_count_spin)
 
         settings_row.addSpacing(12)
         self.main_page.btn_beat_detect = mdi_button("检测卡点", "audio")
         self.main_page.btn_beat_detect.setObjectName("primary_button")
         self.main_page.btn_beat_detect.setEnabled(False)
-        self.main_page.btn_beat_detect.clicked.connect(self.main_page._beat_start_detect)
+        self.main_page.btn_beat_detect.clicked.connect(self.main_page._beat_start_detect)  # noqa: E501
         settings_row.addWidget(self.main_page.btn_beat_detect)
         card_layout.addLayout(settings_row)
 
@@ -698,7 +710,7 @@ class StepBeatView(BaseStepView):
         # 自动识别视频比例，等比完整显示（不拉伸、不裁剪）
         self.main_page.beat_preview_video.setAspectRatioMode(Qt.KeepAspectRatio)
         self.main_page.beat_preview_video.setMinimumSize(200, 150)
-        self.main_page.beat_preview_video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.main_page.beat_preview_video.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # noqa: E501
         self.main_page.beat_preview_video.setStyleSheet("background: #000;")
         pvbox.addWidget(self.main_page.beat_preview_video, 1)
         # 视频控件按比例 setFixedSize 封顶后，用 stretch 吸收剩余空间，避免把标题撑高
@@ -731,7 +743,7 @@ class StepBeatView(BaseStepView):
         self.main_page.btn_beat_confirm.setFixedHeight(35)
         self.main_page.btn_beat_confirm.setEnabled(False)
         self.main_page.btn_beat_confirm.setToolTip("将生成的卡点视频导出到目录并打开")
-        self.main_page.btn_beat_confirm.clicked.connect(self.main_page._beat_export_videos)
+        self.main_page.btn_beat_confirm.clicked.connect(self.main_page._beat_export_videos)  # noqa: E501
         nav_row.addWidget(self.main_page.btn_beat_confirm)
         layout.addLayout(nav_row)
 
@@ -886,7 +898,7 @@ class StepBeatView(BaseStepView):
         self.main_page._beat_music_range = (0.0, 0.0)
         self.main_page.btn_beat_confirm.setEnabled(False)
         self.main_page.btn_beat_detect.setEnabled(True)
-        self.main_page.beat_status_lbl.setText(f"已选择: {os.path.basename(path)}，点击「检测卡点」")
+        self.main_page.beat_status_lbl.setText(f"已选择: {os.path.basename(path)}，点击「检测卡点」")  # noqa: E501
         # 清空旧卡片（待波形/节拍就绪后重建）
         for c in list(self.segment_cards):
             c.stop()

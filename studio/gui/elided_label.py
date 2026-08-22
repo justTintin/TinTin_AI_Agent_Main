@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """可复用的多行省略标签。
 
 行为与 QLabel 基本一致，但会把文本限制在最多 ``max_lines`` 行；超出最后一行时以
@@ -6,7 +5,7 @@
 
 当 ``max_lines <= 0`` 时，回退到普通 QLabel 的完整绘制与尺寸行为，保持向后兼容。
 """
-from PySide6.QtCore import Qt, QSize, QPointF
+from PySide6.QtCore import QPointF, QSize, Qt
 from PySide6.QtGui import QPainter, QTextLayout, QTextOption
 from PySide6.QtWidgets import QLabel
 
@@ -20,7 +19,7 @@ class ElidedLabel(QLabel):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def setMaxLineCount(self, n):
+    def setMaxLineCount(self, n):  # noqa: N802
         """设置最大显示行数；<= 0 时退化为普通 QLabel 行为。"""
         if self._max_lines == n:
             return
@@ -28,14 +27,14 @@ class ElidedLabel(QLabel):
         self.updateGeometry()
         self.update()
 
-    def maxLineCount(self):
+    def maxLineCount(self):  # noqa: N802
         """返回当前最大显示行数。"""
         return self._max_lines
 
     # ------------------------------------------------------------------
     # Painting
     # ------------------------------------------------------------------
-    def paintEvent(self, event):
+    def paintEvent(self, event):  # noqa: N802
         if self._max_lines <= 0:
             super().paintEvent(event)
             return
@@ -95,7 +94,7 @@ class ElidedLabel(QLabel):
     # ------------------------------------------------------------------
     # Sizing
     # ------------------------------------------------------------------
-    def sizeHint(self):
+    def sizeHint(self):  # noqa: N802
         if self._max_lines <= 0:
             return super().sizeHint()
 
@@ -106,7 +105,7 @@ class ElidedLabel(QLabel):
         width = min(sh.width(), 1400)
         return QSize(width, height)
 
-    def minimumSizeHint(self):
+    def minimumSizeHint(self):  # noqa: N802
         if self._max_lines <= 0:
             return super().minimumSizeHint()
 

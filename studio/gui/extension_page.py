@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 扩展插件页面（page 44）
 
@@ -9,29 +8,44 @@
 - 控制本地桥接服务（extension_bridge）：启停 / 端口 / 保存目录 / 服务端扫描
 - 查看最近采集记录
 """
+import contextlib
 import os
 import shutil
 import subprocess
 import winreg
 
+from config.paths import DATA_DIR, EXTENSION_DIR
+from gui._tab_compat import setup_tab_widget
+from gui.base_page import BasePage
+from gui.elided_label import ElidedLabel
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
-    QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-
-from gui.base_page import BasePage
-from gui.elided_label import ElidedLabel
-from config.paths import EXTENSION_DIR
-from utils.extension_bridge import DEFAULT_PORT
-from utils.logger_utils import log
 from utils.extension_bridge import DEFAULT_PORT, get_bridge
 
 # 扩展模块目录（apps/browser-extension/）—— 源码即浏览器加载点，无需复制副本
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
+from utils.logger_utils import log
+from utils.process_utils import CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, popen
+
 EXT_DIR = EXTENSION_DIR
 
 
@@ -42,7 +56,7 @@ def _reg_app_path(exe_name: str) -> str:
     for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
             key = winreg.OpenKey(
-                root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}")
+                root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}")  # noqa: E501
             path, _ = winreg.QueryValueEx(key, "")
             winreg.CloseKey(key)
             if path and os.path.isfile(path):
@@ -62,8 +76,8 @@ def _first_existing(candidates) -> str:
 
 def detect_browsers() -> list:
     """返回 [{name, exe}]，exe 为空表示未安装。"""
-    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-    pfx = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    pf = os.environ.get("PROGRAMFILES", r"C:\Program Files")  # noqa: SIM112
+    pfx = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")  # noqa: SIM112
     la = os.environ.get("LOCALAPPDATA", "")
     defs = [
         ("Google Chrome", "chrome.exe", [
@@ -107,15 +121,13 @@ def ensure_extension_installed() -> str:
     源码目录即加载点，无需复制副本（Chrome 开发者模式加载未打包扩展只读不写）。
     旧的 apps/extension 副本若存在则清理，避免双目录混淆。
     """
-    if not os.path.isdir(EXT_DIR) or not os.path.isfile(os.path.join(EXT_DIR, "manifest.json")):
+    if not os.path.isdir(EXT_DIR) or not os.path.isfile(os.path.join(EXT_DIR, "manifest.json")):  # noqa: E501
         raise FileNotFoundError(f"扩展目录不存在或缺少 manifest.json: {EXT_DIR}")
     # 清理历史遗留的复制副本（apps/extension），统一用 browser-extension 作为加载点
     legacy_copy = os.path.join(os.path.dirname(EXT_DIR), "extension")
-    if os.path.isdir(legacy_copy) and os.path.normcase(legacy_copy) != os.path.normcase(EXT_DIR):
-        try:
+    if os.path.isdir(legacy_copy) and os.path.normcase(legacy_copy) != os.path.normcase(EXT_DIR):  # noqa: E501
+        with contextlib.suppress(OSError):
             shutil.rmtree(legacy_copy, ignore_errors=True)
-        except Exception:
-            pass
     return EXT_DIR
 
 
@@ -125,10 +137,15 @@ class ExtensionPage(BasePage):
         self._browsers = []
 
         outer = QVBoxLayout(self.parent_widget)
-        outer.setContentsMargins(0, 0, 0, 0)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        outer.addWidget(self.tabs)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(0)
+
+        title = QLabel(" 扩展插件")
+        title.setObjectName("heading")
+        title.setFixedHeight(28)
+        outer.addWidget(title, 0, Qt.AlignLeft)
+
+        self._tab_bar, self._stack, self.tabs = setup_tab_widget(outer)
 
         download_tab = QWidget()
         dl_lay = QVBoxLayout(download_tab)
@@ -143,27 +160,23 @@ class ExtensionPage(BasePage):
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(12)
 
-        hdr = QHBoxLayout()
-        title = QLabel(" 扩展插件")
-        title.setObjectName("heading")
-        hdr.addWidget(title)
         desc = ElidedLabel("浏览器素材采集扩展（仿 Billfish 采集插件）", max_lines=1)
         desc.setObjectName("muted_text")
-        hdr.addWidget(desc)
-        hdr.addStretch()
-        root.addLayout(hdr)
+        root.addWidget(desc)
 
         root.addWidget(self._build_browser_card())
         root.addWidget(self._build_bridge_card())
         root.addWidget(self._build_records_card(), 1)
-        self.tabs.addTab(download_tab, "⬇ 下载插件")
+        self._tab_bar.addTab("⬇ 下载插件")
+        self._stack.addWidget(download_tab)
 
         self.bridge.record_added.connect(lambda _rec: self._refresh_records())
         self.bridge.log_message.connect(lambda _msg: self._refresh_bridge_status())
 
         from gui.auto_listing_tab import AutoListingTab
         self.auto_listing_tab = AutoListingTab(self)
-        self.tabs.addTab(self.auto_listing_tab, " 自动上架")
+        self._tab_bar.addTab(" 自动上架")
+        self._stack.addWidget(self.auto_listing_tab)
 
         self._refresh_browsers()
         self._refresh_bridge_status()
@@ -264,7 +277,7 @@ class ExtensionPage(BasePage):
         row2b = QHBoxLayout()
         row2b.addWidget(QLabel("NAS 同步目录:"))
         self.edit_nas_dir = QLineEdit(self.bridge.config.get("nas_sync_dir") or "")
-        self.edit_nas_dir.setPlaceholderText("本地映射网盘目录（如 Z:\\materials\\collect），下载成功后同步到此")
+        self.edit_nas_dir.setPlaceholderText("本地映射网盘目录（如 Z:\\materials\\collect），下载成功后同步到此")  # noqa: E501
         row2b.addWidget(self.edit_nas_dir, 1)
         btn_browse_nas = mdi_button("浏览…", "folder")
         btn_browse_nas.setObjectName("secondary_button")
@@ -275,7 +288,7 @@ class ExtensionPage(BasePage):
         row2c = QHBoxLayout()
         row2c.addWidget(QLabel("下载引擎 Cookies:"))
         self.combo_cookies = QComboBox()
-        for text, data in [("不使用", ""), ("Chrome", "chrome"), ("Edge", "edge"), ("Firefox", "firefox")]:
+        for text, data in [("不使用", ""), ("Chrome", "chrome"), ("Edge", "edge"), ("Firefox", "firefox")]:  # noqa: E501
             self.combo_cookies.addItem(text, data)
         cur_cookies = (self.bridge.config.get("cookies_browser") or "").lower()
         idx = self.combo_cookies.findData(cur_cookies)
@@ -295,7 +308,7 @@ class ExtensionPage(BasePage):
         row2e = QHBoxLayout()
         row2e.addWidget(QLabel("代理地址:"))
         self.edit_proxy = QLineEdit(self.bridge.config.get("proxy") or "")
-        self.edit_proxy.setPlaceholderText("127.0.0.1:7890（留空=不走代理；socks5端口请写 socks5://host:port）")
+        self.edit_proxy.setPlaceholderText("127.0.0.1:7890（留空=不走代理；socks5端口请写 socks5://host:port）")  # noqa: E501
         self.edit_proxy.setToolTip(
             "仅 YouTube 下载使用代理，其他站点直连。填写你代理软件的本地端口，\n"
             "以运行环境方式注入：yt-dlp/ffmpeg 全链路统一走代理。\n\n"
@@ -309,8 +322,8 @@ class ExtensionPage(BasePage):
         lay.addLayout(row2e)
 
         row2d = QHBoxLayout()
-        self.chk_auto_subtitle = QCheckBox(" 视频下载后自动生成字幕（调用服务端 Whisper，与视频同目录保存 .srt 并同步 NAS）")
-        self.chk_auto_subtitle.setChecked(bool(self.bridge.config.get("auto_subtitle", False)))
+        self.chk_auto_subtitle = QCheckBox(" 视频下载后自动生成字幕（调用服务端 Whisper，与视频同目录保存 .srt 并同步 NAS）")  # noqa: E501
+        self.chk_auto_subtitle.setChecked(bool(self.bridge.config.get("auto_subtitle", False)))  # noqa: E501
         row2d.addWidget(self.chk_auto_subtitle)
         row2d.addStretch()
         lay.addLayout(row2d)
@@ -361,8 +374,8 @@ class ExtensionPage(BasePage):
 
         self.records_table = QTableWidget(0, 5)
         self.records_table.setHorizontalHeaderLabels(["时间", "类型", "文件名", "状态", "来源页面"])
-        self.records_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.records_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.records_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)  # noqa: E501
+        self.records_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)  # noqa: E501
         self.records_table.verticalHeader().setVisible(False)
         self.records_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.records_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -381,7 +394,7 @@ class ExtensionPage(BasePage):
         first_installed = -1
         for i, b in enumerate(self._browsers):
             installed = bool(b["exe"])
-            item = QListWidgetItem(f"{'完成：' if installed else '移除'} {b['name']}  {b['exe'] or '（未安装）'}")
+            item = QListWidgetItem(f"{'完成：' if installed else '移除'} {b['name']}  {b['exe'] or '（未安装）'}")  # noqa: E501
             item.setData(Qt.UserRole, i)
             if not installed:
                 item.setFlags(Qt.NoItemFlags)
@@ -402,17 +415,17 @@ class ExtensionPage(BasePage):
             return
         try:
             ext_dir = ensure_extension_installed()
-        except Exception as e:
+        except OSError as e:
             self.show_error(f"准备扩展文件失败：{e}")
             return
         # 打开浏览器扩展管理页（不带 --load-extension：浏览器已运行时该参数会被忽略，
         # 且临时加载每次启动都要重装，反而误导）
         try:
-            subprocess.Popen(
+            popen(
                 [browser["exe"], "chrome://extensions/"],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
             )
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             self.show_error(f"启动浏览器失败：{e}")
             return
         QGuiApplication.clipboard().setText(ext_dir)
@@ -432,7 +445,7 @@ class ExtensionPage(BasePage):
         try:
             ext_dir = ensure_extension_installed()
             os.startfile(ext_dir)
-        except Exception as e:
+        except OSError as e:
             self.show_error(f"打开扩展目录失败：{e}")
 
     def _copy_ext_path(self):
@@ -457,7 +470,7 @@ class ExtensionPage(BasePage):
         if not self._validate_sync_pair():
             return
         restart_needed = (
-            int(self.bridge.config.get("port") or DEFAULT_PORT) != self.spin_port.value()
+            int(self.bridge.config.get("port") or DEFAULT_PORT) != self.spin_port.value()  # noqa: E501
             and self.bridge.is_running
         )
         self.bridge.update_config(
@@ -502,6 +515,7 @@ class ExtensionPage(BasePage):
         """后台更新 yt-dlp（YouTube 解析规则频繁变化，需保持最新）。"""
         from utils.base_worker import BaseWorker
         from utils.extension_bridge import _find_ytdlp
+        from utils.ytdlp_utils import update_ytdlp
         ytdlp = _find_ytdlp()
         if not ytdlp:
             self.show_warning("未找到 yt-dlp（apps/asset-browser/bin/yt-dlp.exe）。")
@@ -513,10 +527,8 @@ class ExtensionPage(BasePage):
             finished = Signal(str)
 
             def do_work(self):
-                r = subprocess.run([ytdlp, "-U"], capture_output=True, text=True,
-                                   timeout=300, creationflags=subprocess.CREATE_NO_WINDOW)
-                out = ((r.stdout or "") + (r.stderr or "")).strip()
-                self.finished.emit(out.splitlines()[-1] if out else "完成")
+                ok, msg = update_ytdlp(ytdlp)
+                self.finished.emit(msg)
 
         def _done(msg):
             self.btn_update_engine.setEnabled(True)
@@ -551,7 +563,7 @@ class ExtensionPage(BasePage):
         try:
             os.makedirs(d, exist_ok=True)
             os.startfile(d)
-        except Exception as e:
+        except OSError as e:
             self.show_error(f"打开目录失败：{e}")
 
     def _refresh_bridge_status(self):
@@ -560,7 +572,7 @@ class ExtensionPage(BasePage):
         self.bridge_status.setText(
             f"● 运行中 127.0.0.1:{port}（已采集 {self.bridge.collected_count} 个）"
             if running else "● 未启动")
-        self.bridge_status.setStyleSheet("color: #2ecc71;" if running else "color: #999;")
+        self.bridge_status.setStyleSheet("color: #2ecc71;" if running else "color: #999;")  # noqa: E501
         self.btn_bridge_toggle.setText("停止服务" if running else "启动服务")
 
         port_note = None
@@ -569,8 +581,8 @@ class ExtensionPage(BasePage):
             try:
                 cfg_port = int(config_port) if config_port else DEFAULT_PORT
                 if cfg_port != port:
-                    port_note = f"注意： 配置端口({cfg_port}) 与运行端口({port})不一致，请在桥接配置中更新配置到运行端口({port})以免连接失败"
-            except Exception:
+                    port_note = f"注意： 配置端口({cfg_port}) 与运行端口({port})不一致，请在桥接配置中更新配置到运行端口({port})以免连接失败"  # noqa: E501
+            except (ValueError, TypeError):
                 pass
 
         self.bridge_port_note.setText(port_note or "")

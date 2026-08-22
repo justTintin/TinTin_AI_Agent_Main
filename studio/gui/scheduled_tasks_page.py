@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 定时任务页：监控服务端 /scheduled/tasks 的执行状态与输出结果。
 
@@ -12,20 +11,34 @@
 """
 import os
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDialog, QDialogButtonBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QTextBrowser, QWidget, QSlider, QFileDialog, QMessageBox,
-)
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
-
+import requests.exceptions
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
-from utils.gui_icons import mdi_button, table_action_button
-from utils.logger_utils import log
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 from utils import scheduled_task_client as stc
+from utils.gui_icons import table_action_button
+from utils.logger_utils import log
 
 
 class _VideoPlayerDialog(QDialog):
@@ -36,7 +49,8 @@ class _VideoPlayerDialog(QDialog):
         self.setWindowTitle(f"播放 播放成片 - {title[:40]}")
         self.resize(960, 600)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 10); lay.setSpacing(8)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(8)
 
         self._video = QVideoWidget()
         lay.addWidget(self._video, 1)
@@ -45,7 +59,8 @@ class _VideoPlayerDialog(QDialog):
         self._player.setAudioOutput(self._audio)
         self._player.setVideoOutput(self._video)
 
-        ctl = QHBoxLayout(); ctl.setSpacing(8)
+        ctl = QHBoxLayout()
+        ctl.setSpacing(8)
         self._btn_toggle = QPushButton("暂停 暂停")
         self._btn_toggle.setObjectName("secondary_button")
         self._btn_toggle.setFixedWidth(90)
@@ -96,7 +111,7 @@ class _VideoPlayerDialog(QDialog):
                             f"无法播放成片（{msg}）。\n可改用「下载成片」保存到本地播放。")
         self._btn_toggle.setEnabled(False)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         self._player.stop()
         super().closeEvent(event)
 
@@ -122,15 +137,18 @@ class ScheduledTasksPage(BasePage):
         heading = QLabel("成片任务")
         heading.setObjectName("heading")
         hdr.addWidget(heading)
-        sub = ElidedLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。", max_lines=1)
+        sub = ElidedLabel("监控服务端成片任务（产品成片/脚本成片）执行状态与输出结果；任务由服务端调度执行。", max_lines=1)  # noqa: E501
         sub.setObjectName("muted_text")
         hdr.addWidget(sub)
         hdr.addStretch()
         root.addLayout(hdr)
 
         # ── 任务列表 ───────────────────────────────────────────────────────
-        list_card = QFrame(); list_card.setObjectName("card")
-        ll = QVBoxLayout(list_card); ll.setContentsMargins(12, 10, 12, 10); ll.setSpacing(8)
+        list_card = QFrame()
+        list_card.setObjectName("card")
+        ll = QVBoxLayout(list_card)
+        ll.setContentsMargins(12, 10, 12, 10)
+        ll.setSpacing(8)  # noqa: E501
 
         list_header = QHBoxLayout()
         list_header.addWidget(QLabel(" 成片任务列表（来自服务端）"))
@@ -171,8 +189,11 @@ class ScheduledTasksPage(BasePage):
         root.addWidget(list_card, 2)
 
         # ── 选中任务详情 ───────────────────────────────────────────────────
-        detail_card = QFrame(); detail_card.setObjectName("card")
-        dl = QVBoxLayout(detail_card); dl.setContentsMargins(12, 10, 12, 10); dl.setSpacing(6)
+        detail_card = QFrame()
+        detail_card.setObjectName("card")
+        dl = QVBoxLayout(detail_card)
+        dl.setContentsMargins(12, 10, 12, 10)
+        dl.setSpacing(6)  # noqa: E501
         dl.addWidget(QLabel(" 任务详情（参数 / 结果）"))
         self.detail = QTextBrowser()
         self.detail.setOpenExternalLinks(False)
@@ -214,13 +235,32 @@ class ScheduledTasksPage(BasePage):
         dl.addWidget(self.variants_title)
         self.variants_container = QWidget()   # 动态填充打分行的容器
         self.variants_layout = QVBoxLayout(self.variants_container)
-        self.variants_layout.setContentsMargins(0, 0, 0, 0); self.variants_layout.setSpacing(4)
+        self.variants_layout.setContentsMargins(0, 0, 0, 0)
+        self.variants_layout.setSpacing(4)  # noqa: E501
         self.variants_container.setVisible(False)
         dl.addWidget(self.variants_container)
         self._current_task_id = None   # 当前展示详情的任务 id（供打分回调用）
         self._agent_link = {}          # 执行层任务号 → 编排层任务号（a_ 前缀）
         self._agent_eval = {}          # 编排层任务号 → 服务端深度评审 evaluation dict
         self._task_eval = {}           # 执行层任务号 → 深度评审（/evaluate/by-task 直接命中）
+
+        # 维度打分区（仅当任务已完成且有深度评审时显示）
+        self.dim_title = QLabel(" 维度打分反馈（逐维改分，驱动服务端进化）")
+        self.dim_title.setStyleSheet("font-weight:bold; color:#f39c12;")
+        self.dim_title.setVisible(False)
+        dl.addWidget(self.dim_title)
+        self._dim_widgets = {}  # {dim_key: {"label": ..., "spin": ..., "orig_score": ...}}
+        self._dim_spins_group = QWidget()
+        self._dim_spins_layout = QVBoxLayout(self._dim_spins_group)
+        self._dim_spins_layout.setContentsMargins(0, 0, 0, 0)
+        self._dim_spins_layout.setSpacing(4)
+        self._dim_spins_group.setVisible(False)
+        dl.addWidget(self._dim_spins_group)
+        self.btn_dim_submit = QPushButton(" 提交维度反馈")
+        self.btn_dim_submit.setObjectName("primary_button")
+        self.btn_dim_submit.setVisible(False)
+        self.btn_dim_submit.clicked.connect(self._on_dimension_feedback_submit)
+        dl.addWidget(self.btn_dim_submit)
 
         root.addWidget(detail_card, 1)
 
@@ -237,7 +277,8 @@ class ScheduledTasksPage(BasePage):
         """从服务端拉取任务列表并刷新表格（HTTP 放后台线程，避免服务端异常时卡界面）。
         同时拉取编排任务列表，建立 执行号 → 编排任务号（a_）映射。"""
         from utils.thread_worker import TaskWorker as Worker
-        if getattr(self, "_refresh_worker", None) and self._refresh_worker.isRunning():
+        self._refresh_worker: Worker | None = None
+        if self._refresh_worker is not None and self._refresh_worker.isRunning():
             return
 
         def _fetch_all():
@@ -245,9 +286,9 @@ class ScheduledTasksPage(BasePage):
             link, evals, task_evals = {}, {}, self._fetch_task_evaluations(items)
             try:
                 from utils import agent_client
-                link = self._build_agent_link(agent_client.list_tasks(root_only=False) or {})
+                link = self._build_agent_link(agent_client.list_tasks(root_only=False) or {})  # noqa: E501
                 evals = self._fetch_evaluations(set(link.values()))
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 log.warning(f"[成片任务] 编排任务映射/评审获取失败（不影响列表）: {e}")
             return items, link, evals, task_evals
 
@@ -276,7 +317,7 @@ class ScheduledTasksPage(BasePage):
 
         link = {}
         for t in tasks:
-            rid = (t.get("result") or {}).get("id") if isinstance(t.get("result"), dict) else None
+            rid = (t.get("result") or {}).get("id") if isinstance(t.get("result"), dict) else None  # noqa: E501
             # 执行层任务号为纯数字；a_/script_ 等属编排层自身产物，不纳入映射
             if rid is not None and str(rid).isdigit():
                 link[str(rid)] = _root(t.get("id"))
@@ -293,7 +334,7 @@ class ScheduledTasksPage(BasePage):
                 ev = (u or {}).get("evaluation")
                 if isinstance(ev, dict):
                     out[aid] = ev
-            except Exception:
+            except requests.exceptions.RequestException:
                 continue
         return out
 
@@ -301,20 +342,16 @@ class ScheduledTasksPage(BasePage):
     def _fetch_task_evaluations(items):
         """按执行层任务号直查深度评审（GET /evaluate/by-task/{id}）。
         成片类任务完成后服务端自动投递评价，数字任务不依赖编排映射也能命中。"""
-        from utils.http_client import http_get
         out = {}
         for t in items or []:
             tid = t.get("id")
             if tid is None or t.get("status") != "completed":
                 continue
             try:
-                r = http_get(f"{stc._server_url()}/evaluate/by-task/{tid}", timeout=10)
-                if r.status_code != 200:
-                    continue
-                ev = (r.json() or {}).get("evaluation")
-                if isinstance(ev, dict) and ev.get("total") is not None:
+                ev = stc.evaluate_by_task(tid)
+                if ev is not None:
                     out[str(tid)] = ev
-            except Exception:
+            except requests.exceptions.RequestException:
                 continue
         return out
 
@@ -346,7 +383,7 @@ class ScheduledTasksPage(BasePage):
             self.table.setItem(i, 0, check_item)
             # ID：优先展示编排任务号（a_），执行号作辅助（悬停可见）
             agent_tid = self._agent_link.get(str(tid))
-            id_item = QTableWidgetItem(f"{agent_tid}\n#{tid}" if agent_tid else str(tid))
+            id_item = QTableWidgetItem(f"{agent_tid}\n#{tid}" if agent_tid else str(tid))  # noqa: E501
             id_item.setToolTip(
                 f"编排任务号：{agent_tid or '—（非对话发起）'}\n执行任务号：{tid}" if agent_tid
                 else f"执行任务号：{tid}")
@@ -358,7 +395,7 @@ class ScheduledTasksPage(BasePage):
             name_item.setToolTip(title)
             self.table.setItem(i, 2, name_item)
             # 类型
-            self.table.setItem(i, 3, QTableWidgetItem(self._type_label(t.get("task_type", ""))))
+            self.table.setItem(i, 3, QTableWidgetItem(self._type_label(t.get("task_type", ""))))  # noqa: E501
             # 状态（带颜色）
             status_item = QTableWidgetItem(self._status_label(status))
             status_item.setForeground(self._status_color(status))
@@ -373,7 +410,7 @@ class ScheduledTasksPage(BasePage):
                 self.table.setCellWidget(i, 6, btn_play)
                 self.table.setCellWidget(i, 7, self._make_download_cell(t))
             # 创建时间
-            self.table.setItem(i, 8, QTableWidgetItem(self._fmt_time(t.get("created_at"))))
+            self.table.setItem(i, 8, QTableWidgetItem(self._fmt_time(t.get("created_at"))))  # noqa: E501
             # 操作列：删除
             self.table.setCellWidget(i, 9, self._make_del_widget(t))
             if status in ("pending", "running"):
@@ -381,6 +418,7 @@ class ScheduledTasksPage(BasePage):
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
         self._current_task_full = None
+        self._hide_dimension_feedback()
         for _b in ("btn_view_log",):
             b = getattr(self, _b, None)
             if b is not None:
@@ -390,9 +428,9 @@ class ScheduledTasksPage(BasePage):
         if hasattr(self, "btn_select_all"):
             self.btn_select_all.setText(" 全选")
         # 有进行中任务 且 自动刷新开启 → 启动轮询；否则停止
-        if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():
+        if has_active and self.chk_autorefresh.isChecked() and not self._poll_timer.isActive():  # noqa: E501
             self._poll_timer.start()
-        elif (not has_active or not self.chk_autorefresh.isChecked()) and self._poll_timer.isActive():
+        elif (not has_active or not self.chk_autorefresh.isChecked()) and self._poll_timer.isActive():  # noqa: E501
             self._poll_timer.stop()
 
     def _on_row_clicked(self, row, col):
@@ -417,6 +455,7 @@ class ScheduledTasksPage(BasePage):
             self.btn_view_log.setVisible(True)
             self.detail.setMarkdown(self._render_detail(t))
             self._populate_variants(t)   # 填充变体打分区
+            self._populate_dimension_feedback(t)   # 填充维度打分区
 
     def _render_detail(self, t):
         params = t.get("params", {}) or {}
@@ -432,7 +471,7 @@ class ScheduledTasksPage(BasePage):
             lines.append(f"- **任务 ID**：{t.get('id')}")
         lines += [
             f"- **类型**：{self._type_label(t.get('task_type', ''))}",
-            f"- **状态**：{self._status_label(t.get('status', ''))}（{t.get('progress', 0)}%）",
+            f"- **状态**：{self._status_label(t.get('status', ''))}（{t.get('progress', 0)}%）",  # noqa: E501
             f"- **创建**：{self._fmt_time(t.get('created_at'))}",
             f"- **完成**：{self._fmt_time(t.get('completed_at'))}",
         ]
@@ -448,7 +487,7 @@ class ScheduledTasksPage(BasePage):
                            "excellent": " 优秀", "marginal": "注意： 边缘"}
             lines += ["", "####  成片评审（服务端深度评审）"]
             lines.append(f"- **总分**：**{ev.get('total')}** / 10　**结论**："
-                         f"{verdict_map.get(ev.get('verdict'), ev.get('verdict') or '—')}"
+                         f"{verdict_map.get(str(ev.get('verdict', '')), str(ev.get('verdict', '')) or '—')}"  # noqa: E501
                          f"（置信度 {ev.get('confidence')}，引擎：{ev.get('engine') or '—'}）")
             layer_labels = (("technical", "技术质量"), ("editing", "剪辑节奏"),
                             ("narrative", "叙事表达"), ("aesthetic", "美学画面"),
@@ -468,16 +507,16 @@ class ScheduledTasksPage(BasePage):
         qs = result.get("quality_score") if isinstance(result, dict) else None
         if isinstance(qs, dict):
             lines += ["", "####  评审评分（成片质量评分）"]
-            lines.append(f"- **总分**：**{qs.get('total')}** / 10（评分引擎：{qs.get('engine') or '—'}）")
-            for k, label in (("clarity", "清晰度"), ("texture", "质感"), ("aesthetics", "美学"),
+            lines.append(f"- **总分**：**{qs.get('total')}** / 10（评分引擎：{qs.get('engine') or '—'}）")  # noqa: E501
+            for k, label in (("clarity", "清晰度"), ("texture", "质感"), ("aesthetics", "美学"),  # noqa: E501
                              ("composition", "构图"), ("color_quality", "色彩质量"),
-                             ("figure_quality", "人物质量"), ("subject_prominence", "主体突出度")):
+                             ("figure_quality", "人物质量"), ("subject_prominence", "主体突出度")):  # noqa: E501
                 if qs.get(k) is not None:
                     lines.append(f"- {label}：{qs.get(k)}")
         # ── 关键结果：成片路径/时长/大小/镜头数 ──
         if isinstance(result, dict) and result:
             lines += ["", "#### 结果"]
-            vid = result.get("output_url") or result.get("video_path") or result.get("output_path") or ""
+            vid = result.get("output_url") or result.get("video_path") or result.get("output_path") or ""  # noqa: E501
             if vid:
                 lines.append(f"- **成片视频**：{vid}")
             pkg = result.get("package_url") or ""
@@ -568,11 +607,12 @@ class ScheduledTasksPage(BasePage):
             f" 变体打分（任务 {self._current_task_id}：对成片好/坏反馈，供服务端进化）　"
             f"最优变体：{best or '—'}")
 
-        # 每个变体一行：变体名/风格/节奏/评分 +  + 
+        # 每个变体一行：变体名/风格/节奏/评分 +  +
         for v in variants:
             row = QWidget()
             rl = QHBoxLayout(row)
-            rl.setContentsMargins(2, 2, 2, 2); rl.setSpacing(8)
+            rl.setContentsMargins(2, 2, 2, 2)
+            rl.setSpacing(8)
             name = v.get("variant", "")
             is_best = (name == best)
             tag = "" if is_best else "  "
@@ -584,11 +624,11 @@ class ScheduledTasksPage(BasePage):
             btn_good = QPushButton(" 好")
             btn_good.setObjectName("secondary_button")
             btn_good.setFixedWidth(64)
-            btn_good.clicked.connect(lambda _=False, fb="good": self._on_variant_feedback(fb))
+            btn_good.clicked.connect(lambda _=False, fb="good": self._on_variant_feedback(fb))  # noqa: E501
             rl.addWidget(btn_good)
             btn_bad = QPushButton(" 差")
             btn_bad.setFixedWidth(64)
-            btn_bad.clicked.connect(lambda _=False, fb="bad": self._on_variant_feedback(fb))
+            btn_bad.clicked.connect(lambda _=False, fb="bad": self._on_variant_feedback(fb))  # noqa: E501
             rl.addWidget(btn_bad)
             self.variants_layout.addWidget(row)
 
@@ -611,7 +651,8 @@ class ScheduledTasksPage(BasePage):
             self.show_error(f"反馈提交失败：{e}", "错误")
         worker.finished.connect(_ok)
         worker.error.connect(_err)
-        self.track_worker(worker); worker.start()
+        self.track_worker(worker)
+        worker.start()
 
     def _feedback_btns_set_enabled(self, enabled):
         """禁用/启用所有变体打分按钮（提交中防重复点击）。"""
@@ -621,13 +662,109 @@ class ScheduledTasksPage(BasePage):
                 for btn in w.findChildren(QPushButton):
                     btn.setEnabled(enabled)
 
+    # ── 维度打分反馈 ──────────────────────────────────────────────────────
+    _DIMENSION_LABELS = {
+        "technical": "技术质量",
+        "editing": "剪辑节奏",
+        "narrative": "叙事表达",
+        "aesthetic": "美学画面",
+        "audio": "音频质量",
+        "compliance": "合规性",
+    }
+
+    def _populate_dimension_feedback(self, t):
+        """根据任务深度评审填充维度打分区。
+        仅当任务已完成且有 layer_scores 时显示；否则隐藏。"""
+        while self._dim_spins_layout.count():
+            child = self._dim_spins_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self._dim_widgets = {}
+
+        ev = self._task_eval.get(str(t.get("id")))
+        if not isinstance(ev, dict):
+            agent_tid = self._agent_link.get(str(t.get("id")))
+            ev = self._agent_eval.get(agent_tid) if agent_tid else None
+        ls = (ev or {}).get("layer_scores") or {}
+        is_done = t.get("status") == "completed"
+
+        if not is_done or not ls:
+            self.dim_title.setVisible(False)
+            self._dim_spins_group.setVisible(False)
+            self.btn_dim_submit.setVisible(False)
+            return
+
+        self.dim_title.setVisible(True)
+        self._dim_spins_group.setVisible(True)
+        self.btn_dim_submit.setVisible(True)
+        self._current_task_id = t.get("id")
+
+        for key, label in self._DIMENSION_LABELS.items():
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(2, 2, 2, 2)
+            rl.setSpacing(8)
+            rl.addWidget(QLabel(f"{label}："))
+            orig = ls.get(key)
+            spin = QSpinBox()
+            spin.setRange(0, 10)
+            spin.setSingleStep(1)
+            spin.setValue(int(orig) if orig is not None else 5)
+            spin.setFixedWidth(60)
+            spin.setToolTip(f"当前服务端评分：{orig if orig is not None else '未评分'}")
+            rl.addWidget(spin)
+            rl.addStretch()
+            self._dim_widgets[key] = {"spin": spin, "orig": orig}
+            self._dim_spins_layout.addWidget(row)
+
+    def _on_dimension_feedback_submit(self):
+        """提交维度改分到服务端。"""
+        tid = self._current_task_id
+        if not tid:
+            return
+        scores = {}
+        for key, wd in self._dim_widgets.items():
+            spin = wd.get("spin")
+            if spin:
+                scores[key] = spin.value()
+        if not scores:
+            self.show_warning("没有可提交的维度分数。")
+            return
+        self.btn_dim_submit.setEnabled(False)
+        self.btn_dim_submit.setText("提交中…")
+        from utils.thread_worker import TaskWorker as Worker
+        worker = Worker(lambda: stc.submit_dimension_feedback(tid, scores))
+        def _ok(updated):
+            self.btn_dim_submit.setEnabled(True)
+            self.btn_dim_submit.setText("提交维度反馈")
+            if updated:
+                self.show_info("维度反馈已提交，服务端将据此优化评审模型。")
+            else:
+                self.show_warning("反馈未生效（任务 id 或接口无效）。")
+        def _err(e):
+            self.btn_dim_submit.setEnabled(True)
+            self.btn_dim_submit.setText("提交维度反馈")
+            self.show_error(f"维度反馈提交失败：{e}", "错误")
+        worker.finished.connect(_ok)
+        worker.error.connect(_err)
+        self.track_worker(worker)
+        worker.start()
+
+    def _hide_dimension_feedback(self):
+        """隐藏维度打分区（刷新/清空详情时调用）。"""
+        self.dim_title.setVisible(False)
+        self._dim_spins_group.setVisible(False)
+        self.btn_dim_submit.setVisible(False)
+        self._dim_widgets = {}
+
     # ── 操作列 ────────────────────────────────────────────────────────────
     def _make_del_widget(self, t):
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(6)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
         btn_del = table_action_button("", "删除")
-        btn_del.clicked.connect(lambda _=False, tid=t.get("id"): self._delete(tid))
+        btn_del.clicked.connect(lambda _=False: self._delete(t.get("id")))
         lay.addWidget(btn_del)
         return w
 
@@ -635,7 +772,8 @@ class ScheduledTasksPage(BasePage):
         """下载列：视频下载 + 打包下载两个按钮。"""
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
         btn_video = table_action_button("⬇ 视频", "下载成片视频")
         btn_video.clicked.connect(
             lambda _=False, t=task: self._download_video(t))
@@ -787,7 +925,7 @@ class ScheduledTasksPage(BasePage):
     # ── 格式化 helper ─────────────────────────────────────────────────────
     @staticmethod
     def _type_label(t):
-        return {"product_montage": "产品成片", "video_montage": "产品成片", "compile_video": "产品成片",
+        return {"product_montage": "产品成片", "video_montage": "产品成片", "compile_video": "产品成片",  # noqa: E501
                 "storyboard_montage": "脚本成片",
                 "script_montage": "脚本成片"}.get(t, t or "—")
 
@@ -800,7 +938,7 @@ class ScheduledTasksPage(BasePage):
     def _status_color(s):
         from PySide6.QtGui import QColor
         return {"running": QColor("#f39c12"), "completed": QColor("#2ecc71"),
-                "failed": QColor("#e74c3c"), "pending": QColor("#888")}.get(s, QColor("#aaa"))
+                "failed": QColor("#e74c3c"), "pending": QColor("#888")}.get(s, QColor("#aaa"))  # noqa: E501
 
     @staticmethod
     def _fmt_time(s):
@@ -811,31 +949,8 @@ class ScheduledTasksPage(BasePage):
 
 
 def _download_to_file(url, path):
-    """下载服务端文件到本地（模块级，供成片任务页与对话气泡复用）。
-
-    流式写文件；若端点返回 JSON（如 {url:...}）则取其地址重试一次。
-    """
-    from utils.http_client import http_get
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with http_get(url, timeout=180, stream=True) as r:
-        if r.status_code != 200:
-            raise RuntimeError(f"服务端返回 HTTP {r.status_code}")
-        ct = (r.headers.get("Content-Type") or "").lower()
-        if "json" in ct:
-            data = r.json()
-            inner = (data.get("url") or data.get("video_url")
-                     or data.get("output_url") or data.get("file_url") or "")
-            if not inner:
-                raise RuntimeError("结果端点返回 JSON 但无视频地址字段")
-            base = stc._server_url()
-            if isinstance(inner, str) and inner.startswith("/") and base:
-                inner = base + inner
-            return _download_to_file(inner, path)
-        with open(path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=256 * 1024):
-                if chunk:
-                    f.write(chunk)
-    return path
+    """下载服务端文件到本地（委托 scheduled_task_client.download_result_file）。"""
+    return stc.download_result_file(url, path)
 
 
 def _resolve_task_video_url(task):
@@ -881,7 +996,7 @@ def _download_many(tasks, save_dir):
             _download_to_file(
                 url, os.path.join(save_dir, f"render_{tid}.mp4"))
             ok += 1
-        except Exception as e:
+        except (OSError, requests.exceptions.RequestException, RuntimeError) as e:
             fail.append(f"{tid}: {e}")
     msg = f" 已下载 {ok} 个成片视频到：{save_dir}"
     if fail:
@@ -901,7 +1016,7 @@ def _download_many_packages(tasks, save_dir):
             _download_to_file(
                 url, os.path.join(save_dir, f"render_{tid}_package.zip"))
             ok += 1
-        except Exception as e:
+        except (OSError, requests.exceptions.RequestException, RuntimeError) as e:
             fail.append(f"{tid}: {e}")
     msg = f" 已下载 {ok} 个成片包到：{save_dir}"
     if fail:

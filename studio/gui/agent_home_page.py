@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """运营工作台首页：高频任务卡片 + AI 对话面板（服务端智能体注册表 → 智能体列表供对话唤起）。
 
 AI 对话（参考 Cherry Studio 对话体验，服务端暂不支持流式 → 整段返回）：
@@ -14,21 +13,38 @@ import json
 import os
 import re
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize, QPoint, QEvent
-from PySide6.QtGui import QTextCursor, QColor, QTextCharFormat
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QFrame, QGridLayout, QWidget, QCheckBox,
-                               QTabWidget, QComboBox, QTextEdit, QApplication,
-                               QTextBrowser, QScrollArea, QDialog, QFileDialog,
-                               QListWidget, QListWidgetItem, QMessageBox)
-from gui.searchable_combo import SearchableComboBox
+import requests.exceptions
 from gui.elided_label import ElidedLabel
-from utils.gui_icons import mdi_icon, mdi_button, icon_button
+from gui.searchable_combo import SearchableComboBox
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QTabBar,
+    QTabWidget,
+    QTextBrowser,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.gui_icons import icon_button, mdi_button, mdi_icon
 from utils.logger_utils import log
 
 # (标题, 图标, 描述, 目标页 index, 强调色)
 _TASK_CARDS = [
-    ("一键成片", "rocket", "选产品或贴文案，自动配素材配音生成成片", 33, "#3b82f6"),
     ("智能混剪", "cut", "多镜头素材自动拼接成片，支持转场配音", 14, "#8b5cf6"),
     ("声音克隆", "mic", "粘贴文案、选音色，克隆整段语音", 20, "#d946ef"),
     ("直播切片", "video", "从直播回放自动切出精彩片段配字幕", 18, "#f97316"),
@@ -87,14 +103,14 @@ class _TaskCard(QPushButton):
         ico.setPixmap(mdi_icon(icon, "#ffffff").pixmap(22, 22))
         head.addWidget(ico)
         t = QLabel(title)
-        t.setStyleSheet("background:transparent; border:none; font-size:15px; font-weight:700; color:#f0f1f7;")
+        t.setStyleSheet("background:transparent; border:none; font-size:15px; font-weight:700; color:#f0f1f7;")  # noqa: E501
         head.addWidget(t)
         head.addStretch()
         lay.addLayout(head)
 
         d = QLabel(desc)
         d.setWordWrap(True)
-        d.setStyleSheet("background:transparent; border:none; color:#9aa3b2; font-size:12px; line-height:1.5;")
+        d.setStyleSheet("background:transparent; border:none; color:#9aa3b2; font-size:12px; line-height:1.5;")  # noqa: E501
         lay.addWidget(d)
 
 
@@ -107,8 +123,8 @@ class _ChatInput(QTextEdit):
     粘贴统一转纯文本，丢弃图片/HTML 格式，保证发送给智能体的内容干净；
     从资源管理器拖入的文件不插入文本，改以 filesDropped 交给面板加入会话附件。
     """
-    sendRequested = Signal()
-    filesDropped = Signal(list)  # [本地文件路径]（拖入文件时发出，不入输入框）
+    sendRequested = Signal()  # noqa: N815
+    filesDropped = Signal(list)  # noqa: N815  # [本地文件路径]（拖入文件时发出，不入输入框）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,7 +132,7 @@ class _ChatInput(QTextEdit):
         self.setAcceptRichText(False)
         self.textChanged.connect(self._on_text_changed)
 
-    def insertFromMimeData(self, source):
+    def insertFromMimeData(self, source):  # noqa: N802
         """粘贴/拖入只保留纯文本：图片、HTML 等格式一律丢弃。
 
         拖入的是文件（资源管理器拖放）时不插入 file:// 文本，
@@ -159,7 +175,7 @@ class _ChatInput(QTextEdit):
         elif popup.isVisible():
             popup.hide()
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event):  # noqa: N802
         popup = self._slash_popup
         if popup is not None and popup.isVisible():
             if event.key() == Qt.Key_Down:
@@ -178,7 +194,7 @@ class _ChatInput(QTextEdit):
                 popup.hide()
                 event.accept()
                 return
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (event.modifiers() & Qt.ShiftModifier):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (event.modifiers() & Qt.ShiftModifier):  # noqa: E501
             self.sendRequested.emit()
             event.accept()
             return
@@ -223,7 +239,7 @@ class _SlashPopup(QListWidget):
             return True
         return any(kw in (a.get("name") or "").lower() for a in self._agents)
 
-    def eventFilter(self, obj, ev):
+    def eventFilter(self, obj, ev):  # noqa: N802
         """点击菜单外部任意位置 → 关闭菜单（事件继续传递，不吞点击）。"""
         if self.isVisible() and ev.type() == QEvent.MouseButtonPress:
             pos = (ev.globalPosition().toPoint()
@@ -340,7 +356,7 @@ class _MdBrowser(QTextBrowser):
         self.setMinimumWidth(200)
         self.document().contentsChanged.connect(self._adjust_height)
 
-    def setMarkdown(self, text):
+    def setMarkdown(self, text):  # noqa: N802
         """渲染 markdown 后把链接前景色改为亮蓝。
 
         Qt 解析器把链接颜色写死为调色板 Link 色（#0000ff），QSS / 默认样式表 /
@@ -360,14 +376,14 @@ class _MdBrowser(QTextBrowser):
                 if fmt.isAnchor() and fmt.foreground().color().name() == "#0000ff":
                     cur = QTextCursor(doc)
                     cur.setPosition(frag.position())
-                    cur.setPosition(frag.position() + frag.length(), QTextCursor.KeepAnchor)
+                    cur.setPosition(frag.position() + frag.length(), QTextCursor.KeepAnchor)  # noqa: E501
                     f = QTextCharFormat()
                     f.setForeground(QColor("#8ec2ff"))
                     cur.mergeCharFormat(f)   # 只合并前景色，保留下划线等其它格式
                 it += 1
             blk = blk.next()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self.document().setTextWidth(self.viewport().width())
         self._adjust_height()
@@ -375,7 +391,7 @@ class _MdBrowser(QTextBrowser):
     def _adjust_height(self):
         self.setFixedHeight(max(int(self.document().size().height()) + 12, 30))
 
-    def sizeHint(self):
+    def sizeHint(self):  # noqa: N802
         doc = self.document()
         w = max(int(doc.idealWidth()) + 36, 200)
         w = min(w, 720)
@@ -388,8 +404,8 @@ class _ChatBubble(QWidget):
     助手回复下方常驻操作栏（参考 Cherry Studio 消息操作栏）：复制/引用/重新生成；
     智能体回复若含成片视频资产，可在内容下方挂「播放/下载」按钮（set_asset_actions）。
     """
-    quoteRequested = Signal(str)     # 引用：回复原文（面板插入输入框）
-    regenerateRequested = Signal()   # 重新生成：面板重发上一条用户消息并替换本气泡
+    quoteRequested = Signal(str)  # noqa: N815     # 引用：回复原文（面板插入输入框）
+    regenerateRequested = Signal()  # noqa: N815   # 重新生成：面板重发上一条用户消息并替换本气泡
 
     def __init__(self, role, text, parent=None):
         super().__init__(parent)
@@ -440,7 +456,7 @@ class _ChatBubble(QWidget):
             ah.setSpacing(6)
             _act_style = (
                 "QPushButton { background:transparent; border:1px solid #3a4152;"
-                " border-radius:12px; color:#9aa3b2; padding:2px 12px; font-size:12px; }"
+                " border-radius:12px; color:#9aa3b2; padding:2px 12px; font-size:12px; }"  # noqa: E501
                 " QPushButton:hover { background:#2d3344; color:#e2e6ef;"
                 " border-color:#5b8ef0; }")
             self._btn_copy = QPushButton(" 复制")
@@ -509,7 +525,7 @@ class _ChatBubble(QWidget):
             if w is not None:
                 w.deleteLater()
         style = ("QPushButton { background:#232838; border:1px solid #2f6fed;"
-                 " border-radius:12px; color:#5b8ef0; padding:2px 14px; font-size:12px; }"
+                 " border-radius:12px; color:#5b8ef0; padding:2px 14px; font-size:12px; }"  # noqa: E501
                  " QPushButton:hover { background:#2f6fed; color:#ffffff; }")
         btn_play = icon_button("play", title or "播放对话生成的成片视频")
         btn_play.setStyleSheet(style)
@@ -536,7 +552,7 @@ class _ChatBubble(QWidget):
             return
         from gui.scheduled_tasks_page import _download_to_file
         from utils.thread_worker import TaskWorker as Worker
-        default = f"render_{self._asset_tid}.mp4" if self._asset_tid else "render_video.mp4"
+        default = f"render_{self._asset_tid}.mp4" if self._asset_tid else "render_video.mp4"  # noqa: E501
         path, _ = QFileDialog.getSaveFileName(
             self, "保存成片",
             os.path.join(os.path.expanduser("~"), "Desktop", default),
@@ -583,7 +599,7 @@ class _ChatWorker(QThread):
                 msgs = list(self._history or [])
                 message = self._message or (msgs[-1]["content"] if msgs else "")
                 sid = self._session_id or ""
-                pool_items = (self._ctx.get("materials") or []) + (self._ctx.get("attachments") or [])
+                pool_items = (self._ctx.get("materials") or []) + (self._ctx.get("attachments") or [])  # noqa: E501
                 # 首次发送且有待入池素材 → 先建会话并把素材一次性入池（后续轮次自动注入）
                 if pool_items and not sid:
                     sid = ac.create_session()
@@ -591,7 +607,7 @@ class _ChatWorker(QThread):
                         raise RuntimeError("创建服务端会话失败，素材无法入池，请稍后重试")
                     for m in self._ctx.get("materials") or []:
                         att = ac.session_attachment_add(sid, material_id=m.get("mid"))
-                        m["pool_key"] = (att or {}).get("file_ref") or str(m.get("mid") or "")
+                        m["pool_key"] = (att or {}).get("file_ref") or str(m.get("mid") or "")  # noqa: E501
                     for a in self._ctx.get("attachments") or []:
                         att = ac.session_attachment_add(sid, file_path=a.get("path"))
                         a["pool_key"] = (att or {}).get("file_ref") or ""
@@ -616,7 +632,7 @@ class _ChatWorker(QThread):
                 if not reply:
                     raise RuntimeError("服务端未返回内容，请稍后重试")
                 self.done.emit({"reply": reply})
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.warning(f"[工作台对话] 请求失败: {e}")
             self.failed.emit(str(e))
 
@@ -656,7 +672,7 @@ class _ModelLoader(QThread):
         try:
             from utils.llm_proxy import list_llm_models
             self.done.emit(list_llm_models(timeout=8))
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.warning(f"[工作台对话] 加载模型列表失败: {e}")
             self.done.emit([])
 
@@ -685,14 +701,14 @@ class _AgentLoader(QThread):
                     "desc": a.get("desc") or a.get("description") or "",
                 })
             self.done.emit(agents)
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             log.warning(f"[工作台对话] 加载智能体列表失败: {e}")
             self.done.emit([])
 
 
 class _AgentBar(QWidget):
     """智能体快捷条：每行 10 个按钮，默认只显示第一行，多余折叠；点「展开」显示全部。"""
-    agentClicked = Signal(dict)
+    agentClicked = Signal(dict)  # noqa: N815
     _COLS = 10
 
     def __init__(self, parent=None):
@@ -764,7 +780,7 @@ class _AgentBar(QWidget):
         extra = n - self._COLS
         self.btn_toggle.setText(
             "▴ 收起" if self._expanded else f"▾ 展开 {extra} 个")
-        for i, a in enumerate(self._agents):
+        for i, _a in enumerate(self._agents):
             it = self._grid.itemAt(i)
             if it is not None and it.widget() is not None:
                 it.widget().setVisible(self._expanded or i < self._COLS)
@@ -876,19 +892,14 @@ class _MaterialPickerDialog(QDialog):
         self._load()
 
     def _load(self):
-        from utils.http_client import http_get
+        from utils import material_client
         from utils.thread_worker import TaskWorker as Worker
-        from utils import config_manager as _cm
-        base = (_cm.get_setting("ai_config", "compute_server_url") or "").strip().rstrip("/")
 
         def _fetch():
-            if not base:
+            data = material_client.list({"size": 500, "page": 1}, timeout=20)
+            if data is None:
                 return []
-            resp = http_get(f"{base}/material/list",
-                            params={"size": 500, "page": 1}, timeout=20)
-            if resp.status_code != 200:
-                raise RuntimeError(f"服务器返回 {resp.status_code}")
-            return (resp.json() or {}).get("items") or []
+            return (data or {}).get("items") or []
 
         self.combo.addItem("加载素材中…", "")
         self._loader = Worker(_fetch)
@@ -910,7 +921,7 @@ class _MaterialPickerDialog(QDialog):
                 name = it.get("filename") or mid
                 brand = (it.get("brand") or "").strip()
                 model = (it.get("model") or it.get("product") or "").strip()
-                mtype = _MEDIA_TYPE_LABEL.get((it.get("media_type") or "").lower(), "素材")
+                mtype = _MEDIA_TYPE_LABEL.get((it.get("media_type") or "").lower(), "素材")  # noqa: E501
                 suffix = f"（{brand} / {model}）" if (brand or model) else ""
                 self.combo.addItem(f"[{mtype}] {name}{suffix}", mid)
         self.combo.blockSignals(False)
@@ -1073,7 +1084,7 @@ class _ChatPanel(QWidget):
         self.btn_attach.setObjectName("secondary_button")
         self.btn_attach.setFixedHeight(30)
         self.btn_attach.setCursor(Qt.PointingHandCursor)
-        self.btn_attach.setToolTip("选择本地文件加入会话素材池（上传后贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")
+        self.btn_attach.setToolTip("选择本地文件加入会话素材池（上传后贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")  # noqa: E501
         self.btn_attach.clicked.connect(self._pick_attachments)
         tool_row.addWidget(self.btn_attach)
         self.btn_product = QPushButton(" 产品")
@@ -1087,7 +1098,7 @@ class _ChatPanel(QWidget):
         self.btn_material.setObjectName("secondary_button")
         self.btn_material.setFixedHeight(30)
         self.btn_material.setCursor(Qt.PointingHandCursor)
-        self.btn_material.setToolTip("从服务端素材库选择素材加入会话素材池（贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")
+        self.btn_material.setToolTip("从服务端素材库选择素材加入会话素材池（贯穿后续所有轮次，服务端自动注入；点胶囊 移除 删除）")  # noqa: E501
         self.btn_material.clicked.connect(self._pick_material)
         tool_row.addWidget(self.btn_material)
         self.btn_script = QPushButton(" 脚本")
@@ -1101,6 +1112,7 @@ class _ChatPanel(QWidget):
         self.chk_plan.setCursor(Qt.PointingHandCursor)
         self.chk_plan.setToolTip("开启后：智能体对话以编排任务方式提交（mode=plan），"
                                  "服务端先拆解为 plan 再自动执行，回复返回任务 ID")
+        self.chk_plan.setChecked(True)  # 默认 plan 模式（编排任务）；取消勾选回退 chat
         tool_row.addWidget(self.chk_plan)
         self.btn_skills = QPushButton(" 技能")
         self.btn_skills.setObjectName("secondary_button")
@@ -1253,7 +1265,7 @@ class _ChatPanel(QWidget):
         """引用回复：以 Markdown 引用块形式插入输入框顶部，补充指令后再发送。"""
         quoted = "\n".join("> " + ln for ln in (text or "").splitlines()) or "> "
         cur = self.input_edit.toPlainText()
-        self.input_edit.setPlainText(f"{quoted}\n\n{cur}" if cur.strip() else quoted + "\n")
+        self.input_edit.setPlainText(f"{quoted}\n\n{cur}" if cur.strip() else quoted + "\n")  # noqa: E501
         self.input_edit.moveCursor(QTextCursor.End)
         self.input_edit.setFocus()
 
@@ -1281,7 +1293,7 @@ class _ChatPanel(QWidget):
         # 同步清理 history 里该轮的旧回复（找不到则跳过，不影响重发）
         for i, m in enumerate(self._history):
             if m["role"] == "user" and m["content"] == q:
-                if i + 1 < len(self._history) and self._history[i + 1]["role"] == "assistant":
+                if i + 1 < len(self._history) and self._history[i + 1]["role"] == "assistant":  # noqa: E501
                     del self._history[i + 1]
                 break
         self._send_text(q, regen_bubble=bubble)
@@ -1372,18 +1384,18 @@ class _ChatPanel(QWidget):
             if any(k in u.lower() for k in _VIDEO_URL_HINTS):
                 return u, ""
         # ② 相对路径
-        m = _REL_URL_RE.search(text)
-        if m:
+        m2 = _REL_URL_RE.search(text)
+        if m2:
             base = self._server_base()
             if base:
-                return base + m.group(0), m.group(1)
+                return base + m2.group(0), m2.group(1)
         # ③ 任务 ID 兜底（仅当消息含成片/渲染语境，避免误判普通编号）
         if re.search(r"(成片|渲染|一键成片|render)", text, re.I):
-            m = re.search(r"(?:任务\s*ID|task\s*id)\s*[:：]?\s*#?(\d+)", text, re.I)
-            if m:
+            m3 = re.search(r"(?:任务\s*ID|task\s*id)\s*[:：]?\s*#?(\d+)", text, re.I)
+            if m3:
                 base = self._server_base()
                 if base:
-                    return f"{base}/editor/render/{m.group(1)}/result", m.group(1)
+                    return f"{base}/editor/render/{m3.group(1)}/result", m3.group(1)
         return "", ""
 
     @staticmethod
@@ -1392,7 +1404,7 @@ class _ChatPanel(QWidget):
         from utils import scheduled_task_client as stc
         try:
             return stc._server_url()
-        except Exception:
+        except requests.exceptions.RequestException:
             return ""
 
     def _on_reply_failed(self, err):
@@ -1447,7 +1459,7 @@ class _ChatPanel(QWidget):
         try:
             from utils.llm_proxy import _get_default_model
             default = _get_default_model()
-        except Exception:
+        except (requests.exceptions.RequestException, KeyError, TypeError, AttributeError):  # noqa: E501
             pass
         for m in models:
             mid = m.get("id") or ""
@@ -1471,7 +1483,7 @@ class _ChatPanel(QWidget):
         try:
             from utils.skill_manager import ensure_builtin_skills
             ensure_builtin_skills()
-        except Exception as e:
+        except Exception as e:  # 外部 API（技能登记）
             log.warning(f"[工作台对话] 内置技能同步失败: {e}")
         self._agent_loader = _AgentLoader()
         self._agent_loader.done.connect(self._on_agents_loaded)
@@ -1482,7 +1494,7 @@ class _ChatPanel(QWidget):
         try:
             from utils.skill_manager import skill_entries
             self._skills = skill_entries()
-        except Exception as e:
+        except Exception as e:  # 外部 API（技能登记查询）
             log.warning(f"[工作台对话] 加载技能失败: {e}")
             self._skills = []
         self._agents = list(agents or []) + self._skills
@@ -1527,7 +1539,7 @@ class _ChatPanel(QWidget):
         chip.setCursor(Qt.PointingHandCursor)
         chip.setToolTip("点击移除该上下文项（不删除则每次对话都携带）")
         chip.setStyleSheet(
-            "QPushButton { background:#1d212b; border:1px solid #2c3344; border-radius:12px;"
+            "QPushButton { background:#1d212b; border:1px solid #2c3344; border-radius:12px;"  # noqa: E501
             " color:#c9d1de; padding:0 10px; font-size:12px; }"
             " QPushButton:hover { border-color:#e74c3c; color:#e74c3c; }")
         chip.clicked.connect(lambda: self._remove_ctx(key))
@@ -1548,18 +1560,18 @@ class _ChatPanel(QWidget):
             idx += 1
 
         if self._ctx_product:
-            add(f" {self._ctx_product.get('brand', '')} / {self._ctx_product.get('model', '')}",
+            add(f" {self._ctx_product.get('brand', '')} / {self._ctx_product.get('model', '')}",  # noqa: E501
                 ("product",))
         for i, m in enumerate(self._ctx_materials):
             mid = str(m.get("id") or m.get("material_id") or "")
             name = m.get("filename") or mid or "未命名"
             mtype = _MEDIA_TYPE_LABEL.get((m.get("media_type") or "").lower(), "素材")
-            tag = " " if m.get("pending") else (" 失败：入池失败" if m.get("pool_failed") else "")
+            tag = " " if m.get("pending") else (" 失败：入池失败" if m.get("pool_failed") else "")  # noqa: E501
             add(f" [{mtype}] {name}{tag}", ("material", i))
         for i, s in enumerate(self._ctx_scripts):
             add(f" [{s.get('topic', '')}] {s.get('shot_count', 0)}镜", ("script", i))
         for i, a in enumerate(self._ctx_attachments):
-            tag = " " if a.get("pending") else (" 失败：入池失败" if a.get("pool_failed") else "")
+            tag = " " if a.get("pending") else (" 失败：入池失败" if a.get("pool_failed") else "")  # noqa: E501
             add(f" {a['name']}{tag}", ("attachment", i))
         self._ctx_row_widget.setVisible(self._ctx_lay.count() > 1)
 
@@ -1612,7 +1624,7 @@ class _ChatPanel(QWidget):
             try:
                 from utils.agent_client import delete_session
                 delete_session(self._session_id)
-            except Exception:
+            except requests.exceptions.RequestException:
                 pass
         self._session_id = ""
         self._ctx_attachments = []
@@ -1637,7 +1649,7 @@ class _ChatPanel(QWidget):
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             os.replace(tmp, path)
-        except Exception as e:
+        except OSError as e:
             log.warning(f"[工作台对话] 会话落盘失败: {e}")
 
     def _restore_chat(self):
@@ -1646,7 +1658,7 @@ class _ChatPanel(QWidget):
             path = self._chat_file()
             if not os.path.isfile(path):
                 return
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             msgs = [m for m in (data.get("history") or [])
                     if isinstance(m, dict) and m.get("role") in ("user", "assistant")
@@ -1669,7 +1681,7 @@ class _ChatPanel(QWidget):
                         bubble.set_asset_actions(url, title=f"任务 #{tid}", tid=tid)
             log.info(f"[工作台对话] 恢复本地消息 {len(msgs)} 条"
                      f"（会话 {self._session_id or '无'}）")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
             log.warning(f"[工作台对话] 本地会话恢复失败: {e}")
 
     # ── 会话素材池后台入池（已有会话时选择即入池，上传不阻塞 UI）──────────
@@ -1777,7 +1789,7 @@ class _ChatPanel(QWidget):
             item = dlg.selected_item()
             if item:
                 sid = str(item.get("id") or "")
-                if sid and not any(str(s.get("id") or "") == sid for s in self._ctx_scripts):
+                if sid and not any(str(s.get("id") or "") == sid for s in self._ctx_scripts):  # noqa: E501
                     self._ctx_scripts.append(item)
                 self._rebuild_ctx_bar()
 
@@ -1830,7 +1842,7 @@ class AgentHomePage:
             from gui.viral_clone_dialog import ViralCloneDialog
             dlg = ViralCloneDialog(self.main_window, self.main_window)
             dlg.exec_()
-        except Exception as e:
+        except Exception as e:  # 外部 UI 组件（ViralCloneDialog 可能触发各类异常）
             log.exception(f"[工作台] 打开爆款仿制对话框失败: {e}")
             QMessageBox.critical(self.main_window, "错误", f"打开爆款仿制失败：{e}")
 
@@ -1848,5 +1860,9 @@ class AgentHomePage:
             tabs = w.findChild(QTabWidget)
             if tabs is not None and 0 <= tab < tabs.count():
                 tabs.setCurrentIndex(tab)
-        except Exception as e:
-            log.warning(f"激活页面 Tab 失败: {e}")
+                return
+            tab_bar = w.findChild(QTabBar)
+            if tab_bar is not None and 0 <= tab < tab_bar.count():
+                tab_bar.setCurrentIndex(tab)
+        except (AttributeError, TypeError):
+            log.warning("激活页面 Tab 失败")

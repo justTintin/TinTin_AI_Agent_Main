@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """本地技能安装/管理。
 
 技能 = 一个包含 SKILL.md 的目录或 zip 包，安装到 data/skills/<skill_id>/。
@@ -13,13 +12,16 @@ tags: [文案, 改写]
 ---
 技能正文（LLM 指令，唤起时随消息发给智能体）。
 """
+import contextlib
 import json
 import os
 import re
 import shutil
 import tempfile
 import zipfile
+from typing import Any
 
+import requests
 from config.paths import DATA_DIR
 
 SKILLS_DIR = os.path.join(DATA_DIR, "skills")
@@ -39,7 +41,7 @@ def is_builtin(skill_id) -> bool:
     for md in glob.glob(os.path.join(BUILTIN_SKILLS_DIR, "*", "SKILL.md")):
         try:
             meta = _parse_skill_dir(os.path.dirname(md))
-        except Exception:
+        except OSError:
             continue
         if meta.get("id") == sid:
             return True
@@ -56,7 +58,7 @@ def _machine_id() -> str:
 
         return get_machine_id() or ""
 
-    except Exception:
+    except Exception:  # 动态导入外部模块
 
         return ""
 
@@ -116,7 +118,7 @@ def register_skill(entry, timeout=8):
 
         _log_warn(f"[技能] register_skill HTTP {r.status_code}: {r.text[:120]}")
 
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
 
         _log_warn(f"[技能] register_skill 失败: {e}")
 
@@ -138,7 +140,7 @@ def unregister_skill(skill_id, timeout=8):
 
         return r.status_code == 200
 
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
 
         _log_warn(f"[技能] unregister_skill({skill_id}) 失败: {e}")
 
@@ -150,7 +152,8 @@ def unregister_skill(skill_id, timeout=8):
 
 def server_skills(timeout=8):
 
-    """GET /skills → 服务端已登记技能清单 [{skill_id, name, description, instruction, machine_id, version}]。
+    """GET /skills → 服务端已登记技能清单
+    [{skill_id, name, description, instruction, machine_id, version}]。
 
 
 
@@ -176,7 +179,7 @@ def server_skills(timeout=8):
 
                 return data.get("skills") or data.get("items") or []
 
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
 
         _log_warn(f"[技能] server_skills 失败: {e}")
 
@@ -194,7 +197,7 @@ def _log_warn(msg):
 
         log.warning(msg)
 
-    except Exception:
+    except Exception:  # 动态导入日志模块
 
         pass
 
@@ -222,18 +225,16 @@ def ensure_builtin_skills():
     try:
         builtin_names = set()
         for md in glob.glob(os.path.join(base, "*", "SKILL.md")):
-            try:
-                builtin_names.add(_parse_skill_dir(os.path.dirname(md)).get("name") or "")
-            except Exception:
-                pass
+            with contextlib.suppress(OSError):
+                builtin_names.add(_parse_skill_dir(os.path.dirname(md)).get("name") or "")  # noqa: E501
         if os.path.isdir(SKILLS_DIR):
             for old_name in os.listdir(SKILLS_DIR):
                 old_dir = os.path.join(SKILLS_DIR, old_name)
-                if not (os.path.isdir(old_dir) and os.path.isfile(os.path.join(old_dir, "SKILL.md"))):
+                if not (os.path.isdir(old_dir) and os.path.isfile(os.path.join(old_dir, "SKILL.md"))):  # noqa: E501
                     continue
                 try:
                     old_meta = _parse_skill_dir(old_dir)
-                except Exception:
+                except OSError:
                     continue
                 if (old_meta.get("name") in builtin_names
                         and not is_builtin(old_meta.get("id") or "")):
@@ -243,7 +244,7 @@ def ensure_builtin_skills():
                     if old_id:
                         # 同步取消服务端旧 id 登记，避免重复条目
                         unregister_skill(old_id)
-    except Exception as e:
+    except OSError as e:
         _log_warn(f"[技能] 内置技能旧目录清理失败: {e}")
 
     for md in sorted(glob.glob(os.path.join(base, "*", "SKILL.md"))):
@@ -254,7 +255,7 @@ def ensure_builtin_skills():
 
             meta = _parse_skill_dir(src_dir)
 
-        except Exception as e:
+        except OSError as e:
 
             _log_warn(f"[技能] 内置技能解析失败 {src_dir}: {e}")
 
@@ -270,7 +271,7 @@ def ensure_builtin_skills():
 
                 entry = install_skill(src_dir, overwrite=False)
 
-            except Exception as e:
+            except Exception as e:  # 安装流程多步操作
 
                 _log_warn(f"[技能] 内置技能安装失败 {sid}: {e}")
 
@@ -284,7 +285,7 @@ def ensure_builtin_skills():
             # 并保证服务端登记存在（幂等）
             try:
                 entry = install_skill(src_dir, overwrite=True)
-            except Exception as e:
+            except Exception as e:  # 安装流程多步操作
                 _log_warn(f"[技能] 内置技能同步失败 {sid}: {e}")
                 entry = meta
             register_skill(entry)
@@ -332,7 +333,7 @@ def _parse_skill_dir(skill_dir):
     md_path = os.path.join(skill_dir, "SKILL.md")
     if not os.path.isfile(md_path):
         raise FileNotFoundError(f"技能目录缺少 SKILL.md: {skill_dir}")
-    with open(md_path, "r", encoding="utf-8-sig") as f:
+    with open(md_path, encoding="utf-8-sig") as f:
         raw = f.read()
     meta, body = _split_frontmatter(raw)
     name = str(meta.get("name") or os.path.basename(skill_dir.rstrip("\\/"))).strip()
@@ -359,11 +360,11 @@ def _index_path():
 def _read_index():
     try:
         if os.path.isfile(_index_path()):
-            with open(_index_path(), "r", encoding="utf-8") as f:
+            with open(_index_path(), encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 return data
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return {}
 
@@ -425,14 +426,14 @@ def _copy_skill_dir(src, meta, overwrite):
 
 def _copy_skill_file(src, overwrite):
     """把单个 .md 文件安装为技能（内部仍落为 <skill_id>/SKILL.md）。"""
-    with open(src, "r", encoding="utf-8-sig") as f:
+    with open(src, encoding="utf-8-sig") as f:
         raw = f.read()
     meta, body = _split_frontmatter(raw)
     name = str(meta.get("name") or os.path.splitext(os.path.basename(src))[0]).strip()
     desc = str(meta.get("description") or "").strip()
     if not desc and body:
         desc = body.splitlines()[0].lstrip("#").strip()
-    entry = {
+    entry: dict[str, Any] = {
         "id": str(meta.get("id") or _slugify(name)),
         "name": name,
         "description": desc,
@@ -521,7 +522,7 @@ def list_skills():
                 continue
             try:
                 entry = _parse_skill_dir(d)
-            except Exception:
+            except OSError:
                 continue
             entries.append(entry)
             index[entry["id"]] = entry

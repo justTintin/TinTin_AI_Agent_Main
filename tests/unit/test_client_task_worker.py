@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """客户端任务下发闭环：领取/执行/上报（mock）。"""
 import os
 import sys
@@ -6,11 +5,14 @@ import tempfile
 import unittest
 from unittest import mock
 
+import requests
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils import client_task_worker as ctw
+from utils import client_task_worker as ctw  # noqa: E402
 
 
 class _Resp:
@@ -35,7 +37,7 @@ class TestPickup(unittest.TestCase):
     def test_pickup_empty(self, m_get):
         self.assertEqual(ctw.pickup_tasks("m1"), [])
 
-    @mock.patch.object(ctw, "http_get", side_effect=Exception("down"))
+    @mock.patch.object(ctw, "http_get", side_effect=requests.exceptions.RequestException("down"))
     def test_pickup_error(self, m_get):
         self.assertEqual(ctw.pickup_tasks("m1"), [])
 

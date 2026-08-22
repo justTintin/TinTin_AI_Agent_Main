@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """自动上架：数据包校验、sku.xlsx 解析、ZIP 导入。"""
 import os
 import shutil
@@ -11,10 +10,11 @@ import zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils.auto_listing import validation
-from utils.auto_listing.validation import ValidationError, inspect_package, prepare_package
+from utils.auto_listing import validation  # noqa: E402
+from utils.auto_listing.validation import ValidationError, inspect_package, prepare_package  # noqa: E402
 
 
 def make_png(width=1, height=1):

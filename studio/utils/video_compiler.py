@@ -1,18 +1,21 @@
+import contextlib
+import json
+import logging
 import os
 import shutil
-import subprocess
 import tempfile
 
 from config.paths import PROJECT_ROOT, WORKSPACE_ROOT
-from utils.platform_utils import find_ffmpeg, find_ffprobe, run_subprocess
+
 from utils.hwaccel import get_video_encode_args
+from utils.platform_utils import find_ffmpeg, find_ffprobe, run_subprocess
 
 RATIO_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
 def _find(name):
-    for c in (os.path.join(WORKSPACE_ROOT, name), os.path.join(PROJECT_ROOT, name), name):
+    for c in (os.path.join(WORKSPACE_ROOT, name), os.path.join(PROJECT_ROOT, name), name):  # noqa: E501
         if os.path.isfile(c):
             return c
     return shutil.which(name) or name
@@ -21,7 +24,7 @@ def _find(name):
 def _run(args, cwd=None):
     r = run_subprocess(args, capture_output=True, cwd=cwd)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[-400:] or "ffmpeg 失败")
+        raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[-400:] or "ffmpeg 失败")  # noqa: E501
 
 
 def _probe_duration(path):
@@ -36,7 +39,9 @@ def _probe_duration(path):
 
 
 def _tc(sec):
-    h = int(sec // 3600); m = int((sec % 3600) // 60); s = int(sec % 60)
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = int(sec % 60)
     ms = int(round((sec - int(sec)) * 1000))
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
@@ -81,15 +86,13 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
                   ratio="9:16", per_dur=3.0, fps=30, intro="", progress=None):
     def _p(msg):
         if progress:
-            try:
+            with contextlib.suppress(Exception):
                 progress(msg)
-            except Exception:
-                pass
 
     if not images:
         raise RuntimeError("没有可用的图片素材。")
     ffmpeg = find_ffmpeg()
-    W, H = RATIO_SIZES.get(ratio, (720, 1280))
+    W, H = RATIO_SIZES.get(ratio, (720, 1280))  # noqa: N806
     n = len(images)
     dur = float(per_dur)
     if audio and os.path.isfile(audio):
@@ -119,7 +122,7 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
             style = "FontSize=18,Outline=2,Alignment=2,MarginV=60"
             _run([ffmpeg, "-y", "-i", "slideshow.mp4",
                   "-vf", f"subtitles=subs.srt:force_style='{style}'",
-                  *get_video_encode_args(crf=23, preset="veryfast"), "sub.mp4"], cwd=tmp)
+                  *get_video_encode_args(crf=23, preset="veryfast"), "sub.mp4"], cwd=tmp)  # noqa: E501
             cur = sub_out
 
         pre = []
@@ -158,3 +161,57 @@ def compile_video(images, out_path, audio="", cover="", subtitle_text="",
         return out_path
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def split_groups(images, n):
+    """把 images 尽量均分成 n 组；不足 n 时循环填充。"""
+    if not images:
+        return [[] for _ in range(n)]
+    if len(images) >= n:
+        k, m = divmod(len(images), n)
+        groups = []
+        start = 0
+        for i in range(n):
+            size = k + (1 if i < m else 0)
+            groups.append(images[start:start + size])
+            start += size
+        return groups
+    else:
+        return [[images[i % len(images)]] for i in range(n)]
+
+
+def scan_storyboard_scripts(base_dir):
+    """扫描所有分镜 JSON 脚本。返回 [{name, path, topic, ratio, total_duration, shot_count, shots}]。"""  # noqa: E501
+    logger = logging.getLogger(__name__)
+    results: list[dict] = []
+    try:
+        if not base_dir or not os.path.isdir(base_dir):
+            return results
+        for topic_dir in sorted(os.listdir(base_dir)):
+            sb_dir = os.path.join(base_dir, topic_dir, "storyboard")
+            if not os.path.isdir(sb_dir):
+                continue
+            for fn in sorted(os.listdir(sb_dir)):
+                if not fn.lower().endswith(".json"):
+                    continue
+                fp = os.path.join(sb_dir, fn)
+                try:
+                    with open(fp, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict) or not isinstance(data.get("shots"), list):  # noqa: E501
+                        continue
+                    results.append({
+                        "name": os.path.splitext(fn)[0],
+                        "path": fp,
+                        "topic": data.get("topic", topic_dir),
+                        "ratio": data.get("ratio", "9:16"),
+                        "total_duration": data.get("total_duration", 0),
+                        "shot_count": data.get("shot_count", len(data.get("shots", []))),  # noqa: E501
+                        "shots": data.get("shots", []),
+                        "saved_at": data.get("saved_at", 0),
+                    })
+                except (OSError, json.JSONDecodeError) as e:
+                    logger.warning("读取脚本失败 %s: %s", fp, e)
+    except OSError as e:
+        logger.warning("扫描脚本失败: %s", e)
+    return results

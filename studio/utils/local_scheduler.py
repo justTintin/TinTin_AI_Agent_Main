@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """本地定时任务管理：基于 Windows 任务计划程序（schtasks）注册/查询/删除客户端内置任务。
 
 背景：客户端定时任务此前靠手工 bat + 任务计划程序配置（抓取热点-每日定时.bat）。
@@ -21,6 +20,7 @@ import subprocess
 from datetime import datetime
 
 from config.paths import DATA_DIR, PROJECT_ROOT, PYTHON_EMBEDED_DIR
+
 from utils.logger_utils import log
 
 TASK_PREFIX = "TinTinAI_"
@@ -41,9 +41,9 @@ _EXEC_CODE = {
         "from config.paths import DATA_DIR;"
         "from utils.agent_router import build_plan;"
         "from utils import agent_client as ac;"
-        "tasks=json.load(open(os.path.join(DATA_DIR,'local_scheduled_tasks.json'),encoding='utf-8'));"
+        "tasks=json.load(open(os.path.join(DATA_DIR,'local_scheduled_tasks.json'),encoding='utf-8'));"  # noqa: E501
         "me=next((t for t in tasks if t.get('task_name')=={task_name!r}),{{}});"
-        "plan=me.get('plan') or (build_plan(me.get('goal') or '') if (me.get('goal') or '').strip() else None);"
+        "plan=me.get('plan') or (build_plan(me.get('goal') or '') if (me.get('goal') or '').strip() else None);"  # noqa: E501
         "plan and ac.create_task(goal=plan.get('goal'),plan=plan,mode='execute')"
     ),
 }
@@ -60,7 +60,7 @@ def _schtasks(*args):
         r = subprocess.run(["schtasks", *args], capture_output=True,
                            text=True, encoding="gbk", errors="replace", timeout=20)
         return r.returncode, (r.stdout or "") + (r.stderr or "")
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         log.warning(f"[本地定时] schtasks 执行失败: {e}")
         return -1, str(e)
 
@@ -69,9 +69,9 @@ def _load():
     """读取本地任务清单（json）。"""
     try:
         if os.path.isfile(TASKS_FILE):
-            with open(TASKS_FILE, "r", encoding="utf-8") as f:
+            with open(TASKS_FILE, encoding="utf-8") as f:
                 return json.load(f)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         log.warning(f"[本地定时] 读取任务清单失败: {e}")
     return []
 
@@ -83,7 +83,7 @@ def _save(tasks):
         with open(TASKS_FILE, "w", encoding="utf-8") as f:
             json.dump(tasks, f, ensure_ascii=False, indent=2)
         return True
-    except Exception as e:
+    except OSError as e:
         log.warning(f"[本地定时] 保存任务清单失败: {e}")
         return False
 
@@ -181,7 +181,7 @@ def create_task(name, task_type="hotspot", schedule=None, goal=None, plan=None):
         "name": safe,
         "type": task_type,
         "schedule": {"mode": mode, "time": time_str,
-                     "weekdays": schedule.get("weekdays", []) if mode == "weekly" else []},
+                     "weekdays": schedule.get("weekdays", []) if mode == "weekly" else []},  # noqa: E501
         "goal": (goal or "").strip() if task_type == "agent" else "",
         "plan": plan if task_type == "agent" else None,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -195,7 +195,7 @@ def list_tasks():
     """返回本地任务清单，并合并 schtasks 实时状态（下次/上次运行、上次结果）。"""
     tasks = _load()
     for t in tasks:
-        code_, out = _schtasks("/query", "/tn", t.get("task_name", ""), "/fo", "LIST", "/v")
+        code_, out = _schtasks("/query", "/tn", t.get("task_name", ""), "/fo", "LIST", "/v")  # noqa: E501
         if code_ == 0:
             info = _parse_query_info(out)
             t["registered"] = True

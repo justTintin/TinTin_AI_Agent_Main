@@ -1,30 +1,27 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 拼接/合成阶段 Worker：标准化转码拼接、配音烧字幕、最终混音。"""
+import contextlib
 import os
 import random
 import shutil
 import subprocess
 import traceback
+
+from gui.montage.utils_media import find_ffmpeg, get_media_duration
 from PySide6.QtCore import Signal
 from utils.base_worker import BaseWorker
-from utils.logger_utils import log
+from utils.ffmpeg_utils import (
+    CREATE_NO_WINDOW,
+    CompletedProcess,
+    TimeoutExpired,
+)
+from utils.ffmpeg_utils import (
+    run as _run_proc,
+)
 from utils.hwaccel import get_video_encode_args
-from gui.montage.utils_media import find_ffmpeg, get_media_duration
+from utils.logger_utils import log
 
 
-def _run_proc(cmd, **kwargs):
-    """运行子进程；默认关闭 stdin，避免 ffmpeg/ffprobe 在 GUI 后台线程中因等待 stdin 输入而假死。
-
-    ffmpeg 默认会尝试读取 stdin 以响应 'q' 等交互命令。在 PySide6 QThread 里，子进程继承的
-    stdin 往往不是真实终端；一旦 ffmpeg 阻塞在 stdin 读取上，就会出现 CPU/GPU 占用为 0 的
-    "假死"现象。显式传入 DEVNULL 可彻底避免该问题。
-    """
-    kwargs.setdefault("stdin", subprocess.DEVNULL)
-    return subprocess.run(cmd, **kwargs)
-
-
-
-class _TranscodeSkip(Exception):
+class _TranscodeSkip(Exception):  # noqa: N818
     """标准化转码单个镜头时，因文件损坏/不可读/转码失败而需跳过。
     携带的提示文案会原样 emit 到 stage 信号，供 UI 展示。"""
 
@@ -35,7 +32,7 @@ class VideoConcatWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(list)  # Emits list of generated files absolute paths
 
-    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade", beat_times=None, music_path="", music_range=None, lut_path=""):
+    def __init__(self, selected_clips, output_dir, layout_mode, recombine_mode, target_clip_count, batch_count, split_descriptions=None, randomness="medium", selected_descriptions_list=None, transition="fade", beat_times=None, music_path="", music_range=None, lut_path=""):  # noqa: E501
         super().__init__()
         self.selected_clips = selected_clips
         self.output_dir = output_dir
@@ -62,7 +59,7 @@ class VideoConcatWorker(BaseWorker):
             if not os.path.isfile(ffprobe):
                 ff = find_ffmpeg()
                 ffprobe = ff.replace("ffmpeg", "ffprobe")
-            cf = subprocess.CREATE_NO_WINDOW
+            cf = CREATE_NO_WINDOW
             cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
                    "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", clip]
             r = _run_proc(cmd, capture_output=True, text=True,
@@ -72,11 +69,11 @@ class VideoConcatWorker(BaseWorker):
                 w, h = int(m.group(1)), int(m.group(2))
                 if w > 0 and h > 0:
                     return w, h
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             log.warning(f"探测原视频分辨率失败: {e}")
         return None
 
-    def _transcode_one(self, i, clip, ffmpeg_path, ffprobe_path, temp_dir, width, height):
+    def _transcode_one(self, i, clip, ffmpeg_path, ffprobe_path, temp_dir, width, height):  # noqa: E501
         """标准化转码单个镜头到 temp_dir/norm_{i:04d}.mp4。
 
         纯函数式：只读入参，输出独立文件，无实例状态写入，线程安全。
@@ -92,13 +89,13 @@ class VideoConcatWorker(BaseWorker):
                      "-of", "csv=p=0", clip_abspath]
         try:
             probe_r = _run_proc(probe_cmd, capture_output=True, text=True, timeout=15,
-                                     creationflags=subprocess.CREATE_NO_WINDOW)
+                                     creationflags=CREATE_NO_WINDOW)
             if probe_r.returncode != 0 or not probe_r.stdout.strip():
                 raise _TranscodeSkip(f"注意： 跳过无法读取的文件: {name}")
         except _TranscodeSkip:
             raise
-        except Exception:
-            raise _TranscodeSkip(f"注意： 跳过探测失败的文件: {name}")
+        except (OSError, subprocess.SubprocessError) as e:
+            raise _TranscodeSkip(f"注意： 跳过探测失败的文件: {name}") from e
 
         # 2) 转码：缩放/填充黑边/统一 30fps，强制软编 libx264 superfast crf23
         # 标准化转码阶段必须强制软编，避免 GPU 编码器驱动/并发会话在后台线程中
@@ -106,13 +103,13 @@ class VideoConcatWorker(BaseWorker):
         norm_out = os.path.join(temp_dir, f"norm_{i:04d}.mp4")
         # format=yuv420p：源素材可能是 10-bit（yuv420p10le/HDR），AMF 等硬件编码器
         # 不支持 10-bit 输入，必须在滤镜链显式转 8-bit，否则转码全部失败。
-        vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p"
+        vf_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p"  # noqa: E501
 
         clip_dur = 0.0
         try:
             if probe_r.returncode == 0 and probe_r.stdout.strip():
                 clip_dur = float(probe_r.stdout.strip())
-        except Exception:
+        except (TypeError, ValueError):
             pass
         encode_timeout = max(60, int(clip_dur * 10)) if clip_dur > 0 else 300
 
@@ -124,10 +121,10 @@ class VideoConcatWorker(BaseWorker):
             norm_out
         ]
         try:
-            r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=encode_timeout)
-        except subprocess.TimeoutExpired:
+            r = _run_proc(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=encode_timeout)  # noqa: E501
+        except TimeoutExpired as e:
             log.warning(f"标准化转码单镜头超时({encode_timeout}s): {name}")
-            raise _TranscodeSkip(f"注意： 转码超时，跳过: {name}")
+            raise _TranscodeSkip(f"注意： 转码超时，跳过: {name}") from e
         if r.returncode != 0:
             log.warning(f"标准化转码单镜头失败，跳过: {clip}\n{r.stderr[-300:]}")
             raise _TranscodeSkip(f"注意： 转码失败，跳过: {name}")
@@ -154,7 +151,7 @@ class VideoConcatWorker(BaseWorker):
         若启用 LUT，使用 filter_complex 给每个镜头做 lut3d 后 concat（需重编码）。
         """
         if not clips:
-            return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
+            return CompletedProcess(args=[], returncode=1, stderr="no clips")
 
         lut_path = self.lut_path
         if lut_path and not os.path.isfile(lut_path):
@@ -164,21 +161,21 @@ class VideoConcatWorker(BaseWorker):
             if lut_path:
                 lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
                 vf = f"lut3d='{lut_esc}',format=yuv420p"
-                self.stage.emit(f"单个镜头 LUT 还原（软件编码）...")
+                self.stage.emit("单个镜头 LUT 还原（软件编码）...")
                 cmd = [ffmpeg_path, "-y", "-i", clips[0], "-vf", vf,
-                       *get_video_encode_args(crf=23, preset="superfast", force_software=True),
+                       *get_video_encode_args(crf=23, preset="superfast", force_software=True),  # noqa: E501
                        "-c:a", "aac", "-ar", "44100", "-ac", "2",
                        "-movflags", "+faststart", out_file]
             else:
                 cmd = [ffmpeg_path, "-y", "-i", clips[0], "-c", "copy", out_file]
             return _run_proc(cmd, capture_output=True, text=True,
-                                  creationflags=subprocess.CREATE_NO_WINDOW)
+                                  creationflags=CREATE_NO_WINDOW)
 
         # 多镜头 + LUT：需要在 filter_complex 里逐个应用 lut3d 后 concat
         if lut_path:
             lut_esc = lut_path.replace("\\", "/").replace(":", "\\:")
             n = len(clips)
-            video_parts = [f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[v{i}];" for i in range(n)]
+            video_parts = [f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[v{i}];" for i in range(n)]  # noqa: E501
             concat_labels = "".join(f"[v{i}]" for i in range(n))
             audio_labels = "".join(f"[{i}:a]" for i in range(n))
             filter_complex = (
@@ -186,7 +183,7 @@ class VideoConcatWorker(BaseWorker):
                 f"{concat_labels}concat=n={n}:v=1:a=0[vout];" +
                 f"{audio_labels}concat=n={n}:v=0:a=1[aout]"
             )
-            cmd = [ffmpeg_path, "-y"] + [arg for i, clip in enumerate(clips) for arg in ("-i", clip)] + [
+            cmd = [ffmpeg_path, "-y"] + [arg for i, clip in enumerate(clips) for arg in ("-i", clip)] + [  # noqa: E501
                 "-filter_complex", filter_complex,
                 "-map", "[vout]", "-map", "[aout]",
                 *get_video_encode_args(crf=23, preset="superfast", force_software=True),
@@ -195,25 +192,25 @@ class VideoConcatWorker(BaseWorker):
                 out_file
             ]
             return _run_proc(cmd, capture_output=True, text=True,
-                                  creationflags=subprocess.CREATE_NO_WINDOW)
+                                  creationflags=CREATE_NO_WINDOW)
 
-        concat_txt = os.path.join(temp_dir, f"concat_simple_{batch_idx}_{os.getpid()}.txt")
+        concat_txt = os.path.join(temp_dir, f"concat_simple_{batch_idx}_{os.getpid()}.txt")  # noqa: E501
         with open(concat_txt, "w", encoding="utf-8") as f:
             for c in clips:
                 safe_path = c.replace("\\", "/")
                 f.write(f"file '{safe_path}'\n")
-        cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
+        cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]  # noqa: E501
         return _run_proc(cmd, capture_output=True, text=True,
-                              creationflags=subprocess.CREATE_NO_WINDOW)
+                              creationflags=CREATE_NO_WINDOW)
 
-    def _run_xfade(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):
+    def _run_xfade(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):  # noqa: E501
         """对少量镜头直接构建 xfade 滤镜链拼接。超过 _XFADE_CHUNK_SIZE 的镜头应走
         _run_xfade_chunked 分块处理。
         """
         xfade_type = self._XFADE_MAP.get(self.transition, "fade")
         transition_dur = 0.5
 
-        self.stage.emit(f"正在合成转场视频 ({len(clips)} 个镜头){'，LUT 已启用' if lut_path else ''}...")
+        self.stage.emit(f"正在合成转场视频 ({len(clips)} 个镜头){'，LUT 已启用' if lut_path else ''}...")  # noqa: E501
 
         durations = []
         for clip in clips:
@@ -222,10 +219,10 @@ class VideoConcatWorker(BaseWorker):
                 cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
                        "-of", "csv=p=0", clip]
                 pr = _run_proc(cmd, capture_output=True, text=True, timeout=10,
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
+                                    creationflags=CREATE_NO_WINDOW)
                 if pr.returncode == 0 and pr.stdout.strip():
                     dur = float(pr.stdout.strip())
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 pass
             if dur <= 0:
                 dur = 5.0
@@ -242,17 +239,14 @@ class VideoConcatWorker(BaseWorker):
             for i in range(n):
                 filter_parts.append(f"[{i}:v]lut3d='{lut_esc}',format=yuv420p[lut{i}];")
 
-        if lut_path:
-            prev_label = "lut0"
-        else:
-            prev_label = "0:v"
+        prev_label = "lut0" if lut_path else "0:v"
         accumulated = durations[0]
         for i in range(1, n):
             offset = max(0, accumulated - transition_dur)
             out_label = f"v{i:02d}"
             src_label = f"lut{i}" if lut_path else f"{i}:v"
             filter_parts.append(
-                f"[{prev_label}][{src_label}]xfade=transition={xfade_type}:duration={transition_dur}:offset={offset:.3f}[{out_label}]"
+                f"[{prev_label}][{src_label}]xfade=transition={xfade_type}:duration={transition_dur}:offset={offset:.3f}[{out_label}]"  # noqa: E501
             )
             prev_label = out_label
             accumulated = offset + transition_dur + (durations[i] - transition_dur)
@@ -280,20 +274,20 @@ class VideoConcatWorker(BaseWorker):
         ]
         try:
             return _run_proc(cmd, capture_output=True, text=True,
-                                  creationflags=subprocess.CREATE_NO_WINDOW, timeout=timeout)
-        except subprocess.TimeoutExpired:
+                                  creationflags=CREATE_NO_WINDOW, timeout=timeout)
+        except TimeoutExpired:
             log.warning(f"xfade 拼接 {len(clips)} 个镜头超时({timeout}s)，输出文件未生成，准备降级")
-            return subprocess.CompletedProcess(args=cmd, returncode=1,
+            return CompletedProcess(args=cmd, returncode=1,
                                                stderr=f"xfade timeout after {timeout}s")
 
-    def _run_xfade_chunked(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):
+    def _run_xfade_chunked(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path):  # noqa: E501
         """镜头数过多时拆块处理，每块内部做 xfade，最后无损 concat 合并各块。"""
         chunk_size = self._XFADE_CHUNK_SIZE
         chunks = [clips[i:i + chunk_size] for i in range(0, len(clips), chunk_size)]
         chunk_files = []
         for idx, chunk in enumerate(chunks):
             self.stage.emit(f"转场拼接分块 {idx + 1}/{len(chunks)} ({len(chunk)} 个镜头)...")
-            chunk_out = os.path.join(temp_dir, f"chunk_{batch_idx}_{idx}_{os.getpid()}.mp4")
+            chunk_out = os.path.join(temp_dir, f"chunk_{batch_idx}_{idx}_{os.getpid()}.mp4")  # noqa: E501
             r = self._run_xfade(ffmpeg_path, ffprobe_path, chunk, chunk_out, temp_dir,
                                 f"{batch_idx}_{idx}", lut_path)
             if r.returncode != 0 or not os.path.isfile(chunk_out):
@@ -301,14 +295,14 @@ class VideoConcatWorker(BaseWorker):
                 r2 = self._simple_concat(ffmpeg_path, chunk, chunk_out, temp_dir,
                                          f"{batch_idx}_{idx}_fallback")
                 if r2.returncode != 0 or not os.path.isfile(chunk_out):
-                    return subprocess.CompletedProcess(args=[], returncode=1,
+                    return CompletedProcess(args=[], returncode=1,
                         stderr=f"chunk {idx} fallback concat failed: {r2.stderr}")
             chunk_files.append(chunk_out)
 
         return self._simple_concat(ffmpeg_path, chunk_files, out_file, temp_dir,
                                     f"chunked_{batch_idx}")
 
-    def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):
+    def _concat_with_transition(self, ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx):  # noqa: E501
         """用 ffmpeg xfade 滤镜拼接镜头，实现转场动画。可选 LUT 色彩还原。
 
         注意：xfade 是复杂 CPU 滤镜，其输出像素格式/帧时序与硬件编码器（AMF/NVENC/QSV）
@@ -318,7 +312,7 @@ class VideoConcatWorker(BaseWorker):
         若用户选择"无转场"或 xfade 超时/失败，自动降级为无损 concat。
         """
         if not clips:
-            return subprocess.CompletedProcess(args=[], returncode=1, stderr="no clips")
+            return CompletedProcess(args=[], returncode=1, stderr="no clips")
 
         # 读取 LUT 配置
         lut_path = self.lut_path
@@ -330,12 +324,12 @@ class VideoConcatWorker(BaseWorker):
 
         # 无转场 / 单镜头：直接走无损 concat
         if self.transition == "none" or len(clips) <= 1:
-            return self._simple_concat(ffmpeg_path, clips, out_file, temp_dir, batch_idx)
+            return self._simple_concat(ffmpeg_path, clips, out_file, temp_dir, batch_idx)  # noqa: E501
 
         # 镜头数在阈值内：直接 xfade；超过阈值：分块 xfade
         if len(clips) <= self._XFADE_CHUNK_SIZE:
-            return self._run_xfade(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)
-        return self._run_xfade_chunked(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)
+            return self._run_xfade(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)  # noqa: E501
+        return self._run_xfade_chunked(ffmpeg_path, ffprobe_path, clips, out_file, temp_dir, batch_idx, lut_path)  # noqa: E501
 
     def _compose_beat_video(self, ffmpeg_path, norm_clips, out_file, temp_dir):
         """音乐卡点合成：每个镜头裁剪到对应节拍区间时长，硬切拼接（保证卡点精准），
@@ -368,7 +362,7 @@ class VideoConcatWorker(BaseWorker):
                    "-pix_fmt", "yuv420p",
                    cut]
             r = _run_proc(cmd, capture_output=True, text=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                               creationflags=CREATE_NO_WINDOW)
             if r.returncode != 0 or not os.path.isfile(cut):
                 log.warning(f"卡点裁剪镜头失败: {r.stderr[-200:]}")
                 raise RuntimeError(f"卡点裁剪第 {i+1} 个镜头失败")
@@ -384,7 +378,7 @@ class VideoConcatWorker(BaseWorker):
         cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
                "-c", "copy", noaudio]
         r = _run_proc(cmd, capture_output=True, text=True,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+                           creationflags=CREATE_NO_WINDOW)
         if r.returncode != 0 or not os.path.isfile(noaudio):
             raise RuntimeError(f"卡点拼接失败：{(r.stderr or '')[-200:]}")
 
@@ -400,7 +394,7 @@ class VideoConcatWorker(BaseWorker):
                    "-c:v", "copy", "-c:a", "aac", "-shortest",
                    out_file]
             r = _run_proc(cmd, capture_output=True, text=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                               creationflags=CREATE_NO_WINDOW)
             if r.returncode != 0 or not os.path.isfile(out_file):
                 log.warning(f"卡点叠加音乐失败，输出无音乐版本: {(r.stderr or '')[-200:]}")
                 shutil.copyfile(noaudio, out_file)
@@ -448,7 +442,7 @@ class VideoConcatWorker(BaseWorker):
             # Step 1: Transcode all selected candidate clips once to temporary folder
             # 并行转码：每个镜头输出独立文件 (norm_{i:04d}.mp4)，互不冲突；
             # 完成后按 i 排序重组，保证拼接顺序与串行版完全一致。
-            normalized_list = []
+            normalized_list: list[tuple[int, str]] = []
             norm_to_desc = {}
             skipped_clips = []
             total_clips = len(self.selected_clips)
@@ -460,7 +454,7 @@ class VideoConcatWorker(BaseWorker):
             with ThreadPoolExecutor(max_workers=max_workers,
                                     thread_name_prefix="norm") as pool:
                 future_to_meta = {
-                    pool.submit(self._transcode_one, i, clip, *transcode_args): (i, clip)
+                    pool.submit(self._transcode_one, i, clip, *transcode_args): (i, clip)  # noqa: E501
                     for i, clip in enumerate(self.selected_clips)
                 }
                 done_count = 0
@@ -472,7 +466,7 @@ class VideoConcatWorker(BaseWorker):
                         skipped_clips.append(clip)
                         self.stage.emit(str(e))
                         norm_out = None
-                    except Exception as e:
+                    except Exception as e:  # 线程池中未预期的错误也按跳过处理
                         # 未预期错误也按跳过处理，避免整个合成失败
                         log.warning(f"标准化转码异常，跳过: {clip}\n{e}", exc_info=True)
                         skipped_clips.append(clip)
@@ -481,43 +475,41 @@ class VideoConcatWorker(BaseWorker):
 
                     if norm_out:
                         normalized_list.append((i, norm_out))
-                        if self.selected_descriptions_list is not None and i < len(self.selected_descriptions_list):
+                        if self.selected_descriptions_list is not None and i < len(self.selected_descriptions_list):  # noqa: E501
                             norm_to_desc[norm_out] = self.selected_descriptions_list[i]
                         else:
-                            norm_to_desc[norm_out] = self.split_descriptions.get(os.path.abspath(clip), "")
+                            norm_to_desc[norm_out] = self.split_descriptions.get(os.path.abspath(clip), "")  # noqa: E501
 
-                    done_count += 1
+                    done_count += 1  # noqa: SIM113
                     self.stage.emit(f"标准化转码进度 {done_count}/{total_clips}")
                     prog = 10 + int(done_count / total_clips * 70)
                     self.progress.emit(prog)
 
             # 按原始下标 i 排序，恢复与串行版一致的拼接顺序
             normalized_list.sort(key=lambda t: t[0])
-            normalized_list = [p for _, p in normalized_list]
+            clip_paths: list[str] = [p for _, p in normalized_list]
 
-            if not normalized_list:
+            if not clip_paths:
                 raise RuntimeError("所有镜头文件均损坏或转码失败，无法合成视频。请重新进行镜头分割。")
             if skipped_clips:
-                self.stage.emit(f"注意： 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(normalized_list)} 个镜头")
+                self.stage.emit(f"注意： 共跳过 {len(skipped_clips)} 个损坏文件，继续合成剩余 {len(clip_paths)} 个镜头")  # noqa: E501
 
             # ── 音乐卡点模式：按节拍裁剪镜头 + 叠加音乐片段，生成单个卡点视频 ──
             if self.recombine_mode == "beat" and self.beat_times:
                 self.stage.emit(" 正在按音乐节拍合成卡点视频...")
                 out_file = os.path.join(
                     self.output_dir, f"montage_beat_{random.randint(1000, 9999)}.mp4")
-                self._compose_beat_video(ffmpeg_path, normalized_list, out_file, temp_dir)
+                self._compose_beat_video(ffmpeg_path, clip_paths, out_file, temp_dir)  # noqa: E501
                 # 保存源镜头列表
                 try:
                     sources_file = os.path.splitext(out_file)[0] + "_sources.txt"
                     with open(sources_file, "w", encoding="utf-8") as sf:
                         for src in self.selected_clips:
                             sf.write(src + "\n")
-                except Exception as e:
+                except OSError as e:
                     log.warning(f"保存卡点视频源镜头列表失败: {e}")
-                try:
+                with contextlib.suppress(OSError):
                     shutil.rmtree(temp_dir)
-                except Exception:
-                    pass
                 self.stage.emit(" 音乐卡点视频合成完成！")
                 self.progress.emit(100)
                 self.finished.emit([out_file])
@@ -527,15 +519,15 @@ class VideoConcatWorker(BaseWorker):
             generated_paths = []
             for batch_idx in range(self.batch_count):
                 self.stage.emit(f"无损拼接第 {batch_idx+1}/{self.batch_count} 个视频...")
-                
-                batch_clips = list(normalized_list)
+
+                batch_clips = list(clip_paths)
                 if self.recombine_mode == "random":
                     if self.randomness == "high":
                         random.shuffle(batch_clips)
                     elif self.randomness == "medium":
                         # Group consecutive clips with same description
                         groups = []
-                        current_group = []
+                        current_group: list[str] = []
                         current_desc = None
                         for n_clip in batch_clips:
                             desc = norm_to_desc.get(n_clip, "").strip()
@@ -551,7 +543,7 @@ class VideoConcatWorker(BaseWorker):
                                     current_desc = desc
                         if current_group:
                             groups.append(current_group)
-                        
+
                         # Shuffle the groups
                         random.shuffle(groups)
                         # Flatten
@@ -559,18 +551,18 @@ class VideoConcatWorker(BaseWorker):
                     elif self.randomness == "low":
                         # Low randomness = no shuffling, keep sequential order
                         pass
-                
+
                 if len(batch_clips) > self.target_clip_count:
                     batch_clips = batch_clips[:self.target_clip_count]
                 elif len(batch_clips) < self.target_clip_count:
                     extra_needed = self.target_clip_count - len(batch_clips)
                     for _ in range(extra_needed):
-                        batch_clips.append(random.choice(normalized_list))
-                
-                out_file = os.path.join(self.output_dir, f"montage_concat_{random.randint(1000, 9999)}_{batch_idx+1}.mp4")
+                        batch_clips.append(random.choice(clip_paths))
+
+                out_file = os.path.join(self.output_dir, f"montage_concat_{random.randint(1000, 9999)}_{batch_idx+1}.mp4")  # noqa: E501
 
                 # 使用 xfade 滤镜实现转场动画（非 copy 模式，需要重新编码）
-                r = self._concat_with_transition(ffmpeg_path, ffprobe_path, batch_clips, out_file, temp_dir, batch_idx)
+                r = self._concat_with_transition(ffmpeg_path, ffprobe_path, batch_clips, out_file, temp_dir, batch_idx)  # noqa: E501
                 if r.returncode != 0:
                     # 转场拼接失败，回退到无损 concat
                     log.warning(f"转场拼接失败，回退到普通拼接: {r.stderr[-200:]}")
@@ -579,17 +571,17 @@ class VideoConcatWorker(BaseWorker):
                         for n_clip in batch_clips:
                             safe_path = n_clip.replace("\\", "/")
                             f.write(f"file '{safe_path}'\n")
-                    cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]
-                    r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    cmd = [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", concat_txt, "-c", "copy", out_file]  # noqa: E501
+                    r = _run_proc(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)  # noqa: E501
                     if r.returncode != 0:
                         raise RuntimeError(f"拼接第 {batch_idx+1} 个视频失败：\n{r.stderr}")
-                
+
                 # 注：不再在合成视频时把画面描述拼接写入 .txt。
                 # 该 .txt 是「口播文案」专属文件，只有用户点「生成口播文案」按钮由 AI 生成后才填充。
                 # 画面描述已保存在内存 split_descriptions/split_clips_cache + _sources.txt 中，
                 # 生成口播文案时由 _get_video_scene_descriptions 正常读取，不受影响。
 
-                # Save the list of original source clips that make up this generated video
+                # Save the list of original source clips that make up this generated video  # noqa: E501
                 sources_file = os.path.splitext(out_file)[0] + "_sources.txt"
                 try:
                     original_sources = []
@@ -600,27 +592,25 @@ class VideoConcatWorker(BaseWorker):
                                 idx = int(filename.split("_")[1].split(".")[0])
                                 if 0 <= idx < len(self.selected_clips):
                                     original_sources.append(self.selected_clips[idx])
-                            except Exception:
+                            except (TypeError, ValueError):
                                 pass
                     with open(sources_file, "w", encoding="utf-8") as sf:
                         for src in original_sources:
                             sf.write(src + "\n")
-                except Exception as e:
+                except OSError as e:
                     log.warning(f"保存视频源镜头列表失败: {e}")
 
                 generated_paths.append(out_file)
                 self.progress.emit(80 + int((batch_idx + 1) / self.batch_count * 20))
 
-            try:
+            with contextlib.suppress(OSError):
                 shutil.rmtree(temp_dir)
-            except Exception:
-                pass
 
             self.stage.emit(f"批量拼接完成，共生成 {self.batch_count} 个视频！")
             self.progress.emit(100)
             self.finished.emit(generated_paths)
 
-        except Exception:
+        except Exception:  # 批量拼接合并失败
             log.exception("批量拼接合并失败")
             self.error.emit(traceback.format_exc())
 
@@ -643,37 +633,37 @@ class FinalMixWorker(BaseWorker):
             if not ffmpeg_path:
                 raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
 
-            creationflags = subprocess.CREATE_NO_WINDOW
+            creationflags = CREATE_NO_WINDOW
             has_bgm = bool(self.bgm_path and os.path.exists(self.bgm_path))
             bgm_vol = self.bgm_volume / 100.0
-            
+
             results = []
             total = len(self.tasks)
-            
+
             for index, (video_path, output_path) in enumerate(self.tasks):
                 self.stage.emit(f"正在进行最终合成配乐 ({index + 1}/{total})...")
                 self.progress.emit(int(index / total * 100))
-                
+
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                
+
                 if has_bgm:
                     # Check if the input video has an audio stream
                     has_audio = False
                     try:
                         ffprobe_cmd = [
-                            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+                            "ffprobe", "-v", "error", "-show_entries", "stream=codec_type",  # noqa: E501
                             "-of", "csv=p=0", video_path
                         ]
-                        p_probe = _run_proc(ffprobe_cmd, capture_output=True, text=True, creationflags=creationflags)
+                        p_probe = _run_proc(ffprobe_cmd, capture_output=True, text=True, creationflags=creationflags)  # noqa: E501
                         if "audio" in p_probe.stdout:
                             has_audio = True
-                    except Exception:
+                    except (OSError, subprocess.SubprocessError):
                         has_audio = True
 
                     # BGM 淡入淡出：开头 1s 淡入，结尾 2s 淡出（按视频时长定位）
                     vid_dur = get_media_duration(video_path)
                     fade_out_start = max(0.0, vid_dur - 2.0)
-                    bgm_fades = f"afade=t=in:st=0:d=1.0,afade=t=out:st={fade_out_start:.3f}:d=2.0" if vid_dur > 0 else "afade=t=in:st=0:d=1.0"
+                    bgm_fades = f"afade=t=in:st=0:d=1.0,afade=t=out:st={fade_out_start:.3f}:d=2.0" if vid_dur > 0 else "afade=t=in:st=0:d=1.0"  # noqa: E501
 
                     if has_audio:
                         # 人声闪避（sidechain ducking）：BGM 在人声出现时自动压低，
@@ -681,7 +671,7 @@ class FinalMixWorker(BaseWorker):
                         filter_complex = (
                             f"[0:a]asplit=2[vo][sc];"
                             f"[1:a]volume={bgm_vol},{bgm_fades}[bg];"
-                            f"[bg][sc]sidechaincompress=threshold=0.05:ratio=8:attack=50:release=400[duck];"
+                            f"[bg][sc]sidechaincompress=threshold=0.05:ratio=8:attack=50:release=400[duck];"  # noqa: E501
                             f"[vo][duck]amix=inputs=2:duration=first:normalize=0,"
                             f"loudnorm=I=-16:TP=-1.5:LRA=11[a]"
                         )
@@ -697,7 +687,7 @@ class FinalMixWorker(BaseWorker):
                         cmd = [
                             ffmpeg_path, "-y", "-i", video_path,
                             "-stream_loop", "-1", "-i", self.bgm_path,
-                            "-filter_complex", f"[1:a]volume={bgm_vol},{bgm_fades},loudnorm=I=-16:TP=-1.5:LRA=11[bgm]",
+                            "-filter_complex", f"[1:a]volume={bgm_vol},{bgm_fades},loudnorm=I=-16:TP=-1.5:LRA=11[bgm]",  # noqa: E501
                             "-map", "0:v", "-map", "[bgm]",
                             "-c:v", "copy", "-c:a", "aac", "-shortest",
                             output_path
@@ -708,18 +698,18 @@ class FinalMixWorker(BaseWorker):
                         "-c", "copy",
                         output_path
                     ]
-                
-                r = _run_proc(cmd, capture_output=True, text=True, creationflags=creationflags)
+
+                r = _run_proc(cmd, capture_output=True, text=True, creationflags=creationflags)  # noqa: E501
                 if r.returncode != 0:
                     raise RuntimeError(f"最后合成视频失败：\n{r.stderr}")
-                    
+
                 results.append(output_path)
-                
+
             self.stage.emit("所有视频及配乐最终合成完成！")
             self.progress.emit(100)
             self.finished.emit(results)
-            
-        except Exception:
+
+        except Exception:  # 最终合成失败
             log.exception("最终合成失败")
             self.error.emit(traceback.format_exc())
 
@@ -728,12 +718,12 @@ class FinalMixWorker(BaseWorker):
 class VideoDubbingWorker(BaseWorker):
     stage = Signal(str)
     progress = Signal(int)
-    finished = Signal(dict)  # Outputs a dict mapping: original_video_path -> dubbed_video_path
+    finished = Signal(dict)  # Outputs a dict mapping: original_video_path -> dubbed_video_path  # noqa: E501
 
     def __init__(self, tasks, add_subtitles=True, length_modes=None,
                  fancy_text=False, fancy_style="gold", fancy_words=None):
         super().__init__()
-        self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)
+        self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)  # noqa: E501
         self.add_subtitles = add_subtitles
         self.length_modes = length_modes or {}  # video_path -> "video" or "audio"
         self.fancy_text = fancy_text
@@ -748,12 +738,12 @@ class VideoDubbingWorker(BaseWorker):
         if not os.path.exists(p):
             return None
         try:
-            with open(p, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 timing = _json.load(f)
             if (isinstance(timing, list) and timing
                     and all(isinstance(t, dict) and t.get("text") for t in timing)):
                 return timing
-        except Exception:
+        except (OSError, _json.JSONDecodeError):
             pass
         return None
 
@@ -765,17 +755,17 @@ class VideoDubbingWorker(BaseWorker):
 
             results = {}
             total = len(self.tasks)
-            
-            for index, (video_path, voice_wav_path, output_video_path, text) in enumerate(self.tasks):
+
+            for index, (video_path, voice_wav_path, output_video_path, text) in enumerate(self.tasks):  # noqa: E501
                 self.stage.emit(f"正在进行视频原声替换配音 ({index + 1}/{total})...")
                 self.progress.emit(int(index / total * 100))
-                
+
                 os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
 
                 length_mode = self.length_modes.get(video_path, "video")
                 video_dur = get_media_duration(video_path)
                 audio_dur = get_media_duration(voice_wav_path)
-                use_audio_length = (length_mode == "audio" and audio_dur > video_dur > 0)
+                use_audio_length = (length_mode == "audio" and audio_dur > video_dur > 0)  # noqa: E501
                 extra_dur = audio_dur - video_dur if use_audio_length else 0.0
                 display_dur = audio_dur if use_audio_length else video_dur
 
@@ -787,7 +777,7 @@ class VideoDubbingWorker(BaseWorker):
 
                 if use_audio_length:
                     # Extend video with last frame clone to match audio length
-                    video_filters.append(f"[{video_label}]tpad=stop_mode=clone:stop_duration={extra_dur:.3f}[v_padded]")
+                    video_filters.append(f"[{video_label}]tpad=stop_mode=clone:stop_duration={extra_dur:.3f}[v_padded]")  # noqa: E501
                     video_label = "v_padded"
 
                 if self.add_subtitles and text:
@@ -811,7 +801,7 @@ class VideoDubbingWorker(BaseWorker):
                             line_ends = [min(e, display_dur) for e in line_ends]
                     else:
                         # 回退：无时间轴时按字数比例估算（旧行为）
-                        raw_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+                        raw_lines = [line.strip() for line in text.strip().split("\n") if line.strip()]  # noqa: E501
                         if not raw_lines:
                             raw_lines = [text.strip()]
                         char_counts = [max(1, len(line)) for line in raw_lines]
@@ -820,7 +810,7 @@ class VideoDubbingWorker(BaseWorker):
                         line_starts, line_ends = [], []
                         for c in char_counts:
                             t0 = cum_t
-                            t1 = cum_t + (display_dur * c / total_chars if display_dur > 0 else 5.0)
+                            t1 = cum_t + (display_dur * c / total_chars if display_dur > 0 else 5.0)  # noqa: E501
                             line_starts.append(t0)
                             line_ends.append(t1)
                             cum_t = t1
@@ -830,7 +820,7 @@ class VideoDubbingWorker(BaseWorker):
                     for i, line_text in enumerate(raw_lines):
                         start_t = line_starts[i]
                         end_t = line_ends[i]
-                        escaped = line_text.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')
+                        escaped = line_text.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
                         dt = (
                             f"drawtext=fontfile='{font_path}':"
                             f"text='{escaped}':"
@@ -853,13 +843,13 @@ class VideoDubbingWorker(BaseWorker):
 
                     # 花字样式预设：fontcolor + borderw + bordercolor + shadow
                     fancy_styles = {
-                        "gold":          "fontcolor=0xF0C040:borderw=4:bordercolor=0x6B3000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
-                        "red":           "fontcolor=0xFF4040:borderw=4:bordercolor=0x800000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
-                        "blue":          "fontcolor=0x40A0FF:borderw=4:bordercolor=0x003080:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
-                        "purple":        "fontcolor=0xC060FF:borderw=4:bordercolor=0x300060:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
-                        "neon_green":    "fontcolor=0x40FF80:borderw=3:bordercolor=0x004020:shadowx=3:shadowy=3:shadowcolor=0x00FF80@0.5",
-                        "white_outline": "fontcolor=white:borderw=5:bordercolor=black:shadowx=2:shadowy=2:shadowcolor=0x000000@0.6",
-                        "yellow_red":    "fontcolor=0xFFFF00:borderw=5:bordercolor=0xCC0000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",
+                        "gold":          "fontcolor=0xF0C040:borderw=4:bordercolor=0x6B3000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
+                        "red":           "fontcolor=0xFF4040:borderw=4:bordercolor=0x800000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
+                        "blue":          "fontcolor=0x40A0FF:borderw=4:bordercolor=0x003080:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
+                        "purple":        "fontcolor=0xC060FF:borderw=4:bordercolor=0x300060:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
+                        "neon_green":    "fontcolor=0x40FF80:borderw=3:bordercolor=0x004020:shadowx=3:shadowy=3:shadowcolor=0x00FF80@0.5",  # noqa: E501
+                        "white_outline": "fontcolor=white:borderw=5:bordercolor=black:shadowx=2:shadowy=2:shadowcolor=0x000000@0.6",  # noqa: E501
+                        "yellow_red":    "fontcolor=0xFFFF00:borderw=5:bordercolor=0xCC0000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
                     }
                     style_str = fancy_styles.get(self.fancy_style, fancy_styles["gold"])
 
@@ -874,7 +864,7 @@ class VideoDubbingWorker(BaseWorker):
                                 continue
                             ft_start = wi * seg_dur
                             ft_end = min((wi + 1) * seg_dur, display_dur)
-                            escaped = word.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')
+                            escaped = word.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
                             # 花字：大号字体，居中偏上，带描边和阴影
                             dt = (
                                 f"drawtext=fontfile='{font_path}':"
@@ -885,7 +875,7 @@ class VideoDubbingWorker(BaseWorker):
                             )
                             fancy_drawtexts.append(dt)
                     if fancy_drawtexts:
-                        video_filters.append(f"[{video_label}]{','.join(fancy_drawtexts)}[vf]")
+                        video_filters.append(f"[{video_label}]{','.join(fancy_drawtexts)}[vf]")  # noqa: E501
                         video_label = "vf"
 
                 if need_audio_speed:
@@ -897,30 +887,30 @@ class VideoDubbingWorker(BaseWorker):
                         atempo_parts.append("atempo=2.0")
                         remaining /= 2.0
                     if remaining < 0.5:
-                        atempo_parts.append(f"atempo=0.5")
+                        atempo_parts.append("atempo=0.5")
                         remaining /= 0.5
                     if abs(remaining - 1.0) > 0.001:
                         atempo_parts.append(f"atempo={remaining:.4f}")
                     if atempo_parts:
                         if video_filters:
-                            video_filters.append(f"[{audio_label}]{','.join(atempo_parts)}[a]")
+                            video_filters.append(f"[{audio_label}]{','.join(atempo_parts)}[a]")  # noqa: E501
                             audio_label = "a"
                         else:
-                            video_filters.append(f"[{audio_label}]{','.join(atempo_parts)}[a]")
+                            video_filters.append(f"[{audio_label}]{','.join(atempo_parts)}[a]")  # noqa: E501
                             audio_label = "a"
-                            # Need a dummy video pass-through so filter_complex can map both
+                            # Need a dummy video pass-through so filter_complex can map both  # noqa: E501
                             video_filters.insert(0, f"[{video_label}]null[v]")
                             video_label = "v"
 
                 if video_filters:
                     filter_complex = ";".join(video_filters)
-                    audio_map = f"[{audio_label}]" if audio_label == "a" else audio_label
+                    audio_map = f"[{audio_label}]" if audio_label == "a" else audio_label  # noqa: E501
                     cmd = [
                         ffmpeg_path, "-y", "-i", video_path,
                         "-i", voice_wav_path,
                         "-filter_complex", filter_complex,
                         "-map", f"[{video_label}]", "-map", audio_map,
-                        *get_video_encode_args(crf=23, preset="superfast"), "-c:a", "aac",
+                        *get_video_encode_args(crf=23, preset="superfast"), "-c:a", "aac",  # noqa: E501
                     ]
                     # "以声音为准"时严格裁剪输出到音频时长：
                     #   audio > video → tpad 已把视频延长到 audio_dur，-t 再确认一次（无害）
@@ -935,18 +925,18 @@ class VideoDubbingWorker(BaseWorker):
                         "-c:v", "copy", "-c:a", "aac", "-shortest",
                     ]
                 cmd.append(output_video_path)
-                
-                r = _run_proc(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+
+                r = _run_proc(cmd, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)  # noqa: E501
                 if r.returncode != 0:
                     err = r.stderr or r.stdout or "(无输出)"
                     raise RuntimeError(f"视频原声替换配音失败：\n{err}\n命令: {' '.join(cmd)}")
-                    
+
                 results[video_path] = output_video_path
-                
+
             self.stage.emit("所有视频替换配音完成！")
             self.progress.emit(100)
             self.finished.emit(results)
-            
-        except Exception:
+
+        except Exception:  # 视频替换配音失败
             log.exception("视频替换配音失败")
             self.error.emit(traceback.format_exc())

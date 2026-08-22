@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """媒体工具：把「图片处理」与「视频处理」两组子功能聚合为「分组卡片菜单」界面。
 
 设计参考：剪贴板卡片式界面——深色卡片（图标 + 标题 + 说明），按「图片 / 视频」分组。
@@ -11,14 +10,21 @@
 """
 import logging
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QGridLayout, QScrollArea, QStackedWidget, QSizePolicy,
-)
-
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 from utils.gui_icons import mdi_icon
 
 log = logging.getLogger(__name__)
@@ -68,7 +74,7 @@ class _ToolCard(QFrame):
         lay.addWidget(desc_lbl, 0, Qt.AlignCenter)
         lay.addStretch()
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
@@ -99,7 +105,7 @@ class MediaToolsPage(BasePage):
     def __init__(self, parent_widget, main_window):
         super().__init__(parent_widget, main_window)
         self._built = set()
-        self._stack = None
+        self._stack: QStackedWidget | None = None
         # 持有工具页实例引用，防止临时实例被 GC 回收导致信号连接失效
         # （如按钮 clicked → 文件对话框无法弹出）
         self._tool_pages = {}
@@ -144,7 +150,7 @@ class MediaToolsPage(BasePage):
         content_lay.addLayout(self._build_card_grid(self._IMAGE_TOOLS, 0))
         content_lay.addSpacing(10)
         content_lay.addWidget(self._group_header("视频"))
-        content_lay.addLayout(self._build_card_grid(self._VIDEO_TOOLS, len(self._IMAGE_TOOLS)))
+        content_lay.addLayout(self._build_card_grid(self._VIDEO_TOOLS, len(self._IMAGE_TOOLS)))  # noqa: E501
         content_lay.addSpacing(10)
         content_lay.addWidget(self._group_header("提示词"))
         content_lay.addLayout(self._build_card_grid(
@@ -171,10 +177,12 @@ class MediaToolsPage(BasePage):
         grid = QGridLayout()
         grid.setSpacing(14)
         cols = 3
-        for i, (title, key, icon_name, desc) in enumerate(tools):
+        stack = self._stack
+        for i, (title, _key, icon_name, desc) in enumerate(tools):
             card = _ToolCard(icon_name, title, desc)
             tool_index = 1 + start_index + i
-            card.clicked.connect(lambda idx=tool_index: self._stack.setCurrentIndex(idx))
+            if stack is not None:
+                card.clicked.connect(lambda idx=tool_index, s=stack: s.setCurrentIndex(idx))  # noqa: E501
             grid.addWidget(card, i // cols, i % cols)
         for c in range(cols):
             grid.setColumnStretch(c, 1)
@@ -184,11 +192,17 @@ class MediaToolsPage(BasePage):
     def _ensure_tool(self, index):
         if index <= 0 or index > len(self._all_tools()) or index in self._built:
             return
-        self._built.add(index)
         key = self._all_tools()[index - 1][1]
+        stack = self._stack
+        if stack is None:
+            return
         try:
-            self._build_tool(key, self._stack.widget(index))
-        except Exception as e:
+            page = stack.widget(index)
+            if page is None:
+                return
+            self._build_tool(key, page)
+            self._built.add(index)
+        except Exception as e:  # Qt 工具页构建可能抛出多类异常
             log.error("[媒体工具] 工具页构建失败(%s): %s", key, e)
 
     def _build_tool(self, key, page):
@@ -199,7 +213,9 @@ class MediaToolsPage(BasePage):
         bar = QHBoxLayout()
         btn_back = QPushButton("← 返回媒体工具")
         btn_back.setObjectName("secondary_button")
-        btn_back.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+        stack = self._stack
+        if stack is not None:
+            btn_back.clicked.connect(lambda s=stack: s.setCurrentIndex(0))
         bar.addWidget(btn_back)
         bar.addStretch()
         lay.addLayout(bar)
@@ -241,7 +257,7 @@ class MediaToolsPage(BasePage):
             from gui.prompt_reverse_page import VideoPromptReversePage
             self._tool_pages[key] = VideoPromptReversePage(content, mw)
         else:
-            raise ValueError("未知媒体工具: %s" % key)
+            raise ValueError(f"未知媒体工具: {key}")
         if self._tool_pages.get(key) is not None:
             page_cls = self._tool_pages[key]
             setup_fn = getattr(page_cls, "setup", None)

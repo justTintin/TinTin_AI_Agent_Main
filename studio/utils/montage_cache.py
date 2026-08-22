@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """智能混剪 - 任务级缓存与素材清单（方案二）。
 
 设计：
@@ -14,27 +13,48 @@ manifest.entries 三类：
 
 纯函数式、不依赖 Qt，可安全地在任意线程调用。
 """
-import os
 import json
+import os
+import shutil
 import time
 import uuid
-import shutil
 
 from config.paths import RUNTIME_DIR
+
 from utils.logger_utils import log
 
-# 缓存根：studio/.runtime/montage_cache（frozen 时 = 部署根/studio/.runtime/montage_cache）
-_MONTAGE_CACHE_ROOT = os.path.join(RUNTIME_DIR, "montage_cache")
+# 缓存根：优先跟随「系统设置 → 本地配置 → 缓存目录」
+#   - 配置了 cache_dir：<cache_dir>/montage_cache
+#   - 未配置：回退 studio/.runtime/montage_cache（frozen 时 = 部署根/studio/.runtime/montage_cache）
+_LOCAL_CFG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # noqa: E501
+                                "config", "local_config.json")
+
+
+def _resolve_cache_root():
+    """按 local_config.json 的 cache_dir/output_dir 解析混剪缓存根；未配置回退 RUNTIME_DIR。"""
+    try:
+        if os.path.isfile(_LOCAL_CFG_FILE):
+            import json as _json
+            with open(_LOCAL_CFG_FILE, encoding="utf-8") as f:
+                data = _json.load(f)
+            d = (data.get("cache_dir") or data.get("output_dir") or "").strip()
+            if d:
+                return os.path.join(d, "montage_cache")
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        pass
+    return os.path.join(RUNTIME_DIR, "montage_cache")
+
+
+_MONTAGE_CACHE_ROOT = _resolve_cache_root()
 
 
 def montage_cache_root():
     """混剪任务缓存根目录（懒创建）。"""
     try:
         os.makedirs(_MONTAGE_CACHE_ROOT, exist_ok=True)
-    except Exception as e:
+    except OSError as e:
         log.warning(f"创建混剪缓存根目录失败({_MONTAGE_CACHE_ROOT}): {e}")
     return _MONTAGE_CACHE_ROOT
-
 
 def new_job_id():
     """生成新任务缓存索引（uuid4 hex）。"""
@@ -69,10 +89,10 @@ def load_manifest(job_id):
     if not os.path.exists(p):
         return {}
     try:
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         log.warning(f"读取混剪素材清单失败({p}): {e}")
         return {}
 
@@ -87,7 +107,7 @@ def save_manifest(job_id, manifest):
         with open(p, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
         return True
-    except Exception as e:
+    except OSError as e:
         log.warning(f"保存混剪素材清单失败({job_id}): {e}")
         return False
 
@@ -116,7 +136,7 @@ def clear_job(job_id):
             shutil.rmtree(target, ignore_errors=True)
             log.info(f"已清理混剪任务缓存: {job_id}")
         return True
-    except Exception as e:
+    except OSError as e:
         log.warning(f"清理混剪任务缓存失败({job_id}): {e}")
         return False
 
@@ -134,7 +154,7 @@ def clear_montage_cache():
                 shutil.rmtree(full, ignore_errors=True)
                 removed += 1
         log.info(f"已清空混剪缓存，移除 {removed} 个任务目录")
-    except Exception as e:
+    except OSError as e:
         log.warning(f"清空混剪缓存失败: {e}")
     return removed
 
@@ -158,7 +178,7 @@ def clear_abandoned_jobs(max_age_hours=24):
             if age_h >= max_age_hours:
                 shutil.rmtree(full, ignore_errors=True)
                 removed += 1
-    except Exception as e:
+    except OSError as e:
         log.warning(f"清理过期混剪任务缓存失败: {e}")
     if removed:
         log.info(f"已清理 {removed} 个过期混剪任务缓存(>{max_age_hours}h)")

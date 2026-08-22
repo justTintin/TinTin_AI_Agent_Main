@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """自动上架数据包：导入、结构校验、sku.xlsx 解析。"""
 import os
 import re
@@ -47,14 +46,16 @@ def normalize_name(name: str) -> str:
 
 
 def shop_matches(name: str, shop_key: str) -> bool:
-    info = DOUYIN_STORES.get(shop_key)
+    info: dict = DOUYIN_STORES.get(shop_key, {})
     if not info:
         return False
     cand = normalize_name(name)
-    if normalize_name(info.get("name", "")) in cand or cand in normalize_name(info.get("name", "")):
+    shop_name = str(info.get("name", ""))
+    if normalize_name(shop_name) in cand or cand in normalize_name(shop_name):
         return True
+    aliases = list(info.get("aliases", []))
     return any(normalize_name(a) in cand or cand in normalize_name(a)
-               for a in info.get("aliases", []) if a)
+               for a in aliases if a)
 
 
 def _find_dir(base: str, wanted: str) -> str:
@@ -108,7 +109,7 @@ def image_size(path: str):
                 else:
                     length = struct.unpack(">H", data[pos + 2:pos + 4])[0]
                     pos += 2 + length
-    except Exception:
+    except Exception:  # struct 二进制解析可能失败
         pass
     return None
 
@@ -119,14 +120,14 @@ def _read_excel(working_dir: str) -> dict:
         raise ValidationError(f"数据包缺少 sku.xlsx: {working_dir}")
     try:
         wb = load_workbook(xls_path, read_only=True, data_only=True)
-    except Exception as e:
+    except Exception as e:  # 外部库调用（openpyxl 读取 Excel）
         raise ValidationError(f"读取 sku.xlsx 失败: {e}") from e
 
     if not wb.worksheets:
         raise ValidationError("sku.xlsx 没有任何工作表")
 
     sheet1 = wb.worksheets[0]
-    headers = [str(c.value or "").strip() if c.value is not None else "" for c in sheet1[1]]
+    headers = [str(c.value or "").strip() if c.value is not None else "" for c in sheet1[1]]  # noqa: E501
     rows = []
     for values in sheet1.iter_rows(min_row=2, values_only=True):
         rows.append(values)
@@ -152,7 +153,7 @@ def _read_excel(working_dir: str) -> dict:
             if brand and brand.lower() != "nan":
                 break
 
-    skus = []
+    skus: list[SkuRow] = []
     if sku_col >= 0:
         for values in rows:
             if len(values) <= sku_col or values[sku_col] is None:
@@ -161,7 +162,7 @@ def _read_excel(working_dir: str) -> dict:
             if not name or name.lower() == "nan":
                 continue
             code = ""
-            if merchant_col >= 0 and len(values) > merchant_col and values[merchant_col] is not None:
+            if merchant_col >= 0 and len(values) > merchant_col and values[merchant_col] is not None:  # noqa: E501
                 code = str(values[merchant_col]).strip()
             if name not in [s.name for s in skus]:
                 skus.append(SkuRow(name=name, merchant_code=code))
@@ -172,7 +173,6 @@ def _read_excel(working_dir: str) -> dict:
     if sheet2 is not None:
         rows2 = list(sheet2.iter_rows(values_only=True))
         if rows2:
-            h1 = str(rows2[0][0] or "").strip() if len(rows2[0]) > 0 else ""
             h2 = str(rows2[0][1] or "").strip() if len(rows2[0]) > 1 else ""
             if h2 and not h2.lower().startswith("unnamed"):
                 title = h2
@@ -223,8 +223,10 @@ def inspect_package(working_dir: str, source_name: str, shop_key: str) -> Packag
     if not os.path.isfile(os.path.join(working_dir, "sku.xlsx")):
         raise ValidationError(f"数据包中未找到 sku.xlsx: {working_dir}")
     if not shop_matches(source_name, shop_key):
-        info = DOUYIN_STORES.get(shop_key, {})
-        expected = " / ".join([info.get("name", "")] + list(info.get("aliases", [])))
+        info: dict = DOUYIN_STORES.get(shop_key, {})
+        shop_name = str(info.get("name", ""))
+        aliases = [str(a) for a in info.get("aliases", [])]
+        expected = " / ".join([shop_name] + aliases)
         raise ValidationError(
             f"数据包名称“{source_name}”未包含目标店铺关键词，请包含：{expected}")
 
@@ -264,12 +266,12 @@ def inspect_package(working_dir: str, source_name: str, shop_key: str) -> Packag
     if not excel["brand"]:
         excel["brand"] = "无品牌"
 
-    info_data = DOUYIN_STORES.get(shop_key, {})
+    info_data: dict = DOUYIN_STORES.get(shop_key, {})
     return PackageInfo(
         working_dir=working_dir,
         source_name=source_name,
         shop_key=shop_key,
-        shop_name=info_data.get("name", shop_key),
+        shop_name=str(info_data.get("name", shop_key)),
         title=excel["title"],
         brand=excel["brand"],
         model=excel["model"],
@@ -287,7 +289,7 @@ def prepare_package(input_path: str, shop_key: str, run_id: str = "") -> Package
         raise ValidationError(f"输入路径不存在: {input_path}")
     source_name = os.path.basename(input_path.rstrip("/\\"))
     run_id = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-    batch_name = os.path.splitext(source_name)[0] if source_name.lower().endswith(".zip") else source_name
+    batch_name = os.path.splitext(source_name)[0] if source_name.lower().endswith(".zip") else source_name  # noqa: E501
     batch_root = os.path.join(AUTO_LISTING_SYNC_DIR, batch_name)
     staged_root = os.path.join(batch_root, "_runs", run_id, "input")
     os.makedirs(staged_root, exist_ok=True)
@@ -298,7 +300,7 @@ def prepare_package(input_path: str, shop_key: str, run_id: str = "") -> Package
         try:
             with zipfile.ZipFile(input_path, "r") as zf:
                 zf.extractall(staged_root)
-        except Exception as e:
+        except (zipfile.BadZipFile, OSError) as e:
             raise ValidationError(f"解压数据包失败: {e}") from e
     else:
         raise ValidationError("输入必须是文件夹或 .zip 压缩包")

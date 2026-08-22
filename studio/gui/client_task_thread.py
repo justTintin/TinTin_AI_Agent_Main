@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """客户端任务下发闭环线程：周期领取 → 执行 → 上报。
 
 配合 utils.client_task_worker：GET /tasks/assigned/{machine_id} 领取，
@@ -8,9 +7,8 @@ POST /tasks/{task_id}/report 上报结果。
 import time
 
 from PySide6.QtCore import QThread, Signal
-
-from utils.logger_utils import log
 from utils import client_task_worker as ctw
+from utils.logger_utils import log
 
 
 class ClientTaskWorker(QThread):
@@ -32,7 +30,7 @@ class ClientTaskWorker(QThread):
         while self.running:
             try:
                 tasks = ctw.pickup_tasks(self.machine_id)
-            except Exception as e:
+            except Exception as e:  # 外部API调用（任务领取 HTTP 请求）
                 log.warning(f"[客户端任务] 领取异常: {e}")
                 tasks = []
             for task in tasks:

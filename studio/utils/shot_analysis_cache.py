@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """镜头分析结果缓存：把「生成镜头分析」（服务端 /material/score_clip）返回的
 评分 / 景别 / 产品 / 型号 / 描述 / 其他维度持久化到视频工作目录的 sidecar JSON，
 避免重新打开应用或对同一视频重新分割后只剩"画面描述"、其他字段全部丢失。
@@ -14,10 +13,10 @@ Key 策略（内容寻址，跨重分割稳定命中）：
 
 设计参考：utils/video_prediction_manager.py 的 Manager + JSON 模式。
 """
-import os
-import json
-import time
 import hashlib
+import json
+import os
+import time
 
 from utils.logger_utils import log
 
@@ -56,8 +55,8 @@ class ShotAnalysisCache:
 
     def __init__(self, workspace_dir, video_basename):
         # 路径与 _save_split_srt 的 srt 同目录：{video_dir}/{video_basename}/
-        self.file_path = os.path.join(workspace_dir or "", f"{video_basename}_shots.json")
-        self._items = {}  # key -> {score, desc, shot_type, product, model, extra, updated_at}
+        self.file_path = os.path.join(workspace_dir or "", f"{video_basename}_shots.json")  # noqa: E501
+        self._items = {}  # key -> {score, desc, shot_type, product, model, extra, updated_at}  # noqa: E501
         self.load()
 
     def load(self):
@@ -66,11 +65,11 @@ class ShotAnalysisCache:
         if not self.file_path or not os.path.exists(self.file_path):
             return self._items
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(self.file_path, encoding="utf-8") as f:
                 data = json.load(f)
             # 兼容 list / dict 两种历史格式
             if isinstance(data, dict):
-                self._items = {str(k): v for k, v in data.items() if isinstance(v, dict)}
+                self._items = {str(k): v for k, v in data.items() if isinstance(v, dict)}  # noqa: E501
         except Exception as e:
             log.warning(f"加载镜头分析缓存失败({self.file_path}): {e}")
             self._items = {}

@@ -1,27 +1,29 @@
-# -*- coding: utf-8 -*-
+import contextlib
 import json
 import time
-import requests
-from utils.http_client import http_get
 import uuid
+
+import requests.exceptions
 from PySide6.QtCore import QThread, Signal
+from utils.http_client import http_get
 from utils.logger_utils import log
-from config.paths import CONFIG_INI_FILE
 
 try:
     import websocket
+    from websocket import WebSocketException
 except ImportError:
     websocket = None
+    WebSocketException = Exception
 
 
 class SystemMonitorThread(QThread):
     stats_updated = Signal(dict)
-    
+
     def __init__(self, get_addr_func):
         super().__init__()
         self.get_addr_func = get_addr_func
         self.running = True
-    
+
     def run(self):
         consecutive_failures = 0
         while self.running:
@@ -29,33 +31,34 @@ class SystemMonitorThread(QThread):
             try:
                 addr = self.get_addr_func().rstrip("/")
                 if not addr:
-                    raise Exception("No address")
-                
+                    raise ValueError("No address")
+
                 # ComfyUI system_stats endpoint
                 res = http_get(f"{addr}/system_stats", timeout=3, quiet=True)
                 if res.status_code == 200:
                     ok = True
                     data = res.json()
                     cpu = data.get('system', {}).get('cpu_utilization', 0)
-                    
+
                     gpu_info = "--"
                     devices = data.get('devices', [])
                     for d in devices:
                         if d.get('type') == 'cuda':
-                            used = (d.get('vram_total', 0) - d.get('vram_free', 0)) // 1024 // 1024
+                            used = (d.get('vram_total', 0) - d.get('vram_free', 0)) // 1024 // 1024  # noqa: E501
                             total = d.get('vram_total', 0) // 1024 // 1024
                             gpu_info = f"{used}MB / {total}MB"
                             break
-                    
+
                     self.stats_updated.emit({
                         "cpu": f"{cpu:.1f}",
                         "ram": "--",
                         "gpu": gpu_info
                     })
                 else:
-                    self.stats_updated.emit({"cpu": "Error", "ram": "--", "gpu": "Error"})
-            except Exception:
-                self.stats_updated.emit({"cpu": "Offline", "ram": "--", "gpu": "Offline"})
+                    self.stats_updated.emit({"cpu": "Error", "ram": "--", "gpu": "Error"})  # noqa: E501
+            except (requests.exceptions.RequestException, json.JSONDecodeError,
+                    KeyError, TypeError, ValueError):
+                self.stats_updated.emit({"cpu": "Offline", "ram": "--", "gpu": "Offline"})  # noqa: E501
             # 指数退避：连续失败时 3s→6s→12s→…封顶 60s；成功后复位
             consecutive_failures = 0 if ok else consecutive_failures + 1
             delay = 3 if consecutive_failures == 0 else min(
@@ -68,17 +71,17 @@ class SystemMonitorThread(QThread):
 class ComfyWSThread(QThread):
     progress_received = Signal(str, int)  # prompt_id, percentage
     status_received = Signal(str, str)    # prompt_id, status_text
-    
+
     def __init__(self, server_addr):
         super().__init__()
-        self.server_addr = server_addr.replace("http://", "ws://") + "/ws?clientId=" + str(uuid.uuid4())
+        self.server_addr = server_addr.replace("http://", "ws://") + "/ws?clientId=" + str(uuid.uuid4())  # noqa: E501
         self.running = True
 
     def run(self):
         if not websocket:
-            log.error("websocket-client library is not installed. ComfyUI progress monitoring will not work.")
+            log.error("websocket-client library is not installed. ComfyUI progress monitoring will not work.")  # noqa: E501
             return
-            
+
         while self.running:
             try:
                 ws = websocket.create_connection(self.server_addr)
@@ -99,8 +102,8 @@ class ComfyWSThread(QThread):
                         else:
                             self.status_received.emit(prompt_id, f"正在执行节点: {node}")
                 ws.close()
-            except Exception as e:
-                log.error(f"WebSocket error connecting to ComfyUI ({self.server_addr}): {e}")
+            except WebSocketException as e:
+                log.error(f"WebSocket error connecting to ComfyUI ({self.server_addr}): {e}")  # noqa: E501
                 time.sleep(5)
 
 
@@ -121,9 +124,10 @@ class AIStatusCheckThread(QThread):
         /health 返回 {status, hostname, os, python, gpu:{...}}——服务端整体
         健康与服务端资源（GPU 显存/利用率），供资源监控栏展示。
         """
-        import os
         import json
+        import os
         from urllib.parse import quote
+
         from utils.http_client import http_get
 
         consecutive_failures = 0
@@ -133,14 +137,14 @@ class AIStatusCheckThread(QThread):
                 if os.path.isfile(self.config_file_path):
                     with open(self.config_file_path, encoding="utf-8") as f:
                         cfg = json.load(f)
-                    server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()
+                    server_url = (cfg.get("compute_server_url") or cfg.get("llm_vision_api_url", "")).strip()  # noqa: E501
                     if server_url:
                         # 心跳带 machine_id + capabilities（已装技能）
                         mid = ""
                         try:
                             from utils.license import get_machine_id
                             mid = get_machine_id() or ""
-                        except Exception:
+                        except Exception:  # 外部 license 查询
                             pass
                         caps = ""
                         try:
@@ -148,7 +152,7 @@ class AIStatusCheckThread(QThread):
                             caps = ",".join(
                                 str(s.get("id") or "") for s in list_skills()
                                 if s.get("id"))
-                        except Exception:
+                        except Exception:  # 外部技能查询
                             pass
                         params = []
                         if mid:
@@ -162,11 +166,9 @@ class AIStatusCheckThread(QThread):
                         res = http_get(url, timeout=2, quiet=True)
                         if res.status_code == 200:
                             status["server_ok"] = True
-                            try:
+                            with contextlib.suppress(json.JSONDecodeError):
                                 status["health"] = res.json()
-                            except Exception:
-                                pass
-            except Exception:
+            except (OSError, requests.exceptions.RequestException):
                 pass
 
             self.status_updated.emit(status)

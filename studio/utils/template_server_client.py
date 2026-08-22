@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """统一模板服务端客户端（按 OpenAPI /templates/* 实现，tag：模板统一）。
 
 已从旧 `/template/*`（成片模板）切换到统一模板接口：
@@ -21,10 +20,13 @@
     ""->全部、"mg"/"motion"->motion、"cover"->cover、"video"->video
   - match_slots 在统一接口中暂无对应端点，仍走旧 /template/match（兼容保留）。
 """
+import contextlib
 import json
 import os
 
-from utils.http_client import http_get, http_post, http_put, http_delete
+import requests
+
+from utils.http_client import http_delete, http_get, http_post, http_put
 from utils.logger_utils import log
 
 _CATEGORY_TO_TYPE = {
@@ -40,13 +42,15 @@ def _server_url():
     """读取 compute_server_url。"""
     try:
         import json as _json
+
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            cfg = _json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            with open(AI_CONFIG_FILE, encoding="utf-8") as _f:
+                cfg = _json.load(_f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return ""
 
@@ -54,7 +58,7 @@ def _server_url():
 def _safe_json(resp):
     try:
         return resp.json()
-    except Exception as e:
+    except json.JSONDecodeError as e:
         log.warning(f"[Template] JSON parse failed: {e}")
         return {}
 
@@ -86,7 +90,7 @@ def list_templates(category="", timeout=10):
             if isinstance(data, list):
                 return data
             return data.get("templates") or data.get("items") or data.get("data") or []
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] list_templates failed: {e}")
     return []
 
@@ -100,7 +104,7 @@ def get_template(template_id, timeout=10):
         r = http_get(f"{url}/templates/{template_id}", timeout=timeout)
         if r.status_code == 200:
             return _safe_json(r)
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] get_template failed: {e}")
     return None
 
@@ -119,7 +123,7 @@ def validate_template(template: dict, timeout=10):
         r = http_post(f"{url}/templates/validate", json=template, timeout=timeout)
         if r.status_code == 200:
             return _safe_json(r)
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] validate_template failed: {e}")
     return {}
 
@@ -136,7 +140,7 @@ def save_template(template: dict, timeout=15):
         if r.status_code in (200, 201):
             return _safe_json(r)
         log.warning(f"[Template] save_template HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] save_template failed: {e}")
     return None
 
@@ -158,7 +162,7 @@ def update_template(template_id, template: dict, timeout=15):
         if r.status_code in (200, 201):
             return _safe_json(r)
         log.warning(f"[Template] update_template HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] update_template failed: {e}")
     return None
 
@@ -172,7 +176,7 @@ def delete_template(template_id, timeout=10):
         r = http_delete(f"{url}/templates/{template_id}", timeout=timeout)
         if r.status_code in (200, 204):
             return _safe_json(r) if r.status_code == 200 else {}
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] delete_template failed: {e}")
     return None
 
@@ -221,7 +225,7 @@ def render(template_id, params=None, ratio="9:16", width=None, height=None,
             log.info(f"[Template] render task_id={task_id}, template_id={template_id}")
             return task_id
         log.warning(f"[Template] render HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] render failed: {e}")
     return None
 
@@ -255,15 +259,15 @@ def render_cover_image(template_id, params=None, ratio="9:16", width=None, heigh
             ctype = (r.headers.get("Content-Type") or "").lower()
             if "image" in ctype:
                 return r.content
-            log.warning(f"[Template] render_cover_image 返回非图片类型: {ctype} {r.text[:120]}")
+            log.warning(f"[Template] render_cover_image 返回非图片类型: {ctype} {r.text[:120]}")  # noqa: E501
             return None
-        log.warning(f"[Template] render_cover_image HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+        log.warning(f"[Template] render_cover_image HTTP {r.status_code}: {r.text[:200]}")  # noqa: E501
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] render_cover_image failed: {e}")
     return None
 
 
-def render_beat(template_id, music, videos=None, params=None, clip_urls="", timeout=600):
+def render_beat(template_id, music, videos=None, params=None, clip_urls="", timeout=600):  # noqa: E501
     """POST /templates/render/beat（multipart）→ 返回 task_id（str）。
 
     music: 本地音频文件路径（必填）；videos: 本地素材文件路径列表（可选）；
@@ -282,26 +286,24 @@ def render_beat(template_id, music, videos=None, params=None, clip_urls="", time
         "params": json.dumps(params or {}, ensure_ascii=False),
         "clip_urls": clip_urls or "",
     }
-    files = [("music", (os.path.basename(music), open(music, "rb")))]
+    files = [("music", (os.path.basename(music), open(music, "rb")))]  # noqa: SIM115
     for path in (videos or []):
         if os.path.isfile(path):
-            files.append(("videos", (os.path.basename(path), open(path, "rb"))))
+            files.append(("videos", (os.path.basename(path), open(path, "rb"))))  # noqa: SIM115
     try:
-        r = http_post(f"{url}/templates/render/beat", data=data, files=files, timeout=timeout)
+        r = http_post(f"{url}/templates/render/beat", data=data, files=files, timeout=timeout)  # noqa: E501
         if r.status_code in (200, 201):
             data = _safe_json(r)
             task_id = _task_id(data)
-            log.info(f"[Template] render_beat task_id={task_id}, template_id={template_id}")
+            log.info(f"[Template] render_beat task_id={task_id}, template_id={template_id}")  # noqa: E501
             return task_id
         log.warning(f"[Template] render_beat HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] render_beat failed: {e}")
     finally:
         for _f in files:
-            try:
+            with contextlib.suppress(OSError):
                 _f[1][1].close()
-            except Exception:
-                pass
     return None
 
 
@@ -316,7 +318,7 @@ def render_result(task_id, timeout=15):
         r = http_get(f"{url}/templates/render/result/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return _safe_json(r)
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] render_result failed: {e}")
     return {}
 
@@ -330,8 +332,57 @@ def render_download(task_id, timeout=60):
         r = http_get(f"{url}/templates/render/download/{task_id}", timeout=timeout)
         if r.status_code == 200:
             return r
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] render_download failed: {e}")
+    return None
+
+
+def download_render_result(output_url, local_path, timeout=120):
+    """下载渲染结果到本地文件。
+
+    output_url 可以是完整 URL 或服务端相对路径（自动拼接 compute_server_url）。
+    """
+    import os
+
+    from utils.mg_server_client import _ensure_url
+
+    full = _ensure_url(output_url)
+    try:
+        r = http_get(full, stream=True, timeout=timeout)
+        r.raise_for_status()
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        return local_path
+    except (requests.exceptions.RequestException, OSError) as e:
+        log.warning(f"[Template] download_render_result failed: {e}")
+        return None
+
+
+def poll_render_status(task_id, timeout=10):
+    """轮询渲染任务状态，依次尝试多个端点。
+
+    优先 /templates/render/result/{id}，回退 /tasks/unified/{id}、
+    /scheduled/tasks/{id}、/editor/render/{id}。
+    返回状态 dict 或 None。
+    """
+    url = _server_url()
+    if not url or not task_id:
+        return None
+    for endpoint in (
+        f"{url}/templates/render/result/{task_id}",
+        f"{url}/tasks/unified/{task_id}",
+        f"{url}/scheduled/tasks/{task_id}",
+        f"{url}/editor/render/{task_id}",
+    ):
+        try:
+            r = http_get(endpoint, timeout=timeout)
+            if r.status_code == 200:
+                return _safe_json(r)
+        except requests.exceptions.RequestException:
+            continue
     return None
 
 
@@ -347,22 +398,20 @@ def analyze_video(file_path=None, material_id=None, timeout=600):
     if file_path:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"file 不存在: {file_path}")
-        files["file"] = (os.path.basename(file_path), open(file_path, "rb"))
+        files["file"] = (os.path.basename(file_path), open(file_path, "rb"))  # noqa: SIM115
     if material_id:
         data["material_id"] = int(material_id)
     try:
-        r = http_post(f"{url}/templates/analyze-video", data=data or None, files=files or None, timeout=timeout)
+        r = http_post(f"{url}/templates/analyze-video", data=data or None, files=files or None, timeout=timeout)  # noqa: E501
         if r.status_code in (200, 201):
             return _safe_json(r)
         log.warning(f"[Template] analyze_video HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] analyze_video failed: {e}")
     finally:
         for _f in files.values():
-            try:
+            with contextlib.suppress(OSError):
                 _f[1].close()
-            except Exception:
-                pass
     return None
 
 
@@ -392,7 +441,7 @@ def preview(template_id, params=None, ratio="9:16", width=None, height=None,
         if r.status_code == 200:
             return _safe_json(r)
         log.warning(f"[Template] preview HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] preview failed: {e}")
     return {}
 
@@ -408,12 +457,112 @@ def match_slots(tags, top_k=5, timeout=10):
     if not url:
         return []
     try:
-        r = http_post(f"{url}/template/match", json={"tags": tags, "top_k": top_k}, timeout=timeout)
+        r = http_post(f"{url}/template/match", json={"tags": tags, "top_k": top_k}, timeout=timeout)  # noqa: E501
         if r.status_code == 200:
             data = _safe_json(r)
             if isinstance(data, list):
                 return data
             return data.get("items") or data.get("data") or []
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[Template] match_slots failed: {e}")
     return []
+
+
+# ── 模板引擎：智能素材匹配 / 一键成片 / 模板导入 ──────────────────────
+
+def match_materials(slots, material_ids=None, top_k=5, timeout=30):
+    """POST /montage/match — 按模板 slot 的 tag 列表智能匹配素材。
+
+    slots: [{slot, tags, type, required}, ...]
+    material_ids: 可选，限定在指定素材 ID 集合内匹配
+    top_k: 每个 slot 返回候选数量
+    返回: {slot: [{material_id, score, ...}, ...], ...}
+    """
+    url = _server_url()
+    if not url:
+        return {}
+    payload = {"slots": slots, "top_k": top_k}
+    if material_ids:
+        payload["material_ids"] = list(material_ids)
+    try:
+        r = http_post(f"{url}/montage/match", json=payload, timeout=timeout)
+        if r.status_code == 200:
+            return _safe_json(r)
+        log.warning(f"[Template] match_materials HTTP {r.status_code}: {r.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[Template] match_materials failed: {e}")
+    return {}
+
+
+def generate_template(template_id, slot_materials, params=None, ratio="9:16",
+                      width=None, height=None, scale=1.0, timeout=600):
+    """POST /template/generate — 模板成片一键编译。
+
+    template_id: 模板 ID
+    slot_materials: {slot: material_id, ...} 每个 slot 绑定的素材
+    params: 模板自定义参数 {topic, bgm_style, ...}
+    返回 task_id（str），失败返回 None
+    """
+    url = _server_url()
+    if not url:
+        raise RuntimeError("未配置 compute_server_url")
+    body = {
+        "template_id": template_id,
+        "slot_materials": slot_materials,
+    }
+    if params:
+        body["params"] = params
+    if ratio:
+        body["ratio"] = ratio
+    if width:
+        body["width"] = int(width)
+    if height:
+        body["height"] = int(height)
+    if scale is not None:
+        body["scale"] = float(scale)
+    try:
+        r = http_post(f"{url}/template/generate", json=body, timeout=timeout)
+        if r.status_code in (200, 201):
+            data = _safe_json(r)
+            task_id = _task_id(data)
+            log.info(f"[Template] generate_template task_id={task_id}")
+            return task_id
+        log.warning(f"[Template] generate_template HTTP {r.status_code}: {r.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[Template] generate_template failed: {e}")
+    return None
+
+
+def import_template_file(file_path, name="", category="", description="", timeout=60):
+    """POST /template/import — 导入剪映(.drt)/PR(.xml) 模板文件。
+
+    file_path: 本地文件路径
+    name/category/description: 模板元信息
+    返回导入的模板 dict，失败返回 None
+    """
+    url = _server_url()
+    if not url:
+        raise RuntimeError("未配置 compute_server_url")
+    if not file_path or not os.path.isfile(file_path):
+        raise FileNotFoundError(f"模板文件不存在: {file_path}")
+    data = {"name": name or os.path.basename(file_path),
+            "category": category,
+            "description": description}
+    files = [("file", (os.path.basename(file_path), open(file_path, "rb")))]  # noqa: SIM115
+    try:
+        r = http_post(f"{url}/template/import", data=data or None, files=files or None, timeout=timeout)  # noqa: E501
+        if r.status_code in (200, 201):
+            return _safe_json(r)
+        log.warning(f"[Template] import_template_file HTTP {r.status_code}: {r.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        log.warning(f"[Template] import_template_file failed: {e}")
+    finally:
+        for _f in files:
+            with contextlib.suppress(OSError):
+                _f[1][1].close()
+    return None
+
+
+def list_video_templates(category="", timeout=10):
+    """GET /templates?type=video — 获取成片模板列表（type=video）。"""
+    return list_templates(category="video", timeout=timeout)

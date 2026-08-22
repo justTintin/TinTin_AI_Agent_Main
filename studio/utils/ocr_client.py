@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
 """OCR 客户端：通过服务端 POST /material/ocr 识别图片文字。
 
 替代本地 PaddleOCR subprocess 调用。服务端接口契约：
     POST {compute_server_url}/material/ocr
     入参：file（multipart 图片字节）/ material_id（query）/ file_hash（query）
-    返回：{"filename": str, "text": str, "lines": [{"text","confidence"[,"poly"]}], "total": int}
+    返回：{"filename": str, "text": str, "lines": [{"text","confidence"[,"poly"]}], "total": int}  # noqa: E501
 
     lines[].poly（可选，PaddleOCR dt_polys）：[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
     —— 服务端返回 poly 时，extract_value_for_key 可做空间定位（关键词右/下方取值）；
@@ -12,6 +11,8 @@
 """
 import os
 import re
+
+import requests
 
 from utils.logger_utils import log
 
@@ -22,20 +23,21 @@ def _get_server_url():
     优先级：ai_config.ocr_api_url（独立配置）> ai_config.compute_server_url（统一地址）。
     """
     try:
-        from config.paths import AI_CONFIG_FILE
         import json
+
+        from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
                 cfg = json.load(f)
-            url = (cfg.get("ocr_api_url") or cfg.get("compute_server_url") or "").strip().rstrip("/")
+            url = (cfg.get("ocr_api_url") or cfg.get("compute_server_url") or "").strip().rstrip("/")  # noqa: E501
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return ""
 
 
-def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=None, timeout=60):
+def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=None, timeout=60):  # noqa: E501
     """上传图片字节到服务端 OCR，返回 {filename, text, lines, total}。
 
     失败抛 RuntimeError。lines 元素为 {text, confidence, poly?}。
@@ -68,7 +70,7 @@ def ocr_image(image_bytes, filename="image.jpg", material_id=None, file_hash=Non
                 "poly": ln.get("poly") or ln.get("dt_polys") or None,
             })
         elif isinstance(ln, str):
-            norm_lines.append({"text": ln, "confidence": 0.0, "box": None, "poly": None})
+            norm_lines.append({"text": ln, "confidence": 0.0, "box": None, "poly": None})  # noqa: E501
     return {
         "filename": data.get("filename", filename),
         "text": data.get("text", ""),
@@ -90,11 +92,11 @@ def ocr_image_crop(path_or_array, box, timeout=60):
     path_or_array：图片路径或 numpy 数组（BGR）。
     用于"框选选区"测试识别——客户端先裁剪再上传，等价于本地 ROI OCR。
     """
-    import numpy as np
     import cv2
+    import numpy as np
     # 载入图片（兼容 unicode 路径）
     if isinstance(path_or_array, str):
-        img = cv2.imdecode(np.fromfile(path_or_array, dtype=np.uint8), 1)  # cv2.IMREAD_COLOR
+        img = cv2.imdecode(np.fromfile(path_or_array, dtype=np.uint8), 1)  # cv2.IMREAD_COLOR  # noqa: E501
         if img is None:
             raise RuntimeError(f"无法读取图片: {path_or_array}")
     else:
@@ -106,10 +108,7 @@ def ocr_image_crop(path_or_array, box, timeout=60):
     ymax = max(0, min(int(ymax), img_h))
     xmin = max(0, min(int(xmin), img_w))
     xmax = max(0, min(int(xmax), img_w))
-    if ymax > ymin and xmax > xmin:
-        roi = img[ymin:ymax, xmin:xmax]
-    else:
-        roi = img
+    roi = img[ymin:ymax, xmin:xmax] if ymax > ymin and xmax > xmin else img
 
     # 编码为 JPEG 字节
     ok, buf = cv2.imencode(".jpg", roi)
@@ -165,14 +164,14 @@ def extract_value_for_key(key_text, lines):
             return (min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2))
         # 回退 poly=[[x,y],...]
         poly = ln.get("poly")
-        if isinstance(poly, (list, tuple)) and len(poly) >= 2 and isinstance(poly[0], (list, tuple)):
+        if isinstance(poly, (list, tuple)) and len(poly) >= 2 and isinstance(poly[0], (list, tuple)):  # noqa: E501
             xs = [p[0] for p in poly]
             ys = [p[1] for p in poly]
             return (min(xs), max(xs), min(ys), max(ys))
         return None
 
     bboxes = [to_bbox(ln) for ln in lines]
-    has_coords = bool(texts) and all(b is not None for b in bboxes) and len(bboxes) == len(texts)
+    has_coords = bool(texts) and all(b is not None for b in bboxes) and len(bboxes) == len(texts)  # noqa: E501
 
     # 找到关键词所在块
     key_idx = -1
@@ -186,7 +185,7 @@ def extract_value_for_key(key_text, lines):
     key_block_text = texts[key_idx]
 
     # 优先：关键词所在块去掉关键词后的剩余
-    cleaned = _strip_seps(re.sub(re.escape(key_text), "", key_block_text, flags=re.IGNORECASE))
+    cleaned = _strip_seps(re.sub(re.escape(key_text), "", key_block_text, flags=re.IGNORECASE))  # noqa: E501
     if cleaned:
         return cleaned, key_block_text
 
@@ -242,8 +241,8 @@ def check_server_ocr(timeout=5):
     """轻量探测服务端 OCR 是否可用（调 /material/status）。返回 bool。"""
     try:
         from utils.http_client import http_get
-        resp = http_get(f"{_get_server_url()}/material/status", timeout=timeout, quiet=True)
+        resp = http_get(f"{_get_server_url()}/material/status", timeout=timeout, quiet=True)  # noqa: E501
         return resp.status_code == 200
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.debug(f"[OCR] 服务端连通检测失败: {e}")
         return False

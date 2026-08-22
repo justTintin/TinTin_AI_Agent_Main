@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """智能混剪的媒体处理工具函数与全局副作用。
 
 本模块集中放置原 video_montage_page.py 的顶层工具函数（ffprobe/ffmpeg 时长探测、
@@ -10,20 +9,21 @@ subprocess.Popen monkey-patch。
 - _patched_Popen 必须在任何 subprocess.Popen 调用前执行；导入本模块即触发，
   保证 Worker 子模块（同样 import 本模块）也能享受到无黑框效果。
 """
+import hashlib
 import os
 import re
-import hashlib
 import subprocess
 
+
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
-class _patched_Popen(subprocess.Popen):
+class _patched_Popen(subprocess.Popen):  # noqa: N801
     def __init__(self, *args, **kwargs):
         if 'creationflags' not in kwargs:
             kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
         super().__init__(*args, **kwargs)
-subprocess.Popen = _patched_Popen
+subprocess.Popen = _patched_Popen  # type: ignore[misc]
 
 
 def safe_source_name(video_path, max_len=40):
@@ -42,7 +42,7 @@ def safe_source_name(video_path, max_len=40):
     if not cleaned:
         cleaned = "video"
     if len(cleaned) > max_len:
-        digest = hashlib.md5((base or "").encode("utf-8", errors="ignore")).hexdigest()[:8]
+        digest = hashlib.md5((base or "").encode("utf-8", errors="ignore")).hexdigest()[:8]  # noqa: E501
         cleaned = cleaned[:max_len] + "_" + digest
     return cleaned
 
@@ -65,14 +65,14 @@ def get_media_duration(filepath):
         r = run_subprocess(cmd, capture_output=True, text=True, timeout=10)
         if r.returncode == 0 and r.stdout.strip():
             return float(r.stdout.strip())
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     return 0.0
 
 
 def parse_srt(srt_text):
     import re
-    pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)"
+    pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)"  # noqa: E501
     matches = re.findall(pattern, srt_text)
     segments = []
 
@@ -86,15 +86,16 @@ def parse_srt(srt_text):
             end_sec = srt_time_to_seconds(m[2])
             text = m[3].strip()
             segments.append((start_sec, end_sec, text))
-        except Exception:
+        except Exception:  # SRT 时间戳解析可能失败
             pass
     return segments
 
 
 def extract_keyframes(video_path, num_frames=3):
-    import cv2
     import base64
     import os
+
+    import cv2
 
     if not video_path or not os.path.exists(video_path):
         return []
@@ -140,7 +141,6 @@ def compute_clip_hash(clip_path):
     返回 64 位整数的哈希值，失败返回 None。两帧汉明距离 < 8 视为高度相似。
     """
     import cv2
-    import numpy as np
     try:
         cap = cv2.VideoCapture(clip_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -162,7 +162,7 @@ def compute_clip_hash(clip_path):
         for b in bits:
             h = (h << 1) | int(b)
         return h
-    except Exception:
+    except Exception:  # 外部库调用（cv2 感知哈希计算）
         return None
 
 
@@ -174,7 +174,6 @@ def compute_clip_quality(clip_path):
     """
     import cv2
     import numpy as np
-    import subprocess
     try:
         cap = cv2.VideoCapture(clip_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -215,11 +214,11 @@ def compute_clip_quality(clip_path):
                     capture_output=True, text=True, timeout=10)
                 if "audio" in (r.stdout or ""):
                     audio_score = 20
-        except Exception:
+        except Exception:  # cv2 操作 + subprocess 调用
             pass
 
         return min(100, round(sharpness_score + contrast_score + audio_score))
-    except Exception:
+    except Exception:  # 外部库调用（cv2 质量评估）
         return -1
 
 

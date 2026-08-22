@@ -1,11 +1,22 @@
-# -*- coding: utf-8 -*-
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                               QFrame, QTableWidget, QHeaderView, QComboBox, QListView,
-                               QSpinBox, QDoubleSpinBox, QCheckBox, QWidget)
-from PySide6.QtCore import Qt
-from gui.searchable_combo import SearchableComboBox
 from gui.montage.base_step_view import BaseStepView
+from gui.searchable_combo import SearchableComboBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListView,
+    QSpinBox,
+    QTableWidget,
+    QVBoxLayout,
+)
 from utils.gui_icons import mdi_button
+
 
 class Step3VoiceView(BaseStepView):
     """步骤 3: 口播配音/克隆人声界面"""
@@ -29,9 +40,9 @@ class Step3VoiceView(BaseStepView):
         row_vid_dir.addWidget(QLabel(" 视频输入目录:"))
         self.main_page.voice_video_dir_input = QLineEdit()
         self.main_page.voice_video_dir_input.setPlaceholderText("选择包含排列视频的目录...")
-        self.main_page.voice_video_dir_input.textChanged.connect(self.main_page._on_voice_video_dir_changed)
+        self.main_page.voice_video_dir_input.textChanged.connect(self.main_page._on_voice_video_dir_changed)  # noqa: E501
         row_vid_dir.addWidget(self.main_page.voice_video_dir_input)
-        
+
         btn_sel_vid_dir = mdi_button("选择目录", "folder")
         btn_sel_vid_dir.setObjectName("secondary_button")
         btn_sel_vid_dir.clicked.connect(self.main_page._select_voice_video_dir)
@@ -44,23 +55,23 @@ class Step3VoiceView(BaseStepView):
         self.main_page.api_url_input = QLineEdit()
         try:
             _cfg = getattr(self.main_page.main_window, "ai_config", {}) or {}
-        except Exception:
+        except (AttributeError, TypeError):
             _cfg = {}
         _saved_vox = (_cfg.get("vox_api_url") or "").strip()
         if _saved_vox:
             self.main_page.api_url_input.setText(_saved_vox)
-        self.main_page.api_url_input.setPlaceholderText("跟随系统设置 → VoxCPM/TTS 地址（形如 http://<服务端>:8000/voxcpm/tts）")
+        self.main_page.api_url_input.setPlaceholderText("跟随系统设置 → VoxCPM/TTS 地址（形如 http://<服务端>:8000/voxcpm/tts）")  # noqa: E501
 
         # 2a. Reference Voice Row
         row_voice = QHBoxLayout()
         row_voice.setSpacing(8)
         row_voice.setAlignment(Qt.AlignVCenter)
         row_voice.addWidget(QLabel(" 参考声音:"))
-        
+
         self.main_page.ref_audio_combo = SearchableComboBox(placeholder="输入声音名称搜索…")
         self.main_page.ref_audio_combo.setView(QListView())
         self.main_page.ref_audio_combo.setMinimumWidth(160)
-        self.main_page.ref_audio_combo.currentIndexChanged.connect(self.main_page._on_ref_audio_combo_changed)
+        self.main_page.ref_audio_combo.currentIndexChanged.connect(self.main_page._on_ref_audio_combo_changed)  # noqa: E501
         row_voice.addWidget(self.main_page.ref_audio_combo)
 
         self.main_page.btn_play_ref = mdi_button("", "volume")
@@ -99,7 +110,7 @@ class Step3VoiceView(BaseStepView):
         """)
         row_ref_text.addWidget(self.main_page.ref_text_input, 1)
         card_layout.addLayout(row_ref_text)
-        
+
         # 3. TTS API 接口地址与推理参数
         row_server = QHBoxLayout()
         row_server.setSpacing(10)
@@ -148,7 +159,7 @@ class Step3VoiceView(BaseStepView):
             "超出范围时不再强制调速，保留自然音质")
         row_server.addWidget(self.main_page.tts_speed_min_spin)
         row_server.addWidget(QLabel("~"))
-        
+
         self.main_page.tts_speed_max_spin = QDoubleSpinBox()
         self.main_page.tts_speed_max_spin.setRange(1.0, 2.0)
         self.main_page.tts_speed_max_spin.setValue(1.2)
@@ -173,14 +184,14 @@ class Step3VoiceView(BaseStepView):
 
         self.main_page.btn_ai_rewrite_settings = mdi_button("文案生成设置", "gear")
         self.main_page.btn_ai_rewrite_settings.setObjectName("secondary_button")
-        self.main_page.btn_ai_rewrite_settings.setStyleSheet("padding: 4px 10px; font-size: 12px;")
-        self.main_page.btn_ai_rewrite_settings.clicked.connect(self.main_page._show_ai_rewrite_settings)
+        self.main_page.btn_ai_rewrite_settings.setStyleSheet("padding: 4px 10px; font-size: 12px;")  # noqa: E501
+        self.main_page.btn_ai_rewrite_settings.clicked.connect(self.main_page._show_ai_rewrite_settings)  # noqa: E501
         row_table_title.addWidget(self.main_page.btn_ai_rewrite_settings)
 
         self.main_page.btn_batch_ai_rewrite = mdi_button("一键AI修改全部文案", "sparkles")
         self.main_page.btn_batch_ai_rewrite.setObjectName("action_button")
-        self.main_page.btn_batch_ai_rewrite.setStyleSheet("padding: 4px 12px; font-size: 12px; font-weight: bold;")
-        self.main_page.btn_batch_ai_rewrite.clicked.connect(self.main_page._batch_ai_rewrite_scripts)
+        self.main_page.btn_batch_ai_rewrite.setStyleSheet("padding: 4px 12px; font-size: 12px; font-weight: bold;")  # noqa: E501
+        self.main_page.btn_batch_ai_rewrite.clicked.connect(self.main_page._batch_ai_rewrite_scripts)  # noqa: E501
         row_table_title.addWidget(self.main_page.btn_batch_ai_rewrite)
         card_layout.addLayout(row_table_title)
 
@@ -188,8 +199,8 @@ class Step3VoiceView(BaseStepView):
         self.main_page.voice_table.setWordWrap(False)
         self.main_page.voice_table.setColumnCount(2)
         self.main_page.voice_table.setHorizontalHeaderLabels(["序号", "视频/配音/文案/状态/操作"])
-        self.main_page.voice_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.main_page.voice_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.main_page.voice_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # noqa: E501
+        self.main_page.voice_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # noqa: E501
         self.main_page.voice_table.verticalHeader().setDefaultSectionSize(140)
         self.main_page.voice_table.verticalHeader().setMinimumSectionSize(90)
         self.main_page.voice_table.verticalHeader().setVisible(False)
@@ -198,9 +209,9 @@ class Step3VoiceView(BaseStepView):
 
         # Subtitle option checkbox
         row_subtitle_opt = QHBoxLayout()
-        self.main_page.chk_add_subtitles = QCheckBox("在配音视频中同时添加/烧录字幕 (逐行按时间显示, 字号随视频高度自适应, 白色 50%透明背景)")
+        self.main_page.chk_add_subtitles = QCheckBox("在配音视频中同时添加/烧录字幕 (逐行按时间显示, 字号随视频高度自适应, 白色 50%透明背景)")  # noqa: E501
         self.main_page.chk_add_subtitles.setChecked(False)
-        self.main_page.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.main_page.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")  # noqa: E501
         row_subtitle_opt.addWidget(self.main_page.chk_add_subtitles)
         card_layout.addLayout(row_subtitle_opt)
 
@@ -208,7 +219,7 @@ class Step3VoiceView(BaseStepView):
         row_fancy_text = QHBoxLayout()
         self.main_page.chk_fancy_text = QCheckBox("添加花字 (关键信息加重提醒)")
         self.main_page.chk_fancy_text.setChecked(False)
-        self.main_page.chk_fancy_text.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.main_page.chk_fancy_text.setStyleSheet("font-size: 13px; font-weight: bold;")  # noqa: E501
         self.main_page.chk_fancy_text.setToolTip("在视频画面中央叠加花字特效文字，用于突出关键卖点/价格/型号等信息")
         row_fancy_text.addWidget(self.main_page.chk_fancy_text)
 
@@ -227,8 +238,8 @@ class Step3VoiceView(BaseStepView):
 
         row_fancy_text.addWidget(QLabel("花字内容:"))
         self.main_page.fancy_text_input = QLineEdit()
-        self.main_page.fancy_text_input.setPlaceholderText("输入要叠加的花字内容，多行用逗号分隔（按镜头顺序轮换）")
-        self.main_page.fancy_text_input.setToolTip("多个花字用逗号分隔，会按镜头顺序轮换显示。如：超轻量化,8000DPI,续航70小时")
+        self.main_page.fancy_text_input.setPlaceholderText("输入要叠加的花字内容，多行用逗号分隔（按镜头顺序轮换）")  # noqa: E501
+        self.main_page.fancy_text_input.setToolTip("多个花字用逗号分隔，会按镜头顺序轮换显示。如：超轻量化,8000DPI,续航70小时")  # noqa: E501
         row_fancy_text.addWidget(self.main_page.fancy_text_input, 1)
         card_layout.addLayout(row_fancy_text)
 
@@ -237,13 +248,13 @@ class Step3VoiceView(BaseStepView):
         self.main_page.btn_synthesize_voice = mdi_button("开始批量克隆人声合成", "voice")
         self.main_page.btn_synthesize_voice.setObjectName("action_button")
         self.main_page.btn_synthesize_voice.setFixedHeight(35)
-        self.main_page.btn_synthesize_voice.clicked.connect(self.main_page._start_synthesize_voice)
+        self.main_page.btn_synthesize_voice.clicked.connect(self.main_page._start_synthesize_voice)  # noqa: E501
         row_actions.addWidget(self.main_page.btn_synthesize_voice, 2)
 
         self.main_page.btn_dub_videos = mdi_button("开始给视频配音 (替换原声)", "video")
         self.main_page.btn_dub_videos.setObjectName("primary_button")
         self.main_page.btn_dub_videos.setFixedHeight(35)
-        self.main_page.btn_dub_videos.clicked.connect(self.main_page._start_dubbing_videos)
+        self.main_page.btn_dub_videos.clicked.connect(self.main_page._start_dubbing_videos)  # noqa: E501
         self.main_page.btn_dub_videos.setEnabled(False)
         row_actions.addWidget(self.main_page.btn_dub_videos, 3)
         card_layout.addLayout(row_actions)
@@ -260,6 +271,6 @@ class Step3VoiceView(BaseStepView):
         self.main_page.btn_next_to_step_4 = mdi_button("下一步：特效包装", "right")
         self.main_page.btn_next_to_step_4.setObjectName("primary_button")
         self.main_page.btn_next_to_step_4.setEnabled(True)
-        self.main_page.btn_next_to_step_4.clicked.connect(lambda: self.main_page._go_to_step(3))
+        self.main_page.btn_next_to_step_4.clicked.connect(lambda: self.main_page._go_to_step(3))  # noqa: E501
         nav_row.addWidget(self.main_page.btn_next_to_step_4)
         layout.addLayout(nav_row)

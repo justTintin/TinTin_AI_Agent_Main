@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 应用图标生成器 · 螺丝钉-电商智能体矩阵
 
@@ -19,14 +18,18 @@
 import math
 import os
 
-from PySide6.QtCore import QPointF, Qt, QRectF
-from PySide6.QtGui import (
-    QColor, QImage, QPainter, QPainterPath, QPen, QRadialGradient,
-    QLinearGradient, QBrush,
-)
-
 from PIL import Image
-
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QRadialGradient,
+)
 
 SIZE = 512
 OUT_PNG = os.path.join(os.path.dirname(__file__), "..", "assets", "app_icon.png")
@@ -98,7 +101,6 @@ def draw_icon(painter: QPainter):
                          QPointF(nx, ny))
 
     # 节点圆点（带光晕）
-    glow = QRadialGradient(QPointF(cx, cy), orbit + 24)
     for nx, ny in nodes:
         g = QRadialGradient(QPointF(nx, ny), 22)
         g.setColorAt(0.0, QColor(150, 160, 235, 150))

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 在线更新检查器（骨架）。
 
@@ -7,7 +6,7 @@
 
 服务器端 API 约定（供搭建服务器时参考）：
   GET {update_url}/version.json
-    返回: {"version": "x.y.z", "channel": "stable", "manifest_url": "...", "release_notes": "..."}
+    返回: {"version": "x.y.z", "channel": "stable", "manifest_url": "...", "release_notes": "..."}  # noqa: E501
   GET {update_url}/manifest-{version}.json
     返回: {"version": "...", "files": [{"rel", "sha256", "size"}]}
     客户端比对本地 manifest 与服务器 manifest 的文件 sha256，
@@ -23,8 +22,9 @@ import json
 import os
 from datetime import datetime
 
-from version import __version__
 from config.paths import UPDATE_CONFIG_FILE
+from version import __version__
+
 from utils.logger_utils import log
 
 
@@ -46,7 +46,7 @@ def load_update_config() -> dict:
             with open(UPDATE_CONFIG_FILE, encoding="utf-8") as f:
                 cfg = json.load(f)
             defaults.update(cfg)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return defaults
 
@@ -57,7 +57,7 @@ def save_update_config(cfg: dict):
         os.makedirs(os.path.dirname(UPDATE_CONFIG_FILE), exist_ok=True)
         with open(UPDATE_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception as e:
+    except OSError as e:
         log.warning(f"保存更新配置失败: {e}")
 
 
@@ -84,7 +84,7 @@ def _compare_versions(local: str, remote: str) -> int:
         if rp < lp:
             return -1
         return 0
-    except Exception:
+    except (ValueError, TypeError):
         return 0
 
 

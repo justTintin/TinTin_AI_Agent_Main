@@ -1,37 +1,50 @@
-# -*- coding: utf-8 -*-
 """
 视频AI智能重命名页面
 选择文件夹 → 扫描视频 → 抽帧分析 → AI识别产品信息 → 按规则重命名
 命名规则: 品牌_品类_型号_视频日期_视频分辨率_横竖屏
 """
-import os
-import re
-import json
 import base64
 import datetime
-import traceback
+import json
+import os
+import re
 
-from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QFileDialog, QProgressBar, QMessageBox, QWidget, QTextEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QFrame, QSpinBox, QDialog, QDialogButtonBox, QScrollArea, QSizePolicy,
-    QComboBox, QSlider
-)
-from PySide6.QtCore import Signal, QThread, Qt, QUrl, QTimer
-from utils.base_worker import BaseWorker
-from PySide6.QtGui import QColor, QFont
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
-
-from utils.logger_utils import log
 from gui.elided_label import ElidedLabel
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.base_worker import BaseWorker
 
 # ─────────────────────────────────────────────
 #  常量 / 知识库
 # ─────────────────────────────────────────────
 from utils.file_dialog_utils import pick_directory
 from utils.gui_icons import mdi_button
+from utils.llm_output_utils import extract_first_object
+from utils.logger_utils import log
+
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv',
                     '.webm', '.m4v', '.ts', '.mts', '.rmvb', '.3gp'}
 
@@ -85,7 +98,7 @@ def _parse_existing_filename(filename: str) -> dict:
     # 日期: YYYYMMDD / YYYY-MM-DD / YYYY_MM_DD
     date_match = re.search(r'(20\d{2})[_\-]?(\d{2})[_\-]?(\d{2})', name_no_ext)
     if date_match:
-        result['date'] = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"
+        result['date'] = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"  # noqa: E501
 
     # 品牌
     for brand in KNOWN_BRANDS:
@@ -120,7 +133,7 @@ def _get_video_meta(video_path: str) -> dict:
                 'resolution': f"{w}x{h}",
                 'orientation': '横屏' if w >= h else '竖屏'
             }
-    except Exception as e:
+    except Exception as e:  # cv2 video meta
         log.warning(f"cv2 read video meta failed: {e}")
     return {}
 
@@ -171,7 +184,7 @@ def _extract_keyframes_b64(video_path: str, num_frames: int = 4) -> list:
                     keyframes_b64.append(base64.b64encode(buf).decode('utf-8'))
         cap.release()
         return keyframes_b64
-    except Exception as e:
+    except Exception as e:  # cv2 keyframe extraction
         log.warning(f"Extract keyframes failed for {video_path}: {e}")
         return []
 
@@ -191,7 +204,7 @@ def _extract_path_info(full_path: str, folder_root: str) -> dict:
         # 2. 也检查子目录路径作为补充
         if full_path:
             rel = os.path.relpath(full_path, folder_root) if folder_root else ""
-            sub_parts = [p.strip() for p in rel.replace("\\", "/").split("/") if p.strip()][:-1]
+            sub_parts = [p.strip() for p in rel.replace("\\", "/").split("/") if p.strip()][:-1]  # noqa: E501
             if sub_parts:
                 path_text += " " + " ".join(sub_parts)
 
@@ -218,13 +231,13 @@ def _extract_path_info(full_path: str, folder_root: str) -> dict:
         model_match = re.search(r'\b([A-Z]{1,4}[\s_-]?\d{2,5}[A-Za-z]?)\b', path_text)
         if model_match:
             result['model'] = model_match.group(1).replace(" ", "").replace("_", "")
-    except Exception:
+    except OSError:
         pass
     return result
 
 
 def _build_new_filename(ai_info: dict, meta: dict, parsed: dict,
-                        original_path: str, path_info: dict = None) -> str:
+                        original_path: str, path_info: dict | None = None) -> str:
     """
     格式: 品牌_品类_型号_日期_分辨率_横竖屏.ext
     品牌/品类/型号全部来自视觉AI结果。
@@ -234,7 +247,7 @@ def _build_new_filename(ai_info: dict, meta: dict, parsed: dict,
     try:
         mtime = os.path.getmtime(original_path)
         fs_date = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-    except Exception:
+    except OSError:
         fs_date = "unknown"
 
     def clean(v):
@@ -285,7 +298,7 @@ def _aggregate_frame_results(results: list) -> tuple:
     def top_value(counter: Counter):
         without_unk = {k: v for k, v in counter.items() if k.lower() != 'unknown'}
         if without_unk:
-            best = max(without_unk, key=without_unk.get)
+            best = max(without_unk, key=lambda k: int(without_unk.get(k, 0)))
             return best, without_unk[best] / total
         return 'unknown', 0.0
 
@@ -358,7 +371,7 @@ class VideoAnalyzeWorker(BaseWorker):
             try:
                 result = self._analyze_one(fpath)
                 self.video_analyzed.emit(idx, result)
-            except Exception as e:
+            except Exception as e:  # video analyze pipeline
                 log.warning(f"Analyze video failed [{fname}]: {e}")
                 self._emit_log(f"   未捕获异常: {type(e).__name__}: {e}")
                 result = self._fallback_result(fpath, str(e))
@@ -380,7 +393,7 @@ class VideoAnalyzeWorker(BaseWorker):
         try:
             mtime = os.path.getmtime(fpath)
             fs_date = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-        except Exception:
+        except OSError:
             fs_date = parsed.get("date", "unknown")
         if fs_date and fs_date != "unknown":
             parsed["date"] = fs_date
@@ -388,13 +401,12 @@ class VideoAnalyzeWorker(BaseWorker):
         # 4. 视觉分析 — 逐帧独立调用，投票聚合
         ai_info   = {'brand': 'unknown', 'category': 'unknown', 'model': 'unknown'}
         conf_info = {'brand_conf': 0.0, 'category_conf': 0.0, 'model_conf': 0.0,
-                     'frame_count': 0, 'brand_votes': {}, 'category_votes': {}, 'model_votes': {}}
+                     'frame_count': 0, 'brand_votes': {}, 'category_votes': {}, 'model_votes': {}}  # noqa: E501
         self._emit_log(
             "  视觉模型: 由服务端自动选择"
         )
 
         if True:
-            import requests as req
             vision_ok = False
             try:
                 self._emit_log(f"  抽帧中… num_frames={self.num_frames}")
@@ -413,16 +425,16 @@ class VideoAnalyzeWorker(BaseWorker):
                                 f"  帧{i+1:02d}/{len(kfs)}: "
                                 f"品牌={r['brand']}  品类={r['category']}  型号={r['model']}"
                             )
-                        except Exception as e:
+                        except Exception as e:  # LLM vision API
                             self._emit_log(f"  帧{i+1:02d}  {type(e).__name__}: {e}")
                     if frame_results:
                         ai_info, conf_info = _aggregate_frame_results(frame_results)
-                        vision_ok = any(v.lower() != 'unknown' for v in ai_info.values())
+                        vision_ok = any(v.lower() != 'unknown' for v in ai_info.values())  # noqa: E501
                         log.info(f"[{fname}] 聚合结果: {ai_info} 置信度: {conf_info}")
                         self._emit_log(
                             f"  聚合({conf_info['frame_count']}帧): "
                             f"品牌={ai_info['brand']}({conf_info['brand_conf']:.0%})  "
-                            f"品类={ai_info['category']}({conf_info['category_conf']:.0%})  "
+                            f"品类={ai_info['category']}({conf_info['category_conf']:.0%})  "  # noqa: E501
                             f"型号={ai_info['model']}({conf_info['model_conf']:.0%})"
                         )
                         # 输出详细投票分布
@@ -432,14 +444,14 @@ class VideoAnalyzeWorker(BaseWorker):
                             ('型号', conf_info['model_votes']),
                         ]:
                             detail = '  '.join(f"{k}×{v}" for k, v in
-                                               sorted(votes.items(), key=lambda x: -x[1]))
+                                               sorted(votes.items(), key=lambda x: -x[1]))  # noqa: E501
                             self._emit_log(f"    {field}分布: {detail}")
                     else:
                         self._emit_log("   所有帧分析均失败")
                 else:
                     log.warning(f"[{fname}] 抽帧返回空列表")
                     self._emit_log("   抽帧返回空列表，跳过视觉分析")
-            except Exception as e:
+            except Exception as e:  # visual analysis pipeline
                 log.warning(f"[{fname}] 视觉分析异常: {type(e).__name__}: {e}")
                 self._emit_log(f"   视觉分析异常: {type(e).__name__}: {e}")
 
@@ -484,10 +496,10 @@ class VideoAnalyzeWorker(BaseWorker):
         try:
             mtime  = os.path.getmtime(fpath)
             date_s = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-        except Exception:
+        except OSError:
             date_s = parsed.get("date", "unknown")
         parsed["date"] = date_s
-        new_name = _build_new_filename({'brand':'unknown','category':'unknown','model':'unknown'},
+        new_name = _build_new_filename({'brand':'unknown','category':'unknown','model':'unknown'},  # noqa: E501
                                        meta, parsed, fpath)
         return {
             'original_path': fpath,
@@ -531,15 +543,12 @@ class VideoAnalyzeWorker(BaseWorker):
                  {"type": "image_url",
                   "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}},
              ]}],
-            model=None, temperature=0.1, max_tokens=200, timeout=60)
+            model="", temperature=0.1, max_tokens=200, timeout=60)
         self._emit_log(f"    ← 响应 {len(text)} 字符")
         self._emit_log(f"    原始: {text[:100]}")
-        raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
-        m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
-        if m:
-            raw = m.group(0)
-        data = json.loads(raw)
+        data = extract_first_object(text)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"视觉模型未输出有效品牌识别 JSON:\n{text[:300]}")
 
         def clean(v):
             v = str(v or "").strip()
@@ -573,7 +582,7 @@ class VideoAnalyzeWorker(BaseWorker):
 
 class FrameAnalysisThread(BaseWorker):
     """抽取视频指定位置的单帧并调用视觉模型分析。"""
-    result_ready = Signal(dict)   # {'brand':..., 'category':..., 'model':...} or {'error':...}
+    result_ready = Signal(dict)   # {'brand':..., 'category':..., 'model':...} or {'error':...}  # noqa: E501
     log_ready    = Signal(str)
 
     def __init__(self, fpath: str, pos_ms: int):
@@ -583,7 +592,6 @@ class FrameAnalysisThread(BaseWorker):
 
     def run(self):
         import cv2
-        import requests as req
         try:
             self.log_ready.emit("抽帧中…")
             cap = cv2.VideoCapture(self.fpath)
@@ -607,31 +615,31 @@ class FrameAnalysisThread(BaseWorker):
                 return
             kf_b64 = base64.b64encode(buf).decode('utf-8')
             self.log_ready.emit("发送至视觉模型…")
-            result = self._call_vision(kf_b64, req)
+            result = self._call_vision(kf_b64)
             self.result_ready.emit(result)
-        except Exception as e:
+        except Exception as e:  # cv2 + LLM vision API
             self.result_ready.emit({'error': f'{type(e).__name__}: {e}'})
 
-    def _call_vision(self, kf_b64: str, req) -> dict:
+    def _call_vision(self, kf_b64: str) -> dict:
         from utils.llm_proxy import llm_chat_messages
         system_prompt = (
             "你是专业的消费电子产品视觉识别专家。通过产品外观特征识别品牌、品类和型号。"
             "只返回 JSON，格式：{\"brand\":\"...\",\"category\":\"...\",\"model\":\"...\"}"
             "无法识别时对应字段填 unknown。"
         )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": [
+                {"type": "text", "text": "请识别这一帧中的产品品牌、品类和型号："},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}},
+            ]},
+        ]
         text = llm_chat_messages(
-            [{"role": "system", "content": system_prompt},
-             {"role": "user", "content": [
-                 {"type": "text", "text": "请识别这一帧中的产品品牌、品类和型号："},
-                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{kf_b64}"}}
-             ]}],
-            model=None, temperature=0.1, max_tokens=300, timeout=60)
-        raw = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
-        m = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
-        if m:
-            raw = m.group(0)
-        data = json.loads(raw)
+            messages,
+            model="", temperature=0.1, max_tokens=300, timeout=60)
+        data = extract_first_object(text)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"视觉模型未输出有效品牌识别 JSON:\n{text[:300]}")
         def clean(v):
             v = str(v or "").strip()
             return v if v and v.lower() not in ("none", "") else "unknown"
@@ -704,8 +712,8 @@ class VideoPlayerDialog(QDialog):
         self.page_ref        = page_ref
         self._duration       = 0
         self._slider_dragging = False
-        self._analysis_thread = None
-        self._pending_rename  = None
+        self._analysis_thread: FrameAnalysisThread | None = None
+        self._pending_rename: tuple[str, str, dict] | None = None
 
         self._setup_ui()
         self._setup_player()
@@ -779,7 +787,8 @@ class VideoPlayerDialog(QDialog):
         self.lbl_frame_status.setWordWrap(True)
         right_v.addWidget(self.lbl_frame_status)
 
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
         sep.setObjectName("videoPlayerDivider")
         right_v.addWidget(sep)
 
@@ -796,7 +805,8 @@ class VideoPlayerDialog(QDialog):
             setattr(self, attr_name, edit)
             right_v.addWidget(edit)
 
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.HLine)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
         sep2.setStyleSheet("QFrame { color: #2d2d2d; }")
         right_v.addWidget(sep2)
 
@@ -844,7 +854,7 @@ class VideoPlayerDialog(QDialog):
         self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.fpath)))
         self.player.play()  # auto-start so first frame is visible
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         self.player.stop()
         if self._analysis_thread and self._analysis_thread.isRunning():
             self._analysis_thread.quit()
@@ -891,7 +901,7 @@ class VideoPlayerDialog(QDialog):
         return f"{m}:{s:02d}"
 
     def _update_time_label(self, pos_ms: int):
-        self.lbl_time.setText(f"{self._fmt_ms(pos_ms)} / {self._fmt_ms(self._duration)}")
+        self.lbl_time.setText(f"{self._fmt_ms(pos_ms)} / {self._fmt_ms(self._duration)}")  # noqa: E501
 
     # ── Frame analysis ───────────────────────────
     def _analyze_current_frame(self):
@@ -930,9 +940,9 @@ class VideoPlayerDialog(QDialog):
         try:
             mtime = os.path.getmtime(self.fpath)
             parsed["date"] = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-        except Exception:
+        except OSError:
             pass
-        self.edit_filename.setText(_build_new_filename(ai_info, meta, parsed, self.fpath))
+        self.edit_filename.setText(_build_new_filename(ai_info, meta, parsed, self.fpath))  # noqa: E501
         self.btn_apply_rename.setEnabled(True)
 
     # ── Rename ───────────────────────────────────
@@ -961,7 +971,7 @@ class VideoPlayerDialog(QDialog):
         self._pending_rename = None
         try:
             os.rename(self.fpath, new_path)
-        except Exception as e:
+        except OSError as e:
             QMessageBox.warning(self, "重命名失败", str(e))
             return
         self.page_ref._apply_rename_from_dialog(self.row_idx, actual_name, ai_info)
@@ -974,8 +984,9 @@ class VideoPlayerDialog(QDialog):
 # ─────────────────────────────────────────────
 #  主页面类
 # ─────────────────────────────────────────────
-from gui.base_page import BasePage
-from gui.searchable_combo import SearchableComboBox
+import contextlib  # noqa: E402
+
+from gui.base_page import BasePage  # noqa: E402
 
 
 class VideoAiRenamePage(BasePage):
@@ -1142,16 +1153,24 @@ class VideoAiRenamePage(BasePage):
             "分辨率/方向", "日期", "状态", "分析结果", "重分析", "播放"
         ])
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Fixed);       self.table.setColumnWidth(0, 32)
-        hdr.setSectionResizeMode(1, QHeaderView.Fixed);       self.table.setColumnWidth(1, 40)
-        hdr.setSectionResizeMode(2, QHeaderView.Interactive); self.table.setColumnWidth(2, 160)
+        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 32)  # noqa: E501
+        hdr.setSectionResizeMode(1, QHeaderView.Fixed)
+        self.table.setColumnWidth(1, 40)  # noqa: E501
+        hdr.setSectionResizeMode(2, QHeaderView.Interactive)
+        self.table.setColumnWidth(2, 160)  # noqa: E501
         hdr.setSectionResizeMode(3, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(4, QHeaderView.Interactive); self.table.setColumnWidth(4, 110)
-        hdr.setSectionResizeMode(5, QHeaderView.Interactive); self.table.setColumnWidth(5, 80)
-        hdr.setSectionResizeMode(6, QHeaderView.Interactive); self.table.setColumnWidth(6, 80)
+        hdr.setSectionResizeMode(4, QHeaderView.Interactive)
+        self.table.setColumnWidth(4, 110)  # noqa: E501
+        hdr.setSectionResizeMode(5, QHeaderView.Interactive)
+        self.table.setColumnWidth(5, 80)  # noqa: E501
+        hdr.setSectionResizeMode(6, QHeaderView.Interactive)
+        self.table.setColumnWidth(6, 80)  # noqa: E501
         hdr.setSectionResizeMode(7, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(8, QHeaderView.Fixed);       self.table.setColumnWidth(8, 50)
-        hdr.setSectionResizeMode(9, QHeaderView.Fixed);       self.table.setColumnWidth(9, 45)
+        hdr.setSectionResizeMode(8, QHeaderView.Fixed)
+        self.table.setColumnWidth(8, 50)  # noqa: E501
+        hdr.setSectionResizeMode(9, QHeaderView.Fixed)
+        self.table.setColumnWidth(9, 45)  # noqa: E501
 
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1184,6 +1203,7 @@ class VideoAiRenamePage(BasePage):
         btn_clear_log.setFixedWidth(64)
         btn_clear_log.setFixedHeight(20)
         btn_clear_log.setStyleSheet("font-size: 11px; padding: 1px 4px;")
+        self.log_panel: QTextEdit
         btn_clear_log.clicked.connect(lambda: self.log_panel.clear())
         log_header_row.addWidget(btn_clear_log)
         layout.addLayout(log_header_row)
@@ -1202,11 +1222,11 @@ class VideoAiRenamePage(BasePage):
         try:
             cfg = self.main_win.ai_config
             self._model          = cfg.get("llm_model",          "").strip()
-            self.lbl_model_info.setText(f" 文本: {self._model}" if self._model else " 未配置文本模型")
+            self.lbl_model_info.setText(f" 文本: {self._model}" if self._model else " 未配置文本模型")  # noqa: E501
             self.lbl_model_info.setProperty("status", "" if self._model else "error")
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
             self.lbl_model_info.style().polish(self.lbl_model_info)
-        except Exception:
+        except (AttributeError, TypeError):
             self.lbl_model_info.setText(" 无法读取 AI 配置")
             self.lbl_model_info.setProperty("status", "error")
             self.lbl_model_info.style().unpolish(self.lbl_model_info)
@@ -1270,7 +1290,7 @@ class VideoAiRenamePage(BasePage):
                 ext = os.path.splitext(fname)[1].lower()
                 if ext in VIDEO_EXTENSIONS:
                     files.append(os.path.join(folder, fname))
-        except Exception as e:
+        except OSError as e:
             QMessageBox.warning(self.parent_widget, "扫描失败", str(e))
             return
 
@@ -1306,12 +1326,12 @@ class VideoAiRenamePage(BasePage):
             try:
                 mtime  = os.path.getmtime(fpath)
                 date_s = datetime.datetime.fromtimestamp(mtime).strftime("%Y%m%d")
-            except Exception:
+            except OSError:
                 date_s = parsed.get("date", "unknown")
             parsed["date"] = date_s
 
             # 生成初始文件名（仅基于原文件名解析 + 路径 + 元数据，无 AI）
-            folder_root = os.path.abspath(self._folder_path) if self._folder_path else ""
+            folder_root = os.path.abspath(self._folder_path) if self._folder_path else ""  # noqa: E501
             path_info = _extract_path_info(fpath, folder_root)
             init_new = _build_new_filename(
                 {'brand':'unknown','category':'unknown','model':'unknown'},
@@ -1339,7 +1359,7 @@ class VideoAiRenamePage(BasePage):
 
             # Col 3: 新文件名（可编辑）
             new_item = QTableWidgetItem(init_new)
-            new_item.setFlags(Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            new_item.setFlags(Qt.ItemIsEditable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)  # noqa: E501
             new_item.setForeground(QColor("#f3f4f6"))
             self.table.setItem(row, 3, new_item)
 
@@ -1377,7 +1397,7 @@ class VideoAiRenamePage(BasePage):
             btn_reanalyze.setFixedWidth(30)
             btn_reanalyze.setFixedHeight(24)
             btn_reanalyze.setEnabled(False)
-            btn_reanalyze.clicked.connect(lambda checked=False, r=row, fp=fpath: self._reanalyze_single(r, fp))
+            btn_reanalyze.clicked.connect(lambda checked=False, r=row, fp=fpath: self._reanalyze_single(r, fp))  # noqa: E501
             self.table.setCellWidget(row, 8, btn_reanalyze)
 
             # Col 9: 播放按钮（随时可用，打开 VideoPlayerDialog）
@@ -1386,7 +1406,7 @@ class VideoAiRenamePage(BasePage):
             btn_play_row.setObjectName("aiRenamePlayBtn")
             btn_play_row.setFixedWidth(30)
             btn_play_row.setFixedHeight(24)
-            btn_play_row.clicked.connect(lambda checked=False, r=row: self._open_video_player(r))
+            btn_play_row.clicked.connect(lambda checked=False, r=row: self._open_video_player(r))  # noqa: E501
             self.table.setCellWidget(row, 9, btn_play_row)
 
         self.table.resizeRowsToContents()
@@ -1470,19 +1490,19 @@ class VideoAiRenamePage(BasePage):
                 try:
                     result = self.worker._analyze_one(self.fpath)
                     self.result_ready.emit(-1, result)
-                except Exception as e:
-                    self.result_ready.emit(-1, {'status': f'注意： {str(e)[:50]}', 'error': True,
+                except Exception as e:  # re-analyze pipeline
+                    self.result_ready.emit(-1, {'status': f'注意： {str(e)[:50]}', 'error': True,  # noqa: E501
                         'brand':'unknown','category':'unknown','model':'unknown',
-                        'new_name':'','resolution':'','orientation':'','date':'','model_name':'unknown'})
+                        'new_name':'','resolution':'','orientation':'','date':'','model_name':'unknown'})  # noqa: E501
 
         temp_worker = VideoAnalyzeWorker([fpath], self._model,
-                                         self.spin_frames.value(), folder_path=self._folder_path)
+                                         self.spin_frames.value(), folder_path=self._folder_path)  # noqa: E501
         temp_worker.log_sig.connect(self._append_log)
         temp_worker.log_row_sig.connect(
             lambda ridx, line, ri=row_idx: self._on_row_log(ri, line)
         )
         self._single_thread = ReAnalyzeThread(fpath, temp_worker)
-        self._single_thread.result_ready.connect(lambda idx, res: self._on_video_analyzed(row_idx, res))
+        self._single_thread.result_ready.connect(lambda idx, res: self._on_video_analyzed(row_idx, res))  # noqa: E501
         self._single_thread.start()
 
     def _on_progress(self, current: int, total: int, msg: str):
@@ -1523,7 +1543,7 @@ class VideoAiRenamePage(BasePage):
             n      = result.get('frame_count',   0)
             if n > 0:
                 ai_result_item.setText(
-                    f"品牌:{brand}({bc:.0%})  品类:{cat}({cc:.0%})  型号:{model}({mc:.0%})  [{n}帧]"
+                    f"品牌:{brand}({bc:.0%})  品类:{cat}({cc:.0%})  型号:{model}({mc:.0%})  [{n}帧]"  # noqa: E501
                 )
             else:
                 ai_result_item.setText(f"品牌:{brand}  品类:{cat}  型号:{model}")
@@ -1757,7 +1777,7 @@ class VideoAiRenamePage(BasePage):
                 if status_item:
                     status_item.setText("已重命名 已")
                     status_item.setForeground(QColor("#34d399"))
-            except Exception as e:
+            except OSError as e:
                 fail_msgs.append(f"{orig_name}: {e}")
                 status_item = self.table.item(row, 6)
                 if status_item:
@@ -1774,7 +1794,7 @@ class VideoAiRenamePage(BasePage):
             try:
                 with open(history_path, "w", encoding="utf-8") as f:
                     json.dump(history_data, f, ensure_ascii=False, indent=2)
-            except Exception as e:
+            except (OSError, TypeError) as e:
                 log.warning(f"Save rename history failed: {e}")
 
         self.btn_undo.setEnabled(bool(history_entries))
@@ -1799,9 +1819,9 @@ class VideoAiRenamePage(BasePage):
             return
 
         try:
-            with open(history_path, "r", encoding="utf-8") as f:
+            with open(history_path, encoding="utf-8") as f:
                 history_data = json.load(f)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             QMessageBox.warning(self.parent_widget, "读取失败", str(e))
             return
 
@@ -1834,14 +1854,12 @@ class VideoAiRenamePage(BasePage):
             try:
                 os.rename(new_path, old_path)
                 success_count += 1
-            except Exception as e:
+            except OSError as e:
                 fail_msgs.append(f"{new_name} → {old_name}: {e}")
 
         # 删除历史文件
-        try:
+        with contextlib.suppress(OSError):
             os.remove(history_path)
-        except Exception:
-            pass
 
         self.btn_undo.setEnabled(False)
         msg = f"完成： 撤销完成：还原 {success_count} 个文件。"

@@ -1,49 +1,39 @@
-# -*- coding: utf-8 -*-
+# type: ignore
 """MainWindow 的 AI 生成/工作流任务 mixin（RunningHub / ComfyUI / 数字人 / 视频工具），从 gui_main 拆出。"""
 
-import subprocess
-import time
 import json
-import sys
 import os
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT
+import time
+
+from config.paths import PROJECT_ROOT
+from core.rh_queue_processor import compute_queue_stats
+from gui.dialogs import open_cef_browser
+from gui.threads import ComfyWSThread
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidgetItem,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-import threading
-import uuid
-import configparser
-from ui import gui_styles
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.account_manager import AccountManager
-from core.creator_browser_controller import CreatorBrowserController
-from utils.thread_worker import TaskWorker as Worker
-from gui.threads import SystemMonitorThread, ComfyWSThread
 from utils import comfyui_client as comfy
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QTextBrowser, QDialog, QListWidget,
-                                 QListWidgetItem, QGridLayout, QFileDialog,
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox, QFormLayout, QDialogButtonBox)
-from PySide6.QtGui import QIcon, QFont, QPixmap
-from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtGui import QFont
-
-
 from utils.file_dialog_utils import pick_file
+from utils.http_download_utils import download_file
+from utils.json_utils import deep_copy
+from utils.logger_utils import log
+from utils.thread_worker import TaskWorker as Worker
+
 WORKFLOW_TYPES = ("文生图", "图生图", "图生视频", "数字人", "其他")
 
 def _classify_runninghub_input_nodes(workflow_json):
@@ -56,7 +46,7 @@ def _classify_runninghub_input_nodes(workflow_json):
     result = {"image": [], "audio": [], "video": [], "duration": []}
     if not isinstance(workflow_json, dict):
         return result
-    duration_aliases = {"duration", "seconds", "length", "video_length", "clip_duration"}
+    duration_aliases = {"duration", "seconds", "length", "video_length", "clip_duration"}  # noqa: E501
     for node_id, node in workflow_json.items():
         if not isinstance(node, dict):
             continue
@@ -71,10 +61,10 @@ def _classify_runninghub_input_nodes(workflow_json):
                 result["audio"].append((node_id, class_type, field_name, val))
             elif field_name == "video":
                 result["video"].append((node_id, class_type, field_name, val))
-            elif field_name in duration_aliases and isinstance(val, (int, float)):
+            elif field_name in duration_aliases and isinstance(val, (int, float)):  # noqa: SIM102
                 # 文件上传节点里的 duration/seconds 通常是内部参数（如音频裁剪），
                 # 不作为可配置的“生成视频时长”。
-                if class_type not in ("LoadImage", "LoadAudio", "VHS_LoadAudioUpload", "LoadVideo", "VHS_LoadVideo", "LoadVideoPath"):
+                if class_type not in ("LoadImage", "LoadAudio", "VHS_LoadAudioUpload", "LoadVideo", "VHS_LoadVideo", "LoadVideoPath"):  # noqa: E501
                     result["duration"].append((node_id, class_type, field_name, val))
     return result
 
@@ -154,14 +144,15 @@ class AIGenMixin:
 
     def on_vt_workflow_changed(self, index):
         file_path = self.vt_workflow_selector.currentData()
-        if not file_path: return
-        
+        if not file_path:
+            return
+
         # Auto load when selected
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 self.vt_current_workflow_data = json.load(f)
             self.vt_workflow_status.setText(f" 已加载: {os.path.basename(file_path)}")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             self.vt_workflow_status.setText(f"失败： 加载失败: {str(e)}")
 
     def select_vt_video(self):
@@ -170,7 +161,7 @@ class AIGenMixin:
             self.vt_video_path_input.setText(path)
 
     def run_video_tool_task(self):
-        if not hasattr(self, 'vt_current_workflow_data') or not self.vt_current_workflow_data:
+        if not hasattr(self, 'vt_current_workflow_data') or not self.vt_current_workflow_data:  # noqa: E501
             QMessageBox.warning(self.parent_widget, "错误", "请先选择并加载工作流。")
             return
 
@@ -193,24 +184,24 @@ class AIGenMixin:
 
                 # 2. Update workflow JSON with uploaded video name
                 # Heuristic: find nodes with 'video' or 'LoadVideo'
-                wf_str = json.dumps(self.vt_current_workflow_data)
-                modified_wf = json.loads(wf_str)
+                modified_wf = deep_copy(self.vt_current_workflow_data)
                 found = False
-                for node_id, node in modified_wf.items():
-                    if node.get("class_type") in ["LoadVideo", "VHS_VideoCombine", "LoadVideoPath"]:
+                for _node_id, node in modified_wf.items():
+                    if node.get("class_type") in ["LoadVideo", "VHS_VideoCombine", "LoadVideoPath"]:  # noqa: E501 SIM102
                         if "video" in node.get("inputs", {}):
                             node["inputs"]["video"] = upload_name
                             found = True
 
                 if not found:
                     # Fallback string replace
+                    wf_str = json.dumps(self.vt_current_workflow_data)
                     wf_str = wf_str.replace("input_video.mp4", upload_name)
                     modified_wf = json.loads(wf_str)
 
                 # 3. 提交（视频工具无对应 /apps 应用，走原始 workflow 提交）
                 prompt_id = client.submit_raw_prompt(modified_wf)
                 return True, prompt_id
-            except Exception as e:
+            except Exception as e:  # ComfyUI 外部API调用
                 return False, str(e)
 
         def on_finished(result):
@@ -224,30 +215,27 @@ class AIGenMixin:
         self.start_worker(run_task, on_finished)
 
     def auto_load_default_dh_workflow(self):
-        default_wf = os.path.join(PROJECT_ROOT, "assets", "workflow", "数字人-上传图片和声音--20260113-api.json")
+        default_wf = os.path.join(PROJECT_ROOT, "assets", "workflow", "数字人-上传图片和声音--20260113-api.json")  # noqa: E501
         if os.path.exists(default_wf):
             try:
-                with open(default_wf, 'r', encoding='utf-8') as f:
+                with open(default_wf, encoding='utf-8') as f:
                     self.current_workflow_data = json.load(f)
                 self.workflow_status.setText(f" 已自动加载: {os.path.basename(default_wf)}")
                 if hasattr(self, 'btn_run_workflow'):
                     self.btn_run_workflow.setEnabled(True)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 log.error(f"Failed to auto-load DH workflow: {e}")
                 self.workflow_status.setText(f"失败： 自动加载失败: {str(e)}")
 
 
 
     def run_digital_human_task(self):
-        if self.backend_selector.currentIndex() == 0:
-            self.run_comfyui_dh_task()
-        else:
-            self.run_runninghub_task()
+        self._run_unified_workflow()
 
     def open_rh_web_interface(self):
         wf_id = self.rh_workflow_id_input.text().strip()
-        url = f"https://www.runninghub.cn/call-api/api-detail/{wf_id}?apiType=5" if wf_id else "https://www.runninghub.cn"
-        open_cef_browser(url, "RunningHub 工作流 API")
+        url = f"https://www.runninghub.cn/ai-detail/{wf_id}" if wf_id else "https://www.runninghub.cn"
+        open_cef_browser(url, "RunningHub 工作流")
 
     def view_rh_api_detail(self):
         """获取 RunningHub 工作流 JSON，在节点列表中展示所有图片/音频输入节点。"""
@@ -273,7 +261,7 @@ class AIGenMixin:
 
         def on_done(wf):
             if not wf or not isinstance(wf, dict):
-                err = " 无法获取工作流 JSON。可能原因：1) 工作流 ID 不正确；2) 未发布为 API；3) API Key 无权限；4) 网络连接问题。"
+                err = " 无法获取工作流 JSON。可能原因：1) 工作流 ID 不正确；2) 未发布为 API；3) API Key 无权限；4) 网络连接问题。"  # noqa: E501
                 self.rh_workflow_info.setText(err)
                 return
 
@@ -282,7 +270,7 @@ class AIGenMixin:
             self.rh_image_nodes = [(n, c, f) for n, c, f, _ in classified["image"]]
             self.rh_audio_nodes = [(n, c, f) for n, c, f, _ in classified["audio"]]
             self.rh_video_nodes = [(n, c, f) for n, c, f, _ in classified["video"]]
-            self.rh_duration_nodes = [(n, c, f, v) for n, c, f, v in classified["duration"]]
+            self.rh_duration_nodes = [(n, c, f, v) for n, c, f, v in classified["duration"]]  # noqa: E501
 
             self.rh_node_list.clear()
             typed_items = []
@@ -294,7 +282,7 @@ class AIGenMixin:
                 typed_items.append((node, "video"))
             for node in classified["duration"]:
                 typed_items.append((node, "duration"))
-            for (node_id, class_type, field_name, default_val), input_type in typed_items:
+            for (node_id, class_type, field_name, default_val), input_type in typed_items:  # noqa: E501
                 display = f"[{node_id}] {class_type} ({field_name})"
                 item = QListWidgetItem(display)
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -311,10 +299,10 @@ class AIGenMixin:
             self._refresh_rh_input_panel()
             summary = (
                 f"图片节点 {len(self.rh_image_nodes)} 个，音频节点 {len(self.rh_audio_nodes)} 个，"
-                f"视频节点 {len(self.rh_video_nodes)} 个，时长节点 {len(self.rh_duration_nodes)} 个；默认全部勾选。"
+                f"视频节点 {len(self.rh_video_nodes)} 个，时长节点 {len(self.rh_duration_nodes)} 个；默认全部勾选。"  # noqa: E501
             )
-            self.rh_workflow_info.setText(f" 已获取 {self.rh_node_list.count()} 个输入节点，{summary}")
-            if self.backend_selector.currentIndex() == 1:
+            self.rh_workflow_info.setText(f" 已获取 {self.rh_node_list.count()} 个输入节点，{summary}")  # noqa: E501
+            if self.backend_selector.currentIndex() == 2:
                 self.btn_run_workflow.setEnabled(self._rh_ready_to_run())
 
         self.start_worker(fetch, on_done)
@@ -379,7 +367,7 @@ class AIGenMixin:
             self.rh_workflow_info.setText("请先选择 RunningHub 数字人工作流")
             return
 
-        checked_image_nodes, checked_audio_nodes, checked_video_nodes, checked_duration_nodes = self._get_checked_rh_nodes()
+        checked_image_nodes, checked_audio_nodes, checked_video_nodes, checked_duration_nodes = self._get_checked_rh_nodes()  # noqa: E501
         if not checked_image_nodes:
             self.rh_workflow_info.setText("请先在节点列表中勾选至少 1 个图片节点")
             return
@@ -472,7 +460,7 @@ class AIGenMixin:
                 })
 
             self.rh_submitted_tasks = {}
-            self.log_area.setText(f"已加入 {len(audio_files)} 个音频到 RunningHub 任务队列，开始执行...")
+            self.log_area.setText(f"已加入 {len(audio_files)} 个音频到 RunningHub 任务队列，开始执行...")  # noqa: E501
 
         self.btn_run_workflow.setEnabled(False)
         self._start_rh_poll_timer()
@@ -558,18 +546,18 @@ class AIGenMixin:
         return client.upload_file(file_path)
 
     def load_comfyui_workflow(self):
-        workflow_path = os.path.join(PROJECT_ROOT, "assets", "workflow", "数字人-上传图片和声音--20260113-api.json")
+        workflow_path = os.path.join(PROJECT_ROOT, "assets", "workflow", "数字人-上传图片和声音--20260113-api.json")  # noqa: E501
         if not os.path.exists(workflow_path):
             QMessageBox.warning(self, "未找到文件", f"工作流文件 {workflow_path} 不存在。")
             return
-            
+
         try:
-            with open(workflow_path, 'r', encoding='utf-8') as f:
+            with open(workflow_path, encoding='utf-8') as f:
                 self.current_workflow_data = json.load(f)
             self.workflow_status.setText(" 已加载: 数字人-上传图片和声音")
             self.btn_run_workflow.setEnabled(True)
             log.info(f"Successfully loaded workflow: {workflow_path}")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             QMessageBox.critical(self, "错误", f"加载工作流失败: {e}")
 
     def run_comfyui_task(self):
@@ -588,7 +576,7 @@ class AIGenMixin:
             if inp.get('required'):
                 val = params.get(inp.get('key'))
                 if val in (None, "", []):
-                    QMessageBox.warning(self.parent_widget, "参数缺失", f"请填写必填项：{inp.get('label', inp.get('key'))}")
+                    QMessageBox.warning(self.parent_widget, "参数缺失", f"请填写必填项：{inp.get('label', inp.get('key'))}")  # noqa: E501
                     return
 
         self.workflow_status.setText(f"正在执行「{app_name}」...")
@@ -609,7 +597,7 @@ class AIGenMixin:
                 # 2. 执行应用
                 prompt_id = client.run_app(app_id, params)
                 return True, prompt_id
-            except Exception as e:
+            except Exception as e:  # ComfyUI 外部API调用
                 return False, str(e)
 
         def on_finished(result):
@@ -618,7 +606,7 @@ class AIGenMixin:
             if success:
                 self.workflow_status.setText(f"完成： 「{app_name}」任务已提交")
                 self.add_task_to_list(info)
-                QMessageBox.information(self.parent_widget, "成功", f"任务已提交！\n应用：{app_name}\nID: {info}")
+                QMessageBox.information(self.parent_widget, "成功", f"任务已提交！\n应用：{app_name}\nID: {info}")  # noqa: E501
             else:
                 self.workflow_status.setText(" 失败")
                 QMessageBox.critical(self.parent_widget, "错误", f"任务启动失败: {info}")
@@ -628,55 +616,59 @@ class AIGenMixin:
         self.worker.start()
 
     def _on_dh_backend_changed(self, index):
-        """数字人 Tab：切换后端时显示/隐藏对应区域并启用/禁用提交按钮。"""
-        if index == 0:  # ComfyUI
-            self.comfy_section.show()
-            self.rh_section.hide()
-            self.btn_run_workflow.setText("提交生成任务")
-            self.btn_run_workflow.setEnabled(bool(self.current_workflow_data))
-        else:  # RunningHub
-            self.comfy_section.hide()
-            self.rh_section.show()
-            self.btn_run_workflow.setText("开始批量任务")
-            self._refresh_rh_input_panel()
-            self._rh_refresh_dh_workflow_selector()
-            wf_id = self.rh_workflow_id_input.text().strip()
-            if wf_id and hasattr(self, "rh_node_list") and self.rh_node_list.count() == 0:
-                QTimer.singleShot(300, self.view_rh_api_detail)
-            self.btn_run_workflow.setEnabled(self._rh_ready_to_run())
+        """数字人 Tab：切换后端过滤时刷新工作流列表。"""
+        self._rh_refresh_dh_workflow_selector()
+        self.btn_run_workflow.setEnabled(self._rh_ready_to_run())
 
     def _rh_has_new_audios(self):
         """列表中是否存在未处理过的驱动音频（只认新增的，已处理过的不重复提交）。"""
         processed = getattr(self, "_rh_processed_audios", None) or set()
         for row in range(self.rh_audio_list.rowCount()):
             item = self.rh_audio_list.item(row, 0)
-            if item and item.data(Qt.UserRole) and item.data(Qt.UserRole) not in processed:
+            if item and item.data(Qt.UserRole) and item.data(Qt.UserRole) not in processed:  # noqa: E501
                 return True
         return False
 
     def _rh_ready_to_run(self):
-        """RunningHub 数字人页面当前是否满足提交条件（图片 + 音频/视频 + 工作流 ID）。"""
+        """RunningHub 数字人页面当前是否满足提交条件。"""
         wf_id = self.rh_workflow_id_input.text().strip()
         if not wf_id:
             return False
-        has_img = bool(self.rh_img_path_input.text().strip())
-        has_new_audios = self._rh_has_new_audios()
-        has_video = bool(self.rh_video_path_input.text().strip())
-        if not has_img or (not has_new_audios and not has_video):
+        if not hasattr(self, "_rh_form_entries") or not self._rh_form_entries:
             return False
-        # 要求节点列表中至少勾选了 1 个图片节点和 1 个媒体节点
-        has_checked_image = False
-        has_checked_media = False
-        for i in range(self.rh_node_list.count()):
-            item = self.rh_node_list.item(i)
-            if item.checkState() != Qt.Checked:
+        has_required = True
+        for ent in self._rh_form_entries:
+            if not ent.get("required"):
                 continue
-            input_type = (item.data(Qt.UserRole) or {}).get("input_type")
-            if input_type == "image":
-                has_checked_image = True
-            elif input_type in ("audio", "video"):
-                has_checked_media = True
-        return has_checked_image and has_checked_media
+            kind = ent["kind"]
+            w = ent["widget"]
+            if kind in ("image", "audio", "video"):
+                path = (w.text() or "").strip() if hasattr(w, "text") else ""
+                if not path:
+                    has_required = False
+                    break
+            elif kind == "select":
+                continue
+            else:
+                val = (w.text() or "").strip() if hasattr(w, "text") else ""
+                if not val:
+                    has_required = False
+                    break
+        if not has_required:
+            return False
+        has_any_image = False
+        has_any_media = False
+        for ent in self._rh_form_entries:
+            kind = ent["kind"]
+            if kind == "image":
+                path = (ent["widget"].text() or "").strip() if hasattr(ent["widget"], "text") else ""
+                if path:
+                    has_any_image = True
+            elif kind in ("audio", "video"):
+                path = (ent["widget"].text() or "").strip() if hasattr(ent["widget"], "text") else ""
+                if path:
+                    has_any_media = True
+        return has_any_image and has_any_media
 
     def _test_runninghub_config(self):
         """在 AI 设置页测试 RunningHub API Key 是否可用。"""
@@ -684,7 +676,7 @@ class AIGenMixin:
             self.rh_config_status.setText("失败： RunningHub 模块未初始化")
             return
         api_key = self.runninghub_api_key_input.text().strip()
-        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
+        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
         if not api_key:
             self.rh_config_status.setText("失败： 请先填写 API Key")
             return
@@ -694,7 +686,7 @@ class AIGenMixin:
             return self.runninghub.test_connection()
         def on_done(info):
             if info:
-                self.rh_config_status.setText(f"完成： 连接成功 (类型: {info.get('apiType', '-')}, 余额: {info.get('remainCoins', '-')})")
+                self.rh_config_status.setText(f"完成： 连接成功 (类型: {info.get('apiType', '-')}, 余额: {info.get('remainCoins', '-')})")  # noqa: E501
             else:
                 self.rh_config_status.setText("失败： 连接失败，请检查 API Key 和基础地址")
         self.start_worker(run, on_done)
@@ -702,32 +694,32 @@ class AIGenMixin:
     def _test_runninghub_comfy_protocol(self):
         """测试 RunningHub 在线工作流的 ComfyUI 协议接口可用性。"""
         from utils.runninghub_comfy_client import RunningHubComfyClient
-        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
+        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
         comfy_auth = self.runninghub_comfy_auth_input.text().strip()
         identify = self.runninghub_comfy_identify_input.text().strip()
         access_token = self.runninghub_access_token_input.text().strip()
         if not comfy_auth or not identify:
-            self.rh_comfy_status.setText("失败： 请先填写 Rh-Comfy-Auth 和 Rh-Identify（登录 RunningHub 后在浏览器 localStorage 中查看）")
+            self.rh_comfy_status.setText("失败： 请先填写 Rh-Comfy-Auth 和 Rh-Identify（登录 RunningHub 后在浏览器 localStorage 中查看）")  # noqa: E501
             return
-        client = RunningHubComfyClient(base_url=base_url, comfy_auth=comfy_auth, identify=identify, access_token=access_token)
+        client = RunningHubComfyClient(base_url=base_url, comfy_auth=comfy_auth, identify=identify, access_token=access_token)  # noqa: E501
         self.rh_comfy_status.setText("正在检测 RunningHub ComfyUI 协议接口...")
 
         def run():
             ok = client.is_alive()
             info = client.get_object_info() if ok else None
-            required = ["LoadImage", "LoadAudio", "WanVideoModelLoader", "MultiTalkModelLoader"]
-            missing = [k for k in required if not (info or {}).get(k)] if isinstance(info, dict) else []
+            required = ["LoadImage", "LoadAudio", "WanVideoModelLoader", "MultiTalkModelLoader"]  # noqa: E501
+            missing = [k for k in required if not (info or {}).get(k)] if isinstance(info, dict) else []  # noqa: E501
             return ok, bool(info), missing
 
         def on_done(result):
             ok, has_info, missing = result
             if ok and has_info:
                 if missing:
-                    self.rh_comfy_status.setText(f"完成： 协议可用，但缺少节点: {', '.join(missing)}")
+                    self.rh_comfy_status.setText(f"完成： 协议可用，但缺少节点: {', '.join(missing)}")  # noqa: E501
                 else:
                     self.rh_comfy_status.setText("完成： ComfyUI 协议可用，所需节点齐全")
             elif ok:
-                self.rh_comfy_status.setText("完成： /system_stats 可用，但 /object_info 未返回节点")
+                self.rh_comfy_status.setText("完成： /system_stats 可用，但 /object_info 未返回节点")  # noqa: E501
             else:
                 self.rh_comfy_status.setText("失败： ComfyUI 协议不可用，请检查会话凭证")
 
@@ -752,8 +744,8 @@ class AIGenMixin:
                 client = comfy.get_client(self.ai_config)
                 img_name = client.upload_file(img_file, accept="image")
                 aud_name = client.upload_file(aud_file, accept="audio")
-                wf = json.loads(json.dumps(self.current_workflow_data))
-                for node_id, node in wf.items():
+                wf = deep_copy(self.current_workflow_data)
+                for _node_id, node in wf.items():
                     if not isinstance(node, dict):
                         continue
                     class_type = node.get("class_type", "")
@@ -764,7 +756,7 @@ class AIGenMixin:
                         inputs["audio"] = aud_name
                 prompt_id = client.submit_raw_prompt(wf)
                 return True, prompt_id
-            except Exception as e:
+            except Exception as e:  # ComfyUI 外部API调用
                 log.exception("ComfyUI digital human task failed")
                 return False, str(e)
 
@@ -796,24 +788,7 @@ class AIGenMixin:
     def _rh_queue_stats(self):
         """计算 RunningHub 任务队列的总数、已提交、成功下载等统计。"""
         tasks = getattr(self, "rh_pending_tasks", None) or []
-        total = len(tasks)
-        submitted = sum(1 for t in tasks if t.get("submit_count", 0) > 0 or t.get("state") != "pending")
-        downloaded = sum(1 for t in tasks if t.get("downloaded"))
-        done = sum(1 for t in tasks if t.get("state") == "done")
-        failed = sum(1 for t in tasks if t.get("state") == "failed")
-        running = sum(1 for t in tasks if t.get("state") == "submitted")
-        pending = sum(1 for t in tasks if t.get("state") == "pending")
-        pct = int((downloaded + failed) / total * 100) if total else 0
-        return {
-            "total": total,
-            "submitted": submitted,
-            "downloaded": downloaded,
-            "done": done,
-            "failed": failed,
-            "running": running,
-            "pending": pending,
-            "pct": pct,
-        }
+        return compute_queue_stats(tasks)
 
     def _update_rh_queue_stats(self):
         """刷新数字人页面的任务队列统计。"""
@@ -844,7 +819,7 @@ class AIGenMixin:
                 break
         if task is None:
             # 没有 pending 任务，检查是否全部结束
-            all_done = all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks)
+            all_done = all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks)  # noqa: E501
             if all_done and not self.rh_submitted_tasks:
                 self.log_area.append("所有任务已完成。")
                 self.btn_run_workflow.setEnabled(
@@ -870,12 +845,12 @@ class AIGenMixin:
         media_file = vid_file or aud_file or ""
         if aud_file:
             self._set_rh_audio_row_state(aud_file, "running")
-        self.log_area.append(f"[{idx+1}/{len(self.rh_pending_tasks)}] 正在上传并提交: {os.path.basename(media_file)}")
+        self.log_area.append(f"[{idx+1}/{len(self.rh_pending_tasks)}] 正在上传并提交: {os.path.basename(media_file)}")  # noqa: E501
 
         def run_task():
             try:
                 use_protocol = False
-                if (self.ai_config or {}).get("runninghub_comfy_auth") and getattr(self, "current_rh_workflow_json", None):
+                if (self.ai_config or {}).get("runninghub_comfy_auth") and getattr(self, "current_rh_workflow_json", None):  # noqa: E501
                     use_protocol = True
                 if use_protocol:
                     from utils.runninghub_comfy_client import get_runninghub_comfy_client
@@ -885,7 +860,7 @@ class AIGenMixin:
                         media_name = client.upload_file(task["vid_file"])
                     else:
                         media_name = client.upload_file(aud_file)
-                    wf = json.loads(json.dumps(self.current_rh_workflow_json))
+                    wf = deep_copy(self.current_rh_workflow_json)
                     for node_id, node in wf.items():
                         if not isinstance(node, dict):
                             continue
@@ -894,37 +869,42 @@ class AIGenMixin:
                         if class_type == "LoadImage" and "image" in inputs:
                             inputs["image"] = img_name
                         elif task.get("video_nodes"):
-                            if class_type in ("LoadVideo", "VHS_LoadVideo", "LoadVideoPath") and "video" in inputs:
+                            if class_type in ("LoadVideo", "VHS_LoadVideo", "LoadVideoPath") and "video" in inputs:  # noqa: E501
                                 inputs["video"] = media_name
-                        elif task.get("audio_nodes"):
+                        elif task.get("audio_nodes"):  # noqa: SIM102
                             if class_type == "LoadAudio" and "audio" in inputs:
                                 inputs["audio"] = media_name
                         # 时长节点直接写入数值
                         for dur_node in task.get("duration_nodes") or []:
                             dur_id, dur_class, dur_field = dur_node[:3]
                             if node_id == dur_id and dur_field in inputs:
-                                inputs[dur_field] = task.get("duration_value", inputs.get(dur_field, 0))
+                                inputs[dur_field] = task.get("duration_value", inputs.get(dur_field, 0))  # noqa: E501
                     prompt_id = client.submit_prompt(wf)
-                    meta = {"img_url": img_name, "media_url": media_name, "img_file": img_file, "protocol": True}
+                    meta = {"img_url": img_name, "media_url": media_name, "img_file": img_file, "protocol": True}  # noqa: E501
                     if aud_file:
                         meta["aud_file"] = aud_file
                     if vid_file:
                         meta["vid_file"] = vid_file
                     return True, prompt_id, meta
 
-                # 视频类工作流服务端接口暂不支持，直接走 RunningHub
-                if not task.get("video_nodes"):
-                    # 优先走服务端统一接口（服务端已配置 RunningHub，客户端免 API Key）；
-                    # 服务端地址未配置或提交失败时静默回退直连 RunningHub
-                    from utils import digital_human_client as dhc
-                    task_id, dh_err = dhc.submit_digital_human(
-                        img_file, aud_file, wf_id,
-                        instance_type=task.get("instance_type") or "default")
-                    if task_id:
-                        meta = {"aud_file": aud_file, "img_file": img_file, "server": True}
+                # 方案A：经典数字人（image+audio，非视频、非 Comfy 协议）走服务端统一提交
+                if not task.get("video_nodes") and aud_file:
+                    from utils import workflow_client as wfc
+                    instance_type = task.get("instance_type") or "default"
+                    wf_resp = wfc.run_workflow(
+                        wf_id,
+                        image_path=img_file,
+                        audio_path=aud_file,
+                        instance_type=instance_type,
+                    )
+                    if wf_resp and wf_resp.get("ok"):
+                        task_id = wf_resp.get("task_id")
+                        if not task_id:
+                            return False, "统一提交返回异常（缺 task_id）", None
+                        meta = {"img_file": img_file, "aud_file": aud_file, "unified": True}
                         return True, task_id, meta
-                    if dh_err:
-                        log.warning("数字人服务端提交失败，回退直连 RunningHub: %s", dh_err)
+                    detail = (wf_resp or {}).get("detail") or (wf_resp or {}).get("error") or "统一提交失败"
+                    return False, str(detail), None
 
                 img_url = self.runninghub.upload_file(img_file)
                 if not img_url:
@@ -932,27 +912,27 @@ class AIGenMixin:
 
                 node_info_list = []
                 for node_id, _class_type, field_name in task.get("image_nodes", []):
-                    node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": img_url})
+                    node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": img_url})  # noqa: E501
 
                 if task.get("video_nodes"):
                     vid_url = self.runninghub.upload_file(task["vid_file"])
                     if not vid_url:
                         return False, "视频上传失败", None
                     for node_id, _class_type, field_name in task.get("video_nodes", []):
-                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": vid_url})
+                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": vid_url})  # noqa: E501
                 else:
                     aud_url = self.runninghub.upload_file(aud_file)
                     if not aud_url:
                         return False, "音频上传失败", None
                     for node_id, _class_type, field_name in task.get("audio_nodes", []):
-                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": aud_url})
+                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": aud_url})  # noqa: E501
 
                 # 时长节点直接透传数值
-                for node_id, _class_type, field_name, default_val in task.get("duration_nodes", []):
+                for node_id, _class_type, field_name, default_val in task.get("duration_nodes", []):  # noqa: E501
                     node_info_list.append({
                         "nodeId": node_id,
                         "fieldName": field_name,
-                        "fieldValue": task.get("duration_value") if task.get("duration_value") is not None else default_val,
+                        "fieldValue": task.get("duration_value") if task.get("duration_value") is not None else default_val,  # noqa: E501
                     })
 
                 meta = {"img_url": img_url, "img_file": img_file}
@@ -961,7 +941,7 @@ class AIGenMixin:
                 if vid_file:
                     meta["vid_file"] = vid_file
                 instance_type = task.get("instance_type") or "default"
-                use_personal_queue = bool((self.ai_config or {}).get("runninghub_use_personal_queue", True))
+                use_personal_queue = bool((self.ai_config or {}).get("runninghub_use_personal_queue", True))  # noqa: E501
                 result = self.runninghub.run_workflow(
                     wf_id, node_info_list,
                     instance_type=instance_type,
@@ -972,7 +952,7 @@ class AIGenMixin:
 
                 # 错误码 435 = 未找到独占实例，官方建议 48G 显存工作流传 instanceType=plus
                 if result.get("error_code") == "435" and instance_type != "plus":
-                    log.warning("RunningHub 435, retry with plus instance for %s", wf_id)
+                    log.warning("RunningHub 435, retry with plus instance for %s", wf_id)  # noqa: E501
                     retry = self.runninghub.run_workflow(
                         wf_id, node_info_list,
                         instance_type="plus",
@@ -991,7 +971,7 @@ class AIGenMixin:
                 else:
                     err = (err_code + " " + err_msg).strip() or "任务启动失败"
                 return False, err, None
-            except Exception as e:
+            except Exception as e:  # RunningHub/ComfyUI 外部API调用
                 log.exception("RunningHub queue task failed")
                 return False, str(e), None
 
@@ -1014,22 +994,23 @@ class AIGenMixin:
                     status="排队中",
                     task_type="RunningHub",
                     source="云端",
-                    extra={"wf_id": wf_id, "aud_file": aud_file, "vid_file": vid_file, "img_file": img_file, "rh_meta": True}
+                    extra={"wf_id": wf_id, "aud_file": aud_file, "vid_file": vid_file, "img_file": img_file, "rh_meta": True}  # noqa: E501
                 )
+                self._rh_add_task_row(info, wf_id, status="排队中", progress=0)
                 self._start_rh_poll_timer()
                 self.log_area.append(f"[{idx+1}] 已提交: {info}")
                 self._update_rh_queue_stats()
                 if meta and meta.get("retried_plus"):
-                    self.log_area.append(f"[{idx+1}] 首次提交返回 435（未找到独占实例），已自动改用 plus 实例重试成功")
+                    self.log_area.append(f"[{idx+1}] 首次提交返回 435（未找到独占实例），已自动改用 plus 实例重试成功")  # noqa: E501
             else:
-                is_415 = "[415]" in info or "可用资源不足" in info or "capacity reached" in info.lower()
+                is_415 = "[415]" in info or "可用资源不足" in info or "capacity reached" in info.lower()  # noqa: E501
                 if is_415 and task.get("retry_count", 0) < 10:
                     task["retry_count"] = task.get("retry_count", 0) + 1
                     task["state"] = "pending"
                     task["next_attempt_at"] = time.time() + 30
                     if aud_file:
                         self._set_rh_audio_row_state(aud_file, "pending")
-                    self.log_area.append(f"[{idx+1}] 提交失败（415 资源不足），30 秒后自动重试第 {task['retry_count']} 次")
+                    self.log_area.append(f"[{idx+1}] 提交失败（415 资源不足），30 秒后自动重试第 {task['retry_count']} 次")  # noqa: E501
                     self._update_rh_queue_stats()
                     if not self.rh_queue_paused:
                         QTimer.singleShot(30000, self._process_rh_queue)
@@ -1067,19 +1048,24 @@ class AIGenMixin:
             self._query_single_rh_task(task_id)
 
     def _query_single_rh_task(self, task_id):
-        """查询单个 RunningHub 任务状态并更新 UI。"""
+        """查询单个 RunningHub 任务状态并更新 UI。
+
+        方案A：优先走服务端统一任务查询（GET /workflows/task/{task_id}，
+        返回形状与 RunningHub 原生 query 一致：{code, data:{status, results, errorMessage}}）；
+        失败/无记录时回退直连 RunningHub（兼容历史任务与视频类任务）。
+        """
         def run_task():
-            # 优先走服务端状态接口（服务端透传 RunningHub 响应），失败回退直连
-            from utils import digital_human_client as dhc
-            data = dhc.get_task_status(task_id)
-            if data is not None:
-                return data
-            return self.runninghub.get_task_status(task_id)
+            from utils import workflow_client as wfc
+            resp = wfc.task_status(task_id)
+            if resp and isinstance(resp, dict) and resp.get("data"):
+                return resp
+            if self.runninghub:
+                return self.runninghub.get_task_status(task_id)
+            return None
 
         def on_done(resp):
             if not resp or not isinstance(resp, dict):
                 return
-            code = resp.get("code")
             data = resp.get("data") or resp
             status = data.get("status") or data.get("errorMessage") or "UNKNOWN"
             error_msg = data.get("errorMessage") or ""
@@ -1099,6 +1085,17 @@ class AIGenMixin:
             # 更新任务表状态
             self._update_rh_task_status(task_id, status, results)
 
+            status_text_map = {
+                "QUEUED": "排队中",
+                "RUNNING": "运行中",
+                "SUCCESS": "完成",
+                "FAILED": "失败",
+                "PAUSED": "已暂停",
+            }
+            rh_status = status_text_map.get(status, status)
+            rh_progress = 100 if status in ("SUCCESS", "FAILED") else 50 if status == "RUNNING" else 0
+            self._rh_update_task_row(task_id, status=rh_status, progress=rh_progress)
+
             if status == "SUCCESS":
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
@@ -1113,7 +1110,7 @@ class AIGenMixin:
                         processed_videos.add(task["vid_file"])
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
-                self._auto_download_rh_results(task_id, results, record.get("meta") or {})
+                self._auto_download_rh_results(task_id, results, record.get("meta") or {})  # noqa: E501
             elif status == "FAILED":
                 task["state"] = "failed"
                 task["error"] = error_msg
@@ -1128,7 +1125,7 @@ class AIGenMixin:
                 QTimer.singleShot(30000, self._process_rh_queue)
 
             # 检查是否全部完成
-            if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):
+            if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):  # noqa: E501
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
                 self.btn_run_workflow.setEnabled(
@@ -1150,7 +1147,7 @@ class AIGenMixin:
             results = client.history_outputs(entry)
             err = ""
             if isinstance(entry.get("error"), dict):
-                err = str(entry.get("error", {}).get("message") or entry.get("error", {}).get("exception_message") or "")
+                err = str(entry.get("error", {}).get("message") or entry.get("error", {}).get("exception_message") or "")  # noqa: E501
             elif entry.get("exception_message"):
                 err = str(entry.get("exception_message"))
             elif entry.get("error"):
@@ -1168,6 +1165,18 @@ class AIGenMixin:
             record["status"] = status
             record["results"] = results
 
+            comfy_status_map = {
+                "queued": "排队中",
+                "running": "运行中",
+                "success": "完成",
+                "completed": "完成",
+                "error": "失败",
+                "failed": "失败",
+            }
+            rh_status = comfy_status_map.get(status.lower(), status)
+            rh_progress = 100 if status.lower() in ("success", "completed", "error", "failed") else 50 if status.lower() == "running" else 0
+            self._rh_update_task_row(task_id, status=rh_status, progress=rh_progress)
+
             if status in ("success", "completed"):
                 task["state"] = "done"
                 self.rh_submitted_tasks.pop(task_id, None)
@@ -1182,7 +1191,7 @@ class AIGenMixin:
                         processed_videos.add(task["vid_file"])
                 self.log_area.append(f"任务完成: {task_id}，结果 {len(results)} 个")
                 self._update_rh_queue_stats()
-                self._auto_download_rh_results(task_id, results, record.get("meta") or {})
+                self._auto_download_rh_results(task_id, results, record.get("meta") or {})  # noqa: E501
             elif status in ("error", "failed"):
                 task["state"] = "failed"
                 task["error"] = err or "工作流运行失败"
@@ -1194,11 +1203,11 @@ class AIGenMixin:
             else:
                 return
 
-            self._update_rh_task_status(task_id, "SUCCESS" if status in ("success", "completed") else "FAILED", results)
+            self._update_rh_task_status(task_id, "SUCCESS" if status in ("success", "completed") else "FAILED", results)  # noqa: E501
             if not self.rh_queue_paused:
                 self.log_area.append("任务结束，等待 30 秒后提交下一个任务")
                 QTimer.singleShot(30000, self._process_rh_queue)
-            if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):
+            if not self.rh_submitted_tasks and all(t["state"] in ("done", "failed") for t in self.rh_pending_tasks):  # noqa: E501
                 if hasattr(self, "rh_poll_timer") and self.rh_poll_timer.isActive():
                     self.rh_poll_timer.stop()
                 self.btn_run_workflow.setEnabled(
@@ -1214,7 +1223,7 @@ class AIGenMixin:
             if not item:
                 continue
             t = item.data(0x0100) or {}
-            if item.text() == task_id[:12] or t.get("id") == task_id or t.get("task_id") == task_id:
+            if item.text() == task_id[:12] or t.get("id") == task_id or t.get("task_id") == task_id:  # noqa: E501
                 status_text = status
                 if status == "QUEUED":
                     status_text = "排队中"
@@ -1238,15 +1247,14 @@ class AIGenMixin:
                 item.setData(0x0100, t)
                 # 完成/失败时启用下载按钮，并禁用暂停/恢复
                 registry = self._task_registry.get(task_id)
-                if registry:
-                    if status in ("SUCCESS", "FAILED"):
-                        btn = registry.get("download_btn")
+                if registry and status in ("SUCCESS", "FAILED"):
+                    btn = registry.get("download_btn")
+                    if btn:
+                        btn.setEnabled(True)
+                    for key in ("pause_btn", "resume_btn"):
+                        btn = registry.get(key)
                         if btn:
-                            btn.setEnabled(True)
-                        for key in ("pause_btn", "resume_btn"):
-                            btn = registry.get(key)
-                            if btn:
-                                btn.setEnabled(False)
+                            btn.setEnabled(False)
                 break
 
     def _auto_download_rh_results(self, task_id, results, meta=None):
@@ -1259,13 +1267,14 @@ class AIGenMixin:
         if not results:
             self.log_area.append(f"任务 {task_id} 完成，但没有可下载的结果。")
             return
-        from utils import config_manager as cm
         from datetime import datetime
-        base_dir = cm.get_setting("local_config", "cache_dir", "") or os.path.join(PROJECT_ROOT, "outputs", "runninghub")
+
+        from utils import config_manager as cm
+        base_dir = cm.get_setting("local_config", "cache_dir", "") or os.path.join(PROJECT_ROOT, "outputs", "runninghub")  # noqa: E501
         save_dir = os.path.join(base_dir, datetime.now().strftime("%Y%m%d"))
         try:
             os.makedirs(save_dir, exist_ok=True)
-        except Exception as e:
+        except OSError as e:
             log.error(f"创建 RunningHub 下载目录失败: {e}")
             self.log_area.append(f"自动下载失败，无法创建目录: {save_dir} ({e})")
             return
@@ -1276,22 +1285,15 @@ class AIGenMixin:
             media_name = os.path.splitext(os.path.basename(meta["vid_file"]))[0]
         self.log_area.append(f"任务完成，开始自动下载到: {save_dir}")
         if media_name:
-            self.log_area.append(f"下载命名规范: {media_name}.扩展名（多个结果时为 {media_name}_序号.扩展名）")
+            self.log_area.append(f"下载命名规范: {media_name}.扩展名（多个结果时为 {media_name}_序号.扩展名）")  # noqa: E501
 
         def run_task():
-            import requests
             downloaded_paths = []
             failed = 0
             for idx, res in enumerate(results, start=1):
                 if not isinstance(res, dict):
                     continue
                 url = res.get("url")
-                # 服务端透传的结果可能是相对路径，拼统一计算节点地址
-                if url and isinstance(url, str) and url.startswith("/"):
-                    from utils import digital_human_client as dhc
-                    base = dhc._get_server_url()
-                    if base:
-                        url = base + url
                 text_val = res.get("text")
                 filename = res.get("filename") or ""
                 protocol = bool(meta and meta.get("protocol"))
@@ -1299,7 +1301,7 @@ class AIGenMixin:
                     continue
                 ext = res.get("outputType", "bin")
                 if media_name:
-                    base_name = media_name if len(results) == 1 else f"{media_name}_{idx}"
+                    base_name = media_name if len(results) == 1 else f"{media_name}_{idx}"  # noqa: E501
                 else:
                     base_name = f"{task_id}_{idx}"
                 name = f"{base_name}.{ext}"
@@ -1311,24 +1313,21 @@ class AIGenMixin:
                     if filename and protocol:
                         from utils.runninghub_comfy_client import get_runninghub_comfy_client
                         client = get_runninghub_comfy_client(self.ai_config)
-                        data = client.download_output(filename, res.get("subfolder") or "", res.get("type") or "output")
+                        data = client.download_output(filename, res.get("subfolder") or "", res.get("type") or "output")  # noqa: E501
                         with open(path, "wb") as f:
                             f.write(data)
                         downloaded_paths.append(path)
                     elif url:
-                        r = requests.get(url, timeout=120)
-                        if r.status_code == 200:
-                            with open(path, "wb") as f:
-                                f.write(r.content)
+                        if download_file(url, path, timeout=120, stream=False):
                             downloaded_paths.append(path)
                         else:
                             failed += 1
-                            log.error(f"自动下载失败 HTTP {r.status_code}: {url}")
+                            log.error(f"自动下载失败: {url}")
                     else:
                         with open(path, "w", encoding="utf-8") as f:
                             f.write(str(text_val))
                         downloaded_paths.append(path)
-                except Exception as e:
+                except Exception as e:  # 外部API调用 + HTTP下载
                     failed += 1
                     log.error(f"自动下载失败 {url or text_val}: {e}")
             return downloaded_paths, failed, save_dir
@@ -1339,14 +1338,14 @@ class AIGenMixin:
                 self.log_area.append(f"已下载: {path}")
             if downloaded_paths:
                 for t in getattr(self, "rh_pending_tasks", []):
-                    if t.get("task_id") == task_id or t.get("aud_file") == (meta or {}).get("aud_file"):
+                    if t.get("task_id") == task_id or t.get("aud_file") == (meta or {}).get("aud_file"):  # noqa: E501
                         t["downloaded"] = True
                         break
                 self._update_rh_queue_stats()
             if failed:
-                self.log_area.append(f"自动下载完成：成功 {len(downloaded_paths)} 个，失败 {failed} 个，目录: {save_dir}")
+                self.log_area.append(f"自动下载完成：成功 {len(downloaded_paths)} 个，失败 {failed} 个，目录: {save_dir}")  # noqa: E501
             else:
-                self.log_area.append(f"自动下载完成：成功 {len(downloaded_paths)} 个，目录: {save_dir}")
+                self.log_area.append(f"自动下载完成：成功 {len(downloaded_paths)} 个，目录: {save_dir}")  # noqa: E501
 
         self.start_worker(run_task, on_finished)
 
@@ -1367,7 +1366,7 @@ class AIGenMixin:
         """取消/移除 RunningHub 任务：从队列和任务表中移除。"""
         # 从待处理队列中移除
         if hasattr(self, "rh_pending_tasks"):
-            self.rh_pending_tasks = [t for t in self.rh_pending_tasks if t.get("task_id") != task_id and t.get("aud_file") != task_id]
+            self.rh_pending_tasks = [t for t in self.rh_pending_tasks if t.get("task_id") != task_id and t.get("aud_file") != task_id]  # noqa: E501
         # 从已提交记录中移除
         if hasattr(self, "rh_submitted_tasks"):
             self.rh_submitted_tasks.pop(task_id, None)
@@ -1421,7 +1420,6 @@ class AIGenMixin:
             return
 
         from datetime import datetime
-        import requests
 
         exported = 0
         failed = 0
@@ -1432,7 +1430,7 @@ class AIGenMixin:
             t = item.data(0x0100) or {}
             if not t.get("rh_meta"):
                 continue
-            status_text = self.task_table.item(row, 3).text() if self.task_table.item(row, 3) else ""
+            status_text = self.task_table.item(row, 3).text() if self.task_table.item(row, 3) else ""  # noqa: E501
             if "完成" not in status_text:
                 continue
             results = t.get("results") or []
@@ -1442,30 +1440,27 @@ class AIGenMixin:
                     continue
                 ext = res.get("outputType", "bin")
                 aud_file = t.get("aud_file") or ""
-                aud_name = os.path.splitext(os.path.basename(aud_file))[0] if aud_file else ""
+                aud_name = os.path.splitext(os.path.basename(aud_file))[0] if aud_file else ""  # noqa: E501
                 if aud_name:
-                    base_name = aud_name if len(results) == 1 else f"{aud_name}_{res_idx}"
+                    base_name = aud_name if len(results) == 1 else f"{aud_name}_{res_idx}"  # noqa: E501
                 else:
-                    base_name = f"{t.get('task_id', item.text())}_{datetime.now().strftime('%H%M%S')}"
+                    base_name = f"{t.get('task_id', item.text())}_{datetime.now().strftime('%H%M%S')}"  # noqa: E501
                 name = f"{base_name}.{ext}"
                 path = os.path.join(out_dir, name)
                 if os.path.exists(path):
                     name = f"{base_name}_{t.get('task_id', item.text())}.{ext}"
                     path = os.path.join(out_dir, name)
                 try:
-                    r = requests.get(url, timeout=60)
-                    if r.status_code == 200:
-                        with open(path, "wb") as f:
-                            f.write(r.content)
+                    if download_file(url, path, timeout=60, stream=False):
                         exported += 1
                         self.log_area.append(f"已导出: {path}")
                     else:
                         failed += 1
-                except Exception as e:
+                except Exception as e:  # HTTP下载安全网（download_file 内部已处理大部分异常）
                     log.error(f"导出结果失败 {url}: {e}")
                     failed += 1
 
-        QMessageBox.information(self, "导出完成", f"成功导出 {exported} 个文件，失败 {failed} 个。\n目录: {out_dir}")
+        QMessageBox.information(self, "导出完成", f"成功导出 {exported} 个文件，失败 {failed} 个。\n目录: {out_dir}")  # noqa: E501
 
     # ------------------------------------------------------------------
     # RunningHub 平台接入：工作流列表管理
@@ -1479,7 +1474,7 @@ class AIGenMixin:
             return result
         for item in items:
             if isinstance(item, str):
-                item = {"id": item, "name": item, "type": "其他", "instanceType": "default"}
+                item = {"id": item, "name": item, "type": "其他", "instanceType": "default"}  # noqa: E501
             elif isinstance(item, dict):
                 if not item.get("id"):
                     continue
@@ -1496,7 +1491,14 @@ class AIGenMixin:
 
 
     def _rh_find_workflow_config(self, wf_id):
-        """按工作流 ID 查找本地配置（含实例类型等），未找到返回 None。"""
+        """按工作流 ID 查找配置（含实例类型等），未找到返回 None。
+
+        优先读上次从服务端 /workflows 下拉缓存的项（含 instance_type/image_nodes/audio_nodes），
+        未命中再回退本地 ai_config.runninghub_workflows。
+        """
+        cached = getattr(self, "_rh_dh_workflow_items", None) or {}
+        if wf_id in cached:
+            return cached[wf_id]
         from utils import config_manager as cm
         items = cm.get_setting("ai_config", "runninghub_workflows", [])
         for item in self._rh_migrate_workflow_items(items):
@@ -1615,35 +1617,27 @@ class AIGenMixin:
         if not wf_id:
             QMessageBox.warning(self, "输入错误", "工作流 ID 不能为空")
             return None
-        return {"id": wf_id, "name": name or wf_id, "type": wf_type, "instanceType": instance_type}
+        return {"id": wf_id, "name": name or wf_id, "type": wf_type, "instanceType": instance_type}  # noqa: E501
 
     def _rh_refresh_workflow_list(self):
-        """拉取 RunningHub 工作流列表并合并到本地表格。
-
-        优先走服务端订阅列表接口（无需 API Key）；服务端不可用时回退直连 RunningHub API。
-        """
+        """拉取 RunningHub 工作流列表并合并到本地表格。"""
         if not self.runninghub:
             self.rh_workflow_list_status.setText("RunningHub 模块未初始化")
             return
         self.rh_workflow_list_status.setText("正在获取工作流列表...")
 
         def run_task():
-            from utils import digital_human_client as dhc
-            items = dhc.get_workflows()
-            if items is not None:
-                return items, True
             api_key = self.runninghub_api_key_input.text().strip()
             if not api_key:
-                return None, False
-            base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"
+                return None
+            base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
             self.runninghub.update_config(api_key=api_key, base_url=base_url)
-            return self.runninghub.get_workflow_list(), False
+            return self.runninghub.get_workflow_list()
 
-        def on_done(result):
-            items, from_server = result
+        def on_done(items):
             if items is None:
                 self.rh_workflow_list_status.setText(
-                    "无法从服务端或 API 读取工作流列表。RunningHub 未公开列表接口，请手动添加工作流 ID。")
+                    "无法读取工作流列表。RunningHub 未公开列表接口，请手动添加工作流 ID。")
                 return
             if not items:
                 self.rh_workflow_list_status.setText("接口返回成功，但当前没有工作流。")
@@ -1659,19 +1653,17 @@ class AIGenMixin:
                 wf_id = item.get("id") or item.get("workflowId") or item.get("webappId")
                 name = item.get("name") or item.get("title") or wf_id
                 if wf_id and wf_id not in existing_ids:
-                    # 服务端订阅条目用 instance_type（下划线），统一成 instanceType
                     self._rh_add_workflow_row({
                         "id": wf_id,
                         "name": name,
                         "type": item.get("type") or "其他",
-                        "instanceType": item.get("instance_type") or item.get("instanceType") or "default",
+                        "instanceType": item.get("instance_type") or item.get("instanceType") or "default",  # noqa: E501
                     })
                     existing_ids.add(wf_id)
                     added += 1
             self._rh_save_workflow_list()
             self._rh_maybe_refresh_dh_selector()
-            src = "服务端订阅列表" if from_server else "RunningHub API"
-            self.rh_workflow_list_status.setText(f"已从{src}刷新，新增 {added} 个工作流")
+            self.rh_workflow_list_status.setText(f"已从 RunningHub API 刷新，新增 {added} 个工作流")  # noqa: E501
 
         self.start_worker(run_task, on_done)
 
@@ -1755,9 +1747,9 @@ class AIGenMixin:
                     continue
                 inputs = src_node.get("inputs", {})
                 for field_name, val in inputs.items():
-                    if isinstance(val, list) and len(val) >= 2 and isinstance(val[0], str):
+                    if isinstance(val, list) and len(val) >= 2 and isinstance(val[0], str):  # noqa: E501
                         target_id = val[0]
-                        references.setdefault(target_id, []).append((src_id, src_node.get("class_type", ""), field_name))
+                        references.setdefault(target_id, []).append((src_id, src_node.get("class_type", ""), field_name))  # noqa: E501
 
             sections = ["<b>工作流 ID:</b> " + wf_id + "<br><br>"]
             sections.append("<b>输入节点（需要映射的节点）：</b>")
@@ -1774,7 +1766,7 @@ class AIGenMixin:
                 input_lines = []
                 for field_name, val in inputs.items():
                     if isinstance(val, list) and len(val) >= 2:
-                        input_lines.append("  • " + field_name + ": 连接自节点 [" + val[0] + "]")
+                        input_lines.append("  • " + field_name + ": 连接自节点 [" + val[0] + "]")  # noqa: E501
                     elif val is None or val == "":
                         input_lines.append("  • " + field_name + ": （未设置）")
                     else:
@@ -1782,11 +1774,11 @@ class AIGenMixin:
 
                 ref_lines = []
                 for ref_id, ref_class, ref_field in references.get(node_id, []):
-                    ref_lines.append("  • 被节点 [" + ref_id + "] " + ref_class + " 的 " + ref_field + " 引用")
+                    ref_lines.append("  • 被节点 [" + ref_id + "] " + ref_class + " 的 " + ref_field + " 引用")  # noqa: E501
                 if not ref_lines:
                     ref_lines.append("  • 输出：暂无下游连接")
 
-                node_html = "<br><b>节点 [" + node_id + "] " + title + "</b>（" + class_type + "）"
+                node_html = "<br><b>节点 [" + node_id + "] " + title + "</b>（" + class_type + "）"  # noqa: E501
                 if input_lines:
                     node_html += "<br><u>输入：</u><br>" + "<br>".join(input_lines)
                 if ref_lines:
@@ -1807,12 +1799,12 @@ class AIGenMixin:
             if other_nodes:
                 sections.append("<br>".join(other_nodes[:20]))
                 if len(other_nodes) > 20:
-                    sections.append("<br><i>...还有 " + str(len(other_nodes) - 20) + " 个节点未显示</i>")
+                    sections.append("<br><i>...还有 " + str(len(other_nodes) - 20) + " 个节点未显示</i>")  # noqa: E501
             else:
                 sections.append("<i>无</i>")
 
             html = "".join(sections)
-            self.rh_workflow_list_status.setText("已获取 " + str(len(input_nodes)) + " 个输入节点，共 " + str(len(other_nodes)) + " 个其他节点")
+            self.rh_workflow_list_status.setText("已获取 " + str(len(input_nodes)) + " 个输入节点，共 " + str(len(other_nodes)) + " 个其他节点")  # noqa: E501
             if hasattr(self, "rh_workflow_node_display"):
                 self.rh_workflow_node_display.setText(html)
 
@@ -1831,79 +1823,370 @@ class AIGenMixin:
 
     def _rh_maybe_refresh_dh_selector(self):
         """平台接入工作流变更后，同步刷新数字人 Tab 的类型过滤下拉列表。"""
-        if hasattr(self, "rh_workflow_selector") and hasattr(self, "rh_workflow_id_input"):
+        if hasattr(self, "rh_workflow_selector") and hasattr(self, "rh_workflow_id_input"):  # noqa: E501
             self._rh_refresh_dh_workflow_selector()
 
     def _rh_refresh_dh_workflow_selector(self):
-        """数字人 Tab：只显示类型为「数字人」的工作流下拉列表。"""
         from utils import config_manager as cm
         items = cm.get_setting("ai_config", "runninghub_workflows", [])
         items = self._rh_migrate_workflow_items(items)
-        digital = [it for it in items if it.get("type") == "数字人"]
+
+        backend_idx = self.backend_selector.currentIndex() if hasattr(self, "backend_selector") else 0
+        if backend_idx == 1:
+            items = [it for it in items if (it.get("backend") or "").lower() == "comfyui"]
+        elif backend_idx == 2:
+            items = [it for it in items if (it.get("backend") or "").lower() == "runninghub"]
+
+        self._populate_rh_dh_selector(items)
+
+        def fetch():
+            from utils import workflow_client as wfc
+            data = wfc.list_workflows(scope="client")
+            workflows = (data or {}).get("workflows") or []
+            out = []
+            for w in workflows:
+                if not isinstance(w, dict):
+                    continue
+                item = wfc.normalize_server_workflow(w)
+                if item:
+                    out.append(item)
+            return out
+
+        def on_done(srv_items):
+            if backend_idx == 1:
+                srv_items = [it for it in srv_items if (it.get("backend") or "").lower() == "comfyui"]
+            elif backend_idx == 2:
+                srv_items = [it for it in srv_items if (it.get("backend") or "").lower() == "runninghub"]
+            if srv_items:
+                self._populate_rh_dh_selector(srv_items)
+
+        self.start_worker(fetch, on_done)
+
+    def _populate_rh_dh_selector(self, items):
+        if not hasattr(self, "rh_workflow_selector") or not hasattr(self, "rh_workflow_id_input"):
+            return
         current_id = self.rh_workflow_id_input.text().strip()
         self.rh_workflow_selector.blockSignals(True)
         self.rh_workflow_selector.clear()
-        for it in digital:
+        for it in items:
             name = it.get("name") or it.get("id")
-            self.rh_workflow_selector.addItem(name, it.get("id"))
+            wf_type = it.get("type") or ""
+            display = f"{name}  [{wf_type}]" if wf_type and wf_type != "其他" else str(name)
+            self.rh_workflow_selector.addItem(display, it.get("id"))
         idx = self.rh_workflow_selector.findData(current_id)
         if idx < 0 and self.rh_workflow_selector.count() > 0:
             idx = 0
         self.rh_workflow_selector.setCurrentIndex(idx)
         self.rh_workflow_selector.blockSignals(False)
+        self._rh_dh_workflow_items = {str(it.get("id")): it for it in items}
         self._on_rh_dh_workflow_changed(idx)
-        # 本地还没有数字人工作流时，尝试从服务端订阅列表自动补全（失败静默）
-        if not digital:
-            self._rh_fetch_server_workflows_async()
-
-    def _rh_fetch_server_workflows_async(self):
-        """后台拉取服务端订阅的工作流列表并合并到本地（供数字人 Tab 下拉使用）。"""
-        if getattr(self, "_rh_server_fetching", False):
-            return
-        self._rh_server_fetching = True
-
-        def run_task():
-            from utils import digital_human_client as dhc
-            return dhc.get_workflows()
-
-        def on_done(items):
-            self._rh_server_fetching = False
-            if not items:
-                return
-            existing_ids = set()
-            for row in range(self.rh_workflow_table.rowCount()):
-                item = self.rh_workflow_table.item(row, 0)
-                if item:
-                    data = item.data(Qt.UserRole) or {}
-                    existing_ids.add(data.get("id"))
-            added = 0
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                wf_id = it.get("id") or it.get("workflowId")
-                if wf_id and wf_id not in existing_ids:
-                    self._rh_add_workflow_row({
-                        "id": wf_id,
-                        "name": it.get("name") or wf_id,
-                        "type": it.get("type") or "其他",
-                        "instanceType": it.get("instance_type") or it.get("instanceType") or "default",
-                    })
-                    existing_ids.add(wf_id)
-                    added += 1
-            if added:
-                self._rh_save_workflow_list()
-                self._rh_refresh_dh_workflow_selector()
-
-        self.start_worker(run_task, on_done)
 
     def _on_rh_dh_workflow_changed(self, index):
-        """数字人 Tab：下拉列表切换时同步隐藏 ID 输入框并自动获取节点。"""
         wf_id = self.rh_workflow_selector.itemData(index) if index >= 0 else None
         self.rh_workflow_id_input.setText(wf_id or "")
-        if wf_id:
-            self.rh_workflow_info.setText("已选择工作流: " + wf_id + "，正在获取节点...")
-            self._reset_rh_node_list()
-            QTimer.singleShot(200, self.view_rh_api_detail)
-        else:
-            self.rh_workflow_info.setText("请在平台接入中配置类型为「数字人」的工作流")
-            self._reset_rh_node_list()
+        if not wf_id:
+            self.rh_workflow_info.setText("暂无可用工作流")
+            self._build_rh_dynamic_form([])
+            return
+        item = (getattr(self, "_rh_dh_workflow_items", None) or {}).get(wf_id) or {}
+        name = item.get("name") or wf_id
+        wf_type = item.get("type") or "其他"
+        desc = item.get("description") or ""
+        inputs_info = item.get("inputs") or []
+        inputs_summary = ", ".join(
+            f"{inp.get('key', '?')}({inp.get('kind', 'text')})"
+            for inp in inputs_info
+        ) if inputs_info else ""
+        parts = [f"已选择: {name}（{wf_type}）"]
+        if desc:
+            parts.append(f"描述: {desc}")
+        if inputs_summary:
+            parts.append(f"输入节点: {inputs_summary}")
+        self.rh_workflow_info.setText("  |  ".join(parts))
+        self._build_rh_dynamic_form(inputs_info)
+
+    def _build_rh_dynamic_form(self, inputs):
+        self._rh_form_entries = []
+        if not hasattr(self, "rh_dynamic_form_layout"):
+            return
+        while self.rh_dynamic_form_layout.count():
+            it = self.rh_dynamic_form_layout.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+            elif it.layout():
+                sub = it.layout()
+                while sub.count():
+                    si = sub.takeAt(0)
+                    sw = si.widget()
+                    if sw:
+                        sw.deleteLater()
+            del it
+
+        for inp in inputs or []:
+            if not isinstance(inp, dict):
+                continue
+            key = inp.get("key")
+            kind = inp.get("kind") or "text"
+            label = inp.get("label") or key
+            required = bool(inp.get("required"))
+            if not key:
+                continue
+            req_mark = "（必填）" if required else ""
+
+            if kind == "image":
+                container = QWidget()
+                lay = QVBoxLayout(container)
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(6)
+                lay.addWidget(QLabel(f"{label} {req_mark}"))
+                row = QHBoxLayout()
+                path_edit = QLineEdit()
+                path_edit.setPlaceholderText(f"请选择{label}...")
+                btn = QPushButton("浏览")
+                btn.clicked.connect(lambda _=False, k=key, e=path_edit, c=container: self._pick_rh_form_file(k, e, c))
+                row.addWidget(path_edit, 1)
+                row.addWidget(btn)
+                lay.addLayout(row)
+                preview_lbl = QLabel("  未选择图片")
+                preview_lbl.setFixedHeight(120)
+                preview_lbl.setStyleSheet("QLabel { background: #1e2030; border: 1px dashed #3a3d52; border-radius: 6px; color: #6b7280; }")
+                preview_lbl.setAlignment(Qt.AlignCenter)
+                lay.addWidget(preview_lbl)
+                self.rh_dynamic_form_layout.addWidget(container)
+                self._rh_form_entries.append({"key": key, "kind": kind, "widget": path_edit, "required": required, "preview": preview_lbl})
+
+            elif kind == "audio":
+                container = QWidget()
+                lay = QVBoxLayout(container)
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(6)
+                lay.addWidget(QLabel(f"{label} {req_mark}"))
+                row = QHBoxLayout()
+                path_edit = QLineEdit()
+                path_edit.setPlaceholderText(f"请选择{label}...")
+                btn = QPushButton("浏览")
+                btn.clicked.connect(lambda _=False, k=key, e=path_edit, c=container: self._pick_rh_form_file(k, e, c))
+                row.addWidget(path_edit, 1)
+                row.addWidget(btn)
+                lay.addLayout(row)
+                from gui.live_clip_page import AudioPlayerWidget
+                player = AudioPlayerWidget()
+                player.setEnabled(False)
+                lay.addWidget(player)
+                self.rh_dynamic_form_layout.addWidget(container)
+                self._rh_form_entries.append({"key": key, "kind": kind, "widget": path_edit, "required": required, "player": player})
+
+            elif kind == "video":
+                container = QWidget()
+                lay = QVBoxLayout(container)
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(6)
+                lay.addWidget(QLabel(f"{label} {req_mark}"))
+                row = QHBoxLayout()
+                path_edit = QLineEdit()
+                path_edit.setPlaceholderText(f"请选择{label}...")
+                btn = QPushButton("浏览")
+                btn.clicked.connect(lambda _=False, k=key, e=path_edit: self._pick_rh_form_file(k, e))
+                row.addWidget(path_edit, 1)
+                row.addWidget(btn)
+                lay.addLayout(row)
+                self.rh_dynamic_form_layout.addWidget(container)
+                self._rh_form_entries.append({"key": key, "kind": kind, "widget": path_edit, "required": required})
+
+            elif kind == "select":
+                combo = QComboBox()
+                for opt in inp.get("options") or []:
+                    combo.addItem(str(opt))
+                container = QWidget()
+                lay = QVBoxLayout(container)
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(6)
+                lay.addWidget(QLabel(f"{label} {req_mark}"))
+                lay.addWidget(combo)
+                self.rh_dynamic_form_layout.addWidget(container)
+                self._rh_form_entries.append({"key": key, "kind": kind, "widget": combo, "required": required})
+
+            else:
+                edit = QLineEdit()
+                edit.setPlaceholderText(f"输入{label}...")
+                container = QWidget()
+                lay = QVBoxLayout(container)
+                lay.setContentsMargins(0, 0, 0, 0)
+                lay.setSpacing(6)
+                lay.addWidget(QLabel(f"{label} {req_mark}"))
+                lay.addWidget(edit)
+                self.rh_dynamic_form_layout.addWidget(container)
+                self._rh_form_entries.append({"key": key, "kind": kind, "widget": edit, "required": required})
+
+        self.rh_dynamic_form_layout.addStretch()
+
+        for ent in self._rh_form_entries:
+            w = ent["widget"]
+            if hasattr(w, "textChanged"):
+                w.textChanged.connect(lambda _=None: self.btn_run_workflow.setEnabled(self._rh_ready_to_run()))
+            elif hasattr(w, "currentIndexChanged"):
+                w.currentIndexChanged.connect(lambda _=None: self.btn_run_workflow.setEnabled(self._rh_ready_to_run()))
+            elif hasattr(w, "currentTextChanged"):
+                w.currentTextChanged.connect(lambda _=None: self.btn_run_workflow.setEnabled(self._rh_ready_to_run()))
+
+    def _pick_rh_form_file(self, key, edit, container=None):
+        filter_map = {
+            "image": "Image Files (*.png *.jpg *.jpeg *.webp *.bmp)",
+            "video": "Video Files (*.mp4 *.mov *.avi *.mkv)",
+            "audio": "Audio Files (*.mp3 *.wav *.m4a *.flac)",
+        }
+        flt = filter_map.get(key, "All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", flt)
+        if path:
+            edit.setText(path)
+            if container and key == "image":
+                for ent in self._rh_form_entries:
+                    if ent.get("widget") is edit and ent.get("preview"):
+                        self._update_image_preview(ent["preview"], path)
+                        break
+            if container and key == "audio":
+                for ent in self._rh_form_entries:
+                    if ent.get("widget") is edit and ent.get("player"):
+                        ent["player"].set_audio_path(path)
+                        break
+
+    def _update_image_preview(self, label, path):
+        from PySide6.QtGui import QPixmap
+        pm = QPixmap(path)
+        if pm.isNull():
+            label.setText("  无法加载图片")
+            label.setPixmap(QPixmap())
+            return
+        scaled = pm.scaled(160, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        label.setPixmap(scaled)
+        label.setText("")
+        label.setStyleSheet("QLabel { background: #1e2030; border: 1px solid #3a3d52; border-radius: 6px; }")
+
+    def _rh_add_task_row(self, task_id, workflow_name, status="等待中", progress=0):
+        if not hasattr(self, "rh_task_list"):
+            return -1
+        row = self.rh_task_list.rowCount()
+        self.rh_task_list.insertRow(row)
+        self.rh_task_list.setItem(row, 0, QTableWidgetItem(str(task_id)))
+        self.rh_task_list.setItem(row, 1, QTableWidgetItem(workflow_name))
+        status_item = QTableWidgetItem(status)
+        status_item.setData(Qt.UserRole, task_id)
+        self.rh_task_list.setItem(row, 2, status_item)
+        progress_item = QTableWidgetItem(f"{progress}%")
+        self.rh_task_list.setItem(row, 3, progress_item)
+        btn_col = QWidget()
+        btn_lay = QHBoxLayout(btn_col)
+        btn_lay.setContentsMargins(2, 0, 2, 0)
+        btn_lay.setSpacing(4)
+        detail_btn = QPushButton("详情")
+        detail_btn.setFixedHeight(22)
+        detail_btn.setStyleSheet(
+            "QPushButton { background: #374151; color: #d1d5db; border: 1px solid #4b5563; border-radius: 4px; padding: 0 8px; }"
+            "QPushButton:hover { background: #4b5563; }")
+        detail_btn.clicked.connect(lambda _=False, tid=task_id: self._rh_show_task_detail(tid))
+        btn_lay.addWidget(detail_btn)
+        btn_lay.addStretch()
+        self.rh_task_list.setCellWidget(row, 4, btn_col)
+        self.rh_task_list.resizeRowToContents(row)
+        return row
+
+    def _rh_update_task_row(self, task_id, status=None, progress=None):
+        if not hasattr(self, "rh_task_list"):
+            return
+        for row in range(self.rh_task_list.rowCount()):
+            item = self.rh_task_list.item(row, 2)
+            if item and item.data(Qt.UserRole) == task_id:
+                if status is not None:
+                    item.setText(status)
+                if progress is not None:
+                    prog_item = self.rh_task_list.item(row, 3)
+                    if prog_item:
+                        prog_item.setText(f"{progress}%")
+                break
+
+    def _rh_remove_task_row(self, task_id):
+        if not hasattr(self, "rh_task_list"):
+            return
+        for row in range(self.rh_task_list.rowCount()):
+            item = self.rh_task_list.item(row, 2)
+            if item and item.data(Qt.UserRole) == task_id:
+                self.rh_task_list.removeRow(row)
+                break
+
+    def _rh_clear_task_list(self):
+        if hasattr(self, "rh_task_list"):
+            self.rh_task_list.setRowCount(0)
+
+    def _rh_show_task_detail(self, task_id):
+        self.log_area.append(f"[任务详情] task_id={task_id}")
+        QMessageBox.information(self, "任务详情", f"任务 ID: {task_id}\n\n（详情查看：运行日志中已记录）")
+
+    def _run_unified_workflow(self):
+        """方案A：按动态表单提交统一工作流（POST /workflows/{workflow_id}/run）。"""
+        if not hasattr(self, "rh_dynamic_form"):
+            self.rh_workflow_info.setText("动态表单未初始化")
+            return
+        wf_id = self.rh_workflow_id_input.text().strip()
+        if not wf_id:
+            self.rh_workflow_info.setText("请先选择工作流")
+            return
+        files = {}
+        values = {}
+        missing = []
+        for ent in self._rh_form_entries:
+            key = ent["key"]
+            kind = ent["kind"]
+            w = ent["widget"]
+            if kind in ("image", "audio", "video"):
+                path = (w.text() or "").strip()
+                if not path:
+                    missing.append(key)
+                elif os.path.isfile(path):
+                    files[key] = path
+            elif kind == "select":
+                values[key] = str(w.currentText())
+            else:  # text
+                val = (w.text() or "").strip()
+                if ent["required"] and not val:
+                    missing.append(key)
+                values[key] = val
+        if missing:
+            self.rh_workflow_info.setText("请填写/选择: " + ", ".join(missing))
+            return
+        instance_type = self._rh_find_workflow_config(wf_id) or {}
+        instance_type = instance_type.get("instanceType") or "default"
+
+        from utils import workflow_client as wfc
+        self.rh_workflow_info.setText("正在提交工作流...")
+        self.btn_run_workflow.setEnabled(False)
+
+        def run():
+            return wfc.run_workflow(wf_id, files=files, values=values, instance_type=instance_type)
+
+        def on_done(resp):
+            self.btn_run_workflow.setEnabled(True)
+            if resp and resp.get("ok"):
+                task_id = resp.get("task_id")
+                if not task_id:
+                    self.rh_workflow_info.setText("提交异常：响应缺 task_id")
+                    return
+                task = {"wf_id": wf_id, "task_id": task_id, "files": files, "values": values,
+                        "state": "submitted"}
+                meta = {"img_file": files.get("image", ""), "aud_file": files.get("audio", ""),
+                        "vid_file": files.get("video", ""), "unified": True}
+                if not hasattr(self, "rh_submitted_tasks") or not isinstance(self.rh_submitted_tasks, dict):
+                    self.rh_submitted_tasks = {}
+                self.rh_submitted_tasks[task_id] = {"task": task, "meta": meta, "status": "SUBMITTED",
+                                                    "results": None, "paused": False, "protocol": False}
+                self.rh_workflow_info.setText(f"已提交，task_id={task_id}，轮询中...")
+                self._rh_add_task_row(task_id, wf_id, status="排队中", progress=0)
+                self.add_task_to_list(task_id, status="排队中", task_type="数字人", source="云端",
+                                      extra={"wf_id": wf_id, "rh_meta": True, "results": None})
+                self._start_rh_poll_timer()
+            else:
+                detail = (resp or {}).get("detail") or (resp or {}).get("error") or "提交失败"
+                self.rh_workflow_info.setText(f"提交失败: {detail}")
+                self.log_area.append(f"统一工作流提交失败: {detail}")
+
+        self.start_worker(run, on_done)

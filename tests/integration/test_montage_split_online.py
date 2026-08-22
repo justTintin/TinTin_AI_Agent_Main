@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """智能混剪镜头分割在线冒烟：POST /montage/split 上传样本视频，校验返回结构（--online）。"""
 import os
 import subprocess
@@ -16,7 +15,6 @@ ONLINE = os.environ.get("RUN_ONLINE") == "1"
 class TestMontageSplitOnline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import shutil
         cls.tmp = tempfile.mkdtemp(prefix="montage_split_")
         cls.mp4 = os.path.join(cls.tmp, "sample.mp4")
         from utils.platform_utils import find_ffmpeg

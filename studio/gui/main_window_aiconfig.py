@@ -1,47 +1,14 @@
-# -*- coding: utf-8 -*-
+# type: ignore
 """MainWindow 的 AI / 大模型配置 mixin（ai_config 读写、连接测试、Ollama 后端切换），从 gui_main 拆出。"""
 
-import subprocess
-import time
 import json
-import sys
 import os
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT, CONFIG_INI_FILE, DREAMINA_EXE
-)
-import threading
-import uuid
-import configparser
-from utils.platform_utils import create_no_window_flag
-from ui import gui_styles
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.account_manager import AccountManager
-from core.creator_browser_controller import CreatorBrowserController
-from utils.thread_worker import TaskWorker as Worker
-from gui.threads import SystemMonitorThread, ComfyWSThread
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
-                                 QListWidgetItem, QGridLayout, QFileDialog, 
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox)
-from PySide6.QtGui import QIcon, QFont, QPixmap
-from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtGui import QFont
+
+import requests.exceptions
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QMessageBox
 from utils import config_manager as cm
+from utils.logger_utils import log
 
 
 class AIConfigMixin:
@@ -52,7 +19,7 @@ class AIConfigMixin:
             cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "大模型配置已保存。")
             log.info("LLM configuration saved successfully.")
-        except Exception as e:
+        except OSError as e:
             log.error(f"保存大模型配置失败: {e}")
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
@@ -81,7 +48,7 @@ class AIConfigMixin:
             self.ai_config["llm_model"] = self.llm_model_input.text().strip()
         # 视觉模型
         if getattr(self, "llm_vision_api_url_input", None) is not None:
-            self.ai_config["llm_vision_api_url"] = self.llm_vision_api_url_input.text().strip()
+            self.ai_config["llm_vision_api_url"] = self.llm_vision_api_url_input.text().strip()  # noqa: E501
         # 统一服务端地址
         server_url = getattr(self, "compute_server_input", None)
         if server_url is not None:
@@ -121,13 +88,13 @@ class AIConfigMixin:
             self.ai_config["runninghub_comfy_auth"] = rh_comfy_auth.text().strip()
         rh_comfy_identify = getattr(self, "runninghub_comfy_identify_input", None)
         if rh_comfy_identify is not None:
-            self.ai_config["runninghub_comfy_identify"] = rh_comfy_identify.text().strip()
+            self.ai_config["runninghub_comfy_identify"] = rh_comfy_identify.text().strip()  # noqa: E501
         rh_access_token = getattr(self, "runninghub_access_token_input", None)
         if rh_access_token is not None:
             self.ai_config["runninghub_access_token"] = rh_access_token.text().strip()
         rh_personal_queue = getattr(self, "runninghub_use_personal_queue_check", None)
         if rh_personal_queue is not None:
-            self.ai_config["runninghub_use_personal_queue"] = rh_personal_queue.isChecked()
+            self.ai_config["runninghub_use_personal_queue"] = rh_personal_queue.isChecked()  # noqa: E501
 
     def _save_all_ai_config(self):
         """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
@@ -137,7 +104,7 @@ class AIConfigMixin:
             cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "所有模型配置已保存。")
             log.info("All AI configuration saved successfully.")
-        except Exception as e:
+        except OSError as e:
             log.error(f"保存全部AI配置失败: {e}")
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
@@ -171,11 +138,11 @@ class AIConfigMixin:
     def refresh_llm_page_status(self):
         if not hasattr(self, "env_config_tool"):
             return
-            
+
         # If we have cached info already, show it immediately first
         if self.env_config_tool.cached_info:
             self._update_llm_page_ui(self.env_config_tool.cached_info)
-            
+
         # Trigger an async refresh to update the cache and UI in background
         self.env_config_tool.refresh_status_async(self._on_llm_env_checked)
 
@@ -191,21 +158,21 @@ class AIConfigMixin:
             return
         # Update VoxCPM status label
         if info.get("voxcpm_ok", False):
-            vox_status = f"<font color='#16a34a'><b>完成： {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#16a34a'><b>完成： {info.get('voxcpm_status', '')}</b></font>"  # noqa: E501
         elif info.get("voxcpm_installed", False):
-            vox_status = f"<font color='#d97706'><b>注意： {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#d97706'><b>注意： {info.get('voxcpm_status', '')}</b></font>"  # noqa: E501
         else:
-            vox_status = f"<font color='#dc2626'><b>失败： {info.get('voxcpm_status', '')}</b></font>"
+            vox_status = f"<font color='#dc2626'><b>失败： {info.get('voxcpm_status', '')}</b></font>"  # noqa: E501
         self.llm_vox_status_val.setText(vox_status)
 
         # Update PaddleOCR status labels
         if info.get("paddleocr_ok", False):
-            paddle_status = f"<font color='#16a34a'><b>完成： {info.get('paddleocr_status', '')}</b></font>"
+            paddle_status = f"<font color='#16a34a'><b>完成： {info.get('paddleocr_status', '')}</b></font>"  # noqa: E501
         else:
-            paddle_status = f"<font color='#dc2626'><b>失败： {info.get('paddleocr_status', '')}</b></font>"
+            paddle_status = f"<font color='#dc2626'><b>失败： {info.get('paddleocr_status', '')}</b></font>"  # noqa: E501
         self.llm_paddle_status_val.setText(paddle_status)
-        
-        p_models_status = f"<font color='#2563eb'><b>{', '.join(info.get('paddleocr_models', []))}</b></font> (存放目录: {info.get('paddleocr_models_dir', '')})"
+
+        p_models_status = f"<font color='#2563eb'><b>{', '.join(info.get('paddleocr_models', []))}</b></font> (存放目录: {info.get('paddleocr_models_dir', '')})"  # noqa: E501
         self.llm_paddle_models_val.setText(p_models_status)
 
     def load_ai_config(self):
@@ -245,14 +212,14 @@ class AIConfigMixin:
         legacy = getattr(self, "ai_config_legacy_file", "") or ""
         if legacy and os.path.exists(legacy):
             try:
-                with open(legacy, 'r', encoding='utf-8') as f:
+                with open(legacy, encoding='utf-8') as f:
                     self.ai_config = json.load(f)
                 for k, v in default_config.items():
                     if k not in self.ai_config:
                         self.ai_config[k] = v
                 cm.save_ai_config(self.ai_config)
                 return
-            except Exception as e:
+            except json.JSONDecodeError as e:
                 log.error(f"加载 AI 配置失败: {e}")
         self.ai_config = default_config
 
@@ -264,19 +231,18 @@ class AIConfigMixin:
             cm.save_ai_config(self.ai_config)
             QMessageBox.information(self, "成功", "AI 配置已保存。")
             log.info("AI configuration saved successfully.")
-        except Exception as e:
+        except OSError as e:
             log.error(f"保存 AI 配置失败: {e}")
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
     def test_ai_connections(self):
         comfyui_addr = self.comfyui_input.text().strip().rstrip("/")
         voice_addr = self.voice_clone_input.text().strip().rstrip("/")
-        
+
         results = []
         try:
-            import requests
-            from utils.http_client import http_get
             from utils import comfyui_client as comfy
+            from utils.http_client import http_get
             # Test ComfyUI：外部地址 + 本地引擎双后端
             if comfyui_addr and comfy.is_alive(comfyui_addr):
                 results.append("ComfyUI(外部): 完成： 在线")
@@ -295,23 +261,23 @@ class AIConfigMixin:
             # Test Voice Clone
             try:
                 res = http_get(voice_addr, timeout=5)
-                results.append(f"克隆声音: {'完成： 在线' if res.status_code == 200 else ' 异常 ('+str(res.status_code)+')'}")
-            except:
+                results.append(f"克隆声音: {'完成： 在线' if res.status_code == 200 else ' 异常 ('+str(res.status_code)+')'}")  # noqa: E501
+            except requests.exceptions.RequestException:
                 results.append("克隆声音:  无法连接")
-            
+
             QMessageBox.information(self, "测试结果", "\n".join(results))
-        except Exception as e:
+        except Exception as e:  # 模块导入/HTTP/UI 等复合操作
             QMessageBox.critical(self, "测试失败", str(e))
 
     def _on_llm_provider_changed(self, index):
         provider = self.llm_provider_combo.currentData()
         presets = {
-            "deepseek":     ("https://api.deepseek.com",                          "deepseek-v4-flash"),
-            "openai":       ("https://api.openai.com/v1",                          "gpt-4o"),
-            "ollama":       ("http://localhost:11434/v1",                          "qwen2.5:7b"),
-            "dashscope":    ("https://dashscope.aliyuncs.com/compatible-mode/v1",  "qwen-plus"),
-            "zhipu":        ("https://open.bigmodel.cn/api/paas/v4",               "glm-4-flash"),
-            "moonshot":     ("https://api.moonshot.cn/v1",                         "moonshot-v1-8k"),
+            "deepseek":     ("https://api.deepseek.com",                          "deepseek-v4-flash"),  # noqa: E501
+            "openai":       ("https://api.openai.com/v1",                          "gpt-4o"),  # noqa: E501
+            "ollama":       ("http://localhost:11434/v1",                          "qwen2.5:7b"),  # noqa: E501
+            "dashscope":    ("https://dashscope.aliyuncs.com/compatible-mode/v1",  "qwen-plus"),  # noqa: E501
+            "zhipu":        ("https://open.bigmodel.cn/api/paas/v4",               "glm-4-flash"),  # noqa: E501
+            "moonshot":     ("https://api.moonshot.cn/v1",                         "moonshot-v1-8k"),  # noqa: E501
             "custom":       ("", ""),
         }
         url, model = presets.get(provider, ("", ""))
@@ -319,11 +285,11 @@ class AIConfigMixin:
             # 自定义模式：API 地址恢复可编辑，清空占位
             self.llm_api_url_input.setReadOnly(False)
             self.llm_api_url_input.setStyleSheet("")
-            self.llm_api_url_input.setPlaceholderText("https://your-api-endpoint.com/v1")
+            self.llm_api_url_input.setPlaceholderText("https://your-api-endpoint.com/v1")  # noqa: E501
             self.llm_model_input.setPlaceholderText("your-model-name")
         else:
             # 预设提供商：地址只读，自动填充
-            _ro = "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"
+            _ro = "QLineEdit { background-color: #3a3a3a; color: #909090; border: 1px solid #555; }"  # noqa: E501
             self.llm_api_url_input.setReadOnly(True)
             self.llm_api_url_input.setStyleSheet(_ro)
             if url:
@@ -335,14 +301,14 @@ class AIConfigMixin:
 
     def _test_llm_connection(self):
         sender = self.sender()
-        btn = sender if sender else (self.btn_test_llm if hasattr(self, "btn_test_llm") else None)
+        btn = sender if sender else (self.btn_test_llm if hasattr(self, "btn_test_llm") else None)  # noqa: E501
         if btn:
             btn.setEnabled(False)
         self.llm_status_lbl.setText("正在测试...")
         self.llm_status_lbl.setStyleSheet("color: #f39c12;")
 
         model = self.llm_model_input.text().strip() or "deepseek-v4-flash"
-        self._llm_test_worker = self._create_proxy_test_worker(model, self.llm_status_lbl, btn)
+        self._llm_test_worker = self._create_proxy_test_worker(model, self.llm_status_lbl, btn)  # noqa: E501
         self._llm_test_worker.start()
 
     def _create_proxy_test_worker(self, model, status_lbl, btn):
@@ -358,7 +324,7 @@ class AIConfigMixin:
                     self.done.emit(True, f"完成： 连接成功 ({self.mdl})")
                 except RuntimeError as e:
                     self.done.emit(False, f"失败： {e}")
-                except Exception as e:
+                except Exception as e:  # 外部LLM API调用
                     self.done.emit(False, f"失败： 连接失败: {str(e)[:80]}")
 
         def _on_done(ok, text):
@@ -400,7 +366,7 @@ class AIConfigMixin:
                         self.done.emit(False, "失败： 未配置服务端地址", "#e74c3c")
                     else:
                         self.done.emit(False, f"失败： 连接失败: {err}", "#e74c3c")
-                except Exception as e:
+                except Exception as e:  # 外部LLM API调用
                     self.done.emit(False, f"失败： 连接失败: {str(e)[:80]}", "#e74c3c")
 
         def _on_done(ok, text, color):
@@ -416,7 +382,8 @@ class AIConfigMixin:
     def _test_vox_connection(self):
         """测试远程 VoxCPM TTS 服务连接。"""
         sender = self.sender()
-        if sender: sender.setEnabled(False)
+        if sender:
+            sender.setEnabled(False)
         self.llm_vox_status_val.setText("正在测试...")
         self.llm_vox_status_val.setStyleSheet("color: #f39c12;")
 
@@ -424,14 +391,14 @@ class AIConfigMixin:
         if not api_url:
             self.llm_vox_status_val.setText("注意： 请填写 API 地址")
             self.llm_vox_status_val.setStyleSheet("color: #f39c12;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
             return
 
         def _run():
-            import requests
             from utils.http_client import http_get
             try:
-                base = api_url.rstrip("/v1/tts").rstrip("/voxcpm/tts").rstrip("/")
+                base = api_url.removesuffix("/v1/tts").removesuffix("/voxcpm/tts").removesuffix("/")
                 r = http_get(f"{base}/voxcpm/health", timeout=5, quiet=True)
                 if r.status_code == 200:
                     self.llm_vox_status_val.setText("完成： 连接成功")
@@ -439,10 +406,11 @@ class AIConfigMixin:
                 else:
                     self.llm_vox_status_val.setText(f"失败： HTTP {r.status_code}")
                     self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 self.llm_vox_status_val.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.llm_vox_status_val.setStyleSheet("color: #e74c3c;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
 
         import threading
         threading.Thread(target=_run, daemon=True).start()
@@ -450,7 +418,8 @@ class AIConfigMixin:
     def _test_whisper_connection(self):
         """测试远程 Whisper ASR 服务连接。"""
         sender = self.sender()
-        if sender: sender.setEnabled(False)
+        if sender:
+            sender.setEnabled(False)
         self.whisper_status_lbl.setText("正在测试...")
         self.whisper_status_lbl.setStyleSheet("color: #f39c12;")
 
@@ -458,11 +427,11 @@ class AIConfigMixin:
         if not api_url:
             self.whisper_status_lbl.setText("注意： 请填写 ASR 服务地址")
             self.whisper_status_lbl.setStyleSheet("color: #f39c12;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
             return
 
         def _run():
-            import requests
             from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/")
@@ -473,10 +442,11 @@ class AIConfigMixin:
                 else:
                     self.whisper_status_lbl.setText(f"失败： HTTP {r.status_code}")
                     self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 self.whisper_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.whisper_status_lbl.setStyleSheet("color: #e74c3c;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
 
         import threading
         threading.Thread(target=_run, daemon=True).start()
@@ -484,7 +454,8 @@ class AIConfigMixin:
     def _test_clip_connection(self):
         """测试远程 CLIP embedding 服务连接。"""
         sender = self.sender()
-        if sender: sender.setEnabled(False)
+        if sender:
+            sender.setEnabled(False)
         self.clip_status_lbl.setText("正在测试...")
         self.clip_status_lbl.setStyleSheet("color: #f39c12;")
 
@@ -492,11 +463,11 @@ class AIConfigMixin:
         if not api_url:
             self.clip_status_lbl.setText("注意： 请填写 CLIP API 地址")
             self.clip_status_lbl.setStyleSheet("color: #f39c12;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
             return
 
         def _run():
-            import requests
             from utils.http_client import http_get
             try:
                 base = api_url.rstrip("/")
@@ -507,10 +478,11 @@ class AIConfigMixin:
                 else:
                     self.clip_status_lbl.setText(f"失败： HTTP {r.status_code}")
                     self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 self.clip_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.clip_status_lbl.setStyleSheet("color: #e74c3c;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
 
         import threading
         threading.Thread(target=_run, daemon=True).start()
@@ -518,7 +490,8 @@ class AIConfigMixin:
     def _test_ocr_connection(self):
         """测试远程服务端 OCR 连接（调 /material/status 探测 /material/ocr 可用性）。"""
         sender = self.sender()
-        if sender: sender.setEnabled(False)
+        if sender:
+            sender.setEnabled(False)
         self.ocr_status_lbl.setText("正在测试...")
         self.ocr_status_lbl.setStyleSheet("color: #f39c12;")
 
@@ -526,26 +499,26 @@ class AIConfigMixin:
         if not api_url:
             self.ocr_status_lbl.setText("注意： 请填写 OCR 服务地址")
             self.ocr_status_lbl.setStyleSheet("color: #f39c12;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
             return
 
         def _run():
-            import requests
-            from utils.http_client import http_get
+            from utils import material_client
             try:
-                base = api_url.rstrip("/")
                 # 探测 /material/status（与 check_server_ocr 一致）
-                r = http_get(f"{base}/material/status", timeout=5, quiet=True)
-                if r.status_code == 200:
+                data = material_client.status(timeout=5, quiet=True)
+                if data is not None:
                     self.ocr_status_lbl.setText("完成： 连接成功（/material/ocr 可用）")
                     self.ocr_status_lbl.setStyleSheet("color: #2ecc71;")
                 else:
-                    self.ocr_status_lbl.setText(f"失败： HTTP {r.status_code}")
+                    self.ocr_status_lbl.setText("失败： 服务端不可达")
                     self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 self.ocr_status_lbl.setText(f"失败： 连接失败: {str(e)[:60]}")
                 self.ocr_status_lbl.setStyleSheet("color: #e74c3c;")
-            if sender: sender.setEnabled(True)
+            if sender:
+                sender.setEnabled(True)
 
         import threading
         threading.Thread(target=_run, daemon=True).start()
@@ -563,12 +536,13 @@ class AIConfigMixin:
                     return
                 device_code = kv.get("device_code", "")
                 verify_url = kv.get("verification_uri", "")
-                self.dr_status.setText(f"<font color='#f59e0b'>请在浏览器打开验证: {verify_url}</font>")
+                self.dr_status.setText(f"<font color='#f59e0b'>请在浏览器打开验证: {verify_url}</font>")  # noqa: E501
                 import webbrowser
                 try:
                     if verify_url:
                         webbrowser.open(verify_url)
-                except: pass
+                except Exception:
+                    pass
                 # 轮询等待认证
                 import threading
                 def poll():
@@ -576,15 +550,15 @@ class AIConfigMixin:
                     if ok2:
                         self.dr_status.setText("<font color='#16a34a'>完成： 登录成功</font>")
                     else:
-                        self.dr_status.setText(f"<font color='#dc2626'>失败： 登录失败: {msg[:100]}</font>")
+                        self.dr_status.setText(f"<font color='#dc2626'>失败： 登录失败: {msg[:100]}</font>")  # noqa: E501
                 threading.Thread(target=poll, daemon=True).start()
             else:
                 # Linux: CLI 不可用，打开浏览器
                 self.dr_status.setText(
-                    "<font color='#f59e0b'>即梦 CLI 未安装（Windows 专属）。建议使用素材浏览器左侧「即梦AI」标签直接访问。</font>")
+                    "<font color='#f59e0b'>即梦 CLI 未安装（Windows 专属）。建议使用素材浏览器左侧「即梦AI」标签直接访问。</font>")  # noqa: E501
                 import webbrowser
                 webbrowser.open("https://jimeng.jianying.com/ai-tool/image/generate")
-        except Exception as e:
+        except Exception as e:  # 外部API调用（DreaminaClient）
             self.dr_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 
     def _dreamina_check(self):
@@ -600,15 +574,20 @@ class AIConfigMixin:
                 self.dr_status.setText(f"<font color='#16a34a'> 已登录 · 额度: {msg}</font>")
             else:
                 self.dr_status.setText("<font color='#f59e0b'> 未登录</font>")
-        except Exception as e:
+        except Exception as e:  # 外部API调用（DreaminaClient）
             self.dr_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 
     # ── 飞书配置 ──
 
     def load_feishu_config(self):
         config = cm.load_ini()
-        appid = ""; appsecret = ""; apptoken = ""; tableid = ""
-        topicfield = "选题"; scriptfield = "脚本"; foldertoken = ""
+        appid = ""
+        appsecret = ""
+        apptoken = ""
+        tableid = ""
+        topicfield = "选题"
+        scriptfield = "脚本"
+        foldertoken = ""
         try:
             if config.has_section('Feishu'):
                 appid = config.get('Feishu', 'AppId', fallback="")
@@ -618,7 +597,7 @@ class AIConfigMixin:
                 topicfield = config.get('Feishu', 'TopicField', fallback="选题")
                 scriptfield = config.get('Feishu', 'ScriptField', fallback="脚本")
                 foldertoken = config.get('Feishu', 'FolderToken', fallback="")
-        except Exception as e:
+        except OSError as e:
             log.error(f"加载飞书配置失败: {e}")
         if hasattr(self, 'edit_feishu_appid'):
             self.edit_feishu_appid.setText(appid)
@@ -638,31 +617,30 @@ class AIConfigMixin:
             config.set('Feishu', 'AppSecret', self.edit_feishu_appsecret.text().strip())
             config.set('Feishu', 'AppToken', self.edit_feishu_apptoken.text().strip())
             config.set('Feishu', 'TableId', self.edit_feishu_tableid.text().strip())
-            config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())
-            config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())
-            config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())
+            config.set('Feishu', 'TopicField', self.edit_feishu_topicfield.text().strip())  # noqa: E501
+            config.set('Feishu', 'ScriptField', self.edit_feishu_scriptfield.text().strip())  # noqa: E501
+            config.set('Feishu', 'FolderToken', self.edit_feishu_foldertoken.text().strip())  # noqa: E501
             cm.save_ini(config)
             QMessageBox.information(self, "提示", "飞书配置参数保存成功！")
-        except Exception as e:
+        except OSError as e:
             QMessageBox.critical(self, "错误", f"保存飞书配置失败:\n{e}")
             log.error(f"保存飞书配置失败: {e}")
 
     def _test_feishu(self):
         self.fs_test_status.setText("测试中…")
-        import requests as req
         from utils.http_client import http_post
         app_id = self.edit_feishu_appid.text().strip()
         app_secret = self.edit_feishu_appsecret.text().strip()
         if not app_id or not app_secret:
-            self.fs_test_status.setText("<font color='#dc2626'>失败： 请填入 App ID 和 Secret</font>")
+            self.fs_test_status.setText("<font color='#dc2626'>失败： 请填入 App ID 和 Secret</font>")  # noqa: E501
             return
         try:
-            r = http_post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            r = http_post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",  # noqa: E501
                           json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
             if r.status_code == 200 and r.json().get("tenant_access_token"):
                 self.fs_test_status.setText("<font color='#16a34a'>完成： 连接成功</font>")
             else:
-                self.fs_test_status.setText(f"<font color='#dc2626'>失败： HTTP {r.status_code}</font>")
-        except Exception as e:
+                self.fs_test_status.setText(f"<font color='#dc2626'>失败： HTTP {r.status_code}</font>")  # noqa: E501
+        except requests.exceptions.RequestException as e:
             self.fs_test_status.setText(f"<font color='#dc2626'>失败： {e}</font>")
 

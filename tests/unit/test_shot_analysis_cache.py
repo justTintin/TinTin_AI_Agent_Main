@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """shot_analysis_cache：镜头分析缓存（内容指纹 + 持久化）。"""
 import os
 import sys
@@ -7,9 +6,10 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import testutil
+
 testutil.ensure_studio_on_path()
 
-from utils.shot_analysis_cache import ShotAnalysisCache, _clip_key
+from utils.shot_analysis_cache import ShotAnalysisCache, _clip_key  # noqa: E402
 
 
 class TestShotAnalysisCache(unittest.TestCase):

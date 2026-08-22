@@ -1,47 +1,11 @@
-# -*- coding: utf-8 -*-
-"""MainWindow 的侧边栏/导航 mixin（setup_sidebar / switch_page / update_nav_focus），从 gui_main 拆出。"""
+# type: ignore
+"""MainWindow 的侧边栏/导航 mixin（setup_sidebar / switch_page / update_nav_focus），从 gui_main 拆出。"""  # noqa: E501
 
-import subprocess
-import time
-import json
-import sys
-import os
-from config.paths import (
-    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
-    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT
-)
-import threading
-import uuid
-import configparser
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QLabel, QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from utils.gui_icons import mdi_button
+from utils.logger_utils import log
 from version import get_version
-from ui import gui_styles
-from gui.transcription_page import TranscriptionToolPage
-from gui.env_config_page import EnvConfigPage, EnvInstallWorker
-from gui.live_clip_page import LiveClipPage
-from gui.voice_clone_page import VoiceClonePage
-from gui.voice_samples_page import VoiceSamplesPage
-from gui.video_ocr_page import VideoOcrPage
-from gui.image_folder_ocr_page import ImageFolderOcrPage
-from utils.logger_utils import log, get_last_logs
-from utils.account_manager import AccountManager
-from core.creator_browser_controller import CreatorBrowserController
-from utils.thread_worker import TaskWorker as Worker
-from gui.threads import SystemMonitorThread, ComfyWSThread
-from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
-                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
-                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
-                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
-                                 QListWidgetItem, QGridLayout, QFileDialog, 
-                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
-                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
-                                 QSpinBox)
-from PySide6.QtGui import QIcon, QFont, QPixmap
-from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
-from PySide6.QtGui import QPalette, QColor
-from PySide6.QtGui import QFont
-from utils.gui_icons import mdi_button, mdi_icon
 
 
 class SidebarMixin:
@@ -51,7 +15,7 @@ class SidebarMixin:
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
         self.sidebar_layout.setSpacing(0)
-        
+
         # Create scroll area for menu items to handle the larger 22px font size cleanly
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -59,13 +23,13 @@ class SidebarMixin:
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-        
+
         scroll_content = QWidget()
         scroll_content.setObjectName("scroll_page")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(8, 12, 8, 12)
         scroll_layout.setSpacing(12)
-        
+
         self.nav_buttons = []
 
         # 完整专业导航容器
@@ -126,11 +90,11 @@ class SidebarMixin:
         script_layout = QVBoxLayout(script_card)
         script_layout.setContentsMargins(6, 8, 6, 8)
         script_layout.setSpacing(2)
-        
+
         script_header = QLabel("方案脚本")
         script_header.setObjectName("section_header")
         script_layout.addWidget(script_header)
-        
+
         script_menus = [
             ("我的知识库", 28, "book"),
             ("产品资料", 27, "database"),
@@ -139,10 +103,7 @@ class SidebarMixin:
             ("分镜脚本创作", 37, "movie-open"),
         ]
         for text, index, icon_name in script_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name) if icon_name else QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -169,10 +130,7 @@ class SidebarMixin:
             ("媒体工具", 45, "tools"),
         ]
         for text, index, icon_name in media_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name) if icon_name else QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -199,10 +157,7 @@ class SidebarMixin:
             ("直播切片", 18, "broadcast"),
         ]
         for text, index, icon_name in compose_menus:
-            if icon_name:
-                btn = mdi_button(text, icon_name)
-            else:
-                btn = QPushButton(text)
+            btn = mdi_button(text, icon_name) if icon_name else QPushButton(text)
             btn.setObjectName("nav_button")
             btn.setProperty("target_index", index)
             btn.setCursor(Qt.PointingHandCursor)
@@ -237,12 +192,12 @@ class SidebarMixin:
         self._nav_full_lay.addWidget(ops_card)
 
         # 5. 系统配置：已收纳到独立「系统设置」二级菜单窗口（底部  入口打开）
-            
+
         self._nav_full_lay.addStretch()
 
         scroll.setWidget(scroll_content)
         self.sidebar_layout.addWidget(scroll)
-        
+
         # ── 底部：系统设置入口（打开独立二级菜单窗口）+ 版本号 ──
         footer_box = QVBoxLayout()
         footer_box.setContentsMargins(8, 4, 8, 6)
@@ -259,60 +214,6 @@ class SidebarMixin:
         self.main_layout.addWidget(self.sidebar)
 
 
-    def open_python_terminal(self):
-        """
-        打开一个外部终端，自动激活当前 Python 环境：
-        优先 Windows Terminal (wt.exe) → PowerShell → cmd.exe
-        工作目录为本项目根目录，PATH 前置当前 Python 的 Scripts 目录。
-        """
-        import sys, os, subprocess
-
-        python_exe  = sys.executable                        # e.g. D:\venv\Scripts\python.exe
-        python_dir  = os.path.dirname(python_exe)           # e.g. D:\venv\Scripts
-        project_dir = PROJECT_ROOT  # studio 根目录（由 paths.py 管理）
-
-        activate    = os.path.join(python_dir, "activate.bat")
-        if os.path.isfile(activate):
-            # 在 venv 里：先 activate 再进交互
-            init_cmd = f'call "{activate}" && cd /d "{project_dir}"'
-        else:
-            # 非 venv：只把 Scripts 目录加到 PATH
-            init_cmd = f'set PATH={python_dir};%PATH% && cd /d "{project_dir}"'
-
-        banner = f'echo [Python 终端] {python_exe} && python --version'
-        full_cmd = f'{init_cmd} && {banner}'
-
-        # 尝试顺序：Windows Terminal → PowerShell → CMD
-        try:
-            subprocess.Popen(
-                ["wt.exe", "--", "cmd.exe", "/K", full_cmd],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
-            return
-        except FileNotFoundError:
-            pass
-
-        try:
-            ps_init = (
-                f'$env:PATH = "{python_dir};" + $env:PATH; '
-                f'Set-Location "{project_dir}"; '
-                f'Write-Host "[Python 终端] {python_exe}" -ForegroundColor Cyan; '
-                f'python --version'
-            )
-            subprocess.Popen(
-                ["powershell.exe", "-NoExit", "-Command", ps_init],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
-            return
-        except FileNotFoundError:
-            pass
-
-        # 最终 fallback：CMD
-        subprocess.Popen(
-            ["cmd.exe", "/K", full_cmd],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
-
     def open_asset_browser(self):
         """直接打开素材浏览器（外部 Electron 应用）。"""
         try:
@@ -320,7 +221,7 @@ class SidebarMixin:
             ok, msg = abrowser.launch()
             if not ok:
                 QMessageBox.warning(self, "无法打开素材浏览器", msg)
-        except Exception as e:
+        except Exception as e:  # 外部API调用（素材浏览器进程启动）
             QMessageBox.critical(self, "错误", f"打开素材浏览器失败：{e}")
 
     def switch_page(self, index):
@@ -328,10 +229,10 @@ class SidebarMixin:
         if hasattr(self, "_ensure_page_built"):
             self._ensure_page_built(index)
         self.content_stack.setCurrentIndex(index)
-        
+
         # 1. Update Navigation Focus (Visual Only)
         self.update_nav_focus(index)
-        
+
         # 2. Trigger Page Specific Logic
         self.trigger_page_logic(index)
 
@@ -343,7 +244,7 @@ class SidebarMixin:
             if str(target) == "8" and str(index) == "10":
                 is_active = True
             new_val = "true" if is_active else "false"
-            # Only repaint buttons whose state actually changed (avoids 60+ style ops per switch)
+            # Only repaint buttons whose state actually changed (avoids 60+ style ops per switch)  # noqa: E501
             if btn.property("active") != new_val:
                 btn.setProperty("active", new_val)
                 btn.style().unpolish(btn)
@@ -358,7 +259,7 @@ class SidebarMixin:
             self._settings_dialog = dlg
             try:
                 dlg.attach_pages(self)
-            except Exception as e:
+            except Exception as e:  # Qt 页面挂载操作可能抛出多类异常
                 log.exception(f"[系统设置] 页面挂载失败: {e}")
         dlg.show()
         dlg.raise_()

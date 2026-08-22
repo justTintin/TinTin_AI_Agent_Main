@@ -1,29 +1,40 @@
-# -*- coding: utf-8 -*-
-import os
-import sys
-import shutil
-import subprocess
-import traceback
-import time
-import math
 import json
+import math
+import os
+
 import av
-from PIL import Image, ImageDraw
-
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
-                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy, QListWidget)
-from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
-from PySide6.QtGui import QImage, QPixmap, QIcon, QCursor, QPainter, QPen, QBrush, QColor, QPolygonF
-from utils.logger_utils import log
+import requests.exceptions
 from config.paths import TMP_DIR
-
+from PIL import Image, ImageDraw
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # 四边形选区辅助函数（选区统一用四点四边形表示：[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]，视频原始帧像素）
 # ═══════════════════════════════════════════════════════════════
-
 from utils.file_dialog_utils import pick_file
 from utils.gui_icons import mdi_button
+from utils.logger_utils import log
+from utils.os_utils import open_in_explorer
+
+
 def _quad_aabb(quad):
     """四点四边形 → 轴对齐外接框 (x, y, w, h)。本地 CLI 只支持矩形，用 AABB 退化。"""
     xs = [p[0] for p in quad]
@@ -70,7 +81,7 @@ class RemoteVSRWorkerV14(QThread):
     log_received = Signal(str)
     finished = Signal(bool, str)
 
-    def __init__(self, video_path, sub_areas, inpaint_mode, output_path, purpose="subtitle", watermark_text=""):
+    def __init__(self, video_path, sub_areas, inpaint_mode, output_path, purpose="subtitle", watermark_text=""):  # noqa: E501
         """
         :param sub_areas: 服务端 sub_areas JSON 字符串。空串=""智能识别（服务端自动检测）；
                           标注选区为四边形相对坐标 [[[x_rel,y_rel]×4], ...]
@@ -99,24 +110,24 @@ class RemoteVSRWorkerV14(QThread):
                 try:
                     from utils.http_client import http_delete
                     http_delete(f"{self._base_url}/tasks/{self._task_id}", timeout=5)
-                except Exception:
+                except requests.exceptions.RequestException:
                     pass
             threading.Thread(target=_cancel, daemon=True).start()
 
     def run(self):
         import json as _json
         import time as _time
-        import requests
+
         from utils.http_client import http_get, http_post
 
         try:
             from config.paths import AI_CONFIG_FILE
             base_url = ""
             if os.path.isfile(AI_CONFIG_FILE):
-                with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
-                    base_url = (_json.load(f).get("compute_server_url") or "").strip().rstrip("/")
+                with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+                    base_url = (_json.load(f).get("compute_server_url") or "").strip().rstrip("/")  # noqa: E501
             if not base_url:
-                self.finished.emit(False, "未配置服务端地址，请先在「系统设置 → 模型配置」中设置 compute_server_url。")
+                self.finished.emit(False, "未配置服务端地址，请先在「系统设置 → 模型配置」中设置 compute_server_url。")  # noqa: E501
                 return
             self._base_url = base_url
 
@@ -125,7 +136,7 @@ class RemoteVSRWorkerV14(QThread):
             self.progress_updated.emit(0)
             self.log_received.emit(f"[INFO] 连接服务端: {base_url}")
             desc = "智能去除（服务端自动检测）" if is_smart else f"选区去除 {self.sub_areas[:60]}"
-            self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  mode={self.inpaint_mode}  {desc}")
+            self.log_received.emit(f"[INFO] 提交服务端去字幕: {base_url}/vsr/remove  mode={self.inpaint_mode}  {desc}")  # noqa: E501
 
             # 上传进度 0-10%（真实字节追踪）
             file_size = os.path.getsize(self.video_path)
@@ -138,14 +149,14 @@ class RemoteVSRWorkerV14(QThread):
 
             with open(self.video_path, "rb") as raw_f:
                 tracked_f = _ProgressFileReader(raw_f, file_size, _on_upload)
-                files = {"file": (os.path.basename(self.video_path), tracked_f, "video/mp4")}
+                files = {"file": (os.path.basename(self.video_path), tracked_f, "video/mp4")}  # noqa: E501
                 data = {
                     "inpaint_mode": self.inpaint_mode,
                     "sub_areas": self.sub_areas,
                     "purpose": self.purpose,
                     "watermark_text": self.watermark_text,
                 }
-                r = http_post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)
+                r = http_post(f"{base_url}/vsr/remove", files=files, data=data, timeout=1800)  # noqa: E501
             if r.status_code != 200:
                 self.finished.emit(False, f"服务端返回 {r.status_code}: {r.text[:300]}")
                 return
@@ -170,7 +181,7 @@ class RemoteVSRWorkerV14(QThread):
                 _time.sleep(3)
                 try:
                     pr = http_get(poll_url, timeout=15)
-                except Exception:
+                except requests.exceptions.RequestException:
                     continue
                 if pr.status_code != 200:
                     continue
@@ -192,11 +203,11 @@ class RemoteVSRWorkerV14(QThread):
                         if elapsed - _last_heartbeat >= 10:
                             _last_heartbeat = elapsed
                             self.log_received.emit(f"[等待] 服务端处理中，已等待 {elapsed} 秒...")
-                except Exception:
+                except (KeyError, TypeError, ValueError):
                     pass
                 if status in ("completed", "done", "success"):
                     # 优先用服务端返回的 download_url，其次从 filename 拼装
-                    dl_url = pdata.get("download_url") or pdata.get("result", {}).get("download_url") or ""
+                    dl_url = pdata.get("download_url") or pdata.get("result", {}).get("download_url") or ""  # noqa: E501
                     if dl_url:
                         if dl_url.startswith("/"):
                             dl_url = base_url + dl_url
@@ -215,7 +226,7 @@ class RemoteVSRWorkerV14(QThread):
                     self.finished.emit(False, f"去字幕任务失败(task_id={task_id}): {err}")
                     return
             self.finished.emit(False, f"去字幕任务超时(3600s), task_id={task_id}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             self.finished.emit(False, f"服务端去字幕异常: {e}")
 
     def _download(self, dl_url):
@@ -241,14 +252,14 @@ class RemoteVSRWorkerV14(QThread):
 
 
 class InteractivePreviewLabelV14(QLabel):
-    boundsChanged = Signal(int)  # index — 选区四点变化，页面读 self.boxes[idx]
-    selectionChanged = Signal(int)  # active_index
+    boundsChanged = Signal(int)  # noqa: N815 # index — 选区四点变化，页面读 self.boxes[idx]
+    selectionChanged = Signal(int)  # noqa: N815 # active_index
     resized = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")
+        self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")  # noqa: E501
         self.setMinimumSize(400, 300)
         self.setMouseTracking(True)
 
@@ -263,7 +274,7 @@ class InteractivePreviewLabelV14(QLabel):
         self.px_offset_x = 0
         self.px_offset_y = 0
 
-        self.drag_mode = None      # None | 'move' | 'vertex-N' (N=0..3) | 'rotate' | 'draw'
+        self.drag_mode = None      # None | 'move' | 'vertex-N' (N=0..3) | 'rotate' | 'draw'  # noqa: E501
         self.drag_start_pos = None
         self.drag_start_quad = None  # 拖动起始时的四点副本（帧坐标）
         self.draw_start = None       # 新画矩形起始点（widget 坐标）
@@ -272,7 +283,7 @@ class InteractivePreviewLabelV14(QLabel):
         self._rotate_cursor_cache = None
         self.allow_rotation = True   # False=去字幕(轴对齐矩形,无旋转把手); True=去水印(可旋转四边形)
 
-    def sizeHint(self):
+    def sizeHint(self):  # noqa: N802
         return QSize(400, 300)
 
     def set_boxes(self, boxes, active_index):
@@ -295,7 +306,7 @@ class InteractivePreviewLabelV14(QLabel):
         for i in range(n):
             xi, yi = quad[i]
             xj, yj = quad[j]
-            if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi):
+            if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi):  # noqa: E501
                 inside = not inside
             j = i
         return inside
@@ -329,7 +340,7 @@ class InteractivePreviewLabelV14(QLabel):
     @staticmethod
     def _make_rotate_cursor():
         """绘制顺时针旋转箭头光标（透明底、白色箭头）。"""
-        from PySide6.QtCore import QRectF, QPointF
+        from PySide6.QtCore import QPointF, QRectF
         pm = QPixmap(28, 28)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
@@ -358,7 +369,7 @@ class InteractivePreviewLabelV14(QLabel):
 
     def get_handle_under_mouse(self, pos):
         """返回 (handle, idx)。handle: 'vertex-N'（N=0..3，仅激活框）/ 'move'（任意框内）/ None。"""
-        if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0 or not self.boxes:
+        if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0 or not self.boxes:  # noqa: E501
             return None, -1
 
         mx, my = pos.x(), pos.y()
@@ -388,7 +399,7 @@ class InteractivePreviewLabelV14(QLabel):
                 return 'move', idx
         return None, -1
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # noqa: N802
         if event.button() != Qt.LeftButton:
             return
         handle, idx = self.get_handle_under_mouse(event.pos())
@@ -412,14 +423,18 @@ class InteractivePreviewLabelV14(QLabel):
                 fy = (event.pos().y() - self.px_offset_y) * self.frame_h / self.target_h
                 self.rotate_start_angle = math.atan2(fy - cy, fx - cx)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event):  # noqa: N802
         # 旋转/顶点/整体移动拖动
-        if self.drag_mode is not None and self.drag_start_pos is not None and self.active_box_index >= 0:
+        if self.drag_mode is not None and self.drag_start_pos is not None and self.active_box_index >= 0:  # noqa: E501
             sq = self.drag_start_quad  # 起始四点
+            if sq is None:
+                return
 
             if self.drag_mode == 'rotate':
                 fx = (event.pos().x() - self.px_offset_x) * self.frame_w / self.target_w
                 fy = (event.pos().y() - self.px_offset_y) * self.frame_h / self.target_h
+                if self.rotate_center is None:
+                    return
                 cx, cy = self.rotate_center
                 delta = math.atan2(fy - cy, fx - cx) - self.rotate_start_angle
                 cos_d, sin_d = math.cos(delta), math.sin(delta)
@@ -447,7 +462,7 @@ class InteractivePreviewLabelV14(QLabel):
                         ty = self.frame_h - aabb[1] - aabb[3]
                 else:
                     ty = -aabb[1] if aabb[1] < 0 else 0
-                self.boxes[self.active_box_index] = [[p[0] + tx, p[1] + ty] for p in new_quad]
+                self.boxes[self.active_box_index] = [[p[0] + tx, p[1] + ty] for p in new_quad]  # noqa: E501
             else:
                 cur = self._widget_to_frame(event.pos())
                 start = self._widget_to_frame(self.drag_start_pos)
@@ -461,7 +476,7 @@ class InteractivePreviewLabelV14(QLabel):
                     aabb = _quad_aabb(sq)
                     nx = max(-aabb[0], min(dx, self.frame_w - aabb[0] - aabb[2]))
                     ny = max(-aabb[1], min(dy, self.frame_h - aabb[1] - aabb[3]))
-                    self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]
+                    self.boxes[self.active_box_index] = [[p[0] + nx, p[1] + ny] for p in sq]  # noqa: E501
                 elif self.drag_mode.startswith('vertex-'):
                     vi = int(self.drag_mode.split('-')[1])
                     cur_f = [max(0, min(self.frame_w, cur[0])),
@@ -478,7 +493,7 @@ class InteractivePreviewLabelV14(QLabel):
                         y0 = min(cur_f[1], oy)
                         x1 = max(cur_f[0], ox)
                         y1 = max(cur_f[1], oy)
-                        self.boxes[self.active_box_index] = _rect_to_quad(x0, y0, x1 - x0, y1 - y0)
+                        self.boxes[self.active_box_index] = _rect_to_quad(x0, y0, x1 - x0, y1 - y0)  # noqa: E501
 
             self.boundsChanged.emit(self.active_box_index)
         else:
@@ -501,19 +516,19 @@ class InteractivePreviewLabelV14(QLabel):
             else:
                 self.setCursor(Qt.ArrowCursor)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
             self.drag_mode = None
             self.drag_start_pos = None
             self.drag_start_quad = None
             self.rotate_center = None
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         self.resized.emit()
 
 
-from gui.base_page import BasePage
+from gui.base_page import BasePage  # noqa: E402
 
 
 class SubtitleRemovalPageV14(BasePage):
@@ -544,7 +559,7 @@ class SubtitleRemovalPageV14(BasePage):
         main_layout.addWidget(heading, 0)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
+        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")  # noqa: E501
         main_layout.addWidget(splitter, 1)
 
         # --- Left Panel: File Selection & Preview ---
@@ -595,7 +610,7 @@ class SubtitleRemovalPageV14(BasePage):
         # Video progress slider for scrubbing / previewing frames
         seek_row = QHBoxLayout()
         seek_row.setSpacing(8)
-        
+
         button_style = """
             QPushButton {
                 background-color: #1a1a24;
@@ -622,7 +637,7 @@ class SubtitleRemovalPageV14(BasePage):
         self.btn_prev_frame.setStyleSheet(button_style)
         self.btn_prev_frame.clicked.connect(self._step_prev_frame)
         seek_row.addWidget(self.btn_prev_frame)
-        
+
         self.seek_slider = QSlider(Qt.Horizontal)
         self.seek_slider.setRange(0, 1000)
         self.seek_slider.setValue(0)
@@ -657,13 +672,13 @@ class SubtitleRemovalPageV14(BasePage):
             }
         """)
         seek_row.addWidget(self.seek_slider)
-        
+
         self.btn_next_frame = QPushButton("播放")
         self.btn_next_frame.setFixedWidth(30)
         self.btn_next_frame.setStyleSheet(button_style)
         self.btn_next_frame.clicked.connect(self._step_next_frame)
         seek_row.addWidget(self.btn_next_frame)
-        
+
         self.lbl_seek_time = QLabel("00:00 / 00:00")
         self.lbl_seek_time.setFixedWidth(90)
         self.lbl_seek_time.setAlignment(Qt.AlignCenter)
@@ -707,7 +722,7 @@ class SubtitleRemovalPageV14(BasePage):
         self.purpose_combo = QComboBox()
         self.purpose_combo.addItem(" 去字幕", "subtitle")
         self.purpose_combo.addItem(" 去水印", "watermark")
-        self.purpose_combo.setToolTip("去字幕：擦除视频中的字幕文字。\n去水印：擦除台标/LOGO 等水印。可填写水印文字帮助服务端精准定位要去除的水印。")
+        self.purpose_combo.setToolTip("去字幕：擦除视频中的字幕文字。\n去水印：擦除台标/LOGO 等水印。可填写水印文字帮助服务端精准定位要去除的水印。")  # noqa: E501
         mode_row.addWidget(self.purpose_combo)
         mode_row.addSpacing(12)
         mode_row.addWidget(QLabel("模式:"))
@@ -741,7 +756,7 @@ class SubtitleRemovalPageV14(BasePage):
         box_manage_group = QFrame()
         self.box_manage_group = box_manage_group
         box_manage_group.setObjectName("box_manage_group")
-        box_manage_group.setStyleSheet("#box_manage_group { background-color: #26262a; border-top: 1px solid #2e2e32; border-bottom: 1px solid #2e2e32; border-radius: 0px; }")
+        box_manage_group.setStyleSheet("#box_manage_group { background-color: #26262a; border-top: 1px solid #2e2e32; border-bottom: 1px solid #2e2e32; border-radius: 0px; }")  # noqa: E501
         box_manage_layout = QVBoxLayout(box_manage_group)
         box_manage_layout.setContentsMargins(24, 16, 24, 16)
         box_manage_layout.setSpacing(14)
@@ -818,22 +833,22 @@ class SubtitleRemovalPageV14(BasePage):
         self.x_slider = QSlider(Qt.Horizontal)
         self.x_slider.valueChanged.connect(self.update_preview)
         self.x_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))
+        sliders_layout.addLayout(create_slider_row("起始横坐标 X:", self.x_slider, self.x_val_lbl))  # noqa: E501
 
         self.w_slider = QSlider(Qt.Horizontal)
         self.w_slider.valueChanged.connect(self.update_preview)
         self.w_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("字幕选区宽 W:", self.w_slider, self.w_val_lbl))
+        sliders_layout.addLayout(create_slider_row("字幕选区宽 W:", self.w_slider, self.w_val_lbl))  # noqa: E501
 
         self.y_slider = QSlider(Qt.Horizontal)
         self.y_slider.valueChanged.connect(self.update_preview)
         self.y_val_lbl = QLabel("0")
-        sliders_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))
+        sliders_layout.addLayout(create_slider_row("起始纵坐标 Y:", self.y_slider, self.y_val_lbl))  # noqa: E501
 
         self.h_slider = QSlider(Qt.Horizontal)
         self.h_slider.valueChanged.connect(self.update_preview)
         self.h_val_lbl = QLabel("1")
-        sliders_layout.addLayout(create_slider_row("字幕选区高 H:", self.h_slider, self.h_val_lbl))
+        sliders_layout.addLayout(create_slider_row("字幕选区高 H:", self.h_slider, self.h_val_lbl))  # noqa: E501
 
         box_manage_layout.addWidget(self.sliders_container)
         self.sliders_container.setVisible(False)  # 四边形直接在预览上拖角点编辑，不再需要坐标滑块
@@ -869,7 +884,7 @@ class SubtitleRemovalPageV14(BasePage):
                 height: 16px;
             }
             QProgressBar::chunk {
-                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);  # noqa: E501
                 border-radius: 5px;
             }
         """)
@@ -936,7 +951,7 @@ class SubtitleRemovalPageV14(BasePage):
                 img = Image.open(path)
                 self.original_frame = img
                 self.frame_width, self.frame_height = img.size
-                
+
                 self.seek_slider.setEnabled(False)
                 self.seek_slider.setValue(0)
                 self.lbl_seek_time.setText("图片无进度")
@@ -947,21 +962,21 @@ class SubtitleRemovalPageV14(BasePage):
                 video_stream = next(s for s in container.streams if s.type == 'video')
                 self.frame_width = video_stream.width
                 self.frame_height = video_stream.height
-                
+
                 # Read first frame
                 for frame in container.decode(video_stream):
                     self.original_frame = frame.to_image()
                     break
-                
-                total_sec = container.duration / 1000000.0 if container.duration else 0.0
+
+                total_sec = container.duration / 1000000.0 if container.duration else 0.0  # noqa: E501
                 self.lbl_seek_time.setText(f"00:00 / {self._format_time(total_sec)}")
                 container.close()
-                
+
                 self.seek_slider.setEnabled(True)
                 self.seek_slider.setValue(0)
                 self.btn_prev_frame.setEnabled(True)
                 self.btn_next_frame.setEnabled(True)
-                
+
             # Block sliders signals during bounds setup
             self.x_slider.blockSignals(True)
             self.w_slider.blockSignals(True)
@@ -992,24 +1007,24 @@ class SubtitleRemovalPageV14(BasePage):
             ]
             self.active_box_index = 0
             self._update_box_list_widget()
-            
-            # Force layout activation & events processing to quickly determine correct preview size
+
+            # Force layout activation & events processing to quickly determine correct preview size  # noqa: E501
             if self.parent_widget.layout():
                 self.parent_widget.layout().activate()
             from PySide6.QtCore import QCoreApplication
             QCoreApplication.processEvents()
             self.update_preview()
-            
+
             # Schedule a short deferred update as well
             QTimer.singleShot(50, self.update_preview)
-        except Exception as e:
+        except (OSError, av.AVError, StopIteration, ValueError) as e:
             log.error(f"Failed to load video preview: {e}")
             self.original_frame = None
             self.preview_label.setText(f"预览加载失败: {e}")
 
     def _is_smart_mode(self):
         """智能识别模式：不画框，服务端自动检测。"""
-        return getattr(self, "mode_switch", None) is not None and self.mode_switch.currentData() == "smart"
+        return getattr(self, "mode_switch", None) is not None and self.mode_switch.currentData() == "smart"  # noqa: E501
 
     def _is_select_mode(self):
         """标注选区模式：用户画四边形选区。"""
@@ -1017,7 +1032,7 @@ class SubtitleRemovalPageV14(BasePage):
 
     def _get_purpose(self):
         """用途：subtitle(去字幕) / watermark(去水印)。"""
-        return self.purpose_combo.currentData() if hasattr(self, "purpose_combo") else "subtitle"
+        return self.purpose_combo.currentData() if hasattr(self, "purpose_combo") else "subtitle"  # noqa: E501
 
     def _on_purpose_changed(self, _idx):
         """用途切换：去水印显示水印文字输入且支持旋转四边形；去字幕用轴对齐矩形。"""
@@ -1055,7 +1070,7 @@ class SubtitleRemovalPageV14(BasePage):
     def _sync_sliders_to_active_box(self):
         if self.active_box_index >= 0 and self.active_box_index < len(self.boxes):
             x, y, w, h = _quad_aabb(self.boxes[self.active_box_index])
-            
+
             self.x_slider.blockSignals(True)
             self.w_slider.blockSignals(True)
             self.y_slider.blockSignals(True)
@@ -1116,9 +1131,8 @@ class SubtitleRemovalPageV14(BasePage):
 
     def update_preview(self):
         # 本地模式处理中禁止更新预览；服务端模式上传后允许拖动预览
-        if self.worker and self.worker.isRunning():
-            if not isinstance(self.worker, RemoteVSRWorkerV14):
-                return
+        if self.worker and self.worker.isRunning() and not isinstance(self.worker, RemoteVSRWorkerV14):
+            return
 
         # 四边形直接在预览上拖角点编辑，无需从滑块同步
 
@@ -1136,8 +1150,10 @@ class SubtitleRemovalPageV14(BasePage):
             ratio = min(display_w / w_img, display_h / h_img)
             target_w = int(w_img * ratio)
             target_h = int(h_img * ratio)
-            if target_w < 1: target_w = 1
-            if target_h < 1: target_h = 1
+            if target_w < 1:
+                target_w = 1
+            if target_h < 1:
+                target_h = 1
 
             self.preview_label.target_w = target_w
             self.preview_label.target_h = target_h
@@ -1145,7 +1161,7 @@ class SubtitleRemovalPageV14(BasePage):
             self.preview_label.px_offset_y = (display_h - target_h) // 2
 
             # PIL resize
-            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.LANCZOS)  # noqa: E501
 
             # 绘制四边形选区（智能去除模式下不画）
             draw = ImageDraw.Draw(resized_img)
@@ -1157,7 +1173,7 @@ class SubtitleRemovalPageV14(BasePage):
                     width = 3 if is_active else 2
                     if allow_rot:
                         # 去水印：可旋转四边形 + 右下角旋转圆环把手
-                        pts = [(int(p[0] * target_w / w_img), int(p[1] * target_h / h_img)) for p in quad]
+                        pts = [(int(p[0] * target_w / w_img), int(p[1] * target_h / h_img)) for p in quad]  # noqa: E501
                         draw.polygon(pts, outline=outline, width=width)
                         if is_active:
                             hs = 5  # 手柄半边长
@@ -1169,9 +1185,9 @@ class SubtitleRemovalPageV14(BasePage):
                                                  outline="#ffd400", width=2)
                                     ax0, ay0 = hx + 3, hy - 8
                                     ax1, ay1 = hx + 10, hy - 14
-                                    draw.line([ax0, ay0, ax1, ay1], fill="#ffd400", width=2)
+                                    draw.line([ax0, ay0, ax1, ay1], fill="#ffd400", width=2)  # noqa: E501
                                     draw.polygon(
-                                        [(ax1, ay1 - 4), (ax1 + 4, ay1), (ax1 - 2, ay1 + 2)],
+                                        [(ax1, ay1 - 4), (ax1 + 4, ay1), (ax1 - 2, ay1 + 2)],  # noqa: E501
                                         fill="#ffd400")
                                 else:
                                     draw.rectangle([hx - hs, hy - hs, hx + hs, hy + hs],
@@ -1193,7 +1209,7 @@ class SubtitleRemovalPageV14(BasePage):
             # Convert to QImage
             rgb_img = resized_img.convert("RGB")
             data = rgb_img.tobytes("raw", "RGB")
-            qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)
+            qImg = QImage(data, target_w, target_h, target_w * 3, QImage.Format_RGB888)  # noqa: N806
             self.preview_label.setPixmap(QPixmap.fromImage(qImg))
 
     def _on_label_bounds_changed(self, idx):
@@ -1280,7 +1296,7 @@ class SubtitleRemovalPageV14(BasePage):
             sub_areas = ""
         elif purpose == "watermark":
             # 去水印：可旋转四边形 → 相对坐标四点；整体格式 [[ [四点] ], ...]
-            polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]
+            polys = [_quad_to_relative_polygon(q, self.frame_width, self.frame_height) for q in self.boxes]  # noqa: E501
             sub_areas = json.dumps(polys)
         else:
             # 去字幕：轴对齐矩形相对坐标 [[ymin,ymax,xmin,xmax], ...]
@@ -1332,7 +1348,7 @@ class SubtitleRemovalPageV14(BasePage):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.status_lbl.setText("状态: 正在终止中，请稍候...")
-            self.log_view.append("\n[WARN] 已发出停止指令，等待引擎退出...") 
+            self.log_view.append("\n[WARN] 已发出停止指令，等待引擎退出...")
             # 不在这里调用 cleanup_ui()，等 worker 的 finished 信号触发 on_worker_finished 统一处理
 
     def on_worker_progress(self, val):
@@ -1348,22 +1364,21 @@ class SubtitleRemovalPageV14(BasePage):
         self.cleanup_ui()
         if success:
             self.status_lbl.setText("状态: 字幕擦除完毕！")
-            
+
             msg_box = QMessageBox(self.parent_widget)
             msg_box.setIcon(QMessageBox.Information)
             msg_box.setWindowTitle("去字幕成功")
             msg_box.setText(f"字幕擦除并画面重绘成功！\n新生成的媒体文件已保存至：\n\n{out_path}")
-            
+
             open_btn = msg_box.addButton("打开文件夹", QMessageBox.ActionRole)
-            ok_btn = msg_box.addButton("确定", QMessageBox.AcceptRole)
-            
+            msg_box.addButton("确定", QMessageBox.AcceptRole)
+
             msg_box.exec()
-            
+
             if msg_box.clickedButton() == open_btn:
                 try:
-                    import subprocess
-                    subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
-                except Exception as e:
+                    open_in_explorer(out_path, select=True)
+                except OSError as e:
                     log.error(f"Failed to open output directory: {e}")
 
             # Restore original video preview with selection boxes overlaid
@@ -1374,7 +1389,7 @@ class SubtitleRemovalPageV14(BasePage):
                 self.update_preview()
                 return
 
-            self.status_lbl.setText(f"状态: 出错。")
+            self.status_lbl.setText("状态: 出错。")
             QMessageBox.critical(
                 self.parent_widget,
                 "处理失败",
@@ -1392,18 +1407,18 @@ class SubtitleRemovalPageV14(BasePage):
                 pix.loadFromData(data)
                 if not pix.isNull():
                     self.preview_label.setPixmap(pix.scaled(
-                        self.preview_label.size(), 
-                        Qt.KeepAspectRatio, 
+                        self.preview_label.size(),
+                        Qt.KeepAspectRatio,
                         Qt.SmoothTransformation
                     ))
-            except Exception:
+            except OSError:
                 pass
 
     def cleanup_ui(self):
         if self.timer:
             self.timer.stop()
             self.timer = None
-        
+
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.video_path_input.setEnabled(True)
@@ -1430,15 +1445,15 @@ class SubtitleRemovalPageV14(BasePage):
         path = self.video_path_input.text().strip()
         if not path or not os.path.exists(path):
             return
-            
+
         ext = os.path.splitext(path)[1].lower()
         if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
             return
-            
+
         try:
             container = av.open(path)
             video_stream = next(s for s in container.streams if s.type == 'video')
-            
+
             duration = video_stream.duration
             if duration is None or duration <= 0:
                 duration_sec = container.duration / 1000000.0
@@ -1446,24 +1461,24 @@ class SubtitleRemovalPageV14(BasePage):
                 target_ts = int(target_sec / float(video_stream.time_base))
             else:
                 target_ts = int(ratio * duration)
-                
+
             container.seek(target_ts, stream=video_stream)
-            
+
             frame_found = False
             for frame in container.decode(video_stream):
                 self.original_frame = frame.to_image()
                 frame_found = True
                 break
-                
+
             total_sec = container.duration / 1000000.0 if container.duration else 0.0
             container.close()
-            
+
             if frame_found:
                 self.update_preview()
                 curr_sec = ratio * total_sec
-                self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
-                
-        except Exception as e:
+                self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")  # noqa: E501
+
+        except (OSError, av.AVError, ValueError) as e:
             log.error(f"Seek failed: {e}")
 
     def _format_time(self, seconds):
@@ -1493,7 +1508,7 @@ class SubtitleRemovalPageV14(BasePage):
                 new_ratio = max(0.0, (val / 1000.0) - ratio_step)
                 self.seek_slider.setValue(int(new_ratio * 1000))
                 self._seek_to_ratio(new_ratio)
-        except Exception:
+        except (OSError, av.AVError):
             pass
 
     def _step_next_frame(self):
@@ -1510,5 +1525,5 @@ class SubtitleRemovalPageV14(BasePage):
                 new_ratio = min(1.0, (val / 1000.0) + ratio_step)
                 self.seek_slider.setValue(int(new_ratio * 1000))
                 self._seek_to_ratio(new_ratio)
-        except Exception:
+        except (OSError, av.AVError):
             pass

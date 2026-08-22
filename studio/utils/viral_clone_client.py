@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """仿爆款（Viral Clone）客户端：封装服务端 /viral/clone/* 接口族。
 
 服务端契约（权威：/agent/registry 中 viral_clone_analyze / viral_clone_plan）：
@@ -7,7 +6,7 @@
 - POST /viral/clone/plan      复刻规划（同步，依赖 analyze）
     {structure: object, product_info: string} → {script: object}
 - POST /viral/clone/flow      全链一条调用（下载→拆解→复刻；客户端仅传 material_id/video_path）
-    {material_id: int?/video_path: string?, product_info: string} → {ok, structure, script}
+    {material_id: int?/video_path: string?, product_info: string} → {ok, structure, script}  # noqa: E501
     抖音未登录/风控 → {need_login: true} / {captcha: true}（先扫码/滑块）
 
 下载原则（2026-08-16 定）：客户端发起的下载一律由客户端素材浏览器（apps/asset-browser，
@@ -17,6 +16,10 @@ Electron）完成，**不走服务端下载**（服务端仅做拆解/复刻）�
 生成（三替换）/组装（剪辑）/对比评价尚未在服务端注册为 viral 能力（卡 E-3.0），
 客户端 generate()/montage()/review() 先占位返回 ok=False + 明确提示。
 """
+import contextlib
+
+import requests
+
 from utils.http_client import http_post
 from utils.logger_utils import log
 from utils.scheduled_task_client import _server_url
@@ -66,11 +69,11 @@ def analyze(video_path=None, material_id=None, timeout=600):
         log.warning("[仿爆款] analyze 需要 video_path 或 material_id 至少一个")
         return None
     try:
-        r = http_post(f"{_server_url()}/viral/clone/analyze", json=body, timeout=timeout)
+        r = http_post(f"{_server_url()}/viral/clone/analyze", json=body, timeout=timeout)  # noqa: E501
         if r.status_code == 200:
             return r.json()
         log.warning(f"[仿爆款] analyze HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[仿爆款] analyze 失败: {e}")
     return None
 
@@ -86,7 +89,7 @@ def plan(structure, product_info, timeout=180):
         if r.status_code == 200:
             return r.json()
         log.warning(f"[仿爆款] plan HTTP {r.status_code}: {r.text[:200]}")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[仿爆款] plan 失败: {e}")
     return None
 
@@ -123,7 +126,7 @@ def flow(material_id=None, video_path=None, product_info="", timeout=900):
             return {"ok": False, "error": data.get("error") or "flow 未返回成功"}
         return {"ok": True, "structure": data.get("structure"),
                 "script": data.get("script")}
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         log.warning(f"[仿爆款] flow 失败: {e}")
         return {"ok": False, "error": f"flow 调用失败：{e}"}
 
@@ -145,7 +148,7 @@ def open_in_asset_browser(url=None, topic="爆款仿制"):
             return ab.launch_for_topic(topic, keyword=str(url).strip(),
                                        platform=platform)
         return ab.launch() + ("",)
-    except Exception as e:
+    except (ImportError, AttributeError, TypeError) as e:
         log.warning(f"[仿爆款] 打开素材浏览器失败: {e}")
         return False, f"打开素材浏览器失败：{e}", ""
 
@@ -193,10 +196,8 @@ def run_clone(video_ref, product_info="", on_log=None, timeout=900):
     """
     def _emit(msg):
         if on_log:
-            try:
+            with contextlib.suppress(Exception):
                 on_log(msg)
-            except Exception:
-                pass
         log.info(f"[仿爆款] {msg}")
 
     norm = normalize_source(video_ref)

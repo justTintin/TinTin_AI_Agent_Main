@@ -1,21 +1,33 @@
-# -*- coding: utf-8 -*-
-import os
-import sys
-import shutil
 import json
+import os
+import shutil
 import uuid
-from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
-                               QFileDialog, QProgressBar, QMessageBox, QFrame, QTableWidget,
-                               QTableWidgetItem, QHeaderView, QWidget, QInputDialog, QDialog)
-from PySide6.QtCore import Signal, QThread, Qt, QUrl
-from utils.base_worker import BaseWorker
-from PySide6.QtGui import QColor
-from utils.logger_utils import log
-from config.paths import PROJECT_ROOT
 
+from config.paths import PROJECT_ROOT
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from utils.base_worker import BaseWorker
 from utils.file_dialog_utils import pick_file
-from utils.gui_icons import mdi_button
-VOICE_SAMPLES_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "assets", "voice_samples"))
+from utils.gui_icons import mdi_button, icon_button
+from utils.logger_utils import log
+
+VOICE_SAMPLES_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "assets", "voice_samples"))  # noqa: E501
 METADATA_PATH = os.path.join(VOICE_SAMPLES_DIR, "metadata.json")
 
 class PunctuationLLMWorker(BaseWorker):
@@ -29,8 +41,8 @@ class PunctuationLLMWorker(BaseWorker):
     def run(self):
         try:
             from utils.llm_proxy import llm_chat
-            system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"
-            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)
+            system_prompt = "你是一个智能语音识别文本后处理助手。你的任务是给一段没有标点符号的语音识别文本添加合理的标点符号（，。！？：等），并进行合理的断句，使阅读更清晰自然。请绝对不要修改、增加或删除原文本的任何字词（只允许增删标点符号），直接输出加上标点后的纯文本，不要有任何多余的解释或包裹标记。"  # noqa: E501
+            content = llm_chat(system_prompt, self.raw_text, model=self.model, temperature=0.3, timeout=25)  # noqa: E501
             if content.startswith("```"):
                 content = content.replace("```", "").strip()
             self.finished.emit(content)
@@ -44,7 +56,7 @@ def load_voice_samples():
             json.dump([], f, indent=4, ensure_ascii=False)
         return []
     try:
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        with open(METADATA_PATH, encoding="utf-8") as f:
             samples = json.load(f)
         # Always resolve path from filename relative to VOICE_SAMPLES_DIR
         # so the project can be moved without breaking sample references.
@@ -64,7 +76,7 @@ def save_voice_samples(samples):
     except Exception as e:
         log.error(f"保存声音样本元数据失败: {e}")
 
-from gui.base_page import BasePage
+from gui.base_page import BasePage  # noqa: E402
 
 
 class VoiceSamplesPage(BasePage):
@@ -77,13 +89,8 @@ class VoiceSamplesPage(BasePage):
     def setup(self):
         # Main layout
         main_layout = QVBoxLayout(self.parent_widget)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(20)
-
-        # Title
-        heading = QLabel(" 声音样本库管理")
-        heading.setObjectName("heading")
-        main_layout.addWidget(heading, 0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(12)
 
         # 1. Form Card for adding voice samples
         form_card = QFrame()
@@ -103,7 +110,7 @@ class VoiceSamplesPage(BasePage):
         self.file_path_input.setReadOnly(True)
         self.file_path_input.setPlaceholderText("点击右侧按钮选择 wav/mp3/m4a 声音文件...")
         row_file.addWidget(self.file_path_input)
-        
+
         btn_browse = mdi_button("浏览文件", "folder")
         btn_browse.setObjectName("secondary_button")
         btn_browse.clicked.connect(self._browse_audio_file)
@@ -121,6 +128,8 @@ class VoiceSamplesPage(BasePage):
         # Reference text description row
         row_text = QHBoxLayout()
         row_text.addWidget(QLabel("参考文案(可选):"))
+        ref_text_col = QVBoxLayout()
+        ref_text_col.setSpacing(6)
         self.ref_text_input = QTextEdit()
         self.ref_text_input.setPlaceholderText("选填。填入参考音频对应的说话文字，克隆时会自动填充参考文案框...")
         self.ref_text_input.setFixedHeight(50)
@@ -138,17 +147,15 @@ class VoiceSamplesPage(BasePage):
                 background-color: rgba(255, 255, 255, 0.08);
             }
         """)
-        row_text.addWidget(self.ref_text_input)
-        form_layout.addLayout(row_text)
+        ref_text_col.addWidget(self.ref_text_input)
+        row_text.addLayout(ref_text_col, 1)
 
-        # Form action buttons row
-        row_form_actions = QHBoxLayout()
-        self.btn_add_sample = QPushButton(" 添加声音样本")
+        self.btn_add_sample = mdi_button("添加声音样本", "plus")
         self.btn_add_sample.setObjectName("primary_button")
+        self.btn_add_sample.setFixedHeight(50)
         self.btn_add_sample.clicked.connect(self._add_voice_sample)
-        row_form_actions.addWidget(self.btn_add_sample)
-        row_form_actions.addStretch()
-        form_layout.addLayout(row_form_actions)
+        row_text.addWidget(self.btn_add_sample)
+        form_layout.addLayout(row_text)
 
         main_layout.addWidget(form_card, 0)
 
@@ -169,15 +176,15 @@ class VoiceSamplesPage(BasePage):
         # Table
         self.samples_table = QTableWidget()
         self.samples_table.setColumnCount(5)
-        self.samples_table.setHorizontalHeaderLabels(["序号", "样本名称", "参考文案", "文件名", "操作"])
-        self.samples_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.samples_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
+        self.samples_table.setHorizontalHeaderLabels(["序号", "样本名称", "参考文案", "文件名", "操作"])  # noqa: E501
+        self.samples_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # noqa: E501
+        self.samples_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)  # noqa: E501
         self.samples_table.setColumnWidth(1, 150)
-        self.samples_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.samples_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+        self.samples_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)  # noqa: E501
+        self.samples_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)  # noqa: E501
         self.samples_table.setColumnWidth(3, 180)
-        self.samples_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
-        self.samples_table.setColumnWidth(4, 160)
+        self.samples_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.samples_table.horizontalHeader().setStretchLastSection(True)
         self.samples_table.verticalHeader().setDefaultSectionSize(38)
         self.samples_table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
         table_layout.addWidget(self.samples_table, 1)
@@ -253,7 +260,7 @@ class VoiceSamplesPage(BasePage):
 
             self._load_table_data()
             self.status_label.setText(" 成功添加声音样本库！")
-            QMessageBox.information(self.parent_widget, "成功", f"人声样本 '{name}' 已成功导入样本库！")
+            QMessageBox.information(self.parent_widget, "成功", f"人声样本 '{name}' 已成功导入样本库！")  # noqa: E501
         except Exception as e:
             log.error(f"添加人声样本失败: {e}")
             self.status_label.setText("失败： 添加失败")
@@ -264,10 +271,10 @@ class VoiceSamplesPage(BasePage):
     def _load_table_data(self):
         self.samples_table.setRowCount(0)
         samples = load_voice_samples()
-        
+
         # Sort by name
         samples.sort(key=lambda x: x.get("name", "").lower())
-        
+
         self.samples_table.setRowCount(len(samples))
         for i, s in enumerate(samples):
             # 0: Index
@@ -301,35 +308,23 @@ class VoiceSamplesPage(BasePage):
             sample_id = s.get("id")
             path = s.get("path")
 
-            btn_play = QPushButton("")
-            btn_play.setToolTip("播放")
-            btn_play.setStyleSheet("padding: 0px; font-size: 11px;")
-            btn_play.setFixedWidth(28)
+            btn_play = icon_button("play", "播放", size=18)
             btn_play.clicked.connect(lambda checked=False, p=path: self._play_sample(p))
             h_layout.addWidget(btn_play)
 
-            # Transcribe/generate text button (always visible)
-            btn_asr = QPushButton("")
-            btn_asr.setToolTip("根据音频生成/更新参考文案")
-            btn_asr.setStyleSheet("padding: 0px; font-size: 11px;")
-            btn_asr.setFixedWidth(28)
-            btn_asr.clicked.connect(lambda checked=False, p=path, sid=sample_id: self._generate_ref_text(p, sid))
+            btn_asr = icon_button("edit", "根据音频生成/更新参考文案", size=18)
+            btn_asr.clicked.connect(lambda checked=False, p=path, sid=sample_id: self._generate_ref_text(p, sid))  # noqa: E501
             h_layout.addWidget(btn_asr)
 
-            btn_rename = QPushButton("")
-            btn_rename.setToolTip("重命名")
-            btn_rename.setStyleSheet("padding: 0px; font-size: 11px;")
-            btn_rename.setFixedWidth(28)
-            btn_rename.clicked.connect(lambda checked=False, idx=i, sid=sample_id: self._rename_sample(idx, sid))
+            btn_rename = icon_button("pencil", "重命名", size=18)
+            btn_rename.clicked.connect(lambda checked=False, idx=i, sid=sample_id: self._rename_sample(idx, sid))  # noqa: E501
             h_layout.addWidget(btn_rename)
 
-            btn_delete = QPushButton("")
-            btn_delete.setToolTip("删除")
-            btn_delete.setStyleSheet("padding: 0px; font-size: 11px;")
-            btn_delete.setFixedWidth(28)
-            btn_delete.clicked.connect(lambda checked=False, idx=i, sid=sample_id: self._delete_sample(idx, sid))
+            btn_delete = icon_button("delete", "删除", size=18)
+            btn_delete.clicked.connect(lambda checked=False, idx=i, sid=sample_id: self._delete_sample(idx, sid))  # noqa: E501
             h_layout.addWidget(btn_delete)
 
+            h_layout.addStretch()
             self.samples_table.setCellWidget(i, 4, widget)
 
     def _play_sample(self, wav_path):
@@ -337,20 +332,21 @@ class VoiceSamplesPage(BasePage):
             QMessageBox.warning(self.parent_widget, "错误", "音频文件不存在，无法播放。")
             return
         try:
-            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-            
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
             if not self._media_player:
                 self._media_player = QMediaPlayer()
                 self._audio_output = QAudioOutput()
                 self._media_player.setAudioOutput(self._audio_output)
-            
+
             if self._media_player.playbackState() == QMediaPlayer.PlayingState:
                 self._media_player.stop()
-                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):
+                if self._media_player.source().toLocalFile() == os.path.abspath(wav_path):  # noqa: E501
                     return
-            
+
             self._media_player.setSource(QUrl.fromLocalFile(wav_path))
-            self._audio_output.setVolume(1.0)
+            if self._audio_output is not None:
+                self._audio_output.setVolume(1.0)
             self._media_player.play()
         except Exception as e:
             log.error(f"播放样本音频失败: {e}")
@@ -364,7 +360,7 @@ class VoiceSamplesPage(BasePage):
                 break
         if not target:
             return
-            
+
         new_name, ok = QInputDialog.getText(
             self.parent_widget,
             "重命名样本",
@@ -437,7 +433,7 @@ class VoiceSamplesPage(BasePage):
 
             def do_work(self):
                 try:
-                    from utils.asr_client import transcribe_remote, read_asr_url
+                    from utils.asr_client import read_asr_url, transcribe_remote
                     segments = transcribe_remote(
                         self.audio_path, read_asr_url(),
                         language="",
@@ -532,7 +528,7 @@ class VoiceSamplesPage(BasePage):
             sample_id = item.data(Qt.UserRole)
             if not sample_id:
                 return
-            
+
             samples = load_voice_samples()
             target = None
             for s in samples:
@@ -541,10 +537,10 @@ class VoiceSamplesPage(BasePage):
                     break
             if not target:
                 return
-            
+
             from gui.video_montage_page import TextEditDialog
-            
-            dialog = TextEditDialog(f"编辑参考文案 - {target.get('name')}", target.get("ref_text", ""), self.parent_widget)
+
+            dialog = TextEditDialog(f"编辑参考文案 - {target.get('name')}", target.get("ref_text", ""), self.parent_widget)  # noqa: E501
             if dialog.exec() == QDialog.Accepted:
                 new_text = dialog.get_text().strip()
                 target["ref_text"] = new_text

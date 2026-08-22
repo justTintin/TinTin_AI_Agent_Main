@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """Windows 开机自启管理（HKCU\\...\\CurrentVersion\\Run 注册表键）。
 
 源码模式：写 "pythonw.exe" "studio/gui_main.py"（脚本目录自动入 sys.path，无需额外环境）。
 打包模式：直接写 exe 路径。
 """
+import contextlib
 import os
 import sys
 import winreg
@@ -20,7 +20,7 @@ def _autostart_command() -> str:
         alt = os.path.join(os.path.dirname(python_exe), "pythonw.exe")
         if os.path.isfile(alt):
             python_exe = alt
-    entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gui_main.py")
+    entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gui_main.py")  # noqa: E501
     return f'"{python_exe}" "{entry}"'
 
 
@@ -42,12 +42,10 @@ def set_enabled(enabled: bool) -> bool:
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY)
         try:
             if enabled:
-                winreg.SetValueEx(key, _VALUE_NAME, 0, winreg.REG_SZ, _autostart_command())
+                winreg.SetValueEx(key, _VALUE_NAME, 0, winreg.REG_SZ, _autostart_command())  # noqa: E501
             else:
-                try:
+                with contextlib.suppress(OSError):
                     winreg.DeleteValue(key, _VALUE_NAME)
-                except OSError:
-                    pass
         finally:
             winreg.CloseKey(key)
         return True

@@ -1,9 +1,11 @@
-# -*- coding: utf-8 -*-
 """智能体编排客户端：封装 /agent 接口族（能力注册表 + 编排任务树 + 中间产物）。
 
 服务端「智能体化」契约（权威：服务端 /guide 智能体化章节，客户端 PRD_V2.2 §13）：
-- GET  /agent/registry                 能力注册表（只读；数量以服务端实时返回为准，含 viral 仿爆款/音频生成等；include_external 附加客户端/外部）
-- POST /agent/tasks                    登记编排任务；mode=execute 提交 plan 由服务端 Orchestrator 自动执行
+- GET  /agent/registry                 能力注册表（只读；数量以服务端实时返回为准，
+                                         含 viral 仿爆款/音频生成等；
+                                         include_external 附加客户端/外部）
+- POST /agent/tasks                    登记编排任务；mode=execute 提交 plan
+                                         由服务端 Orchestrator 自动执行
 - GET  /agent/tasks                    列表（默认只列根任务；root_only=false 全部）
 - GET  /agent/tasks/{id}               详情 + children 嵌套子任务树（derived_status 聚合推导）
 - PATCH /agent/tasks/{id}              更新状态/进度/结果（执行器与客户端共用）
@@ -14,7 +16,10 @@
 
 任务 id 前缀 a_；/tasks/unified/{id} 已打通（返回完整子任务树）。
 """
+import json
 import os
+
+from requests.exceptions import RequestException
 
 from utils.http_client import http_get, http_post, logged_request
 from utils.logger_utils import log
@@ -26,7 +31,7 @@ def _machine_id() -> str:
     try:
         from utils.license import get_machine_id
         return get_machine_id() or ""
-    except Exception:
+    except Exception:  # 外部API调用（license导入/执行）
         return ""
 
 
@@ -57,7 +62,7 @@ def get_registry(include_external=False, timeout=10):
         if r.status_code == 200:
             return r.json()
         log.warning(f"[智能体] get_registry HTTP {r.status_code}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] get_registry 失败: {e}")
     return None
 
@@ -68,7 +73,7 @@ def get_capability(capability_id, timeout=10):
         r = http_get(f"{_server_url()}/agent/registry/{capability_id}", timeout=timeout)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] get_capability({capability_id}) 失败: {e}")
     return None
 
@@ -88,7 +93,7 @@ def get_agents(timeout=10):
                 return data.get("agents") or []
             if isinstance(data, list):
                 return data
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] get_agents 失败: {e}")
     return []
 
@@ -120,7 +125,7 @@ def create_task(goal=None, plan=None, capability=None, params=None,
         if r.status_code == 200:
             return r.json()
         log.warning(f"[智能体] create_task HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] create_task 失败: {e}")
     return None
 
@@ -142,7 +147,7 @@ def list_tasks(root_only=True, status=None, parent_task_id=None, timeout=10):
         if r.status_code == 200:
             return r.json()
         log.warning(f"[智能体] list_tasks HTTP {r.status_code}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] list_tasks 失败: {e}")
     return {}
 
@@ -154,7 +159,7 @@ def get_task(task_id, timeout=10):
         if r.status_code == 200:
             return r.json()
         log.warning(f"[智能体] get_task({task_id}) HTTP {r.status_code}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] get_task({task_id}) 失败: {e}")
     return None
 
@@ -179,7 +184,7 @@ def update_task(task_id, status=None, progress=None, result=None,
         r = logged_request("PATCH", f"{_server_url()}/agent/tasks/{task_id}",
                            json=body, timeout=timeout)
         return r.status_code == 200
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] update_task({task_id}) 失败: {e}")
         return False
 
@@ -187,11 +192,11 @@ def update_task(task_id, status=None, progress=None, result=None,
 def _action(task_id, action, timeout=10):
     """POST /agent/tasks/{id}/{action} 通用操作（cancel/confirm/pause/resume/retry）。"""
     try:
-        r = http_post(f"{_server_url()}/agent/tasks/{task_id}/{action}", timeout=timeout)
+        r = http_post(f"{_server_url()}/agent/tasks/{task_id}/{action}", timeout=timeout)  # noqa: E501
         if r.status_code == 200:
             return r.json()
         log.warning(f"[智能体] {action}({task_id}) HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] {action}({task_id}) 失败: {e}")
     return None
 
@@ -225,12 +230,12 @@ def cancel_task(task_id, timeout=10):
 def list_artifacts(task_id, timeout=10):
     """GET /agent/tasks/{id}/artifacts → 任务中间产物列表（自动 + 手动）。失败返回 []。"""
     try:
-        r = http_get(f"{_server_url()}/agent/tasks/{task_id}/artifacts", timeout=timeout)
+        r = http_get(f"{_server_url()}/agent/tasks/{task_id}/artifacts", timeout=timeout)  # noqa: E501
         if r.status_code == 200:
             data = r.json()
             return data.get("artifacts") or data.get("items") or []
         log.warning(f"[智能体] list_artifacts({task_id}) HTTP {r.status_code}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] list_artifacts({task_id}) 失败: {e}")
     return []
 
@@ -243,7 +248,7 @@ def register_artifact(task_id, kind, file_ref, meta=None, timeout=10):
             "meta": meta or {},
         })
         return r.status_code == 200
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] register_artifact({task_id}) 失败: {e}")
         return False
 
@@ -291,7 +296,7 @@ def agent_chat(message, history=None, agent_id=None, model=None,
                 "tool_calls": data.get("tool_calls") or [],
             }
         log.warning(f"[智能体] agent_chat HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[智能体] agent_chat 失败: {e}")
     return None
 
@@ -312,10 +317,10 @@ def delete_session(session_id, machine_id=None, timeout=10):
     if not session_id:
         return False
     try:
-        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}", machine_id)
+        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}", machine_id)  # noqa: E501
         r = logged_request("DELETE", url, timeout=timeout)
         return r.status_code == 200
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[会话] delete_session({session_id}) 失败: {e}")
         return False
 
@@ -328,14 +333,14 @@ def session_attachments(session_id, machine_id=None, timeout=10):
     if not session_id:
         return []
     try:
-        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}/attachments",
+        url = _attach_machine(f"{_server_url()}/agent/sessions/{session_id}/attachments",  # noqa: E501
                               machine_id)
         r = http_get(url, timeout=timeout)
         if r.status_code == 200:
             data = r.json()
             return data.get("attachments") or []
         log.warning(f"[会话] session_attachments({session_id}) HTTP {r.status_code}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[会话] session_attachments({session_id}) 失败: {e}")
     return []
 
@@ -356,7 +361,7 @@ def session_attachment_add(session_id, material_id=None, file_path=None,
             log.info(f"[会话] 素材入池 session={session_id} material_id={material_id}")
             r = http_post(url, data={"material_id": str(material_id)}, timeout=30)
         elif file_path and os.path.isfile(file_path):
-            log.info(f"[会话] 附件入池 session={session_id} file={os.path.basename(file_path)}")
+            log.info(f"[会话] 附件入池 session={session_id} file={os.path.basename(file_path)}")  # noqa: E501
             with open(file_path, "rb") as f:
                 r = http_post(url, files={"file": (os.path.basename(file_path), f)},
                               timeout=timeout)
@@ -370,7 +375,7 @@ def session_attachment_add(session_id, material_id=None, file_path=None,
                 att["file_ref"] = str(material_id)  # 素材库引用的删除 key = material_id
             return att
         log.warning(f"[会话] 素材入池 HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[会话] 素材入池失败: {e}")
     return None
 
@@ -387,19 +392,19 @@ def session_attachment_remove(session_id, key, machine_id=None, timeout=10):
         return False
     try:
         url = _attach_machine(
-            f"{_server_url()}/agent/sessions/{session_id}/attachments/{key}", machine_id)
+            f"{_server_url()}/agent/sessions/{session_id}/attachments/{key}", machine_id)  # noqa: E501
         r = logged_request("DELETE", url, timeout=timeout)
         if r.status_code == 200:
             try:
                 removed = r.json().get("removed")
-            except Exception:
+            except json.JSONDecodeError:
                 removed = None
             if removed == 0:  # 200 但没删到任何条目 → 视为失败
-                log.warning(f"[会话] 素材移除未生效 session={session_id} key={key}（服务端 removed=0）")
+                log.warning(f"[会话] 素材移除未生效 session={session_id} key={key}（服务端 removed=0）")  # noqa: E501
                 return False
             log.info(f"[会话] 素材移除 session={session_id} key={key}")
             return True
         log.warning(f"[会话] 素材移除 HTTP {r.status_code}: {r.text[:150]}")
-    except Exception as e:
+    except RequestException as e:
         log.warning(f"[会话] 素材移除({key}) 失败: {e}")
     return False

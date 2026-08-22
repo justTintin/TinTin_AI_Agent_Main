@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 「我的知识库」数据层。
 
@@ -6,13 +7,11 @@
 
 存储：JSON 文件（config.paths.MY_KNOWLEDGE_FILE），沿用项目「Manager 类 + JSON」模式。
 """
-import json
 import os
+import json
 import time
-from typing import Any
 
-from config.paths import KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR, MY_KNOWLEDGE_FILE
-
+from config.paths import MY_KNOWLEDGE_FILE, KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
 from utils.logger_utils import log
 
 # 风格参考样本类型：从素材浏览器同步的关注/收藏视频文章（标题+文案文本为主，关联源/媒体）
@@ -47,7 +46,7 @@ PRODUCT_CAT_OPTIONS  = ["笔电", "鼠标类", "键盘类", "外设类", "台机
 INDUSTRY_OPTIONS     = ["科技类", "财经类", "电商行业类"]
 
 # 条目类型（场景）。可扩展，风格化排在最前供文案页默认勾选。
-ENTRY_TYPES = [STYLIZATION_TYPE, "品牌调性", "话术风格", "人设口吻", "选题方向", "禁用词/红线", REFERENCE_TYPE, "其他"]  # noqa: E501
+ENTRY_TYPES = [STYLIZATION_TYPE, "品牌调性", "话术风格", "人设口吻", "选题方向", "禁用词/红线", REFERENCE_TYPE, "其他"]
 
 
 class MyKnowledgeManager:
@@ -59,9 +58,9 @@ class MyKnowledgeManager:
     def load(self):
         if os.path.exists(self.file_path):
             try:
-                with open(self.file_path, encoding="utf-8-sig") as f:
+                with open(self.file_path, "r", encoding="utf-8-sig") as f:
                     self.items = json.load(f)
-            except (OSError, json.JSONDecodeError) as e:
+            except Exception as e:
                 log.error(f"加载我的知识库失败: {e}")
                 self.items = []
         else:
@@ -73,7 +72,7 @@ class MyKnowledgeManager:
             os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump(self.items, f, indent=4, ensure_ascii=False)
-        except OSError as e:
+        except Exception as e:
             log.error(f"保存我的知识库失败: {e}")
 
     def all_items(self):
@@ -135,23 +134,23 @@ class MyKnowledgeManager:
         raw_path = items_path or _find_kb_json("kb_items.json")
 
         # 合并两个来源：url → entry，kb_sync 优先（数据更丰富）
-        all_entries: dict[str, Any] = {}
+        all_entries = {}
         if os.path.exists(sync_path):
             try:
-                with open(sync_path, encoding="utf-8-sig") as f:
+                with open(sync_path, "r", encoding="utf-8-sig") as f:
                     for e in json.load(f):
                         url = (e.get("url") or "").strip()
                         all_entries[url or f"_s{len(all_entries)}"] = e
-            except (OSError, json.JSONDecodeError):
+            except Exception:
                 pass
         if os.path.exists(raw_path):
             try:
-                with open(raw_path, encoding="utf-8-sig") as f:
+                with open(raw_path, "r", encoding="utf-8-sig") as f:
                     for e in json.load(f):
                         url = (e.get("url") or "").strip()
                         if url and url not in all_entries:
                             all_entries[url] = e
-            except (OSError, json.JSONDecodeError):
+            except Exception:
                 pass
 
         if not all_entries:
@@ -212,7 +211,7 @@ class MyKnowledgeManager:
             added += 1
         if added or updated:
             self.save()
-        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在），更新 {updated} 条下载路径。"  # noqa: E501
+        return added, skipped, f"导入完成：新增 {added} 条，跳过 {skipped} 条（已存在），更新 {updated} 条下载路径。"
 
     def sync_media_paths(self, manifest_path=None):
         """
@@ -224,18 +223,18 @@ class MyKnowledgeManager:
         if not os.path.exists(sync_path):
             return 0
         try:
-            with open(sync_path, encoding="utf-8-sig") as f:
+            with open(sync_path, "r", encoding="utf-8-sig") as f:
                 entries = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
+        except Exception as e:
             log.error(f"读取 kb_sync.json 失败: {e}")
             return 0
         if not isinstance(entries, list):
             return 0
         # 构建 url → mediaPath 映射
         url_to_media = {}
-        for entry in entries:
-            url = (entry.get("url") or "").strip()
-            mp = (entry.get("mediaPath") or "").strip()
+        for e in entries:
+            url = (e.get("url") or "").strip()
+            mp = (e.get("mediaPath") or "").strip()
             if url and mp:
                 url_to_media[url] = mp
         if not url_to_media:
@@ -265,9 +264,9 @@ class MyKnowledgeManager:
                 "请先在素材浏览器「收藏记录」标签中收集内容，收藏记录会自动同步到此路径。"
             )
         try:
-            with open(fpath, encoding="utf-8-sig") as f:
+            with open(fpath, "r", encoding="utf-8-sig") as f:
                 entries = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
+        except Exception as e:
             return 0, 0, f"读取收藏记录失败：{e}"
         if not isinstance(entries, list):
             return 0, 0, "收藏记录格式异常（应为数组）。"
@@ -281,25 +280,25 @@ class MyKnowledgeManager:
         url_to_media = {}
         if os.path.exists(sync_path):
             try:
-                with open(sync_path, encoding="utf-8-sig") as f:
+                with open(sync_path, "r", encoding="utf-8-sig") as f:
                     for se in json.load(f):
                         s_url = (se.get("url") or "").strip()
                         s_mp = (se.get("mediaPath") or "").strip()
                         if s_url and s_mp:
                             url_to_media[s_url] = s_mp
-            except (OSError, json.JSONDecodeError):
+            except Exception:
                 pass
 
         added = skipped = 0
-        for entry in entries:
-            url = (entry.get("url") or "").strip()
+        for e in entries:
+            url = (e.get("url") or "").strip()
             if url and url in existing_urls:
                 skipped += 1
                 continue
-            title = (entry.get("title") or "").strip()
-            caption = (entry.get("caption") or "").strip()
-            platform_name = (entry.get("platformName") or entry.get("platform") or "").strip()
-            creator = (entry.get("creatorName") or "").strip()
+            title = (e.get("title") or "").strip()
+            caption = (e.get("caption") or "").strip()
+            platform_name = (e.get("platformName") or e.get("platform") or "").strip()
+            creator = (e.get("creatorName") or "").strip()
             content_parts = [p for p in (title, caption) if p]
             content = "\n\n".join(content_parts) or "(无文本)"
             name = f"[{platform_name}][{creator}] {title[:30]}".strip()
@@ -309,16 +308,16 @@ class MyKnowledgeManager:
                 "type": REFERENCE_TYPE,
                 "content": content,
                 "source": {
-                    "platform": entry.get("platform", ""),
+                    "platform": e.get("platform", ""),
                     "platformName": platform_name,
                     "creator": creator,
                     "url": url,
                     "media_path": url_to_media.get(url, ""),
-                    "date": entry.get("date", ""),
-                    "heat": entry.get("heat", ""),
-                    "media_type": entry.get("type", ""),
-                    "is_collected": bool(entry.get("isCollected", False)),
-                    "is_liked": bool(entry.get("isLiked", False)),
+                    "date": e.get("date", ""),
+                    "heat": e.get("heat", ""),
+                    "media_type": e.get("type", ""),
+                    "is_collected": bool(e.get("isCollected", False)),
+                    "is_liked": bool(e.get("isLiked", False)),
                 },
                 "created_at": int(time.time()),
                 "updated_at": int(time.time()),
@@ -358,11 +357,11 @@ class MyKnowledgeManager:
         self.save()
         return True
 
-    def recommend_stylizations(self, dim: str | None = None, dim_value: str | None = None) -> list:
+    def recommend_stylizations(self, dim: str = None, dim_value: str = None) -> list:
         """按评分降序返回所有风格化；若指定维度/取值则匹配的排最前。"""
         items = [it for it in self.items if it.get("type") == STYLIZATION_TYPE]
         def _sort_key(it):
-            match = (it.get("dim") == dim and it.get("dim_value") == dim_value) if dim else False  # noqa: E501
+            match = (it.get("dim") == dim and it.get("dim_value") == dim_value) if dim else False
             return (0 if match else 1, -(it.get("score") or 5.0))
         items.sort(key=_sort_key)
         return items

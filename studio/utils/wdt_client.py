@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 旺店通 ERP OpenAPI2 客户端（纯 Python，仅依赖标准库）。
 
@@ -5,15 +6,13 @@
 接口文档：https://open.wangdian.cn/open/apidoc
 本模块只实现知识库需要的「库存查询 stock_query」。
 """
-import contextlib
-import hashlib
-import json
 import os
+import json
 import time
-import urllib.error
+import hashlib
 import urllib.parse
 import urllib.request
-from typing import Any
+import urllib.error
 
 from config.paths import PROJECT_ROOT
 
@@ -32,16 +31,16 @@ def load_erp_config():
     """读取 ERP 凭据配置；不存在则写入沙箱默认值并返回。"""
     try:
         if os.path.exists(ERP_CONFIG_FILE):
-            with open(ERP_CONFIG_FILE, encoding="utf-8") as f:
+            with open(ERP_CONFIG_FILE, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             return {**_DEFAULT_CONFIG, **(cfg or {})}
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     try:
         os.makedirs(os.path.dirname(ERP_CONFIG_FILE), exist_ok=True)
         with open(ERP_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(_DEFAULT_CONFIG, f, indent=4, ensure_ascii=False)
-    except OSError:
+    except Exception:
         pass
     return dict(_DEFAULT_CONFIG)
 
@@ -82,7 +81,7 @@ class WdtClient:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
             return {"code": -1, "message": f"网络请求失败: {e}"}
-        except Exception as e:  # urllib 外部API
+        except Exception as e:
             return {"code": -1, "message": str(e)}
 
     def stock_query(self, page_no=0, page_size=100, warehouse_no=None,
@@ -130,7 +129,7 @@ class WdtClient:
             total = None
             collected = 0
             while True:
-                resp = self.goods_query(page_no=page_no, page_size=page_size, start_time=st, end_time=et)  # noqa: E501
+                resp = self.goods_query(page_no=page_no, page_size=page_size, start_time=st, end_time=et)
                 if resp.get("code") != 0:
                     # 时间窗内无数据等业务错误不致命，跳过本窗
                     break
@@ -146,8 +145,10 @@ class WdtClient:
                         }
                 collected += len(goods)
                 if progress_cb:
-                    with contextlib.suppress(Exception):
+                    try:
                         progress_cb(len(mapping))
+                    except Exception:
+                        pass
                 if not goods or (total and collected >= total):
                     break
                 page_no += 1
@@ -162,11 +163,11 @@ class WdtClient:
         progress_cb(fetched, total) 可选，用于上报进度。
         返回 (records, error)：error 为 None 表示成功。
         """
-        records: list[dict] = []
+        records = []
         page_no = 0
         total = None
         while True:
-            resp = self.stock_query(page_no=page_no, page_size=page_size, warehouse_no=warehouse_no)  # noqa: E501
+            resp = self.stock_query(page_no=page_no, page_size=page_size, warehouse_no=warehouse_no)
             if resp.get("code") != 0:
                 return records, resp.get("message", "未知错误")
             if total is None:
@@ -174,8 +175,10 @@ class WdtClient:
             batch = resp.get("stocks", []) or []
             records.extend(batch)
             if progress_cb:
-                with contextlib.suppress(Exception):
+                try:
                     progress_cb(len(records), total)
+                except Exception:
+                    pass
             if not batch or (total and len(records) >= total):
                 break
             page_no += 1
@@ -196,9 +199,9 @@ def map_stocks_to_kb(stock_records):
 
     def fmt(n):
         # 去掉无意义的小数（371.0000 -> 371）
-        return str(int(n)) if abs(n - int(n)) < 1e-6 else f"{n:.4f}".rstrip("0").rstrip(".")  # noqa: E501
+        return str(int(n)) if abs(n - int(n)) < 1e-6 else f"{n:.4f}".rstrip("0").rstrip(".")
 
-    agg: dict[str, Any] = {}
+    agg = {}
     for r in stock_records:
         spec_no = str(r.get("spec_no", "")).strip()
         key = spec_no or f"{r.get('brand_name','')}|{r.get('goods_name','')}"

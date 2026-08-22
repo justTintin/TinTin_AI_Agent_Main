@@ -1,188 +1,147 @@
+# -*- coding: utf-8 -*-
 """智能混剪 - 分割阶段 Worker：场景检测、挑精华、镜头评分。"""
-import contextlib
 import os
+import subprocess
+import time as _time
 import traceback
-
-import requests.exceptions
-from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 from PySide6.QtCore import Signal
-from utils.api_error import ApiError
 from utils.base_worker import BaseWorker
-from utils.ffmpeg_utils import CREATE_NO_WINDOW, cut_video, run
-from utils.hwaccel import get_video_encode_args
 from utils.logger_utils import log
-from utils.montage_client import beat, download_result, poll_unified, result_url, split
+from utils.hwaccel import get_video_encode_args, get_hwaccel_decode_args, get_encoder
+from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
 
 
-class ServerSplitWorker(BaseWorker):
-    """服务端镜头分割 + 逐镜分析（POST /montage/split，分割+分析合并接口）。
 
-    信号契约：
-        finished(output_dir, scene_count, [(start_sec, end_sec), ...])
-    新增：
-        analysis_ready(list)  # [{filename, shot_index, aesthetic_score, shot_analysis, description}, ...]  # noqa: E501
-
-    素材来源三选一（服务端解析）：
-        - video_path：本地视频/图片文件（传 file，视频做分割、图片转静态镜头）
-        - material_id：素材库素材 id（传 material_id）
-        - clip_url：素材地址（material://{id} / http(s)://... / 本地路径）
-
-    片段由服务端裁好，通过 shots[].download_url 下载到 output_dir（文件名保持
-    {源名}_shot_{序号:03d}.mp4，与 _rename_video_splits_with_metadata 期望的 _shot_ 前缀一致）；
-    下载失败时若有本地源文件则回退本地 ffmpeg 按 start/end 重裁，否则该镜跳过。
-    """
-
+class PySceneDetectWorker(BaseWorker):
     stage = Signal(str)
     progress = Signal(int)
     busy = Signal(bool)
-    finished = Signal(str, int, list)
-    analysis_ready = Signal(list)
+    finished = Signal(str, int, list)  # Output directory, number of scenes, list of (start_sec, end_sec)
 
-    def __init__(self, video_path=None, output_dir="", threshold=27, min_scene_len=0.5,
-                 server_url=None, material_id="", clip_url="", product_mode=False,
-                 image_duration=3.0, analyze=True):
+    def __init__(self, video_path, output_dir, threshold, min_scene_len):
         super().__init__()
-        self.video_path = video_path or ""
+        self.video_path = video_path
         self.output_dir = output_dir
         self.threshold = threshold
         self.min_scene_len = min_scene_len
-        self.server_url: str = (server_url or "").strip().rstrip("/")
-        self.material_id = (material_id or "").strip()
-        self.clip_url = (clip_url or "").strip()
-        self.product_mode = product_mode
-        self.image_duration = image_duration
-        self.analyze = analyze
-        self.shot_meta = []  # 逐镜分析结果（finished 之后 analysis_ready emit）
-        self._aborted = False
-
-    def abort(self):
-        self._aborted = True
-
-    def _local_cut(self, start, end, out):
-        """本地 ffmpeg 按起止时间重裁（download_url 下载失败时的兜底）。"""
-        if not self.video_path or not os.path.isfile(self.video_path):
-            return False
-        return cut_video(self.video_path, start, end, out)
 
     def run(self):
         try:
-            self.stage.emit("正在调用服务端镜头分割（分割+逐镜分析）…")
+            self.stage.emit("正在检查 PySceneDetect 环境")
             self.progress.emit(10)
             self.busy.emit(True)
 
-            if not self.server_url:
-                from utils import scheduled_task_client as _stc
-                self.server_url = _stc._server_url()
-            if not self.server_url:
-                raise RuntimeError("未配置 compute_server_url")
-
-            os.makedirs(self.output_dir, exist_ok=True)
-            from gui.montage.utils_media import safe_source_name
-            base = safe_source_name(self.video_path) if self.video_path else ""
-            data = {
-                "threshold": str(self.threshold),
-                "min_scene_len": str(self.min_scene_len),
-                "analyze": "true" if self.analyze else "false",
-                "product_mode": "true" if self.product_mode else "false",
-                "image_duration": str(self.image_duration),
-            }
-            files = None
-            if self.material_id:
-                data["material_id"] = self.material_id
-            elif self.clip_url:
-                data["clip_url"] = self.clip_url
-            elif self.video_path and os.path.isfile(self.video_path):
-                # 按扩展名设置 mime：图片也可作为静态镜头上传
-                _ext = os.path.splitext(self.video_path)[1].lower()
-                _mime = {".mp4": "video/mp4", ".m4v": "video/m4v", ".mov": "video/quicktime",  # noqa: E501
-                         ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
-                         ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",  # noqa: E501
-                         ".webp": "image/webp", ".bmp": "image/bmp", ".gif": "image/gif"}.get(_ext, "video/mp4")  # noqa: E501
-                # 文件句柄由 finally 关闭；保持打开是为了在 multipart POST 期间可读
-                files = {"file": (os.path.basename(self.video_path), open(self.video_path, "rb"), _mime)}  # noqa: SIM115  # noqa: E501
-            else:
-                raise RuntimeError("没有可分割的素材（需 file / material_id / clip_url 之一）")
-
-            file_size = (os.path.getsize(self.video_path)
-                         if self.video_path and os.path.isfile(self.video_path) else 0)
-            log.info(f"[服务端镜头分割] 开始请求: /montage/split "
-                     f"file={self.video_path or '-'} size={file_size} "
-                     f"material_id={self.material_id or '-'} clip_url={self.clip_url or '-'}")  # noqa: E501
             try:
-                resp = split(self.server_url, files, data, 590)  # type: ignore[arg-type]
-            except requests.exceptions.RequestException as e:
-                log.error(f"[服务端镜头分割] 请求异常: {type(e).__name__}: {e}")
-                raise
-            finally:
-                if files:
-                    with contextlib.suppress(Exception):
-                        files["file"][1].close()
+                from scenedetect import open_video, SceneManager
+                from scenedetect.detectors import ContentDetector
+            except ImportError:
+                raise RuntimeError("未检测到 scenedetect 依赖。")
 
-            shots = resp.get("shots") or []
-            if not shots:
-                self.stage.emit("服务端未检测到镜头切点")
+            ffmpeg_path = find_ffmpeg()
+            if not ffmpeg_path:
+                raise RuntimeError("未检测到 ffmpeg，请在软件目录放置 ffmpeg.exe 或将其加入环境变量 PATH。")
+
+            # Setup ffmpeg environment for scenedetect
+            if os.path.isfile(ffmpeg_path):
+                ffmpeg_dir = os.path.dirname(os.path.abspath(ffmpeg_path))
+                if ffmpeg_dir not in os.environ["PATH"]:
+                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+                try:
+                    import scenedetect.output.video
+                    scenedetect.output.video._FFMPEG_PATH = ffmpeg_path
+                except Exception as e:
+                    log.warning(f"无法为 scenedetect 设置 _FFMPEG_PATH: {e}")
+
+            self.stage.emit("正在分析镜头切点...")
+            self.progress.emit(30)
+
+            # 打开视频并进行场景检测（frame_skip 跳过部分帧加速，min_scene_len 已限制最小镜头长度，
+            # 跳帧带来的切点偏移 ≤ frame_skip 帧，对混剪素材可接受）
+            _t_detect = _time.time()
+            video = open_video(self.video_path)
+            scene_manager = SceneManager()
+            scene_manager.add_detector(ContentDetector(threshold=self.threshold, min_scene_len=self.min_scene_len))
+            scene_manager.detect_scenes(video, show_progress=False, frame_skip=3)
+            scene_list = scene_manager.get_scene_list()
+            log.info(f"[镜头分割] {os.path.basename(self.video_path)} 场景检测耗时 "
+                     f"{_time.time() - _t_detect:.1f}s，检出 {len(scene_list)} 个镜头")
+
+            if not scene_list:
+                self.stage.emit("未检测到明显的镜头切点")
                 self.progress.emit(100)
-                self.analysis_ready.emit([])
                 self.finished.emit(self.output_dir, 0, [])
                 return
 
-            self.progress.emit(50)
-            self.stage.emit(f"服务端检测到 {len(shots)} 个镜头，正在下载服务端裁好的片段…")
-            self.shot_meta = []
-            scenes = []
-            created = 0
-            for sh in shots:
-                start = float(sh.get("start_sec") or 0)
-                end = float(sh.get("end_sec") or start)
-                idx = int(sh.get("shot_index") or (created + 1))
-                # 用服务端返回的片段名（保留 .mp4 扩展名），与 _rename_video_splits_with_metadata 的
-                # _shot_ 前缀约定一致；仅当文件名超长时截断（保留扩展名），防 Windows 260 路径。
-                fname = os.path.basename(sh.get("filename") or f"{base}_shot_{idx:03d}.mp4")  # noqa: E501
-                if len(fname) > 200:
-                    _stem, _ext = os.path.splitext(fname)
-                    fname = _stem[:196] + (_ext or ".mp4")
-                out = os.path.join(self.output_dir, fname)
-                ok = False
-                dl_url = sh.get("download_url") or ""
-                if dl_url:
-                    try:
-                        saved = download_result(self.server_url + dl_url, out, 300)
-                        ok = bool(saved) and os.path.isfile(out) and os.path.getsize(out) > 0  # noqa: E501
-                        if not ok:
-                            log.warning(f"[服务端分割] 下载片段为空: {out}")
-                    except requests.exceptions.RequestException as e:
-                        log.warning(f"[服务端分割] 下载片段失败({fname}): {e}")
-                if not ok:
-                    log.warning(f"[服务端分割] 下载失败，回退本地重裁: {fname}")
-                    ok = self._local_cut(start, end, out)
-                if ok:
-                    scenes.append((start, end))
-                    created += 1
-                    self.shot_meta.append({
-                        "filename": os.path.basename(out),
-                        "shot_index": idx,
-                        "aesthetic_score": sh.get("aesthetic_score"),
-                        "shot_analysis": sh.get("shot_analysis"),
-                        "description": sh.get("description") or "",
-                    })
-                else:
-                    log.warning(f"[服务端分割] 片段生成失败，跳过: {fname}")
-            if not created:
-                raise RuntimeError("服务端分割返回镜头但片段获取失败，请检查网络/ffmpeg")
+            self.stage.emit(f"检测到 {len(scene_list)} 个镜头，正在分割输出...")
+            self.progress.emit(60)
 
+            os.makedirs(self.output_dir, exist_ok=True)
+            video_basename = os.path.splitext(os.path.basename(self.video_path))[0]
+
+            # 自行切分：GPU 硬编（可用时）替代 scenedetect 内置 libx264 软编码，大幅提速
+            _t_split = _time.time()
+            self._split_scenes_ffmpeg(ffmpeg_path, scene_list, video_basename)
+            log.info(f"[镜头分割] {os.path.basename(self.video_path)} 切分导出耗时 "
+                     f"{_time.time() - _t_split:.1f}s（{len(scene_list)} 段）")
+
+            # 验证输出文件是否生成，防止 ffmpeg 调用失败无输出却显示成功
+            created_files = []
+            if os.path.exists(self.output_dir):
+                created_files = [f for f in os.listdir(self.output_dir) if f.lower().endswith(".mp4")]
+            
+            if not created_files:
+                raise RuntimeError(
+                    "未能生成分割后的镜头视频文件。请检查 ffmpeg 是否工作正常。\n"
+                    "也可以尝试将 ffmpeg.exe 复制到软件根目录下。"
+                )
+
+            scenes_sec = [(s[0].get_seconds(), s[1].get_seconds()) for s in scene_list]
+            self.stage.emit("分割导出完成")
             self.progress.emit(100)
-            self.stage.emit("分割导出完成（服务端分割+分析，片段已下载）")
-            self.analysis_ready.emit(list(self.shot_meta))
-            self.finished.emit(self.output_dir, created, scenes)
+            self.finished.emit(self.output_dir, len(scene_list), scenes_sec)
+
+        except Exception:
             self.busy.emit(False)
-        except Exception:  # 服务端镜头分割失败
-            self.busy.emit(False)
-            log.exception("服务端镜头分割失败")
+            log.exception("镜头分割失败")
             self.error.emit(traceback.format_exc())
-        finally:
-            if files:
-                with contextlib.suppress(Exception):
-                    files["file"][1].close()
+
+    def _split_scenes_ffmpeg(self, ffmpeg_path, scene_list, video_basename):
+        """按场景列表逐段切分：输入快速 seek + 重编码（帧级精确）。
+
+        实测结论：分割是「大量短片段」场景，每段独立起 ffmpeg 进程，GPU 会话初始化
+        开销（约 0.2~0.3s/次）会超过编码本身收益，故固定 libx264 veryfast 软编
+        （强 CPU 可达 50x+ 实时），不启用 CUDA 硬解；单段失败自动重试一次。
+        输出命名 {basename}_shot_{NNN}.mp4，与后续 _rename_video_splits_with_metadata 兼容。
+        """
+        total = len(scene_list)
+        pad = max(2, len(str(total)))
+        encode_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
+        decode_args = []
+        creationflags = 0x08000000
+        for idx, (start_tc, end_tc) in enumerate(scene_list):
+            start_s = float(start_tc.get_seconds())
+            end_s = float(end_tc.get_seconds())
+            dur = max(0.1, end_s - start_s)
+            out_name = f"{video_basename}_shot_{str(idx + 1).zfill(pad)}.mp4"
+            out_path = os.path.join(self.output_dir, out_name)
+            tail_args = ["-t", f"{dur:.3f}", *encode_args,
+                         "-pix_fmt", "yuv420p", "-c:a", "aac",
+                         "-movflags", "+faststart", out_path]
+            cmd = [ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+                   *decode_args, "-ss", f"{start_s:.3f}", "-i", self.video_path] + tail_args
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                               errors="ignore", creationflags=creationflags)
+            if (r.returncode != 0 or not os.path.exists(out_path)) and decode_args:
+                # 硬解失败（编码格式不受支持等）→ 去掉硬解参数软解重试
+                cmd_soft = [ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+                            "-ss", f"{start_s:.3f}", "-i", self.video_path] + tail_args
+                r = subprocess.run(cmd_soft, capture_output=True, text=True, encoding="utf-8",
+                                   errors="ignore", creationflags=creationflags)
+            if r.returncode != 0 or not os.path.exists(out_path):
+                log.warning(f"[镜头分割] 第 {idx + 1}/{total} 段切分失败: {(r.stderr or '')[-200:]}")
+            self.stage.emit(f"正在分割输出 ({idx + 1}/{total})...")
+            self.progress.emit(60 + int((idx + 1) * 38 / total))
+
 
 
 class BestClipWorker(BaseWorker):
@@ -196,7 +155,7 @@ class BestClipWorker(BaseWorker):
     progress = Signal(int)
     finished = Signal(str, float, float)  # 输出片段路径, 起始秒, 结束秒
 
-    def __init__(self, video_path, output_dir, duration_sec, shot_index=1, clear_dir=False):  # noqa: E501
+    def __init__(self, video_path, output_dir, duration_sec, shot_index=1, clear_dir=False):
         super().__init__()
         self.video_path = video_path
         self.output_dir = output_dir
@@ -213,7 +172,7 @@ class BestClipWorker(BaseWorker):
             out_path = self._cut(start, end)
             self.progress.emit(100)
             self.finished.emit(out_path, start, end)
-        except Exception:  # 精华片段分析失败
+        except Exception:
             self.error.emit(traceback.format_exc())
 
     def _find_best_window(self):
@@ -305,29 +264,34 @@ class BestClipWorker(BaseWorker):
             try:
                 for f in os.listdir(self.output_dir):
                     if "_shot_" in f and f.lower().endswith((".mp4", ".m4v")):
-                        with contextlib.suppress(OSError):
+                        try:
                             os.remove(os.path.join(self.output_dir, f))
-            except OSError:
+                        except Exception:
+                            pass
+            except Exception:
                 pass
 
-        from gui.montage.utils_media import safe_source_name
-        basename = safe_source_name(self.video_path)
+        basename = os.path.splitext(os.path.basename(self.video_path))[0]
         s_str = format_seconds_to_srt_timestamp(start).replace(":", "-")
         e_str = format_seconds_to_srt_timestamp(end).replace(":", "-")
         out_name = f"{basename}_shot_{self.shot_index:03d}_{s_str}_{e_str}.mp4"
         out_path = os.path.abspath(os.path.join(self.output_dir, out_name))
         dur = max(0.1, end - start)
 
-        creationflags = CREATE_NO_WINDOW
-        # format=yuv420p：源素材可能是 10-bit（yuv420p10le/HDR），AMF 等硬件编码器
-        # 不支持 10-bit 输入，必须在滤镜链显式转 8-bit。
-        cmd = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path,
-               "-t", f"{dur:.3f}", "-vf", "format=yuv420p",
-               *get_video_encode_args(crf=18, preset="veryfast"),
-               "-pix_fmt", "yuv420p", "-c:a", "aac",
-               "-movflags", "+faststart", out_path]
-        r = run(cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="ignore", creationflags=creationflags)
+        creationflags = 0x08000000
+        # 单段短片段场景：GPU 会话初始化开销大于编码收益，沿用 libx264 软编（见 _split_scenes_ffmpeg 实测结论）
+        decode_args = []
+        tail_args = ["-t", f"{dur:.3f}", *get_video_encode_args(crf=18, preset="veryfast"),
+                     "-pix_fmt", "yuv420p", "-c:a", "aac",
+                     "-movflags", "+faststart", out_path]
+        cmd = [ffmpeg, "-y", *decode_args, "-ss", f"{start:.3f}", "-i", self.video_path] + tail_args
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                           errors="ignore", creationflags=creationflags)
+        if (r.returncode != 0 or not os.path.exists(out_path)) and decode_args:
+            # 硬解失败时去掉硬解参数软解重试
+            cmd_soft = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", self.video_path] + tail_args
+            r = subprocess.run(cmd_soft, capture_output=True, text=True, encoding="utf-8",
+                               errors="ignore", creationflags=creationflags)
         if r.returncode != 0 or not os.path.exists(out_path):
             tail = (r.stderr or "")[-400:]
             raise RuntimeError(f"ffmpeg 裁剪失败:\n{tail}")
@@ -335,6 +299,241 @@ class BestClipWorker(BaseWorker):
 
 
 
+
+
+class ServerClipAnalysisWorker(BaseWorker):
+    """调用服务端 /material/score_clip 对每个镜头做 AI 分析，返回评分与描述。
+
+    接口为异步任务模式（服务端文档: docs/SERVER_API.md §1.2）：
+      1. POST /material/score_clip 上传文件 → 返回 task_id
+      2. GET  /tasks/unified/{task_id} 轮询 → status: pending/running/completed/failed
+      3. status==completed 后从 result 字段取 score + description
+
+    逐条上传镜头片段到服务端，线程池并发（IO 密集），每条完成即 emit item_ready。
+    """
+    item_ready = Signal(int, dict)        # row_index, result_dict{score,desc,...}
+    progress = Signal(int)                 # 0-100
+    finished = Signal(int, int)            # ok_count, fail_count
+
+    _MAX_WORKERS = 4
+    _POLL_INTERVAL = 2.0       # 轮询间隔（秒）
+    _POLL_TIMEOUT = 300.0      # 单条镜头最大等待时间（秒）
+
+    def __init__(self, clip_paths, server_url, product_prompt=""):
+        super().__init__()
+        self.clip_paths = list(clip_paths)
+        self.server_url = (server_url or "").strip().rstrip("/")
+        # 主要产品提示词（选填）：非空时随请求提交，服务端 AI 围绕该产品评分与描述
+        self.product_prompt = (product_prompt or "").strip()
+        self._should_stop = False
+
+    def stop(self):
+        self._should_stop = True
+
+    def _analyze_one(self, clip_path):
+        """提交 → 轮询 → 返回完整 result dict。"""
+        import requests
+        import time as _time
+
+        fname = os.path.basename(clip_path)
+        fsize = os.path.getsize(clip_path) if os.path.isfile(clip_path) else 0
+        submit_url = f"{self.server_url}/material/score_clip"
+
+        # ── 第 1 步：提交文件，获取 task_id ──
+        form_data = {"analyze_shot": "true", "product_mode": "true"}
+        if self.product_prompt:
+            form_data["product_prompt"] = self.product_prompt
+        log.info(f"[镜头分析] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url}")
+        with open(clip_path, "rb") as f:
+            resp = requests.post(
+                submit_url,
+                files={"file": (fname, f, "video/mp4")},
+                data=form_data,
+                timeout=60,
+            )
+        log.info(f"[镜头分析] {fname} 提交响应: HTTP {resp.status_code}, body={resp.text[:300]}")
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(f"提交失败 HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            submit_data = resp.json()
+        except Exception:
+            raise RuntimeError(f"提交响应非 JSON: {resp.text[:200]}")
+
+        # 兼容多种 task_id 字段名
+        task_id = (submit_data.get("task_id") or submit_data.get("id")
+                   or submit_data.get("job_id") or "")
+        if not task_id:
+            # 如果响应里直接包含结果（同步模式兼容），直接解析
+            result = self._parse_result(submit_data, fname)
+            if result.get("score", -1) >= 0 or result.get("desc"):
+                return result
+            raise RuntimeError(
+                f"服务端未返回 task_id 也无有效结果。"
+                f"响应: {str(submit_data)[:250]}")
+
+        log.info(f"[镜头分析] {fname} 获得 task_id={task_id}，开始轮询...")
+
+        # ── 第 2 步：轮询任务状态直到完成（统一接口: GET /tasks/unified/{id}）──
+        poll_url = f"{self.server_url}/tasks/unified/{task_id}"
+        deadline = _time.time() + self._POLL_TIMEOUT
+        last_status = ""
+
+        while _time.time() < deadline:
+            if self._should_stop:
+                raise RuntimeError("用户取消")
+            _time.sleep(self._POLL_INTERVAL)
+            try:
+                pr = requests.get(poll_url, timeout=15)
+            except Exception as e:
+                log.warning(f"[镜头分析] {fname} 轮询请求异常: {e}")
+                continue
+            if pr.status_code != 200:
+                log.warning(f"[镜头分析] {fname} 轮询 HTTP {pr.status_code}")
+                continue
+            try:
+                pdata = pr.json()
+            except Exception:
+                continue
+
+            # 兼容嵌套 data 结构
+            task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
+            status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
+            if status != last_status:
+                log.info(f"[镜头分析] {fname} task={task_id} status={status}")
+                last_status = status
+
+            if status in ("completed", "done", "success", "finished"):
+                # ── 第 3 步：从 result 取分析数据 ──
+                raw_result = task_obj.get("result") or task_obj
+                result = self._parse_result(raw_result, fname)
+                if result.get("score", -1) < 0 and not result.get("desc"):
+                    raise RuntimeError(
+                        f"任务完成但 result 无有效数据。"
+                        f"task_obj: {str(task_obj)[:250]}")
+                log.info(f"[镜头分析] {fname} 完成: score={result.get('score', -1):.1f}, "
+                         f"desc={str(result.get('desc', ''))[:50]}")
+                return result
+
+            if status in ("failed", "error", "cancelled"):
+                err_msg = (task_obj.get("error_msg") or task_obj.get("error")
+                           or task_obj.get("message") or "未知错误")
+                raise RuntimeError(f"服务端任务失败: {err_msg}")
+
+            # pending / running / 其他 → 继续轮询
+
+        raise RuntimeError(
+            f"轮询超时（{self._POLL_TIMEOUT:.0f}s），task_id={task_id}，"
+            f"最后状态: {last_status or '无响应'}")
+
+    @staticmethod
+    def _parse_result(payload, fname=""):
+        """从 result dict 中提取所有有用字段，返回标准化 dict。
+
+        服务端实际返回结构（/scheduled/tasks/{id} 的 result 字段）：
+        {
+          "filename": "...",
+          "aesthetic_score": {
+            "total": 7.1, "clarity": 7.7, "texture": 4.5,
+            "aesthetics": 5.0, "composition": 7.5, "color_quality": 10.0,
+            "figure_quality": 5.0, "subject_prominence": 10.0, "engine": "laion+opencv"
+          }
+        }
+        """
+        result = {"score": -1.0, "desc": "", "extra": {}}
+        if not isinstance(payload, dict):
+            return result
+        # 兼容嵌套 data
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+
+        # ── 评分：优先从 aesthetic_score.total 取 ──
+        aes = inner.get("aesthetic_score")
+        if isinstance(aes, dict):
+            raw_score = aes.get("total", aes.get("score", -1))
+            try:
+                result["score"] = float(raw_score)
+            except (TypeError, ValueError):
+                result["score"] = -1.0
+            # 将各维度评分放入 extra
+            for k, v in aes.items():
+                if k in ("total", "engine"):
+                    continue
+                if isinstance(v, (int, float)):
+                    result["extra"][k] = v
+            if aes.get("engine"):
+                result["extra"]["engine"] = aes["engine"]
+        else:
+            # 回退：直接在顶层找 score
+            raw_score = inner.get("score", inner.get("total_score", inner.get("value", -1)))
+            try:
+                result["score"] = float(raw_score)
+            except (TypeError, ValueError):
+                result["score"] = -1.0
+
+        # ── 描述 ──
+        desc = (inner.get("description") or inner.get("desc")
+                or inner.get("analysis") or inner.get("text") or "")
+        result["desc"] = str(desc).strip()
+
+        # ── 嵌套 shot_analysis（analyze_shot=true 时服务端返回：
+        #    shot_type 景别 / scene_primary 主画面 / product 产品 /
+        #    model 型号 / brand 品牌 / visual_type / segment / confidence）──
+        sa = inner.get("shot_analysis")
+        if isinstance(sa, dict):
+            for k, v in sa.items():
+                if v is None or not str(v).strip():
+                    continue
+                if isinstance(v, (str, int, float, bool)):
+                    result["extra"].setdefault(k, v)
+            # 主要画面描述：优先用 scene_primary
+            if not result["desc"]:
+                result["desc"] = str(sa.get("scene_primary") or "").strip()
+
+        # ── 收集其他有意义的字段 ──
+        _skip_keys = {"score", "total_score", "value", "description", "desc",
+                      "analysis", "text", "data", "status", "state", "task_id",
+                      "id", "job_id", "error", "error_msg", "message",
+                      "aesthetic_score", "shot_analysis", "filename"}
+        for k, v in inner.items():
+            if k in _skip_keys or v is None:
+                continue
+            if isinstance(v, (str, int, float, bool)) and str(v).strip():
+                result["extra"][k] = v
+            elif isinstance(v, list) and v:
+                result["extra"][k] = ", ".join(str(x) for x in v[:5])
+        return result
+
+    def do_work(self):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        total = len(self.clip_paths)
+        if total == 0:
+            self.finished.emit(0, 0)
+            return
+        ok = 0
+        fail = 0
+        done = 0
+        with ThreadPoolExecutor(max_workers=self._MAX_WORKERS,
+                                thread_name_prefix="clip_analysis") as pool:
+            futures = {pool.submit(self._analyze_one, p): i
+                       for i, p in enumerate(self.clip_paths)}
+            try:
+                for fut in as_completed(futures):
+                    if self._should_stop:
+                        break
+                    idx = futures[fut]
+                    try:
+                        result_dict = fut.result()
+                        self.item_ready.emit(idx, result_dict)
+                        ok += 1
+                    except Exception as e:
+                        fail += 1
+                        log.warning(f"[镜头分析] {os.path.basename(self.clip_paths[idx])} 分析失败: {e}")
+                    done += 1
+                    self.progress.emit(int(done * 100 / total))
+            finally:
+                for fut in futures:
+                    if not fut.done():
+                        fut.cancel()
+        self.finished.emit(ok, fail)
 
 
 class BeatDetectWorker(BaseWorker):
@@ -367,12 +566,11 @@ class BeatDetectWorker(BaseWorker):
         self._should_stop = True
 
     def do_work(self):
+        import requests
         import time as _time
 
-        from utils.http_client import http_post
-
         fname = os.path.basename(self.music_path)
-        fsize = os.path.getsize(self.music_path) if os.path.isfile(self.music_path) else 0  # noqa: E501
+        fsize = os.path.getsize(self.music_path) if os.path.isfile(self.music_path) else 0
         submit_url = f"{self.server_url}/audio/beatmap"
 
         # 多片段请求参数（count=片段个数，segment_duration=每段时长秒）
@@ -384,20 +582,20 @@ class BeatDetectWorker(BaseWorker):
 
         try:
             # ── 第 1 步：提交音频文件，获取 task_id ──
-            log.info(f"[音乐卡点] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url} "  # noqa: E501
+            log.info(f"[音乐卡点] 提交: {fname} ({fsize/1024/1024:.1f}MB) -> POST {submit_url} "
                      f"count={self.count} segment_duration={self.segment_duration}")
             with open(self.music_path, "rb") as f:
-                resp = http_post(submit_url,
-                                 files={"file": (fname, f, "audio/mpeg")},
-                                 data=form_data,
-                                 timeout=60)
+                resp = requests.post(submit_url,
+                                     files={"file": (fname, f, "audio/mpeg")},
+                                     data=form_data,
+                                     timeout=60)
             log.info(f"[音乐卡点] 响应: HTTP {resp.status_code}, body={resp.text[:300]}")
             if resp.status_code not in (200, 201, 202):
                 raise RuntimeError(f"提交失败 HTTP {resp.status_code}: {resp.text[:200]}")
             try:
                 submit_data = resp.json()
-            except requests.exceptions.JSONDecodeError as e:
-                raise RuntimeError(f"响应非 JSON: {resp.text[:200]}") from e
+            except Exception:
+                raise RuntimeError(f"响应非 JSON: {resp.text[:200]}")
 
             # 兼容：如果服务端直接返回结果（同步兼容模式）
             task_id = (submit_data.get("task_id") or submit_data.get("id")
@@ -412,6 +610,7 @@ class BeatDetectWorker(BaseWorker):
 
             # ── 第 2 步：轮询 GET /tasks/unified/{task_id} ──
             log.info(f"[音乐卡点] task_id={task_id}，轮询中...")
+            poll_url = f"{self.server_url}/tasks/unified/{task_id}"
             deadline = _time.time() + self._POLL_TIMEOUT
             last_status = ""
 
@@ -419,14 +618,22 @@ class BeatDetectWorker(BaseWorker):
                 if self._should_stop:
                     raise RuntimeError("用户取消")
                 _time.sleep(self._POLL_INTERVAL)
-                pdata = poll_unified(self.server_url, task_id, 15)
-                if pdata is None:
+                try:
+                    pr = requests.get(poll_url, timeout=15)
+                except Exception as e:
+                    log.warning(f"[音乐卡点] 轮询异常: {e}")
+                    continue
+                if pr.status_code != 200:
+                    continue
+                try:
+                    pdata = pr.json()
+                except Exception:
                     continue
 
-                task_obj = (pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata) or {}  # noqa: E501
-                status = str(task_obj.get("status") or task_obj.get("state") or "").lower()  # noqa: E501
+                task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
+                status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
                 if status != last_status:
-                    log.info(f"[音乐卡点] task_id={task_id} status={status}")
+                    log.info(f"[音乐卡点] status={status}")
                     last_status = status
 
                 if status in ("completed", "done", "success", "finished"):
@@ -443,20 +650,18 @@ class BeatDetectWorker(BaseWorker):
                 if status in ("failed", "error", "cancelled"):
                     err = (task_obj.get("error_msg") or task_obj.get("error")
                            or task_obj.get("message") or "未知")
-                    raise RuntimeError(f"任务失败(task_id={task_id}): {err}")
+                    raise RuntimeError(f"任务失败: {err}")
 
             raise RuntimeError(f"轮询超时({self._POLL_TIMEOUT:.0f}s), task={task_id}")
-        except Exception as e:  # 音乐卡点失败
-            log.error(f"[音乐卡点] task_id={task_id if 'task_id' in dir() else 'N/A'} 失败: {e}")  # noqa: E501
-            self.error.emit(f"[task_id={task_id if 'task_id' in dir() else 'N/A'}] {e}")
+        except Exception as e:
+            log.error(f"[音乐卡点] 失败: {e}")
+            self.error.emit(str(e))
 
     @staticmethod
     def _extract_beats(payload):
         if not isinstance(payload, dict):
             return []
-        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload  # noqa: E501
-        if not isinstance(inner, dict):
-            return []
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
         beats = (inner.get("beats") or inner.get("beat_times")
                  or inner.get("timestamps") or inner.get("beat_points") or [])
         if isinstance(beats, list) and beats:
@@ -484,9 +689,7 @@ class BeatDetectWorker(BaseWorker):
         """
         if not isinstance(payload, dict):
             return []
-        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload  # noqa: E501
-        if not isinstance(inner, dict):
-            return []
+        inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
         clips = inner.get("clips")
         if not isinstance(clips, list):
             result = inner.get("result")
@@ -499,19 +702,14 @@ class BeatDetectWorker(BaseWorker):
             if not isinstance(c, dict):
                 continue
             try:
-                start_val = c.get("start")
-                end_val = c.get("end")
-                if start_val is None or end_val is None:
-                    continue
-                start = float(start_val)
-                end = float(end_val)
+                start = float(c.get("start"))
+                end = float(c.get("end"))
             except (TypeError, ValueError):
                 continue
             if end <= start:
                 continue
             try:
-                strength_val = c.get("strength", 1.0)
-                strength = float(strength_val) if strength_val is not None else 1.0
+                strength = float(c.get("strength", 1.0))
             except (TypeError, ValueError):
                 strength = 1.0
             out.append({"start": start, "end": end, "strength": strength})
@@ -564,27 +762,24 @@ class BeatVideoGenWorker(BaseWorker):
 
     @classmethod
     def _mime(cls, path):
-        return cls._MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")  # noqa: E501
+        return cls._MIME.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
 
     def do_work(self):
+        import requests
         import time as _time
 
         spec = self.spec
         n_variants = max(1, int(spec.get("variant_count") or 1))
-        results = [{"index": i, "ok": False, "path": "", "error": ""} for i in range(n_variants)]  # noqa: E501
+        results = [{"index": i, "ok": False, "path": "", "error": ""} for i in range(n_variants)]
 
         # ── 第 1 步：提交单个 /montage/beat 任务（音乐+素材仅上传一次）──
         self.progress.emit(5, "正在上传音乐与素材...")
         try:
-            videos = self._prepare_videos(spec)
-            submit_spec = dict(spec)
-            submit_spec["videos"] = videos
-            tid = self._submit_one(submit_spec)
-        except Exception as e:  # 卡点成片提交失败
+            tid = self._submit_one(spec)
+        except Exception as e:
             log.error(f"[卡点成片] 提交失败: {e}")
             for r in results:
-                # ApiError 已含"调用接口失败 + 接口 + 参数 + 错误"，无需额外前缀
-                r["error"] = str(e) if isinstance(e, ApiError) else f"提交失败: {e}"
+                r["error"] = f"提交失败: {e}"
             self.all_done.emit(results)
             return
         log.info(f"[卡点成片] 已提交 task_id={tid}, variant_count={n_variants}")
@@ -597,10 +792,18 @@ class BeatVideoGenWorker(BaseWorker):
             if self._should_stop:
                 raise RuntimeError("用户取消")
             _time.sleep(self._POLL_INTERVAL)
-            pdata = poll_unified(self.server_url, tid, 15)
-            if pdata is None:
+            try:
+                pr = requests.get(f"{self.server_url}/tasks/unified/{tid}", timeout=15)
+            except Exception as e:
+                log.warning(f"[卡点成片] 轮询异常: {e}")
                 continue
-            task_obj = (pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata) or {}  # noqa: E501
+            if pr.status_code != 200:
+                continue
+            try:
+                pdata = pr.json()
+            except Exception:
+                continue
+            task_obj = pdata.get("data") if isinstance(pdata.get("data"), dict) else pdata
             status = str(task_obj.get("status") or task_obj.get("state") or "").lower()
             if status in ("completed", "done", "success", "finished"):
                 result = task_obj.get("result") or task_obj
@@ -609,14 +812,14 @@ class BeatVideoGenWorker(BaseWorker):
                 err = (task_obj.get("error_msg") or task_obj.get("error")
                        or task_obj.get("message") or "未知")
                 for r in results:
-                    r["error"] = f"服务端生成失败(task_id={tid}): {err}"
-                log.error(f"[卡点成片] task_id={tid} 生成失败: {err}")
+                    r["error"] = f"服务端生成失败: {err}"
+                log.error(f"[卡点成片] 生成失败: {err}")
                 self.all_done.emit(results)
                 return
 
         if result is None:
             for r in results:
-                r["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）, task_id={tid}"
+                r["error"] = f"生成超时（{self._POLL_TIMEOUT:.0f}s）"
             self.all_done.emit(results)
             return
 
@@ -627,88 +830,37 @@ class BeatVideoGenWorker(BaseWorker):
             for i, v in enumerate(variants):
                 if self._should_stop:
                     raise RuntimeError("用户取消")
-                file_ref = v.get("file") or result_url(self.server_url, tid, v.get('variant', i + 1))  # noqa: E501
+                file_ref = v.get("file") or f"/montage/result/{tid}/{v.get('variant', i + 1)}"
                 try:
                     local = self._download(tid, file_ref, i)
                     results[i]["ok"] = True
                     results[i]["path"] = local
-                    log.info(f"[卡点成片] task_id={tid} 变体{i + 1} 下载完成: {local}")
+                    log.info(f"[卡点成片] 变体{i + 1} 下载完成: {local}")
                     self.video_ready.emit(i, local)
-                except requests.exceptions.RequestException as e:
-                    log.error(f"[卡点成片] task_id={tid} 变体{i + 1} 下载失败: {e}")
-                    results[i]["error"] = f"下载失败(task_id={tid}): {e}"
+                except Exception as e:
+                    log.error(f"[卡点成片] 变体{i + 1} 下载失败: {e}")
+                    results[i]["error"] = f"下载失败: {e}"
                 self.progress.emit(int(50 + (i + 1) / total_v * 50),
                                    f"下载视频 {i + 1}/{total_v}")
         else:
             # variant_count=1 时服务端仅返回 result.file
-            file_ref = result.get("file") or result_url(self.server_url, tid)
+            file_ref = result.get("file") or f"/montage/result/{tid}"
             try:
                 local = self._download(tid, file_ref, 0)
                 results[0]["ok"] = True
                 results[0]["path"] = local
-                log.info(f"[卡点成片] task_id={tid} 成片下载完成: {local}")
+                log.info(f"[卡点成片] 成片下载完成: {local}")
                 self.video_ready.emit(0, local)
-            except requests.exceptions.RequestException as e:
-                log.error(f"[卡点成片] task_id={tid} 成片下载失败: {e}")
-                results[0]["error"] = f"下载失败(task_id={tid}): {e}"
+            except Exception as e:
+                log.error(f"[卡点成片] 成片下载失败: {e}")
+                results[0]["error"] = f"下载失败: {e}"
 
         self.progress.emit(100, "全部完成")
         self.all_done.emit(results)
 
-    _IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-
-    def _prepare_videos(self, spec):
-        """上传前预处理素材：图片转成静态视频片段（服务端只接受视频）。
-        图片片段时长默认 2 秒，可由 spec['image_duration'] 指定（随音乐节拍变化）。"""
-        videos = [v for v in (spec.get("videos") or []) if v and os.path.isfile(v)]
-        try:
-            img_dur = max(0.5, float(spec.get("image_duration") or 2.0))
-        except (TypeError, ValueError):
-            img_dur = 2.0
-        out_dir = os.path.join(self.download_dir, "img_clips")
-        prepared = []
-        n_img = 0
-        for v in videos:
-            if os.path.splitext(v)[1].lower() in self._IMAGE_EXTS:
-                if n_img == 0:
-                    self.progress.emit(8, "正在转换图片素材...")
-                clip = self._image_to_clip(v, out_dir, img_dur)
-                prepared.append(clip)
-                n_img += 1
-                log.info(f"[卡点成片] 图片转片段: {os.path.basename(v)} -> {clip} ({img_dur:.1f}s)")  # noqa: E501
-            else:
-                prepared.append(v)
-        if n_img:
-            log.info(f"[卡点成片] 共转换 {n_img} 张图片为 {img_dur:.1f}s 静态片段")
-        return prepared
-
-    def _image_to_clip(self, image_path, out_dir, duration):
-        """ffmpeg 将单张图片转成带静音音轨的 mp4 静态片段，结果按时长缓存复用。"""
-        os.makedirs(out_dir, exist_ok=True)
-        stem = os.path.splitext(os.path.basename(image_path))[0]
-        out_path = os.path.join(out_dir, f"{stem}_img{duration:.1f}s.mp4")
-        if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-            return out_path
-        ffmpeg = find_ffmpeg()
-        if not ffmpeg:
-            raise RuntimeError("未检测到 ffmpeg，无法转换图片素材。")
-        dur = max(0.5, float(duration))
-        # 尺寸归一到偶数（yuv420p 要求），附带静音音轨便于服务端混音
-        cmd = [ffmpeg, "-y", "-loop", "1", "-i", image_path,
-               "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-               "-t", f"{dur:.3f}",
-               "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-               "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-               "-c:a", "aac", "-shortest", "-movflags", "+faststart", out_path]
-        r = run(cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="ignore")
-        if r.returncode != 0 or not os.path.exists(out_path):
-            tail = (r.stderr or "")[-300:]
-            raise RuntimeError(f"图片转视频失败({os.path.basename(image_path)}):\n{tail}")
-        return out_path
-
     def _submit_one(self, spec):
         """提交单个 /montage/beat 任务，返回 task_id。"""
+        import requests
         music = spec.get("music") or ""
         videos = spec.get("videos") or []
         if not music or not os.path.isfile(music):
@@ -719,64 +871,56 @@ class BeatVideoGenWorker(BaseWorker):
 
         # 组装表单参数（仅传非空项）
         data = {}
-        for key in ("count", "time_limit", "variant_count", "min_duration", "max_duration",  # noqa: E501
-                    "width", "height", "fps", "crf", "transition", "transition_duration",  # noqa: E501
-                    "aspect_ratio"):
+        for key in ("count", "time_limit", "variant_count", "min_duration", "max_duration",
+                    "width", "height", "fps", "crf", "transition", "transition_duration"):
             v = spec.get(key)
             if v is None or v == "":
                 continue
             data[key] = str(v)
 
-        # 提交给 ApiError 的参数：music 文件名 + 镜头数 + 变体数 + 表单参数（脱敏由 ApiError 完成）
-        beat_url = f"{self.server_url}/montage/beat"
-        error_params = {
-            "music": os.path.basename(music),
-            "video_count": len(videos),
-            "variant_count": spec.get("variant_count", 1),
-        }
-        error_params.update(data)
-
         opened, files = [], []
         try:
-            mf = open(music, "rb")  # noqa: SIM115
-            opened.append(mf)
+            mf = open(music, "rb"); opened.append(mf)
             files.append(("music", (os.path.basename(music), mf, self._mime(music))))
             for vp in videos:
-                vf = open(vp, "rb")  # noqa: SIM115
-                opened.append(vf)
+                vf = open(vp, "rb"); opened.append(vf)
                 files.append(("videos", (os.path.basename(vp), vf, self._mime(vp))))
             log.info(f"[卡点成片] 上传: 1 音乐 + {len(videos)} 视频, 参数={data}")
-            try:
-                resp = beat(self.server_url, files, data, 600)
-            except requests.exceptions.RequestException as e:
-                raise ApiError(beat_url, method="POST", params=error_params,
-                               response_text=str(e), service="montage",
-                               note="montage_client.beat 调用失败") from e
+            resp = requests.post(f"{self.server_url}/montage/beat",
+                                 files=files, data=data, timeout=600)
         finally:
             for fh in opened:
-                with contextlib.suppress(OSError):
+                try:
                     fh.close()
+                except Exception:
+                    pass
 
-        tid = resp.get("id") or resp.get("task_id") or resp.get("job_id") or ""
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            body = resp.json()
+        except Exception:
+            raise RuntimeError(f"响应非 JSON: {resp.text[:200]}")
+        tid = body.get("id") or body.get("task_id") or body.get("job_id") or ""
         if not tid:
-            raise ApiError(beat_url, method="POST", params=error_params,
-                           response_text=str(resp), service="montage",
-                           note="未返回任务 id")
+            raise RuntimeError(f"未返回任务 id: {str(body)[:200]}")
         return tid
 
     def _download(self, task_id, file_ref, index):
         """下载成片到 download_dir，返回本地路径。"""
-        if str(file_ref).startswith("http"):
-            url = file_ref
-        elif str(file_ref).startswith("/"):
-            url = self.server_url + file_ref
-        else:
-            url = result_url(self.server_url, task_id)
+        import requests
+        url = file_ref if str(file_ref).startswith("http") else f"{self.server_url}{file_ref}"
+        if not str(file_ref).startswith(("http", "/")):
+            url = f"{self.server_url}/montage/result/{task_id}"
         os.makedirs(self.download_dir, exist_ok=True)
         ext = os.path.splitext(str(file_ref).split("?")[0])[1] or ".mp4"
         local = os.path.join(self.download_dir, f"beat_gen_{index + 1}{ext}")
-        saved = download_result(url, local, 300)
-        if not saved or not os.path.isfile(local) or os.path.getsize(local) == 0:
+        with requests.get(url, stream=True, timeout=300) as r:
+            r.raise_for_status()
+            with open(local, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+        if not os.path.isfile(local) or os.path.getsize(local) == 0:
             raise RuntimeError("下载文件为空")
         return local
-

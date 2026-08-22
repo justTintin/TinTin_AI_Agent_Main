@@ -1,8 +1,7 @@
-from PySide6.QtCore import Signal
-
+# -*- coding: utf-8 -*-
+from PySide6.QtCore import QThread, Signal
 from utils.base_worker import BaseWorker
 from utils.logger_utils import log
-
 
 class TaskWorker(BaseWorker):
     finished = Signal(object)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 我的知识库 - 以「风格化」为核心的三区布局：
 
@@ -7,48 +8,31 @@
 
 工具栏：同步/导入/提炼
 """
+import json
 import os
+import subprocess
+import time as _time
 from functools import partial
 
-from config.paths import KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
-from core.knowledge_stats import (
-    compute_knowledge_stats,
-    determine_warning_level,
-    read_browser_counts,
-)
-from gui.base_page import BasePage
-from gui.elided_label import ElidedLabel
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QFrame,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QSplitter,
-    QTextEdit,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
+    QFrame, QListWidget, QListWidgetItem, QMessageBox, QComboBox,
+    QSplitter, QFormLayout, QDialog, QDialogButtonBox, QScrollArea, QWidget,
+    QTreeWidget, QTreeWidgetItem, QHeaderView,
+)
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QColor, QFont, QDesktopServices
+
+from config.paths import KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
+from utils.my_knowledge_manager import (
+    MyKnowledgeManager, ENTRY_TYPES, REFERENCE_TYPE, STYLIZATION_TYPE, STYLE_DIMS,
 )
 from utils import asset_browser_client as abrowser
-from utils import knowledge_distiller
 from utils.base_worker import BaseWorker
-from utils.my_knowledge_manager import (
-    REFERENCE_TYPE,
-    STYLE_DIMS,
-    STYLIZATION_TYPE,
-    MyKnowledgeManager,
-)
-from utils.os_utils import open_in_explorer
+from utils import knowledge_distiller
+
+from gui.base_page import BasePage
+
 
 # ══════════════════════════════════════════════════════
 #  Workers
@@ -109,17 +93,15 @@ class SampleDetailDialog(QDialog):
         has_media  = bool(media_path and os.path.exists(media_path))
         transcript = (sample.get("transcript") or "").strip()
         if src.get("is_liked"):
-            badge = " 点赞"
+            badge = "👍 点赞"
         elif src.get("is_collected"):
-            badge = " 收藏"
+            badge = "🔖 收藏"
         else:
-            badge = " 关注"
+            badge = "👤 关注"
 
         # ── 标题 ──
         title_lbl = QLabel(sample.get("name", "(未命名)"))
-        f = QFont()
-        f.setBold(True)
-        f.setPointSize(12)
+        f = QFont(); f.setBold(True); f.setPointSize(12)
         title_lbl.setFont(f)
         title_lbl.setWordWrap(True)
         root.addWidget(title_lbl)
@@ -132,9 +114,7 @@ class SampleDetailDialog(QDialog):
         meta_lbl.setObjectName("muted_text")
         root.addWidget(meta_lbl)
 
-        sep0 = QFrame()
-        sep0.setFrameShape(QFrame.HLine)
-        sep0.setFrameShadow(QFrame.Sunken)  # noqa: E501
+        sep0 = QFrame(); sep0.setFrameShape(QFrame.HLine); sep0.setFrameShadow(QFrame.Sunken)
         root.addWidget(sep0)
 
         # ── 主体：左右分割 ──
@@ -146,8 +126,8 @@ class SampleDetailDialog(QDialog):
         ll.setContentsMargins(0, 0, 8, 0)
         ll.setSpacing(8)
 
-        ll.addWidget(QLabel(" 视频播放（网页在线预览 / 本地关联）："))
-
+        ll.addWidget(QLabel("📺 视频播放（网页在线预览 / 本地关联）："))
+        
         try:
             from PySide6.QtWebEngineWidgets import QWebEngineView
             has_webengine = True
@@ -157,14 +137,14 @@ class SampleDetailDialog(QDialog):
         self.web_view = None
         if has_webengine and url:
             self.web_view = QWebEngineView()
-
+            
             # Set standard Desktop User-Agent to prevent bots detection / JSON responses
             profile = self.web_view.page().profile()
             profile.setHttpUserAgent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
-
+            
             # Optimize Bilibili URL to use the embedded player
             target_url = url
             if "bilibili.com" in url:
@@ -172,8 +152,8 @@ class SampleDetailDialog(QDialog):
                 m = re.search(r'/(BV[a-zA-Z0-9]+)', url)
                 if m:
                     bvid = m.group(1)
-                    target_url = f"https://player.bilibili.com/player.html?bvid={bvid}&page=1&high_quality=1&danmaku=0"  # noqa: E501
-
+                    target_url = f"https://player.bilibili.com/player.html?bvid={bvid}&page=1&high_quality=1&danmaku=0"
+            
             self.web_view.setUrl(QUrl(target_url))
             self.web_view.setMinimumHeight(480)
             ll.addWidget(self.web_view, 1)
@@ -183,38 +163,38 @@ class SampleDetailDialog(QDialog):
             self.web_view.setMinimumHeight(480)
             ll.addWidget(self.web_view, 1)
         else:
-            placeholder = QLabel(" 暂无在线播放链接")
+            placeholder = QLabel("📺 暂无在线播放链接")
             placeholder.setObjectName("muted_text")
             placeholder.setAlignment(Qt.AlignCenter)
-            placeholder.setStyleSheet("border: 1px solid #3a3a3c; border-radius: 8px; background-color: #1c1c1e;")  # noqa: E501
+            placeholder.setStyleSheet("border: 1px solid #3a3a3c; border-radius: 8px; background-color: #1c1c1e;")
             placeholder.setMinimumHeight(480)
             ll.addWidget(placeholder, 1)
 
         # 关联操作栏
         local_row = QHBoxLayout()
         if url:
-            btn_open = QPushButton(" 在外部浏览器打开链接")
+            btn_open = QPushButton("🌐 在外部浏览器打开链接")
             btn_open.setObjectName("secondary_button")
             _u = url
             btn_open.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(_u)))
             local_row.addWidget(btn_open)
 
         if has_media:
-            btn_play = QPushButton("播放 用本地播放器播放")
+            btn_play = QPushButton("▶️ 用本地播放器播放")
             btn_play.setObjectName("primary_button")
             _mp = media_path
             btn_play.clicked.connect(lambda: os.startfile(_mp))
             local_row.addWidget(btn_play)
-
-            btn_folder = QPushButton(" 打开本地文件夹")
+            
+            btn_folder = QPushButton("📁 打开本地文件夹")
             btn_folder.setObjectName("secondary_button")
-            btn_folder.clicked.connect(lambda: open_in_explorer(_mp, select=True))
+            btn_folder.clicked.connect(lambda: subprocess.Popen(f'explorer /select,"{_mp}"'))
             local_row.addWidget(btn_folder)
         else:
-            lbl_no_local = QLabel(" 本地媒体：未下载（您可通过上方窗口或外部链接直接在线预览）")
+            lbl_no_local = QLabel("📥 本地媒体：未下载（您可通过上方窗口或外部链接直接在线预览）")
             lbl_no_local.setObjectName("muted_text")
             local_row.addWidget(lbl_no_local)
-
+        
         ll.addLayout(local_row)
         splitter.addWidget(left)
 
@@ -224,32 +204,30 @@ class SampleDetailDialog(QDialog):
         rl.setContentsMargins(8, 0, 0, 0)
         rl.setSpacing(8)
 
-        rl.addWidget(QLabel(" 内容文本（标题 / 文案）："))
+        rl.addWidget(QLabel("📄 内容文本（标题 / 文案）："))
         content_box = QTextEdit()
         content_box.setReadOnly(True)
         content_box.setPlainText(sample.get("content", ""))
         content_box.setMaximumHeight(150)
         rl.addWidget(content_box)
 
-        rl.addWidget(QLabel(" 字幕 / 转写文本："))
+        rl.addWidget(QLabel("📝 字幕 / 转写文本："))
         transcript_box = QTextEdit()
         transcript_box.setReadOnly(True)
         if transcript:
             transcript_box.setPlainText(transcript)
         else:
             transcript_box.setPlaceholderText(
-                "（尚未转写 — 可在「参考素材」面板点「 批量转文字」生成转写文本）")
+                "（尚未转写 — 可在「参考素材」面板点「🎬 批量转文字」生成转写文本）")
         rl.addWidget(transcript_box, 1)
 
         if stylization:
-            sep3 = QFrame()
-            sep3.setFrameShape(QFrame.HLine)
-            sep3.setFrameShadow(QFrame.Sunken)  # noqa: E501
+            sep3 = QFrame(); sep3.setFrameShape(QFrame.HLine); sep3.setFrameShadow(QFrame.Sunken)
             rl.addWidget(sep3)
             dim_label = STYLE_DIMS.get(stylization.get("dim", ""), "风格")
             dim_val   = stylization.get("dim_value", "")
             rl.addWidget(QLabel(f"蒸馏贡献  →  「{dim_label}：{dim_val}」风格化"))
-
+            
             style_preview = QTextEdit()
             style_preview.setReadOnly(True)
             style_preview.setPlainText(stylization.get("content", "")[:500] + "…")
@@ -295,11 +273,11 @@ class _BatchTranscribeWorker(BaseWorker):
                 continue
             self.progress.emit(f"转写中：{os.path.basename(media_path)}…")
             try:
-                segments = asr_client.transcribe_remote(media_path, asr_url, language="zh")  # noqa: E501
+                segments = asr_client.transcribe_remote(media_path, asr_url, language="zh")
                 sample["transcript"] = asr_client.segments_to_plain(segments)
                 count += 1
-            except Exception as e:  # 外部 API 调用：ASR 远程转写服务
-                self.progress.emit(f"注意： 跳过 {os.path.basename(media_path)}: {e}")
+            except Exception as e:
+                self.progress.emit(f"⚠️ 跳过 {os.path.basename(media_path)}: {e}")
         if count:
             self._manager.save()
         self.finished.emit(count)
@@ -322,37 +300,37 @@ class MyKnowledgePage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(16)
 
-        hdr = QHBoxLayout()
-        heading = QLabel(" 我的知识库")
+        heading = QLabel("📚 我的知识库")
         heading.setObjectName("heading")
-        hdr.addWidget(heading)
-        subtitle = ElidedLabel("收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整", max_lines=1)
+        root.addWidget(heading)
+
+        subtitle = QLabel(
+            "收藏/点赞 → 提炼「风格化」（写法画像）→ 用于脚本风格调整"
+        )
         subtitle.setObjectName("muted_text")
-        hdr.addWidget(subtitle)
-        hdr.addStretch()
-        root.addLayout(hdr)
+        root.addWidget(subtitle)
 
         # ── 工具栏 ──
         bar = QHBoxLayout()
-        btn_sync = QPushButton(" 同步关注内容")
+        btn_sync = QPushButton("🌐 同步关注内容")
         btn_sync.setObjectName("secondary_button")
         btn_sync.setToolTip("打开素材浏览器，同步关注的创作者内容")
         btn_sync.clicked.connect(self._open_browser_sync)
         bar.addWidget(btn_sync)
 
-        btn_import_raw = QPushButton(" 导入收藏记录")
+        btn_import_raw = QPushButton("📋 导入收藏记录")
         btn_import_raw.setObjectName("secondary_button")
         btn_import_raw.setToolTip("从浏览器收藏/点赞记录导入原始素材（无需下载）")
         btn_import_raw.clicked.connect(self._import_kb_items)
         bar.addWidget(btn_import_raw)
 
-        btn_import = QPushButton(" 同步记录素材")
+        btn_import = QPushButton("🔄 同步记录素材")
         btn_import.setObjectName("secondary_button")
         btn_import.setToolTip("合并导入已下载素材 + 浏览器收藏记录")
         btn_import.clicked.connect(self._import_samples)
         bar.addWidget(btn_import)
 
-        self.btn_distill = QPushButton(" 提炼风格化")
+        self.btn_distill = QPushButton("✨ 提炼风格化")
         self.btn_distill.setObjectName("primary_button")
         self.btn_distill.setToolTip(
             "把收藏/点赞样本按四个维度（账号/内容类型/产品品类/行业垂类）\n"
@@ -420,7 +398,7 @@ class MyKnowledgePage(BasePage):
 
         lay.addStretch()
 
-        btn_refresh_stat = QPushButton(" 刷新数据统计")
+        btn_refresh_stat = QPushButton("🔄 刷新数据统计")
         btn_refresh_stat.setObjectName("secondary_button")
         btn_refresh_stat.setFixedHeight(28)
         btn_refresh_stat.setToolTip("重新读取浏览器数据文件，更新未处理数量统计")
@@ -434,16 +412,13 @@ class MyKnowledgePage(BasePage):
         # 先同步下载路径：从 kb_sync.json 更新已下载但 media_path 为空的条目
         self.manager.sync_media_paths()
         all_items = self.manager.all_items()
-
-        # ── 知识库统计 ──
-        kb_stats = compute_knowledge_stats(all_items, STYLIZATION_TYPE, REFERENCE_TYPE)
-        stylizations_count = kb_stats["stylizations"]
-        samples_count = kb_stats["samples"]
-        downloaded_kb = kb_stats["downloaded_kb"]
-        days_ago = kb_stats["days_ago"]
+        stylizations = [it for it in all_items if it.get("type") == STYLIZATION_TYPE]
+        samples      = [it for it in all_items if it.get("type") == REFERENCE_TYPE]
 
         # ── 上次提炼时间 ──
-        if stylizations_count:
+        if stylizations:
+            last_ts  = max(it.get("updated_at", 0) for it in stylizations)
+            days_ago = int((_time.time() - last_ts) / 86400)
             if days_ago == 0:
                 time_str = "今天"
             elif days_ago == 1:
@@ -451,21 +426,49 @@ class MyKnowledgePage(BasePage):
             else:
                 time_str = f"{days_ago} 天前"
             self.stat_last.setText(
-                f"上次提炼：{time_str}  ·  风格化 {stylizations_count} 条"
+                f"上次提炼：{time_str}  ·  风格化 {len(stylizations)} 条"
             )
         else:
             days_ago = 9999
             self.stat_last.setText("尚未提炼")
 
+        # ── 知识库统计 ──
+        downloaded_kb = sum(
+            1 for it in samples
+            if os.path.exists((it.get("source") or {}).get("media_path","") or "")
+        )
         self.stat_kb.setText(
-            f"知识库：{samples_count} 条样本  ·  {downloaded_kb} 条已下载媒体"
+            f"知识库：{len(samples)} 条样本  ·  {downloaded_kb} 条已下载媒体"
         )
 
         # ── 浏览器数据文件 ──
-        browser_items, browser_sync = read_browser_counts(
-            KNOWLEDGE_MATERIALS_DIR, KNOWLEDGE_MEDIA_DIR
-        )
-        unimported = max(0, browser_items - samples_count)
+        browser_items = 0
+        browser_sync  = 0
+        # 兼容旧版自定义目录：优先项目内部，回退到用户可配置目录
+        kb_items_path = os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_items.json")
+        if not os.path.exists(kb_items_path):
+            kb_items_path = os.path.join(KNOWLEDGE_MEDIA_DIR, "kb_items.json")
+        kb_sync_path  = os.path.join(KNOWLEDGE_MATERIALS_DIR, "kb_sync.json")
+        if not os.path.exists(kb_sync_path):
+            kb_sync_path = os.path.join(KNOWLEDGE_MEDIA_DIR, "kb_sync.json")
+        if os.path.exists(kb_items_path):
+            try:
+                with open(kb_items_path, encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        browser_items = len(data)
+            except Exception:
+                pass
+        if os.path.exists(kb_sync_path):
+            try:
+                with open(kb_sync_path, encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        browser_sync = len(data)
+            except Exception:
+                pass
+
+        unimported = max(0, browser_items - len(samples))
 
         self.stat_browser.setText(
             f"浏览器：收藏记录 {browser_items} 条  ·  已下载素材 {browser_sync} 条"
@@ -473,13 +476,20 @@ class MyKnowledgePage(BasePage):
         )
 
         # ── 颜色示警 ──
-        color, _level = determine_warning_level(
-            stylizations_count, unimported, days_ago
-        )
+        # 红色 = 紧急：大量未导入 或 从未提炼
+        # 橙色 = 注意：有未导入记录 或 超过 7 天未提炼
+        # 绿色 = 正常：数据同步且新鲜
+        if not stylizations or unimported > 30 or days_ago > 14:
+            color = "#F44336"  # 红色：急需提炼
+        elif unimported > 0 or days_ago > 7:
+            color = "#FF9800"  # 橙色：建议提炼
+        else:
+            color = "#4CAF50"  # 绿色：已同步
+
         self.stat_browser.setStyleSheet(f"color: {color};")
         tooltip = (
             f"浏览器共 {browser_items} 条收藏记录，"
-            f"已导入知识库 {samples_count} 条，"
+            f"已导入知识库 {len(samples)} 条，"
             f"未导入 {unimported} 条。\n"
             f"距上次提炼 {days_ago if days_ago < 9999 else '∞'} 天。"
         )
@@ -572,32 +582,32 @@ class MyKnowledgePage(BasePage):
 
         # ── 操作按钮行 ──
         btn_row = QHBoxLayout()
-        self.btn_use_style = QPushButton(" 用此风格调文案")
+        self.btn_use_style = QPushButton("✍️ 用此风格调文案")
         self.btn_use_style.setObjectName("primary_button")
         self.btn_use_style.setEnabled(False)
         self.btn_use_style.clicked.connect(self._adjust_copy)
         btn_row.addWidget(self.btn_use_style)
 
-        self.btn_regen = QPushButton(" 重新提炼")
+        self.btn_regen = QPushButton("🔄 重新提炼")
         self.btn_regen.setObjectName("secondary_button")
         self.btn_regen.setEnabled(False)
         self.btn_regen.clicked.connect(self._regen_current)
         btn_row.addWidget(self.btn_regen)
 
-        self.btn_del_style = QPushButton(" 删除")
+        self.btn_del_style = QPushButton("🗑️ 删除")
         self.btn_del_style.setObjectName("secondary_button")
         self.btn_del_style.setEnabled(False)
         self.btn_del_style.clicked.connect(self._delete_current)
         btn_row.addWidget(self.btn_del_style)
 
-        self.btn_like = QPushButton(" 加分")
+        self.btn_like = QPushButton("👍 加分")
         self.btn_like.setObjectName("secondary_button")
         self.btn_like.setToolTip("此风格效果好，评分 +0.5")
         self.btn_like.setEnabled(False)
         self.btn_like.clicked.connect(self._like_current)
         btn_row.addWidget(self.btn_like)
 
-        self.btn_dislike = QPushButton(" 差评")
+        self.btn_dislike = QPushButton("👎 差评")
         self.btn_dislike.setObjectName("secondary_button")
         self.btn_dislike.setToolTip("此风格效果差，评分 -0.3")
         self.btn_dislike.setEnabled(False)
@@ -627,7 +637,7 @@ class MyKnowledgePage(BasePage):
         self.samples_header.setObjectName("card_title")
         hdr_row.addWidget(self.samples_header, 1)
 
-        self.btn_transcribe = QPushButton(" 批量转文字")
+        self.btn_transcribe = QPushButton("🎬 批量转文字")
         self.btn_transcribe.setObjectName("secondary_button")
         self.btn_transcribe.setToolTip(
             "对已下载的素材视频运行 Whisper 转写，跳过未下载或已有转写的素材")
@@ -645,8 +655,6 @@ class MyKnowledgePage(BasePage):
         self.samples_hint = QLabel("← 选择一个风格化条目，查看其参考素材")
         self.samples_hint.setObjectName("muted_text")
         self.samples_hint.setAlignment(Qt.AlignCenter)
-        # 占位提示固定一行高度，避免 samples_list 隐藏时被布局撑高成半屏
-        self.samples_hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         lay.addWidget(self.samples_hint)
 
         self.samples_list = QTreeWidget()
@@ -662,7 +670,7 @@ class MyKnowledgePage(BasePage):
         self.samples_list.itemDoubleClicked.connect(self._on_sample_double_clicked)
         lay.addWidget(self.samples_list, 1)
 
-        legend = QLabel("完成：=已下载  未=未下载  =已转写  — =未转写  |  双击查看素材详情")
+        legend = QLabel("✅=已下载  ⬜=未下载  📝=已转写  — =未转写  |  双击查看素材详情")
         legend.setObjectName("muted_text")
         legend.setVisible(False)
         self.samples_legend = legend
@@ -705,7 +713,7 @@ class MyKnowledgePage(BasePage):
         if not cfg["model"]:
             self.show_warning("请先在「AI 设置」配置 LLM 模型名称。", "未配置 LLM")
             return
-        has_samples = any(it.get("type") == REFERENCE_TYPE for it in self.manager.all_items())  # noqa: E501
+        has_samples = any(it.get("type") == REFERENCE_TYPE for it in self.manager.all_items())
         if not has_samples:
             self.show_warning("还没有原始素材。请先点「导入收藏记录」或「同步记录素材」。", "无可提炼样本")
             return
@@ -720,7 +728,7 @@ class MyKnowledgePage(BasePage):
             self.distill_status.setText("")
             self.refresh_stylization_list()
             self._refresh_stats()
-            (self.show_info if (created or updated) else self.show_warning)(msg, "风格化提炼")  # noqa: E501
+            (self.show_info if (created or updated) else self.show_warning)(msg, "风格化提炼")
 
         self._distill_worker.finished.connect(on_done)
         self._distill_worker.error.connect(
@@ -748,7 +756,7 @@ class MyKnowledgePage(BasePage):
             return
         self.action_status.setText("正在重新提炼…")
         self.btn_regen.setEnabled(False)
-        self._regen_worker = _RegenWorker(cfg, s.get("dim",""), s.get("dim_value",""), samples)  # noqa: E501
+        self._regen_worker = _RegenWorker(cfg, s.get("dim",""), s.get("dim_value",""), samples)
 
         def on_done(content):
             self.btn_regen.setEnabled(True)
@@ -765,7 +773,7 @@ class MyKnowledgePage(BasePage):
 
         self._regen_worker.finished.connect(on_done)
         self._regen_worker.error.connect(
-            lambda e: (setattr(self, 'btn_regen_ok', True),  # type: ignore[func-returns-value]
+            lambda e: (setattr(self, 'btn_regen_ok', True),
                        self.btn_regen.setEnabled(True),
                        self.action_status.setText(""),
                        self.show_error(f"失败：{e}")))
@@ -790,7 +798,7 @@ class MyKnowledgePage(BasePage):
         self.manager.like_item(s.get("id",""))
         self.current_stylization = self.manager.get(s.get("id",""))
         score = self.current_stylization.get("score", 5.0)
-        self.action_status.setText(f" 已点赞，当前评分 {score:.1f}")
+        self.action_status.setText(f"👍 已点赞，当前评分 {score:.1f}")
         self.refresh_stylization_list()
 
     def _dislike_current(self):
@@ -800,7 +808,7 @@ class MyKnowledgePage(BasePage):
         self.manager.dislike_item(s.get("id",""))
         self.current_stylization = self.manager.get(s.get("id",""))
         score = self.current_stylization.get("score", 5.0)
-        self.action_status.setText(f" 已差评，当前评分 {score:.1f}")
+        self.action_status.setText(f"👎 已差评，当前评分 {score:.1f}")
         self.refresh_stylization_list()
 
     # ══════════════ 调文案 ══════════════
@@ -823,7 +831,7 @@ class MyKnowledgePage(BasePage):
         def _sel_key(it):
             if it.get("type") == STYLIZATION_TYPE:
                 score = it.get("score", 5.0)
-                match = (it.get("dim") == cur_dim and it.get("dim_value") == cur_dim_val)  # noqa: E501
+                match = (it.get("dim") == cur_dim and it.get("dim_value") == cur_dim_val)
                 return (0, 0 if match else 1, -score)
             return (1, 0, 0)
         selectable.sort(key=_sel_key)
@@ -846,8 +854,8 @@ class MyKnowledgePage(BasePage):
             t = it.get("type", "")
             name = it.get("name", "")
             score = it.get("score")
-            score_tag = f" {score:.1f}分" if (t == STYLIZATION_TYPE and score is not None) else ""  # noqa: E501
-            warn_tag = " 注意：样本少" if (t == STYLIZATION_TYPE and (it.get("source_count") or 0) < 3) else ""  # noqa: E501
+            score_tag = f" ⭐{score:.1f}" if (t == STYLIZATION_TYPE and score is not None) else ""
+            warn_tag = " ⚠️样本少" if (t == STYLIZATION_TYPE and (it.get("source_count") or 0) < 3) else ""
             node = QListWidgetItem(f"[{t}]  {name}{score_tag}{warn_tag}")
             node.setData(Qt.UserRole, it.get("id"))
             node.setFlags(node.flags() | Qt.ItemIsUserCheckable)
@@ -860,7 +868,7 @@ class MyKnowledgePage(BasePage):
             klist.addItem(node)
         lay.addWidget(klist)
 
-        btn_go = QPushButton(" 调整文案")
+        btn_go = QPushButton("✨ 调整文案")
         btn_go.setObjectName("primary_button")
         lay.addWidget(btn_go)
 
@@ -900,13 +908,13 @@ class MyKnowledgePage(BasePage):
             status.setText("正在调整…")
             self._adj_worker = LLMWorker("", "", model, system, user)
             self._adj_worker.finished.connect(
-                lambda t: (out.setPlainText(t), status.setText("完成"), btn_go.setEnabled(True)))  # noqa: E501
+                lambda t: (out.setPlainText(t), status.setText("完成"), btn_go.setEnabled(True)))
             self._adj_worker.error.connect(
                 lambda e: (status.setText(f"失败：{e}"), btn_go.setEnabled(True)))
             self._adj_worker.start()
 
         btn_go.clicked.connect(run)
-        QDialogButtonBox(QDialogButtonBox.Close, parent=dlg).rejected.connect(dlg.reject)  # noqa: E501
+        QDialogButtonBox(QDialogButtonBox.Close, parent=dlg).rejected.connect(dlg.reject)
         lay.addWidget(QDialogButtonBox(QDialogButtonBox.Close, parent=dlg))
         dlg.exec()
 
@@ -919,12 +927,12 @@ class MyKnowledgePage(BasePage):
 
         # 应用维度过滤
         if self._style_filter_dim is not None:
-            stylizations = [it for it in stylizations if it.get("dim") == self._style_filter_dim]  # noqa: E501
+            stylizations = [it for it in stylizations if it.get("dim") == self._style_filter_dim]
 
         if not stylizations:
-            msg = ("（暂无风格化条目，请先导入素材并点「 提炼风格化」）"
+            msg = ("（暂无风格化条目，请先导入素材并点「✨ 提炼风格化」）"
                    if self._style_filter_dim is None
-                   else "（此维度暂无风格化条目）")
+                   else f"（此维度暂无风格化条目）")
             empty = QListWidgetItem(msg)
             empty.setFlags(Qt.NoItemFlags)
             empty.setForeground(QColor("#888888"))
@@ -933,7 +941,7 @@ class MyKnowledgePage(BasePage):
 
         # 按维度分组输出
         dim_order = list(STYLE_DIMS.keys())
-        by_dim: dict[str, list] = {}
+        by_dim = {}
         for it in stylizations:
             by_dim.setdefault(it.get("dim","other"), []).append(it)
 
@@ -959,9 +967,14 @@ class MyKnowledgePage(BasePage):
                 cnt = it.get("source_count", 0)
                 score = it.get("score", 5.0)
                 # 评分徽章：绿 ≥7 / 黄 5–6.9 / 红 <5
-                badge = f"{score:.1f}" if score >= 7.0 or score >= 5.0 else f"{score:.1f}"
-                warn = "  注意：" if cnt < 3 else ""
-                label = f"      {val}   [{badge}]  ({cnt} 条){warn}"
+                if score >= 7.0:
+                    badge = f"⭐{score:.1f}"
+                elif score >= 5.0:
+                    badge = f"★{score:.1f}"
+                else:
+                    badge = f"☆{score:.1f}"
+                warn = "  ⚠️" if cnt < 3 else ""
+                label = f"    🎨  {val}   [{badge}]  ({cnt} 条){warn}"
                 node = QListWidgetItem(label)
                 node.setData(Qt.UserRole, it.get("id"))
                 # 评分颜色
@@ -1008,7 +1021,7 @@ class MyKnowledgePage(BasePage):
 
         n_total   = len(matched)
         n_missing = sum(1 for s in matched
-                        if not os.path.exists((s.get("source") or {}).get("media_path","") or ""))  # noqa: E501
+                        if not os.path.exists((s.get("source") or {}).get("media_path","") or ""))
         n_transcribed = sum(1 for s in matched if (s.get("transcript") or "").strip())
 
         self.samples_header.setText(f"参考素材  —  [{dim_label}]  {dim_val}  （{n_total} 条）")
@@ -1020,10 +1033,10 @@ class MyKnowledgePage(BasePage):
         # 未下载/未转写提醒
         warn_parts = []
         if n_missing > 0:
-            warn_parts.append(f"注意： {n_missing}/{n_total} 条素材尚未下载，批量转文字将跳过")
+            warn_parts.append(f"⚠️ {n_missing}/{n_total} 条素材尚未下载，批量转文字将跳过")
         if n_transcribed < n_total - n_missing:
             not_yet = n_total - n_missing - n_transcribed
-            warn_parts.append(f" {not_yet} 条已下载但未转写")
+            warn_parts.append(f"📝 {not_yet} 条已下载但未转写")
         if warn_parts:
             self.samples_warn_label.setText("  |  ".join(warn_parts))
             self.samples_warn_label.setVisible(True)
@@ -1034,7 +1047,12 @@ class MyKnowledgePage(BasePage):
 
         for s in matched:
             src = s.get("source") or {}
-            badge = "" if src.get("is_liked") or src.get("is_collected") else ""
+            if src.get("is_liked"):
+                badge = "👍"
+            elif src.get("is_collected"):
+                badge = "🔖"
+            else:
+                badge = "👤"
             platform   = src.get("platformName") or src.get("platform","")
             creator    = src.get("creator","")
             media_path = src.get("media_path","")
@@ -1043,8 +1061,8 @@ class MyKnowledgePage(BasePage):
 
             title_short = s.get("name","")[:28]
             col0 = f"{badge}  [{platform}]  {creator}  —  {title_short}"
-            col1 = "完成：" if has_media else "未"
-            col2 = "" if has_transcript else "—"
+            col1 = "✅" if has_media else "⬜"
+            col2 = "📝" if has_transcript else "—"
 
             node = QTreeWidgetItem([col0, col1, col2])
             node.setData(0, Qt.UserRole, s.get("id"))
@@ -1134,7 +1152,7 @@ class MyKnowledgePage(BasePage):
         if not to_transcribe:
             already  = sum(1 for it in matched if (it.get("transcript") or "").strip())
             missing  = sum(1 for it in matched
-                           if not os.path.exists((it.get("source") or {}).get("media_path","") or ""))  # noqa: E501
+                           if not os.path.exists((it.get("source") or {}).get("media_path","") or ""))
             self.show_info(
                 f"无需处理：{already} 条已有转写文本，{missing} 条未下载（已跳过）。",
                 "批量转文字"
@@ -1144,7 +1162,7 @@ class MyKnowledgePage(BasePage):
         model_name = ai.get("whisper_model", "large-v3")
         self.btn_transcribe.setEnabled(False)
         self.samples_header.setText(f"正在转写 0/{len(to_transcribe)} 条…")
-        self._transcribe_worker = _BatchTranscribeWorker(to_transcribe, model_name, self.manager)  # noqa: E501
+        self._transcribe_worker = _BatchTranscribeWorker(to_transcribe, model_name, self.manager)
         self._transcribe_worker.progress.connect(self.samples_header.setText)
         self._transcribe_worker.finished.connect(self._on_transcribe_done)
         self._transcribe_worker.error.connect(

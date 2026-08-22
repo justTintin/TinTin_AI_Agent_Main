@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 所有后台 QThread 任务的统一基类。
 
@@ -27,7 +28,7 @@ class BaseWorker(QThread):
     def run(self):
         try:
             self.do_work()
-        except Exception as e:  # 模板方法：捕获所有子类 do_work() 异常
+        except Exception as e:
             log.error(f"{type(self).__name__} 执行失败: {e}")
             self.error.emit(str(e))
 

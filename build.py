@@ -9,8 +9,8 @@
 """
 
 import os
-import subprocess
 import sys
+import subprocess
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 STUDIO_DIR = os.path.join(PROJECT_ROOT, "studio")

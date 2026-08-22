@@ -5,25 +5,26 @@
 - License 文件：JSON 格式，RSA 签名防篡改
 - 公钥内置在代码中用于验证；私钥由开发者离线保管，不在此工程内
 
-注意： 本模块只做"验证"，不做"签发"。签发逻辑已移至工程外的独立工具
+⚠️ 本模块只做"验证"，不做"签发"。签发逻辑已移至工程外的独立工具
    TinTin_License_Signer/sign_license.py（含私钥），严禁随客户端分发。
 """
 
-import hashlib
-import json
 import os
-import platform
-import socket
-import subprocess
+import json
+import hashlib
 import uuid
-from datetime import datetime
+import socket
+import platform
+import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
 
 # config 目录由 paths.py 统一管理（支持源码模式与 frozen 打包模式）
 from config.paths import CONFIG_DIR
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 
 # ── 公钥（嵌入代码用于验证；私钥由开发者离线保管，不在此工程内）──────────────
 _PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
@@ -64,7 +65,7 @@ def get_machine_id() -> str:
         )
         if result.returncode == 0 and result.stdout.strip():
             parts.append(f"uuid:{result.stdout.strip()}")
-    except (OSError, subprocess.SubprocessError):
+    except Exception:
         pass
 
     # 综合哈希
@@ -106,14 +107,14 @@ def verify_license(license_json: str | None = None) -> LicenseInfo:
 
         try:
             license_json = license_path.read_text(encoding="utf-8")
-        except OSError as e:
-            raise LicenseError("许可证文件读取失败") from e
+        except Exception:
+            raise LicenseError("许可证文件读取失败")
 
     # 解析 License
     try:
         license_data = json.loads(license_json)
-    except json.JSONDecodeError as e:
-        raise LicenseError("许可证文件格式错误") from e
+    except json.JSONDecodeError:
+        raise LicenseError("许可证文件格式错误")
 
     payload_data = license_data.get("payload")
     signature_hex = license_data.get("signature")
@@ -126,18 +127,18 @@ def verify_license(license_json: str | None = None) -> LicenseInfo:
         _PUBLIC_KEY_PEM.encode(), backend=default_backend()
     )
 
-    payload_bytes = json.dumps(payload_data, sort_keys=True, ensure_ascii=False).encode()  # noqa: E501
+    payload_bytes = json.dumps(payload_data, sort_keys=True, ensure_ascii=False).encode()
     signature = bytes.fromhex(signature_hex)
 
     try:
         public_key.verify(
             signature,
             payload_bytes,
-            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),  # noqa: E501
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
             hashes.SHA256(),
         )
-    except Exception as e:  # cryptography 外部库调用
-        raise LicenseError("许可证签名校验失败（文件已被篡改）") from e
+    except Exception:
+        raise LicenseError("许可证签名校验失败（文件已被篡改）")
 
     # 校验机器码
     current_machine = get_machine_id()
@@ -152,8 +153,8 @@ def verify_license(license_json: str | None = None) -> LicenseInfo:
     try:
         expires = datetime.fromisoformat(payload_data.get("expires", ""))
         days_left = (expires - datetime.now()).days
-    except (ValueError, TypeError) as e:
-        raise LicenseError("许可证有效期格式错误") from e
+    except (ValueError, TypeError):
+        raise LicenseError("许可证有效期格式错误")
 
     if days_left <= 0:
         raise LicenseError(f"许可证已过期（{abs(days_left)} 天前）")
@@ -185,7 +186,7 @@ def check_trial_whitelist(machine_id: str | None = None) -> bool:
                 data = json.load(f)
             allowed = set(data.get("machine_ids", []))
             return machine_id in allowed
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return False
 
@@ -214,7 +215,7 @@ def save_activation_cache(info: LicenseInfo):
                 "expires": info.expires,
                 "activated_at": datetime.now().isoformat(),
             }, f, ensure_ascii=False, indent=2)
-    except OSError:
+    except Exception:
         pass
 
 
@@ -239,7 +240,7 @@ def load_activation_cache() -> LicenseInfo | None:
                 "expires": data["expires"],
                 "features": [],
             })
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    except Exception:
         pass
     return None
 

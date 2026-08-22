@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """LLM 服务端压力测试脚本。
 
 用法:
@@ -5,31 +6,16 @@
     python tests/stress_llm.py -c 20 -n 200 -m qwen2.5vl:7b-16k  # 自定义参数
     python tests/stress_llm.py --vision                  # 多模态压力测试
 """
-import argparse
-import json
 import os
 import sys
-import threading
 import time
-
+import json
+import base64
+import threading
+import argparse
 import requests
 
-
-def _server_from_config():
-    """服务端地址统一从 studio/config/ai_config.json 的 compute_server_url 读取。"""
-    try:
-        p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "studio", "config", "ai_config.json")
-        with open(p, encoding="utf-8") as f:
-            url = json.load(f).get("compute_server_url", "")
-        if url:
-            return url.rstrip("/")
-    except Exception:
-        pass
-    return "http://192.168.111.28:8000"
-
-
-SERVER = _server_from_config()
+SERVER = "http://192.168.111.19:8000"
 
 # ── 结果收集 ──
 errors = []
@@ -111,7 +97,6 @@ def worker(start: int, count: int, model: str, vision: bool, timeout: int):
 
 
 def main():
-    global SERVER
     parser = argparse.ArgumentParser(description="LLM 压力测试")
     parser.add_argument("-c", "--concurrent", type=int, default=10, help="并发数")
     parser.add_argument("-n", "--requests", type=int, default=50, help="总请求数")
@@ -121,9 +106,10 @@ def main():
     parser.add_argument("--server", type=str, default=SERVER, help="服务端地址")
     args = parser.parse_args()
 
+    global SERVER
     SERVER = args.server
 
-    print("=== LLM 压力测试 ===")
+    print(f"=== LLM 压力测试 ===")
     print(f"服务端: {SERVER}")
     print(f"并发数: {args.concurrent}")
     print(f"总请求: {args.requests}")
@@ -167,7 +153,7 @@ def main():
     total_elapsed = time.time() - t0_total
 
     # ── 统计 ──
-    print("\n=== 结果 ===")
+    print(f"\n=== 结果 ===")
     print(f"总耗时:    {total_elapsed:.1f}s")
     print(f"成功:      {len(times)}/{args.requests}")
     print(f"失败:      {len(errors)}/{args.requests}")
@@ -183,7 +169,7 @@ def main():
         print(f"QPS:       {len(times) / total_elapsed:.1f}")
 
     if errors:
-        print("\n错误明细 (前 10):")
+        print(f"\n错误明细 (前 10):")
         for e in errors[:10]:
             print(f"  - {e}")
 

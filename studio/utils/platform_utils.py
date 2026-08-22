@@ -1,7 +1,7 @@
 import os
+import sys
 import shutil
 import subprocess
-import sys
 
 IS_WIN = True  # 工程仅支持 Windows
 
@@ -66,14 +66,9 @@ def kill_process_by_pid(pid: int, *, tree: bool = False):
 # ═══════════════════════════════════════════════════════════════
 
 def run_subprocess(cmd, **kwargs):
-    """subprocess.run 统一封装 —— 自动隐藏 Windows 控制台窗口，并默认关闭 stdin。
-
-    在 GUI 无控制台环境下，子进程继承的 stdin 往往不是真实终端；ffmpeg 等工具会
-    阻塞在 stdin 读取上，导致 CPU/GPU 0% 假死。统一默认传入 DEVNULL 避免该问题。
-    """
+    """subprocess.run 统一封装 —— 自动隐藏 Windows 控制台窗口。"""
     kwargs.setdefault("creationflags", 0)
     kwargs["creationflags"] |= _CREATE_NO_WINDOW
-    kwargs.setdefault("stdin", subprocess.DEVNULL)
     return subprocess.run(cmd, **kwargs)
 
 
@@ -106,7 +101,7 @@ def _ffmpeg_fallback_candidates(exe: str) -> list:
     """
     try:
         from config.paths import WORKSPACE_ROOT
-    except ImportError:
+    except Exception:
         return []
     return [
         os.path.join(WORKSPACE_ROOT, exe),
@@ -147,6 +142,25 @@ def find_ffprobe() -> str:
             return os.path.abspath(c)
 
     return exe
+
+
+def find_ffplay() -> str:
+    """查找 ffplay 可执行文件（用于镜头定点预览），找不到返回空串。"""
+    exe = binary_name("ffplay")
+    ffmpeg = find_ffmpeg()
+    if ffmpeg:
+        sibling = os.path.join(os.path.dirname(ffmpeg), binary_name("ffplay"))
+        if os.path.isfile(sibling):
+            return sibling
+    found = shutil.which(exe)
+    if found:
+        return os.path.abspath(found)
+
+    for c in _ffmpeg_fallback_candidates(exe):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+
+    return ""
 
 
 def find_python() -> str:

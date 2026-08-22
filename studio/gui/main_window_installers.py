@@ -1,20 +1,63 @@
-# type: ignore
-"""MainWindow 的安装器 mixin（Playwright / PaddleOCR 修复），从 gui_main 拆出。"""
+# -*- coding: utf-8 -*-
+"""MainWindow 的安装器 mixin（Playwright 修复），从 gui_main 拆出。
 
-import os
-import sys
+注：PaddleOCR 本地部署/修复能力已移除 —— OCR 已服务端化，
+识别统一由算力服务端执行（见 utils/ocr_client.py），客户端无需本地 OCR 环境。
+"""
+
+import subprocess
+import time
+import json
 import zipfile
-
-from config.paths import BUNDLED_PW_BROWSERS_ZIP, PW_BROWSERS_DIR
-from PySide6.QtWidgets import QMessageBox
-from utils.ffmpeg_utils import run
+import shutil
+from config.paths import BUNDLED_PW_BROWSERS_ZIP
+import sys
+import os
+from config.paths import (
+    PROJECT_ROOT, RUNTIME_DIR, LOG_DIR, TMP_DIR, COOKIES_DIR,
+    ACCOUNTS_DIR, PW_BROWSERS_DIR, WORKSPACE_ROOT
+)
+import threading
+import uuid
+import configparser
+from ui import gui_styles
+from gui.transcription_page import TranscriptionToolPage
+from gui.env_config_page import EnvConfigPage, EnvInstallWorker
+from gui.subtitle_removal_page import SubtitleRemovalPage
+from gui.live_clip_page import LiveClipPage
+from gui.voice_clone_page import VoiceClonePage
+from gui.voice_samples_page import VoiceSamplesPage
+from gui.video_ocr_page import VideoOcrPage
+from gui.image_folder_ocr_page import ImageFolderOcrPage
+from utils.logger_utils import log, get_last_logs
+from utils.account_manager import AccountManager
+from core.creator_browser_controller import CreatorBrowserController
+from utils.thread_worker import TaskWorker as Worker
+from gui.threads import SystemMonitorThread, ComfyWSThread
+from gui.dialogs import LoginDialog, StartupSplash, CloseSplash, open_cef_browser, EditAccountDialog
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                                 QHBoxLayout, QPushButton, QLabel, QStackedWidget, 
+                                 QFrame, QSizePolicy, QLineEdit, QTableWidget, 
+                                 QTableWidgetItem, QHeaderView, QMessageBox, QCheckBox,
+                                 QScrollArea, QTextEdit, QDialog, QListWidget, 
+                                 QListWidgetItem, QGridLayout, QFileDialog, 
+                                 QProgressBar, QComboBox, QInputDialog, QSplitter,
+                                 QAbstractItemView, QButtonGroup, QGroupBox, QListView,
+                                 QSpinBox)
+from PySide6.QtGui import QIcon, QFont, QPixmap
+from PySide6.QtCore import Qt, QSize, QUrl, QThread, Signal, QTimer, QEvent
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtGui import QFont
 
 
 class InstallersMixin:
     def is_playwright_chromium_present(self):
         if not os.path.isdir(PW_BROWSERS_DIR):
             return False
-        return any("chrome.exe" in files for _root, _dirs, files in os.walk(PW_BROWSERS_DIR))
+        for root, dirs, files in os.walk(PW_BROWSERS_DIR):
+            if "chrome.exe" in files:
+                return True
+        return False
 
     def ensure_playwright_chromium_ready(self):
         self._pw_ready = self.is_playwright_chromium_present()
@@ -39,13 +82,13 @@ class InstallersMixin:
                     with zipfile.ZipFile(BUNDLED_PW_BROWSERS_ZIP, "r") as zf:
                         zf.extractall(PW_BROWSERS_DIR)
                     return {"code": 0, "out": "unzipped"}
-            except Exception as e:  # 文件解压涉及 I/O 多类异常
+            except Exception as e:
                 return {"code": 2, "out": f"unzip_failed: {e}"}
 
             env = os.environ.copy()
             env["PLAYWRIGHT_BROWSERS_PATH"] = PW_BROWSERS_DIR
             cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
-            p = run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="ignore")  # noqa: E501
+            p = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="ignore")
             return {"code": p.returncode, "out": (p.stdout or "") + (p.stderr or "")}
 
         def on_done(res):
@@ -78,5 +121,10 @@ class InstallersMixin:
         self.start_worker(run_install, on_finished=on_done, on_error=on_err)
 
     def start_paddle_repair(self):
-        """OCR 已为服务端模式，无需本地部署。此方法仅作兼容保留。"""
-        QMessageBox.information(self, "无需部署", "OCR 已切换为服务端模式（/material/ocr），无需本地 PaddleOCR 环境。")  # noqa: E501
+        # OCR 已迁移至算力服务端，客户端不再需要本地部署 PaddleOCR 环境
+        QMessageBox.information(
+            self,
+            "OCR 已服务端化",
+            "文字识别（OCR）已迁移至算力服务端执行，本机无需再部署 PaddleOCR 环境。\n\n"
+            "请确保「系统设置 → 平台接入」中已正确配置统一计算节点地址（compute_server_url）。"
+        )

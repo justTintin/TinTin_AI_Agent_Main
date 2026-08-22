@@ -3,10 +3,10 @@
 """
 import json
 import os
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QApplication
 
 from config.paths import CONFIG_DIR
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
 
 _THEME_CONFIG_FILE = os.path.join(CONFIG_DIR, "theme.json")
 
@@ -21,7 +21,7 @@ def get_saved_theme() -> str:
         theme = data.get("theme", "dark")
         if theme in THEME_OPTIONS:
             return theme
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return "dark"
 
@@ -87,11 +87,7 @@ def _create_light_palette() -> QPalette:
 
 
 def apply_theme(app: QApplication):
-    """根据保存的设置应用主题（调色板 + QSS 样式表）。
-
-    设置完调色板与 QSS 后，对全部控件执行 unpolish/polish，
-    保证主题切换即时生效（无需重启）。
-    """
+    """根据保存的设置应用主题（调色板 + QSS 样式表）。"""
     effective = get_effective_theme()
     if effective == "light":
         app.setPalette(_create_light_palette())
@@ -101,7 +97,3 @@ def apply_theme(app: QApplication):
         app.setPalette(_create_dark_palette())
         from ui.gui_styles import STYLE_SHEET
         app.setStyleSheet(STYLE_SHEET)
-    for widget in app.allWidgets():
-        widget.style().unpolish(widget)
-        widget.style().polish(widget)
-    app.processEvents()

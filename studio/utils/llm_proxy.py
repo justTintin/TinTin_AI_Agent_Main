@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 LLM 代理客户端 — 文本 LLM 调用统一走服务端代理。
 
@@ -15,14 +16,11 @@ LLM 代理客户端 — 文本 LLM 调用统一走服务端代理。
     from utils.llm_proxy import llm_chat
     reply = llm_chat(system="你是文案专家", user="写一段产品介绍", model="deepseek-v4-flash")
 """
-import json
 import os
+import json
 
-import requests
-
-from utils.api_error import ApiError
-from utils.http_client import resilient_get, resilient_post
 from utils.logger_utils import log
+from utils.http_client import resilient_post
 
 
 def _read_config() -> dict:
@@ -30,17 +28,20 @@ def _read_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return {}
 
 
 def _get_server_url() -> str:
-    """获取服务端统一地址。"""
-    cfg = _read_config()
-    return (cfg.get("compute_server_url") or "").strip().rstrip("/")
+    """获取服务端统一地址（走统一解析 + 缓存）。"""
+    from utils.server_resolver import get_server_url
+    try:
+        return get_server_url()
+    except RuntimeError:
+        return ""
 
 
 def _get_default_model() -> str:
@@ -53,7 +54,7 @@ def llm_chat(
     system: str,
     user: str,
     *,
-    model: str | None = "",
+    model: str = "",
     temperature: float = 0.4,
     timeout: int = 120,
     max_tokens: int = 0,
@@ -78,29 +79,27 @@ def llm_chat(
     if not base:
         raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
 
-    # model=None means server selects; empty string means use default text model
-    if model == "":
+    if not model:
         model = _get_default_model()
+
     url = f"{base}/llm/chat/completions"
     payload = {
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "temperature": temperature,
     }
-    if model is not None:
-        payload["model"] = model
     if max_tokens > 0:
         payload["max_tokens"] = max_tokens
 
-    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'}")
+    log.info(f"[LLM代理] POST {url} model={model}")
     resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
-        raise ApiError(url, method="POST", params=payload,
-                       status_code=resp.status_code, response_text=resp.text, service="llm")  # noqa: E501
+        raise RuntimeError(f"LLM 服务端返回 HTTP {resp.status_code}: {err}")
 
     data = resp.json()
     # 兼容 OpenAI 格式和自定义格式
@@ -116,7 +115,7 @@ def llm_chat(
 def llm_chat_messages(
     messages: list,
     *,
-    model: str | None = "",
+    model: str = "",
     temperature: float = 0.4,
     timeout: int = 120,
     max_tokens: int = 0,
@@ -143,26 +142,24 @@ def llm_chat_messages(
     if not base:
         raise RuntimeError("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
 
-    # model=None means server selects; empty string means use default text model
-    if model == "":
+    if not model:
         model = _get_default_model()
+
     url = f"{base}/llm/chat/completions"
     payload = {
+        "model": model,
         "messages": messages,
         "temperature": temperature,
     }
-    if model is not None:
-        payload["model"] = model
     if max_tokens > 0:
         payload["max_tokens"] = max_tokens
 
-    log.info(f"[LLM代理] POST {url} model={model if model is not None else '服务端自选'} 消息数={len(messages)}")  # noqa: E501
+    log.info(f"[LLM代理] POST {url} model={model} 消息数={len(messages)}")
     resp = resilient_post(url, json=payload, timeout=timeout, service="llm")
     if resp.status_code != 200:
         err = resp.text[:300] if resp.text else ""
         log.error(f"[LLM代理] HTTP {resp.status_code}: {err}")
-        raise ApiError(url, method="POST", params=payload,
-                       status_code=resp.status_code, response_text=resp.text, service="llm")  # noqa: E501
+        raise RuntimeError(f"LLM 服务端返回 HTTP {resp.status_code}: {err}")
 
     data = resp.json()
     content = (
@@ -191,26 +188,11 @@ def llm_chat_json(
     t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.MULTILINE).strip()
     try:
         return json.loads(t)
-    except json.JSONDecodeError:
+    except Exception:
         m = re.search(r"(\[.*\]|\{.*\})", t, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(1))
-            except json.JSONDecodeError:
+            except Exception:
                 pass
     return None
-
-
-def list_llm_models(timeout: int = 10) -> list:
-    """GET /llm/models → 可用文本模型列表 [{"id","name","provider",...}]；失败返回 []。"""
-    base = _get_server_url()
-    if not base:
-        return []
-    try:
-        resp = resilient_get(f"{base}/llm/models", timeout=timeout, service="llm")
-        if resp.status_code == 200:
-            return resp.json().get("models") or []
-        log.warning(f"[LLM代理] list_llm_models HTTP {resp.status_code}")
-    except requests.exceptions.RequestException as e:
-        log.warning(f"[LLM代理] list_llm_models 失败: {e}")
-    return []

@@ -1,75 +1,30 @@
+# -*- coding: utf-8 -*-
 import os
-import re
 import shutil
+import subprocess
+import traceback
+import sys
+import json
+import re
 import tempfile
 import time
-import traceback
 from collections import Counter
-from typing import Any
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFont, QPixmap
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSlider,
-    QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
+                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QTextEdit,
+                               QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+                               QWidget, QStackedWidget, QScrollArea, QGridLayout, QSlider, QDialog)
+from PySide6.QtCore import Signal, QThread, Qt, QUrl, QTimer
 from utils.base_worker import BaseWorker
-from utils.ffmpeg_utils import (
-    DEVNULL,
-    PIPE,
-    find_ffmpeg,
-    get_video_fps,
-    get_video_resolution,
-)
-from utils.ffmpeg_utils import (
-    extract_frame as ffmpeg_extract_frame,
-)
-from utils.ffmpeg_utils import (
-    popen as ffmpeg_popen,
-)
-from utils.ffmpeg_utils import (
-    run as ffmpeg_run,
-)
-from utils.gui_icons import icon_button, mdi_button, mdi_icon, std_icon
-from utils.llm_output_utils import extract_json_block
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtGui import QFont, QPixmap, QImage, QDesktopServices
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
-from utils.srt_utils import parse_srt_to_segments
+from utils.hwaccel import get_video_encode_args
+from config.paths import OUTPUTS_DIR, TMP_DIR
 
-
-def _set_button_icon(btn, name):
-    """优先使用 Qt 标准图标，缺失则回退到 mdi 图标。"""
-    icon = std_icon(name)
-    if icon.isNull():
-        icon = mdi_icon(name)
-    btn.setIcon(icon)
-import contextlib  # noqa: E402
-
-from config.paths import OUTPUTS_DIR, TMP_DIR  # noqa: E402
-from gui.common_widgets import DropZone  # noqa: E402
-from utils.file_dialog_utils import pick_file, pick_save_file  # noqa: E402
-from utils.hwaccel import get_video_encode_args  # noqa: E402
 
 HOT_KEYWORDS_CN = [
     "重点", "关键", "核心", "重要", "注意", "记住", "一定要", "必须",
@@ -81,20 +36,46 @@ HOT_KEYWORDS_CN = [
 ]
 
 
+def _startupinfo():
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
+    return si
+
+
+def _ffmpeg():
+    from utils.platform_utils import find_ffmpeg, binary_name
+    p = find_ffmpeg()
+    if not p or p == binary_name("ffmpeg"):
+        p = shutil.which("ffmpeg")
+    if not p:
+        raise RuntimeError("未检测到 ffmpeg，请安装 ffmpeg 或将其加入环境变量 PATH")
+    return p
+
+
+def extract_frame(video_path, out_image, time_sec=1.0):
+    cmd = [_ffmpeg(), "-y", "-ss", str(time_sec), "-i", video_path,
+           "-vframes", "1", "-q:v", "2", out_image]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                       startupinfo=_startupinfo())
+    if r.returncode != 0 or not os.path.exists(out_image):
+        raise RuntimeError(f"提取帧失败:\n{r.stderr}")
+
+
 def resize_and_pad_with_blur(img, target_size):
     tw, th = target_size
     sw, sh = img.size
-
-    # 1. Create blurred background (resize source to stretch over target, then apply strong blur)  # noqa: E501
+    
+    # 1. Create blurred background (resize source to stretch over target, then apply strong blur)
     bg = img.resize((tw, th), Image.Resampling.LANCZOS)
     bg = bg.filter(ImageFilter.GaussianBlur(radius=20))
-
+    
     # 2. Resize source preserving aspect ratio to fit inside target_size
     ratio = min(tw / sw, th / sh)
     nw = int(sw * ratio)
     nh = int(sh * ratio)
     fg = img.resize((nw, nh), Image.Resampling.LANCZOS)
-
+    
     # 3. Paste the fg directly in the center of bg
     x = (tw - nw) // 2
     y = (th - nh) // 2
@@ -102,11 +83,39 @@ def resize_and_pad_with_blur(img, target_size):
     return bg
 
 
+def get_video_resolution(video_path):
+    cmd = [_ffmpeg(), "-i", video_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
+    out = r.stderr or ""
+    match = re.search(r",\s*(\d{2,5})x(\d{2,5})\b", out)
+    if match:
+        w = int(match.group(1))
+        h = int(match.group(2))
+        return w, h
+    return 1280, 720
+
+
+def get_video_fps(video_path):
+    cmd = [_ffmpeg(), "-i", video_path]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore", startupinfo=_startupinfo())
+    out = r.stderr or ""
+    fps = 30.0
+    match = re.search(r"\b(\d+(?:\.\d+)?)\s*fps\b", out)
+    if match:
+        try:
+            fps = float(match.group(1))
+        except ValueError:
+            pass
+    if fps <= 0 or fps > 120:
+        fps = 30.0
+    return fps
+
+
 def slice_srt(original_srt_path, start_sec, end_sec, out_srt_path):
     if not os.path.exists(original_srt_path):
         return False
     try:
-        with open(original_srt_path, encoding="utf-8", errors="ignore") as f:
+        with open(original_srt_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         blocks = re.split(r'\n\s*\n', content.strip())
         new_blocks = []
@@ -117,18 +126,18 @@ def slice_srt(original_srt_path, start_sec, end_sec, out_srt_path):
                 continue
             ts_line = lines[1]
             text = "\n".join(lines[2:])
-            match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})", ts_line)  # noqa: E501
+            match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})", ts_line)
             if match:
                 sh, sm, ss, sms = map(int, match.groups()[:4])
                 eh, em, es, ems = map(int, match.groups()[4:])
-
+                
                 t_start = sh * 3600 + sm * 60 + ss + sms / 1000.0
                 t_end = eh * 3600 + em * 60 + es + ems / 1000.0
-
+                
                 if t_end > start_sec and t_start < end_sec:
                     new_start = max(0.0, t_start - start_sec)
                     new_end = min(end_sec - start_sec, t_end - start_sec)
-
+                    
                     if new_end > new_start:
                         def format_ts(t):
                             h = int(t // 3600)
@@ -139,15 +148,15 @@ def slice_srt(original_srt_path, start_sec, end_sec, out_srt_path):
                                 s += 1
                                 ms -= 1000
                             return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
+                        
                         new_ts_line = f"{format_ts(new_start)} --> {format_ts(new_end)}"
                         new_blocks.append(f"{idx}\n{new_ts_line}\n{text}")
                         idx += 1
-
+                        
         with open(out_srt_path, "w", encoding="utf-8") as f:
             f.write("\n\n".join(new_blocks) + "\n")
         return True
-    except OSError as e:
+    except Exception as e:
         print(f"Error slicing SRT: {e}")
         return False
 
@@ -170,7 +179,7 @@ def generate_cover_image(frame_path, title, out_path, size=(1280, 720)):
     overlay = Image.new("RGBA", (size[0], bar_h), (0, 0, 0, 180))
     img.paste(overlay, (0, size[1] - bar_h), overlay)
 
-    draw.rectangle([0, size[1] - bar_h, size[0], size[1] - bar_h + line_width], fill=(59, 130, 246))  # noqa: E501
+    draw.rectangle([0, size[1] - bar_h, size[0], size[1] - bar_h + line_width], fill=(59, 130, 246))
 
     font = None
     for fn in ["C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/msyh.ttc",
@@ -179,7 +188,7 @@ def generate_cover_image(frame_path, title, out_path, size=(1280, 720)):
             try:
                 font = ImageFont.truetype(fn, font_size)
                 break
-            except Exception:  # PIL font loading
+            except Exception:
                 pass
     if font is None:
         font = ImageFont.load_default()
@@ -197,27 +206,27 @@ def generate_cover_image(frame_path, title, out_path, size=(1280, 720)):
 
 
 def embed_cover_to_video(cover_path, video_path, out_path, cover_duration=2):
-    ffmpeg = find_ffmpeg()
-
+    ffmpeg = _ffmpeg()
+    
     # 1. Detect resolution and fps dynamically
     w, h = get_video_resolution(video_path)
     fps = get_video_fps(video_path)
-
+    
     # 2. Select appropriate cover (use vertical cover if portrait video)
     selected_cover = cover_path
     if w < h:
         vertical_path = cover_path.replace("cover_", "cover_vertical_")
         if os.path.exists(vertical_path):
             selected_cover = vertical_path
-
+            
     cmd = [
         ffmpeg, "-y",
         "-loop", "1", "-i", selected_cover,
         "-i", video_path,
         "-filter_complex",
-        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"  # noqa: E501
-        f"trim=duration={cover_duration},fps={fps},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v0];"  # noqa: E501
-        f"[1:v]fps={fps},format=yuv420p[v1];"
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+        f"trim=duration={cover_duration},fps={fps},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v0];"
+        f"[1:v]fps={fps}[v1];"
         f"[v0][v1]concat=n=2:v=1:a=0[v];"
         f"[1:a]adelay={cover_duration*1000}:all=1[a]",
         "-map", "[v]", "-map", "[a]",
@@ -225,7 +234,8 @@ def embed_cover_to_video(cover_path, video_path, out_path, cover_duration=2):
         "-c:a", "aac", "-shortest",
         out_path,
     ]
-    r = ffmpeg_run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")  # noqa: E501
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                       startupinfo=_startupinfo())
     if r.returncode != 0:
         raise RuntimeError(f"封面嵌入失败:\n{r.stderr}")
 
@@ -262,26 +272,27 @@ class AudioExtractWorker(BaseWorker):
             log.info(f"[AudioExtractWorker] 提取完成, 进度更新{count}次")
             self.progress.emit(100)
             self.finished.emit(self.audio_path)
-        except Exception:  # audio extraction pipeline
+        except Exception:
             log.exception("[AudioExtractWorker] 提取异常")
             self.error.emit(traceback.format_exc())
 
     def _extract(self):
-        ffmpeg = find_ffmpeg()
+        ffmpeg = _ffmpeg()
         cmd = [ffmpeg, "-y", "-threads", "0", "-i", self.video_path, "-vn",
                "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                "-progress", "pipe:1", "-nostats", self.audio_path]
         log.info(f"[AudioExtractWorker] ffmpeg: {' '.join(cmd)}")
-        self._ffmpeg_proc = ffmpeg_popen(cmd, stdout=PIPE, stderr=DEVNULL,
-                                              bufsize=0)
-        assert self._ffmpeg_proc.stdout is not None
+        self._ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                              bufsize=0, startupinfo=_startupinfo())
         for line in iter(self._ffmpeg_proc.stdout.readline, b""):
             if self.isInterruptionRequested():
                 self._ffmpeg_proc.kill()
                 return
             if line.startswith(b"out_time_ms="):
-                with contextlib.suppress(ValueError):
+                try:
                     yield int(line.split(b"=")[1]) / 1_000_000
+                except ValueError:
+                    pass
         self._ffmpeg_proc.wait()
         if self._ffmpeg_proc.returncode != 0:
             raise RuntimeError("音频提取失败")
@@ -291,7 +302,7 @@ class AudioExtractWorker(BaseWorker):
             if self._ffmpeg_proc and self._ffmpeg_proc.poll() is None:
                 self._ffmpeg_proc.kill()
                 self.finished.emit(self.audio_path)
-        except Exception:  # ffmpeg process kill
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -302,7 +313,7 @@ class HotSpotAnalyzer(BaseWorker):
 
     def __init__(self, segments, use_llm=False, llm_model=""):
         super().__init__()
-        self.segments = [s for s in segments if hasattr(s, 'start') and hasattr(s, 'text')]  # noqa: E501
+        self.segments = [s for s in segments if hasattr(s, 'start') and hasattr(s, 'text')]
         self.use_llm = use_llm
         self.llm_model = llm_model
 
@@ -312,13 +323,13 @@ class HotSpotAnalyzer(BaseWorker):
                 self._llm_analyze()
             else:
                 self._rule_analyze()
-        except Exception:  # hotspot analysis pipeline
+        except Exception:
             self.error.emit(traceback.format_exc())
 
     def _rule_analyze(self):
         self.stage.emit("正在使用内置算法分析热点片段...")
         self.progress.emit(10)
-        windows: list[dict[str, Any]] = []
+        windows = []
         win, step = 60, 30
         total_dur = self.segments[-1].end if self.segments else 0
         for t0 in range(0, int(total_dur) + 1, step):
@@ -327,24 +338,24 @@ class HotSpotAnalyzer(BaseWorker):
             if not wsegs:
                 continue
             text = " ".join(s.text.strip() for s in wsegs)
-            words: list[str] = list(re.findall(r"[\u4e00-\u9fff\w]+", text))
+            words = list(re.findall(r"[\u4e00-\u9fff\w]+", text))
             if len(words) < 10:
                 continue
             kw_hits = sum(1 for w in words if w in HOT_KEYWORDS_CN)
             density = len(words) / win
             unique = len(set(words)) / max(1, len(words))
             digits = sum(1 for c in text if c.isdigit())
-            score = kw_hits * 3.0 + density * 10.0 + unique * 15.0 + min(digits, 20) * 0.3  # noqa: E501
-            windows.append({"start": t0, "end": t1, "score": score, "text": text, "words": words})  # noqa: E501
+            score = kw_hits * 3.0 + density * 10.0 + unique * 15.0 + min(digits, 20) * 0.3
+            windows.append({"start": t0, "end": t1, "score": score, "text": text, "words": words})
         self.progress.emit(40)
         if not windows:
             self.finished.emit([])
             return
         scores = [w["score"] for w in windows]
         threshold = sum(scores) / len(scores) * 1.3
-        peaks: list[dict[str, Any]] = [w for w in windows if w["score"] >= threshold]
+        peaks = [w for w in windows if w["score"] >= threshold]
         self.progress.emit(60)
-        merged: list[dict[str, Any]] = []
+        merged = []
         for p in sorted(peaks, key=lambda x: x["start"]):
             if merged and p["start"] - merged[-1]["end"] < 20:
                 merged[-1]["end"] = max(merged[-1]["end"], p["end"])
@@ -353,7 +364,7 @@ class HotSpotAnalyzer(BaseWorker):
                 merged[-1]["words"].extend(p["words"])
             else:
                 merged.append(p)
-        results: list[dict[str, Any]] = []
+        results = []
         for m in merged:
             dur = m["end"] - m["start"]
             if dur < 15 or dur > 300:
@@ -363,7 +374,7 @@ class HotSpotAnalyzer(BaseWorker):
                     continue
             word_freq = Counter(m["words"])
             hot = [w for w in word_freq if w in HOT_KEYWORDS_CN]
-            reg = [(w, c) for w, c in word_freq.most_common(20) if len(w) >= 2 and w not in HOT_KEYWORDS_CN]  # noqa: E501
+            reg = [(w, c) for w, c in word_freq.most_common(20) if len(w) >= 2 and w not in HOT_KEYWORDS_CN]
             top = hot[:3] + [w for w, _ in reg[:5]]
             title = " | ".join(top[:5]) if top else "精彩片段"
             results.append({
@@ -378,46 +389,48 @@ class HotSpotAnalyzer(BaseWorker):
         self.finished.emit(results)
 
     def _llm_analyze(self):
+        import re
+        import json
         from utils.llm_proxy import llm_chat_messages
-        full: list[str] = []
+        full = []
         for s in self.segments:
             ts = f"[{int(s.start//60):02d}:{int(s.start%60):02d}]"
             full.append(f"{ts} {s.text.strip()}")
-
+            
         # Group lines to avoid splitting them and add overlapping context (5 lines)
-        chunks: list[str] = []
-        current_chunk: list[str] = []
+        chunks = []
+        current_chunk = []
         current_len = 0
-        overlap_lines: list[str] = []
+        overlap_lines = []
         for line in full:
             if not current_chunk and overlap_lines:
                 current_chunk.extend(overlap_lines)
-                current_len = sum(len(line) + 1 for line in overlap_lines)
+                current_len = sum(len(l) + 1 for l in overlap_lines)
             current_chunk.append(line)
             current_len += len(line) + 1
             if current_len >= 4000:
                 chunks.append("\n".join(current_chunk))
-                overlap_lines = current_chunk[-5:] if len(current_chunk) >= 5 else current_chunk[:]  # noqa: E501
+                overlap_lines = current_chunk[-5:] if len(current_chunk) >= 5 else current_chunk[:]
                 current_chunk = []
                 current_len = 0
         if current_chunk:
             chunks.append("\n".join(current_chunk))
-
-        all_results: list[dict[str, Any]] = []
+            
+        all_results = []
         for ci, chunk in enumerate(chunks):
             self.stage.emit(f"正在使用大模型分析第 {ci+1}/{len(chunks)} 段字幕...")
             self.progress.emit(10 + int(ci / max(1, len(chunks)) * 70))
             prompt = (
                 "你是专业的直播视频内容分析师。请仔细阅读以下直播字幕文本，并从中找出最具传播价值和吸引力的热点片段。\n\n"
                 "【分析与剪裁规则】：\n"
-                "1. **保持话题完整连贯（核心要求）**：如果主播在连续讨论同一个话题或主题，请务必将其归为一个完整的片段，不要将其切碎为多个零碎、不连贯的小片段。片段时长一般控制在30秒到5分钟之间。如果一个话题较长（如3-5分钟），只要逻辑连贯，请输出为一个完整片段。\n"  # noqa: E501
-                "2. **语义停顿**：确保片段的开始时间（start）和结束时间（end）定位在语句的自然停顿处，避免截断一句话。\n"  # noqa: E501
-                "3. **时间戳格式**：必须严格使用待分析文本中对应的 `分:秒`（如 `12:34`）格式。如果分钟数超过60，也请按照 `分钟数:秒` 格式输出（例如 `75:20`），不要转换为 `时:分:秒`。\n"  # noqa: E501
+                "1. **保持话题完整连贯（核心要求）**：如果主播在连续讨论同一个话题或主题，请务必将其归为一个完整的片段，不要将其切碎为多个零碎、不连贯的小片段。片段时长一般控制在30秒到5分钟之间。如果一个话题较长（如3-5分钟），只要逻辑连贯，请输出为一个完整片段。\n"
+                "2. **语义停顿**：确保片段的开始时间（start）和结束时间（end）定位在语句的自然停顿处，避免截断一句话。\n"
+                "3. **时间戳格式**：必须严格使用待分析文本中对应的 `分:秒`（如 `12:34`）格式。如果分钟数超过60，也请按照 `分钟数:秒` 格式输出（例如 `75:20`），不要转换为 `时:分:秒`。\n"
                 "4. **评分打分**：根据内容的精彩程度、信息干货密度 and 传播价值，给每个片段打分（0-10分）。\n"
                 "5. **片段标题**：为片段起一个能够高度概括主题、有吸引力且不超过15个字的简短标题。\n\n"
                 "【输出格式要求】：\n"
-                "请仅返回一个标准的 JSON 数组格式，不要包含任何 Markdown 格式标记（如 ```json）或任何额外的解释性文字。格式示例如下：\n"  # noqa: E501
-                "[{\"start\": \"mm:ss\", \"end\": \"mm:ss\", \"title\": \"片段标题\", \"score\": 8.5}]\n\n"  # noqa: E501
+                "请仅返回一个标准的 JSON 数组格式，不要包含任何 Markdown 格式标记（如 ```json）或任何额外的解释性文字。格式示例如下：\n"
+                "[{\"start\": \"mm:ss\", \"end\": \"mm:ss\", \"title\": \"片段标题\", \"score\": 8.5}]\n\n"
                 "【待分析字幕文本】：\n" + chunk
             )
             try:
@@ -425,11 +438,10 @@ class HotSpotAnalyzer(BaseWorker):
                     [{"role": "user", "content": prompt}],
                     model=self.llm_model, temperature=0.3, timeout=120, max_tokens=2000
                 )
-                parsed = extract_json_block(content)
-                if isinstance(parsed, list):
-                    for item in parsed:
-                        sp = item["start"].split(":")
-                        ep = item["end"].split(":")
+                m = re.search(r"\[[\s\S]*\]", content)
+                if m:
+                    for item in json.loads(m.group()):
+                        sp = item["start"].split(":"); ep = item["end"].split(":")
                         item["start"] = int(sp[0]) * 60 + int(sp[1])
                         item["end"] = int(ep[0]) * 60 + int(ep[1])
                         item["duration"] = item["end"] - item["start"]
@@ -438,11 +450,11 @@ class HotSpotAnalyzer(BaseWorker):
                         item["preview"] = ""
                         item["score"] = item.get("score", 5.0)
                         all_results.append(item)
-            except Exception as e:  # LLM API call
+            except Exception as e:
                 log.warning(f"LLM chunk {ci} error: {e}")
-
+                
         # Post-process: merge overlapping or adjacent LLM hotspots (gap <= 15s)
-        merged_results: list[dict[str, Any]] = []
+        merged_results = []
         all_results.sort(key=lambda x: x["start"])
         for item in all_results:
             if not merged_results:
@@ -461,11 +473,11 @@ class HotSpotAnalyzer(BaseWorker):
                         merged_results.append(item)
                 else:
                     merged_results.append(item)
-
+                    
         for item in merged_results:
-            item["start_str"] = f"{int(item['start']//60):02d}:{int(item['start']%60):02d}"  # noqa: E501
+            item["start_str"] = f"{int(item['start']//60):02d}:{int(item['start']%60):02d}"
             item["end_str"] = f"{int(item['end']//60):02d}:{int(item['end']%60):02d}"
-
+            
         merged_results.sort(key=lambda x: x["score"], reverse=True)
         self.progress.emit(100)
         self.finished.emit(merged_results)
@@ -489,95 +501,54 @@ class VideoClipWorker(BaseWorker):
             results = []
             total = len(self.clips)
             for i, clip in enumerate(self.clips):
-                title = re.sub(r"[^\w\u4e00-\u9fff\-]", "_", clip.get("title", "clip"))[:30]  # noqa: E501
+                title = re.sub(r"[^\w\u4e00-\u9fff\-]", "_", clip.get("title", "clip"))[:30]
                 out = os.path.join(self.output_dir, f"clip_{i+1:03d}_{title}.mp4")
                 self.stage.emit(f"正在剪辑第 {i+1}/{total} 个片段: {title}...")
-
+                
                 start_sec = clip["start"]
                 end_sec = clip["end"]
                 duration = max(0.1, end_sec - start_sec)
-
+                
                 # Combine fast seek (before -i) and accurate seek (after -i)
                 fast_start = max(0, start_sec - 30)
                 remain_start = start_sec - fast_start
-
+                
                 # Check for burning subtitles
                 burn = clip.get("burn_subtitles", False)
                 temp_srt = None
                 cwd_dir = None
                 vf_args = []
-
+                
                 if burn and self.srt_path and os.path.exists(self.srt_path):
                     temp_srt = out.replace(".mp4", "_temp_sub.srt")
                     success = slice_srt(self.srt_path, start_sec, end_sec, temp_srt)
-                    if success and os.path.exists(temp_srt) and os.path.getsize(temp_srt) > 0:  # noqa: E501
+                    if success and os.path.exists(temp_srt) and os.path.getsize(temp_srt) > 0:
                         cwd_dir = os.path.dirname(temp_srt)
                         rel_srt = os.path.basename(temp_srt)
-                        # format=yuv420p：源素材可能是 10-bit，AMF 等硬件编码器不支持 10-bit 输入
-                        vf_args = ["-vf", f"subtitles={rel_srt},format=yuv420p"]
+                        vf_args = ["-vf", f"subtitles={rel_srt}"]
                     else:
                         temp_srt = None
-                else:
-                    # 不烧字幕也显式转 8-bit，防御 10-bit 源素材
-                    vf_args = ["-vf", "format=yuv420p"]
-
+                
                 abs_video = os.path.abspath(self.video_path)
                 abs_out = os.path.abspath(out)
-
-                cmd = [find_ffmpeg(), "-y",
+                
+                cmd = [_ffmpeg(), "-y",
                        "-ss", f"{fast_start:.3f}",
                        "-i", abs_video,
                        "-ss", f"{remain_start:.3f}",
                        "-t", f"{duration:.3f}"] + vf_args + [
                        *get_video_encode_args(crf=23, preset="fast"),
                        "-c:a", "aac", abs_out]
-
-                r = ffmpeg_run(cmd, capture_output=True, text=True, encoding="utf-8",
-                                   errors="ignore", cwd=cwd_dir)
-
+                       
+                r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                   errors="ignore", startupinfo=_startupinfo(), cwd=cwd_dir)
+                                   
                 if temp_srt and os.path.exists(temp_srt):
-                    with contextlib.suppress(OSError):
+                    try:
                         os.remove(temp_srt)
-
-                # GPU 编码器失败时回退 libx264 重试一次
-                if r.returncode != 0 and "-c:v" in cmd:
-                    enc_idx = cmd.index("-c:v")
-                    enc_name = cmd[enc_idx + 1] if enc_idx + 1 < len(cmd) else ""
-                    if enc_name != "libx264":
-                        log.warning(f"[切片] GPU编码器 {enc_name} 失败，回退 libx264 重试: {title}")
-                        fallback_cmd = list(cmd)
-                        # 替换编码器及其参数为 libx264
-                        fallback_cmd[enc_idx + 1] = "libx264"
-                        # 移除 GPU 特有参数 (-preset p3, -cq, -rc vbr_hq 等)
-                        clean = [fallback_cmd[0]]
-                        skip_next = False
-                        for _ci, arg in enumerate(fallback_cmd[1:], 1):
-                            if skip_next:
-                                skip_next = False
-                                continue
-                            if arg in ("-preset", "-cq", "-qp_i", "-qp_p", "-global_quality", "-rc"):  # noqa: E501
-                                skip_next = True
-                                continue
-                            if arg in ("vbr_hq", "speed", "quality", "balanced"):
-                                continue
-                            clean.append(arg)
-                        # 插入 libx264 标准参数
-                        try:
-                            vi = clean.index("-c:v")
-                            clean[vi + 1] = "libx264"
-                            clean.insert(vi + 2, "-preset")
-                            clean.insert(vi + 3, "fast")
-                            clean.insert(vi + 4, "-crf")
-                            clean.insert(vi + 5, "23")
-                        except (ValueError, IndexError):
-                            pass
-                        r = ffmpeg_run(clean, capture_output=True, text=True, encoding="utf-8",  # noqa: E501
-                                           errors="ignore", cwd=cwd_dir)
-
-                if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) == 0:  # noqa: E501
-                    stderr_tail = (r.stderr or "")[-300:]
-                    log.error(f"[切片] 第{i+1}/{total}个片段失败: {title}\n  cmd={cmd}\n  stderr={stderr_tail}")  # noqa: E501
-
+                    except Exception:
+                        pass
+                        
                 if os.path.exists(out) and os.path.getsize(out) > 0:
                     results.append({
                         "path": out,
@@ -594,7 +565,7 @@ class VideoClipWorker(BaseWorker):
             self.stage.emit(f"剪辑完成: {len(results)}/{total}")
             self.progress.emit(90)
             self.finished.emit(results)
-        except Exception:  # video clip pipeline
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -620,11 +591,10 @@ class CoverGeneratorWorker(BaseWorker):
                 self.progress.emit(int(i / total * 100))
                 frame_path = os.path.join(covers_dir, f"frame_{i+1:03d}.jpg")
                 cover_path = os.path.join(covers_dir, f"cover_{i+1:03d}.jpg")
-                cover_vertical_path = os.path.join(covers_dir, f"cover_vertical_{i+1:03d}.jpg")  # noqa: E501
-                if not ffmpeg_extract_frame(ci["path"], 1.0, frame_path, quality=2):
-                    raise RuntimeError(f"提取帧失败: {ci['path']}")
-                generate_cover_image(frame_path, ci["title"], cover_path, size=(1280, 720))  # noqa: E501
-                generate_cover_image(frame_path, ci["title"], cover_vertical_path, size=(720, 1280))  # noqa: E501
+                cover_vertical_path = os.path.join(covers_dir, f"cover_vertical_{i+1:03d}.jpg")
+                extract_frame(ci["path"], frame_path, time_sec=1.0)
+                generate_cover_image(frame_path, ci["title"], cover_path, size=(1280, 720))
+                generate_cover_image(frame_path, ci["title"], cover_vertical_path, size=(720, 1280))
                 results.append({
                     "cover_path": cover_path,
                     "cover_vertical_path": cover_vertical_path,
@@ -641,7 +611,7 @@ class CoverGeneratorWorker(BaseWorker):
                 })
                 self.cover_ready.emit(i, cover_path)
             self.finished.emit(results)
-        except Exception:  # cover generation pipeline
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -669,7 +639,7 @@ class FinalExportWorker(BaseWorker):
                 results.append(out)
                 self.progress.emit(int((i + 1) / total * 100))
             self.finished.emit(results)
-        except Exception:  # final export pipeline
+        except Exception:
             self.error.emit(traceback.format_exc())
 
 
@@ -681,49 +651,51 @@ class AudioPlayerWidget(QWidget):
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
-
+        
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-
-        self.btn_play = icon_button("play", "播放 / 暂停")
+        
+        self.btn_play = mdi_button("播放", "play")
+        self.btn_play.setFixedWidth(70)
+        self.btn_play.setObjectName("secondary_button")
         self.btn_play.clicked.connect(self.toggle_play)
         layout.addWidget(self.btn_play)
-
+        
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setFixedWidth(100)
         self.lbl_time.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_time)
-
+        
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.sliderMoved.connect(self.set_position)
         self.slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                height: 6px
+                height: 6px;
                 background: #2e2e32;
-                border-radius: 3px
+                border-radius: 3px;
             }
             QSlider::sub-page:horizontal {
                 background: #3b82f6;
-                border-radius: 3px
+                border-radius: 3px;
             }
             QSlider::handle:horizontal {
                 background: #ffffff;
-                width: 14px
-                margin-top: -4px
-                margin-bottom: -4px
-                border-radius: 7px
+                width: 14px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 7px;
             }
         """)
         layout.addWidget(self.slider)
-
+        
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
-
+        
         self.audio_path = None
         self.setEnabled(False)
-
+        
     def set_audio_path(self, audio_path):
         if not audio_path or not os.path.exists(audio_path):
             self.setEnabled(False)
@@ -731,41 +703,41 @@ class AudioPlayerWidget(QWidget):
         self.audio_path = audio_path
         self.player.setSource(QUrl.fromLocalFile(audio_path))
         self.setEnabled(True)
-        _set_button_icon(self.btn_play, "play")
+        self.btn_play.setText("播放")
         self.lbl_time.setText("00:00 / 00:00")
         self.slider.setValue(0)
-
+        
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            _set_button_icon(self.btn_play, "pause")
-
+            self.btn_play.setText("暂停")
+            
     def position_changed(self, position):
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
         self.update_time_label(position, self.player.duration())
-
+        
     def duration_changed(self, duration):
         self.slider.setRange(0, duration)
         self.update_time_label(self.player.position(), duration)
-
+        
     def set_position(self, position):
         self.player.setPosition(position)
-
+        
     def update_time_label(self, position, duration):
         pos_sec = position // 1000
         dur_sec = duration // 1000
-
+        
         pos_min = pos_sec // 60
         pos_sec = pos_sec % 60
-
+        
         dur_min = dur_sec // 60
         dur_sec = dur_sec % 60
-
-        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")  # noqa: E501
+        
+        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")
 
 
 # ==================== Helper Widgets ====================
@@ -773,84 +745,83 @@ class AudioPlayerWidget(QWidget):
 # ==================== Helper Widgets ====================
 
 class CoverEditDialog(QDialog):
-    def __init__(self, video_path, title, frame_path, cover_path, cover_vertical_path="", parent=None):  # noqa: E501
+    def __init__(self, video_path, title, frame_path, cover_path, cover_vertical_path="", parent=None):
         super().__init__(parent)
         self.setWindowTitle("编辑视频封面")
         self.resize(1100, 650)
         self.setModal(True)
         self.setObjectName("cover_edit_dialog")
-
+       
         self.video_path = video_path
         self.original_title = title
         self.original_frame_path = frame_path
         self.original_cover_path = cover_path
-        self.original_cover_vertical_path = cover_vertical_path or cover_path.replace("cover_", "cover_vertical_")  # noqa: E501
-
+        self.original_cover_vertical_path = cover_vertical_path or cover_path.replace("cover_", "cover_vertical_")
+        
         self.temp_dir = tempfile.mkdtemp()
         self.temp_frame_path = os.path.join(self.temp_dir, "temp_frame.jpg")
         self.temp_cover_path = os.path.join(self.temp_dir, "temp_cover.jpg")
-        self.temp_cover_vertical_path = os.path.join(self.temp_dir, "temp_cover_vertical.jpg")  # noqa: E501
-
+        self.temp_cover_vertical_path = os.path.join(self.temp_dir, "temp_cover_vertical.jpg")
+        
         if os.path.exists(frame_path):
             shutil.copy(frame_path, self.temp_frame_path)
         if os.path.exists(cover_path):
             shutil.copy(cover_path, self.temp_cover_path)
         if os.path.exists(self.original_cover_vertical_path):
-            shutil.copy(self.original_cover_vertical_path, self.temp_cover_vertical_path)  # noqa: E501
-
+            shutil.copy(self.original_cover_vertical_path, self.temp_cover_vertical_path)
+            
         self.current_title = title
         self.saved = False
-
+        
         # Throttled seek variables to support drag frame-by-frame mode
-        self.last_seek_time = 0.0
+        self.last_seek_time = 0
         self.pending_seek_pos = None
         self.seek_timer = QTimer(self)
         self.seek_timer.setSingleShot(True)
         self.seek_timer.timeout.connect(self._do_throttled_seek)
-
+        
         self.init_ui()
-
+        
     def init_ui(self):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(20)
-
+        
         # COLUMN 1: Video area (1/3 width)
         col1_widget = QWidget()
         col1_layout = QVBoxLayout(col1_widget)
         col1_layout.setContentsMargins(0, 0, 0, 0)
         col1_layout.setSpacing(10)
-
-        player_title = QLabel("<b> 视频截取区域 (拖动滑块定帧)</b>")
+        
+        player_title = QLabel("<b>🎥 视频截取区域 (拖动滑块定帧)</b>")
         player_title.setObjectName("cover_section_title")
         col1_layout.addWidget(player_title)
-
+        
         self.video_widget = QVideoWidget()
-        self.video_widget.setAspectRatioMode(Qt.KeepAspectRatio)  # 等比完整显示
         self.video_widget.setObjectName("cover_video_widget")
         col1_layout.addWidget(self.video_widget, 1)
-
+        
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
         # Larger drag handle for precise frame adjustment/scrubbing
         self.slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                height: 8px
+                height: 8px;
                 background: #27272a;
-                border-radius: 4px
+                border-radius: 4px;
             }
             QSlider::sub-page:horizontal {
                 background: #3b82f6;
-                border-radius: 4px
+                border-radius: 4px;
             }
             QSlider::handle:horizontal {
                 background: #ffffff;
                 border: 3px solid #3b82f6;
-                width: 22px
-                height: 22px
-                margin-top: -7px
-                margin-bottom: -7px
-                border-radius: 11px
+                width: 22px;
+                height: 22px;
+                margin-top: -7px;
+                margin-bottom: -7px;
+                border-radius: 11px;
             }
             QSlider::handle:horizontal:hover {
                 background: #3b82f6;
@@ -858,31 +829,45 @@ class CoverEditDialog(QDialog):
             }
         """)
         col1_layout.addWidget(self.slider)
-
+        
         ctrl_layout = QHBoxLayout()
         ctrl_layout.setSpacing(10)
-
-        self.btn_play = icon_button("play", "播放 / 暂停")
+        
+        self.btn_play = mdi_button("播放", "play")
+        self.btn_play.setStyleSheet("""
+            QPushButton {
+                background-color: #27272a;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3f3f46;
+            }
+        """)
+        self.btn_play.setFixedWidth(80)
         self.btn_play.clicked.connect(self.toggle_play)
         ctrl_layout.addWidget(self.btn_play)
-
+        
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setFixedWidth(100)
         self.lbl_time.setAlignment(Qt.AlignCenter)
         self.lbl_time.setObjectName("cover_time_label")
         ctrl_layout.addWidget(self.lbl_time)
-
+        
         ctrl_layout.addStretch()
-
+        
         self.btn_capture = mdi_button("选择当前帧为封面", "camera")
         self.btn_capture.setStyleSheet("""
             QPushButton {
                 background-color: #10b981;
                 color: #ffffff;
-                border: none
-                border-radius: 4px
-                padding: 6px 16px
-                font-weight: bold
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #059669;
@@ -890,33 +875,33 @@ class CoverEditDialog(QDialog):
         """)
         self.btn_capture.clicked.connect(self.capture_current_frame)
         ctrl_layout.addWidget(self.btn_capture)
-
+        
         col1_layout.addLayout(ctrl_layout)
         main_layout.addWidget(col1_widget, 1) # Weight 1 (1/3 of layout width)
-
+        
         # COLUMN 2: Horizontal Cover Preview (1/3 width)
         col2_widget = QWidget()
         col2_layout = QVBoxLayout(col2_widget)
         col2_layout.setContentsMargins(0, 0, 0, 0)
         col2_layout.setSpacing(12)
         col2_layout.setAlignment(Qt.AlignTop)
-
-        h_cover_title = QLabel("<b> 横屏封面预览 (16:9)</b>")
+        
+        h_cover_title = QLabel("<b>🖼️ 横屏封面预览 (16:9)</b>")
         h_cover_title.setObjectName("cover_section_title")
         col2_layout.addWidget(h_cover_title)
-
+        
         self.lbl_cover_preview_h = QLabel()
         self.lbl_cover_preview_h.setFixedSize(320, 180) # Large horizontal preview
         self.lbl_cover_preview_h.setObjectName("cover_preview_h")
         self.lbl_cover_preview_h.setAlignment(Qt.AlignCenter)
         col2_layout.addWidget(self.lbl_cover_preview_h, 0, Qt.AlignCenter)
-
+        
         if os.path.exists(self.temp_cover_path):
             pix_h = QPixmap(self.temp_cover_path)
-            self.lbl_cover_preview_h.setPixmap(pix_h.scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
+            self.lbl_cover_preview_h.setPixmap(pix_h.scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
             self.lbl_cover_preview_h.setText("暂无横屏封面，请在左侧截图")
-
+            
         col2_layout.addSpacing(10)
         col2_layout.addWidget(QLabel("封面标题 (不超过10个字):"))
         self.title_input = QLineEdit(self.current_title)
@@ -926,106 +911,106 @@ class CoverEditDialog(QDialog):
             QLineEdit {
                 background-color: #1e1e24;
                 border: 1px solid #2e2e32;
-                border-radius: 4px
-                padding: 6px
+                border-radius: 4px;
+                padding: 6px;
                 color: #f8fafc;
-                font-size: 13px
+                font-size: 13px;
             }
         """)
         self.title_input.textChanged.connect(self.on_title_changed)
         col2_layout.addWidget(self.title_input)
-
+        
         main_layout.addWidget(col2_widget, 1) # Weight 1 (1/3 of layout width)
-
+        
         # COLUMN 3: Vertical Cover Preview (1/3 width)
         col3_widget = QWidget()
         col3_layout = QVBoxLayout(col3_widget)
         col3_layout.setContentsMargins(0, 0, 0, 0)
         col3_layout.setSpacing(12)
         col3_layout.setAlignment(Qt.AlignTop)
-
-        v_cover_title = QLabel("<b> 竖屏封面预览 (9:16)</b>")
+        
+        v_cover_title = QLabel("<b>📱 竖屏封面预览 (9:16)</b>")
         v_cover_title.setObjectName("cover_section_title")
         col3_layout.addWidget(v_cover_title)
-
+        
         self.lbl_cover_preview_v = QLabel()
         self.lbl_cover_preview_v.setFixedSize(180, 320) # Large vertical preview
         self.lbl_cover_preview_v.setObjectName("cover_preview_v")
         self.lbl_cover_preview_v.setAlignment(Qt.AlignCenter)
         col3_layout.addWidget(self.lbl_cover_preview_v, 0, Qt.AlignCenter)
-
+        
         if os.path.exists(self.temp_cover_vertical_path):
             pix_v = QPixmap(self.temp_cover_vertical_path)
-            self.lbl_cover_preview_v.setPixmap(pix_v.scaled(180, 320, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
+            self.lbl_cover_preview_v.setPixmap(pix_v.scaled(180, 320, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         else:
             self.lbl_cover_preview_v.setText("暂无竖屏封面，请在左侧截图")
-
+            
         col3_layout.addSpacing(10)
-
+        
         actions_layout = QHBoxLayout()
         self.btn_save = QPushButton("确定保存")
         self.btn_save.setStyleSheet("""
             QPushButton {
                 background-color: #3b82f6;
                 color: #ffffff;
-                border: none
-                border-radius: 4px
-                padding: 8px 20px
-                font-weight: bold
+                border: none;
+                border-radius: 4px;
+                padding: 8px 20px;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #2563eb;
             }
         """)
         self.btn_save.clicked.connect(self.save_and_close)
-
+        
         self.btn_cancel = QPushButton("取消")
         self.btn_cancel.setStyleSheet("""
             QPushButton {
                 background-color: #27272a;
                 color: #e4e4e7;
                 border: 1px solid #3f3f46;
-                border-radius: 4px
-                padding: 8px 20px
+                border-radius: 4px;
+                padding: 8px 20px;
             }
             QPushButton:hover {
                 background-color: #3f3f46;
             }
         """)
         self.btn_cancel.clicked.connect(self.reject)
-
+        
         actions_layout.addWidget(self.btn_save)
         actions_layout.addWidget(self.btn_cancel)
         col3_layout.addLayout(actions_layout)
-
+        
         main_layout.addWidget(col3_widget, 1) # Weight 1 (1/3 of layout width)
-
+        
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(self.video_widget)
-
+        
         self.slider.sliderPressed.connect(self.on_slider_pressed)
         self.slider.sliderMoved.connect(self.set_position)
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
-
+        
         self.player.setSource(QUrl.fromLocalFile(self.video_path))
         self.player.play()
-
+        
     def on_slider_pressed(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
-
+            self.btn_play.setText("播放")
+        
     def toggle_play(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
+            self.btn_play.setText("播放")
         else:
             self.player.play()
-            _set_button_icon(self.btn_play, "pause")
-
+            self.btn_play.setText("暂停")
+            
     def set_position(self, position):
         self.pending_seek_pos = position
         now = time.time()
@@ -1034,22 +1019,22 @@ class CoverEditDialog(QDialog):
         else:
             if not self.seek_timer.isActive():
                 self.seek_timer.start(30)
-
+                
     def _do_throttled_seek(self):
         if self.pending_seek_pos is not None:
             self.player.setPosition(self.pending_seek_pos)
             self.last_seek_time = time.time()
             self.pending_seek_pos = None
-
+            
     def position_changed(self, position):
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
         self.update_time_label(position, self.player.duration())
-
+        
     def duration_changed(self, duration):
         self.slider.setRange(0, duration)
         self.update_time_label(self.player.position(), duration)
-
+        
     def update_time_label(self, position, duration):
         pos_sec = position // 1000
         dur_sec = duration // 1000
@@ -1057,47 +1042,46 @@ class CoverEditDialog(QDialog):
         pos_sec = pos_sec % 60
         dur_min = dur_sec // 60
         dur_sec = dur_sec % 60
-        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")  # noqa: E501
-
+        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")
+        
     def capture_current_frame(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
-
+            self.btn_play.setText("播放")
+            
         time_sec = self.player.position() / 1000.0
         self.btn_capture.setEnabled(False)
         self.btn_capture.setText("正在截取中...")
         self.btn_capture.repaint()
-
+        
         try:
-            if not ffmpeg_extract_frame(self.video_path, time_sec, self.temp_frame_path, quality=2):  # noqa: E501
-                raise RuntimeError(f"提取帧失败: {self.video_path}")
+            extract_frame(self.video_path, self.temp_frame_path, time_sec=time_sec)
             self.regenerate_cover()
-        except Exception as e:  # ffmpeg frame capture
+        except Exception as e:
             QMessageBox.warning(self, "截图失败", f"无法捕获当前帧:\n{str(e)}")
         finally:
             self.btn_capture.setEnabled(True)
             self.btn_capture.setText("选择当前帧为封面")
-
+            
     def on_title_changed(self, text):
         self.current_title = text.strip()
         self.regenerate_cover()
-
+        
     def regenerate_cover(self):
         if not os.path.exists(self.temp_frame_path):
             return
         try:
-            generate_cover_image(self.temp_frame_path, self.current_title, self.temp_cover_path, size=(1280, 720))  # noqa: E501
-            generate_cover_image(self.temp_frame_path, self.current_title, self.temp_cover_vertical_path, size=(720, 1280))  # noqa: E501
-
+            generate_cover_image(self.temp_frame_path, self.current_title, self.temp_cover_path, size=(1280, 720))
+            generate_cover_image(self.temp_frame_path, self.current_title, self.temp_cover_vertical_path, size=(720, 1280))
+            
             pix_h = QPixmap(self.temp_cover_path)
-            self.lbl_cover_preview_h.setPixmap(pix_h.scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
-
+            self.lbl_cover_preview_h.setPixmap(pix_h.scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            
             pix_v = QPixmap(self.temp_cover_vertical_path)
-            self.lbl_cover_preview_v.setPixmap(pix_v.scaled(180, 320, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # noqa: E501
-        except Exception:  # PIL image generation
+            self.lbl_cover_preview_v.setPixmap(pix_v.scaled(180, 320, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception as e:
             log.exception("生成临时封面失败")
-
+            
     def save_and_close(self):
         try:
             if not os.path.exists(self.temp_frame_path):
@@ -1105,16 +1089,18 @@ class CoverEditDialog(QDialog):
                 return
             shutil.copy(self.temp_frame_path, self.original_frame_path)
             shutil.copy(self.temp_cover_path, self.original_cover_path)
-            shutil.copy(self.temp_cover_vertical_path, self.original_cover_vertical_path)  # noqa: E501
+            shutil.copy(self.temp_cover_vertical_path, self.original_cover_vertical_path)
             self.saved = True
             self.accept()
-        except OSError as e:
+        except Exception as e:
             QMessageBox.critical(self, "保存失败", f"无法保存封面修改:\n{str(e)}")
-
-    def closeEvent(self, event):  # noqa: N802
+            
+    def closeEvent(self, event):
         self.player.stop()
-        with contextlib.suppress(OSError):
+        try:
             shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception:
+            pass
         super().closeEvent(event)
 
 
@@ -1126,50 +1112,50 @@ class ClipListItemWidget(QFrame):
         self.clip_index = index
         self.main_page = main_page
         self.selected = False
-
+        
         self.setObjectName("clip_list_item")
         self.setFrameShape(QFrame.StyledPanel)
         self.init_ui()
-
+        
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
-
+        
         top_layout = QHBoxLayout()
         self.lbl_title = QLabel(f"<b>{self.clip_info.get('title', '精彩片段')}</b>")
         self.lbl_title.setObjectName("clip_list_item_title")
         self.lbl_title.setWordWrap(True)
         top_layout.addWidget(self.lbl_title, 1)
-
+        
         score = self.clip_info.get('score', 0.0)
-        self.lbl_score = QLabel(f"评分 {score}")
+        self.lbl_score = QLabel(f"⭐ {score}")
         self.lbl_score.setObjectName("clip_list_item_score")
         top_layout.addWidget(self.lbl_score)
         layout.addLayout(top_layout)
-
+        
         meta_layout = QHBoxLayout()
-        meta_text = f"{self.clip_info.get('start_str', '00:00')} - {self.clip_info.get('end_str', '00:00')} ({self.clip_info.get('duration', 0)}s)"  # noqa: E501
+        meta_text = f"⏱ {self.clip_info.get('start_str', '00:00')} - {self.clip_info.get('end_str', '00:00')} ({self.clip_info.get('duration', 0)}s)"
         self.lbl_meta = QLabel(meta_text)
         self.lbl_meta.setObjectName("clip_list_item_meta")
         meta_layout.addWidget(self.lbl_meta, 1)
-
+        
         from PySide6.QtWidgets import QCheckBox
         self.chk_subtitles = QCheckBox("加字幕")
         self.chk_subtitles.setStyleSheet("""
             QCheckBox {
                 color: #94a3b8;
-                font-size: 11px
+                font-size: 11px;
             }
         """)
         self.chk_subtitles.setChecked(False)
         meta_layout.addWidget(self.chk_subtitles)
         layout.addLayout(meta_layout)
-
+        
         # Intermediate row: Slicing progress and individual slice button
         self.slice_layout = QHBoxLayout()
         self.slice_layout.setSpacing(8)
-
+        
         self.pbar_slice = QProgressBar()
         self.pbar_slice.setRange(0, 100)
         self.pbar_slice.setValue(0)
@@ -1179,28 +1165,28 @@ class ClipListItemWidget(QFrame):
             QProgressBar {
                 background-color: #1e1e24;
                 border: 1px solid #2e2e32;
-                border-radius: 4px
-                text-align: center
+                border-radius: 4px;
+                text-align: center;
                 color: #ffffff;
-                font-size: 9px
+                font-size: 9px;
             }
             QProgressBar::chunk {
                 background-color: #3b82f6;
-                border-radius: 3px
+                border-radius: 3px;
             }
         """)
         self.slice_layout.addWidget(self.pbar_slice, 1)
-
+        
         self.btn_slice_single = mdi_button("单独切片", "cut")
         self.btn_slice_single.setStyleSheet("""
             QPushButton {
                 background-color: #d97706;
                 color: #ffffff;
-                border: none
-                border-radius: 4px
-                padding: 4px 10px
-                font-size: 11px
-                font-weight: bold
+                border: none;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #b45309;
@@ -1214,62 +1200,80 @@ class ClipListItemWidget(QFrame):
         self.btn_slice_single.setFixedWidth(80)
         self.btn_slice_single.clicked.connect(self.start_individual_slice)
         self.slice_layout.addWidget(self.btn_slice_single)
-
+        
         layout.addLayout(self.slice_layout)
-
+        
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setFrameShadow(QFrame.Sunken)
         sep.setObjectName("clip_list_separator")
         layout.addWidget(sep)
-
+        
         play_layout = QHBoxLayout()
         play_layout.setSpacing(6)
-
-        self.btn_play = icon_button("play", "播放声音")
+        
+        self.btn_play = mdi_button("播放声音", "play")
+        self.btn_play.setStyleSheet("""
+            QPushButton {
+                background-color: #27272a;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #3f3f46;
+            }
+            QPushButton:disabled {
+                color: #52525b;
+                border-color: #27272a;
+            }
+        """)
+        self.btn_play.setFixedWidth(80)
         self.btn_play.setEnabled(False)
         play_layout.addWidget(self.btn_play)
-
+        
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setObjectName("clip_list_item_time")
         self.lbl_time.setFixedWidth(80)
         self.lbl_time.setAlignment(Qt.AlignCenter)
         play_layout.addWidget(self.lbl_time)
-
+        
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.setEnabled(False)
         self.slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                height: 4px
+                height: 4px;
                 background: #2e2e32;
-                border-radius: 2px
+                border-radius: 2px;
             }
             QSlider::sub-page:horizontal {
                 background: #10b981;
-                border-radius: 2px
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
                 background: #ffffff;
-                width: 10px
-                height: 10px
-                margin-top: -3px
-                margin-bottom: -3px
-                border-radius: 5px
+                width: 10px;
+                height: 10px;
+                margin-top: -3px;
+                margin-bottom: -3px;
+                border-radius: 5px;
             }
         """)
         play_layout.addWidget(self.slider)
-
+        
         self.btn_edit_cover = mdi_button("编辑封面", "palette")
         self.btn_edit_cover.setStyleSheet("""
             QPushButton {
                 background-color: #3b82f6;
                 color: #ffffff;
-                border: none
-                border-radius: 4px
-                padding: 4px 8px
-                font-size: 11px
-                font-weight: bold
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #2563eb;
@@ -1283,33 +1287,33 @@ class ClipListItemWidget(QFrame):
         self.btn_edit_cover.setFixedWidth(80)
         self.btn_edit_cover.setEnabled(False)
         play_layout.addWidget(self.btn_edit_cover)
-
+        
         layout.addLayout(play_layout)
-
+        
         self.player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
-
+        
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_edit_cover.clicked.connect(self.open_cover_editor)
         self.slider.sliderMoved.connect(self.set_position)
-
+        
         self.player.positionChanged.connect(self.position_changed)
         self.player.durationChanged.connect(self.duration_changed)
-
+        
         self.update_style()
 
-    def mousePressEvent(self, event):  # noqa: N802
+    def mousePressEvent(self, event):
         self.main_page.select_clip_item(self.clip_index)
         super().mousePressEvent(event)
-
+        
     def update_style(self):
         if self.selected:
             self.setStyleSheet("""
                 QFrame#clip_list_item {
                     background-color: #1e293b;
                     border: 2px solid #3b82f6;
-                    border-radius: 8px
+                    border-radius: 8px;
                 }
             """)
         else:
@@ -1317,58 +1321,58 @@ class ClipListItemWidget(QFrame):
                 QFrame#clip_list_item {
                     background-color: #18181b;
                     border: 1px solid #2e2e32;
-                    border-radius: 8px
+                    border-radius: 8px;
                 }
                 QFrame#clip_list_item:hover {
                     border: 1px solid #4b5563;
                 }
             """)
-
+            
     def set_selected(self, selected):
         self.selected = selected
         self.update_style()
-
+        
     def enable_playback(self, video_path):
         self.clip_info["video_path"] = video_path
         self.player.setSource(QUrl.fromLocalFile(video_path))
         self.btn_play.setEnabled(True)
         self.btn_edit_cover.setEnabled(True)
         self.slider.setEnabled(True)
-
+        
         self.btn_slice_single.setText("已切片")
         self.btn_slice_single.setEnabled(False)
         self.pbar_slice.setVisible(False)
-
+        
     def toggle_play(self):
-        if not self.clip_info.get("video_path") or not os.path.exists(self.clip_info["video_path"]):  # noqa: E501
+        if not self.clip_info.get("video_path") or not os.path.exists(self.clip_info["video_path"]):
             return
-
+            
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
+            self.btn_play.setText("播放声音")
         else:
             self.main_page.pause_all_players_except(self.clip_index)
             self.player.play()
-            _set_button_icon(self.btn_play, "pause")
-
+            self.btn_play.setText("暂停")
+            
     def pause_audio(self):
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
-            _set_button_icon(self.btn_play, "play")
-
+            self.btn_play.setText("播放声音")
+            
     def open_cover_editor(self):
         video_path = self.clip_info.get("video_path")
         if not video_path or not os.path.exists(video_path):
             return
-
+            
         self.pause_audio()
         self.main_page.pause_all_players_except(-1)
-
+        
         cover_path = self.clip_info.get("cover_path", "")
         cover_vertical_path = self.clip_info.get("cover_vertical_path", "")
         if not cover_vertical_path and cover_path:
             cover_vertical_path = cover_path.replace("cover_", "cover_vertical_")
-
+            
         dialog = CoverEditDialog(
             video_path=video_path,
             title=self.clip_info.get("title", ""),
@@ -1383,27 +1387,27 @@ class ClipListItemWidget(QFrame):
             self.clip_info["cover_vertical_path"] = dialog.original_cover_vertical_path
             self.lbl_title.setText(f"<b>{dialog.current_title}</b>")
             self.main_page.on_clip_info_updated(
-                self.clip_index,
-                dialog.current_title,
-                dialog.original_cover_path,
+                self.clip_index, 
+                dialog.current_title, 
+                dialog.original_cover_path, 
                 dialog.original_cover_vertical_path
             )
 
     def start_individual_slice(self):
-        if not self.main_page.video_path or not os.path.exists(self.main_page.video_path):  # noqa: E501
-            QMessageBox.warning(self.main_page.parent_widget, "错误", f"视频文件不存在，请重新选择视频文件。\n路径: {self.main_page.video_path or '未选择'}")  # noqa: E501
+        if not self.main_page.video_path or not os.path.exists(self.main_page.video_path):
+            QMessageBox.warning(self.main_page.parent_widget, "错误", f"视频文件不存在，请重新选择视频文件。\n路径: {self.main_page.video_path or '未选择'}")
             return
-
+            
         self.btn_slice_single.setEnabled(False)
         self.btn_slice_single.setText("正在切片...")
         self.pbar_slice.setValue(0)
         self.pbar_slice.setVisible(True)
-
+        
         if not self.main_page.output_dir:
             vname = os.path.splitext(os.path.basename(self.main_page.video_path))[0]
             self.main_page.output_dir = os.path.join(OUTPUTS_DIR, "live_clips", vname)
             os.makedirs(self.main_page.output_dir, exist_ok=True)
-
+            
         clip_data = dict(self.clip_info)
         clip_data["burn_subtitles"] = self.chk_subtitles.isChecked()
         clip_data["index"] = self.clip_index
@@ -1415,23 +1419,22 @@ class ClipListItemWidget(QFrame):
         self.worker_clip.finished.connect(self.on_individual_clip_done)
         self.worker_clip.error.connect(self.on_individual_slice_error)
         self.worker_clip.start()
-
+        
     def on_individual_slice_error(self, err):
         self.btn_slice_single.setEnabled(True)
         self.btn_slice_single.setText("单独切片")
         self.pbar_slice.setVisible(False)
-        from gui.error_dialog import show_error_dialog
-        show_error_dialog(self.main_page.parent_widget, "单独切片失败", f"单独切片失败:\n{err}")
-
+        QMessageBox.critical(self.main_page.parent_widget, "错误", f"单独切片失败:\n{err}")
+        
     def on_individual_clip_done(self, results):
         if not results:
             self.on_individual_slice_error("没有生成切片视频")
             return
-
+            
         video_path = results[0]["path"]
         self.clip_info["video_path"] = video_path
         self.btn_slice_single.setText("生成封面...")
-
+        
         ci = {
             "path": video_path,
             "title": self.clip_info.get("title", ""),
@@ -1443,40 +1446,40 @@ class ClipListItemWidget(QFrame):
             "duration": self.clip_info.get("duration", 0),
             "score": self.clip_info.get("score", 0),
         }
-
+        
         self.worker_cover = CoverGeneratorWorker([ci], self.main_page.output_dir)
         self.worker_cover.finished.connect(self.on_individual_cover_done)
         self.worker_cover.error.connect(self.on_individual_slice_error)
         self.worker_cover.start()
-
+        
     def on_individual_cover_done(self, covers_info):
         if not covers_info:
             self.on_individual_slice_error("没有生成封面")
             return
-
+            
         ci = covers_info[0]
         self.clip_info["cover_path"] = ci["cover_path"]
         self.clip_info["cover_vertical_path"] = ci.get("cover_vertical_path", "")
         self.clip_info["frame_path"] = ci["frame_path"]
         self.clip_info["video_path"] = ci["video_path"]
         self.clip_info["title"] = ci["title"]
-
+        
         self.enable_playback(ci["video_path"])
         self.main_page.update_covers_info_for_index(self.clip_index, ci)
-
+        
         self.btn_slice_single.setText("已切片")
     def position_changed(self, position):
         if not self.slider.isSliderDown():
             self.slider.setValue(position)
         self.update_time_label(position, self.player.duration())
-
+        
     def duration_changed(self, duration):
         self.slider.setRange(0, duration)
         self.update_time_label(self.player.position(), duration)
-
+        
     def set_position(self, position):
         self.player.setPosition(position)
-
+        
     def update_time_label(self, position, duration):
         pos_sec = position // 1000
         dur_sec = duration // 1000
@@ -1484,12 +1487,12 @@ class ClipListItemWidget(QFrame):
         pos_sec = pos_sec % 60
         dur_min = dur_sec // 60
         dur_sec = dur_sec % 60
-        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")  # noqa: E501
+        self.lbl_time.setText(f"{pos_min:02d}:{pos_sec:02d} / {dur_min:02d}:{dur_sec:02d}")
 
 
 # ==================== Page ====================
 
-from gui.base_page import BasePage  # noqa: E402
+from gui.base_page import BasePage
 
 
 class LiveClipPage(BasePage):
@@ -1535,7 +1538,7 @@ class LiveClipPage(BasePage):
         self.pause_all_players_except(-1)
         if hasattr(self, "audio_player"):
             self.audio_player.player.pause()
-            _set_button_icon(self.audio_player.btn_play, "play")
+            self.audio_player.btn_play.setText("播放")
 
         if index == 0:
             self.progress_bar = self.progress_bar_p0
@@ -1545,14 +1548,14 @@ class LiveClipPage(BasePage):
             self.stage_lbl = self.stage_lbl_p1
             # Update selected count label for Step 2
             selected_count = sum(1 for i in range(self.hotspot_table.rowCount())
-                                 if self.hotspot_table.item(i, 0) and self.hotspot_table.item(i, 0).checkState() == Qt.Checked)  # noqa: E501
+                                 if self.hotspot_table.item(i, 0) and self.hotspot_table.item(i, 0).checkState() == Qt.Checked)
             self.clip_status_lbl.setText(f"已选 {selected_count} 个片段待切片")
             self.btn_clip.setEnabled(selected_count > 0)
             self._init_clip_list()
 
         self.stacked.setCurrentIndex(index)
         self._update_step_indicator(index)
-        self.stage_lbl.setText("")
+        self.stage_lbl.setText("就绪")
         self.progress_bar.setVisible(False)
 
     def setup(self):
@@ -1569,7 +1572,7 @@ class LiveClipPage(BasePage):
         self.step_bar.setObjectName("step_bar")
         self.step_bar.setStyleSheet(
             "QFrame#step_bar { background-color: rgba(255,255,255,0.02); "
-            "border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 10px 16px; }")  # noqa: E501
+            "border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 10px 16px; }")
         sl = QHBoxLayout(self.step_bar)
         self.step_labels = []
         for i, text in enumerate(["\U0001F4F9 视频分析与热点发现", "\u2702 切片与封面生成"]):
@@ -1580,7 +1583,7 @@ class LiveClipPage(BasePage):
             sl.addWidget(lbl)
             self.step_labels.append(lbl)
             layout.addWidget(self.step_bar, 0)
-
+    
             # 初始化第一步为激活状态
             QTimer.singleShot(0, lambda: self._update_step_indicator(0))
 
@@ -1608,19 +1611,21 @@ class LiveClipPage(BasePage):
         cl.setSpacing(10)
         cl.setContentsMargins(12, 10, 12, 10)
 
-        # Row 1: Video selection with drag-and-drop
-        self.video_path_input = DropZone(
-            ("mp4", "mov", "avi", "mkv", "flv", "ts", "webm", "m4v"),
-            hint="拖入直播录像 或 点击选择（支持 40GB+，流式处理）",
-            min_height=60
-        )
-        self.video_path_input.clicked.connect(self._select_video)
-        self.video_path_input.file_dropped.connect(self._on_video_dropped)
-        cl.addWidget(self.video_path_input)
-
+        # Row 1: Video selection in one line
+        vr = QHBoxLayout()
+        vr.addWidget(QLabel("<b>直播视频:</b>"))
+        self.video_path_input = QLineEdit()
+        self.video_path_input.setPlaceholderText("选择直播录像（支持 40GB+，流式处理）...")
+        vr.addWidget(self.video_path_input)
+        btn = QPushButton("选择视频")
+        btn.setObjectName("secondary_button")
+        btn.clicked.connect(self._select_video)
+        vr.addWidget(btn)
+        
         self.video_info_lbl = QLabel("")
         self.video_info_lbl.setObjectName("video_info_label")
-        cl.addWidget(self.video_info_lbl)
+        vr.addWidget(self.video_info_lbl)
+        cl.addLayout(vr)
 
         # Row 2: Audio player for seek and playback
         pr = QHBoxLayout()
@@ -1633,8 +1638,8 @@ class LiveClipPage(BasePage):
         ar = QHBoxLayout()
         ar.addWidget(QLabel("分析方法:"))
         self.analysis_mode = QComboBox()
-        self.analysis_mode.addItem(" AI 大模型 (DeepSeek/OpenAI)", "llm")
-        self.analysis_mode.addItem(" 内置算法 (无需 API)", "rule")
+        self.analysis_mode.addItem("🤖 AI 大模型 (DeepSeek/OpenAI)", "llm")
+        self.analysis_mode.addItem("🧠 内置算法 (无需 API)", "rule")
         ar.addWidget(self.analysis_mode)
 
         # Transcribe Language Selection
@@ -1678,7 +1683,7 @@ class LiveClipPage(BasePage):
         sub_vl.setSpacing(8)
         sub_vl.setContentsMargins(12, 10, 12, 10)
         sub_header = QHBoxLayout()
-        sub_header.addWidget(QLabel("<b> 字幕预览</b>"))
+        sub_header.addWidget(QLabel("<b>📝 字幕预览</b>"))
         sub_header.addStretch()
         self.btn_export_sub = mdi_button("导出字幕", "save")
         self.btn_export_sub.setObjectName("secondary_button")
@@ -1686,7 +1691,7 @@ class LiveClipPage(BasePage):
         self.btn_export_sub.clicked.connect(self._export_subtitles)
         sub_header.addWidget(self.btn_export_sub)
         sub_vl.addLayout(sub_header)
-
+        
         self.transcript_preview = QTextEdit()
         self.transcript_preview.setReadOnly(True)
         self.transcript_preview.setObjectName("log_viewer")
@@ -1725,15 +1730,9 @@ class LiveClipPage(BasePage):
         lh.addWidget(self.selected_count_lbl)
 
         sel_btns = QHBoxLayout()
-        ba = QPushButton("全选")
-        ba.setObjectName("secondary_button")
-        ba.clicked.connect(self._select_all)  # noqa: E501
-        bd = QPushButton("取消")
-        bd.setObjectName("secondary_button")
-        bd.clicked.connect(self._deselect_all)  # noqa: E501
-        sel_btns.addWidget(ba)
-        sel_btns.addWidget(bd)
-        sel_btns.addStretch()
+        ba = QPushButton("全选"); ba.setObjectName("secondary_button"); ba.clicked.connect(self._select_all)
+        bd = QPushButton("取消"); bd.setObjectName("secondary_button"); bd.clicked.connect(self._deselect_all)
+        sel_btns.addWidget(ba); sel_btns.addWidget(bd); sel_btns.addStretch()
         lh.addLayout(sel_btns)
         ll.addLayout(lh)
 
@@ -1742,13 +1741,13 @@ class LiveClipPage(BasePage):
         self.hotspot_table.verticalHeader().setVisible(False)
         self.hotspot_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.hotspot_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.hotspot_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)  # noqa: E501
+        self.hotspot_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.hotspot_table.setColumnWidth(0, 50)
         self.hotspot_table.setColumnWidth(1, 110)
         self.hotspot_table.setColumnWidth(2, 60)
         self.hotspot_table.setColumnWidth(3, 50)
         self.hotspot_table.cellClicked.connect(self._on_hotspot_clicked)
-        self.hotspot_table.cellChanged.connect(lambda r, c: self._update_count() if c == 0 else None)  # noqa: E501
+        self.hotspot_table.cellChanged.connect(lambda r, c: self._update_count() if c == 0 else None)
         ll.addWidget(self.hotspot_table)
 
         # Removed hotspot_detail text edit since it is no longer needed
@@ -1759,7 +1758,7 @@ class LiveClipPage(BasePage):
 
         # Bottom status, progress and navigation row for Page 0
         bot_layout = QHBoxLayout()
-
+        
         self.stage_lbl_p0 = QLabel("就绪 - 请选择直播视频")
         self.stage_lbl_p0.setObjectName("muted_text")
         bot_layout.addWidget(self.stage_lbl_p0)
@@ -1774,7 +1773,7 @@ class LiveClipPage(BasePage):
         self.btn_to_step2.setEnabled(False)
         self.btn_to_step2.clicked.connect(lambda: self._go_to_step(1))
         bot_layout.addWidget(self.btn_to_step2)
-
+        
         layout.addLayout(bot_layout)
 
         self.stacked.addWidget(page)
@@ -1792,15 +1791,15 @@ class LiveClipPage(BasePage):
         ccl = QVBoxLayout(clip_list_card)
         ccl.setSpacing(12)
         ccl.setContentsMargins(16, 16, 16, 16)
-
+        
         # Header controls row
         header_layout = QHBoxLayout()
         header_layout.setSpacing(16)
-
+        
         title_lbl = QLabel("<b>\u2702 自动切片与封面编辑</b>")
         title_lbl.setObjectName("clip_page_title")
         header_layout.addWidget(title_lbl)
-
+        
         self.clip_status_lbl = QLabel("已选 0 个片段待切片")
         self.clip_status_lbl.setObjectName("clip_status_label")
         header_layout.addWidget(self.clip_status_lbl)
@@ -1813,24 +1812,24 @@ class LiveClipPage(BasePage):
         header_layout.addWidget(self.btn_open_output)
 
         ccl.addLayout(header_layout)
-
+        
         # Scroll Area for the list of clips
         self.cover_scroll = QScrollArea()
         self.cover_scroll.setWidgetResizable(True)
         self.cover_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.cover_scroll.setFrameShape(QScrollArea.NoFrame)
         self.cover_scroll.setStyleSheet("background-color: transparent;")
-
+        
         self.cover_container = QWidget()
         self.cover_container.setStyleSheet("background-color: transparent;")
         self.clips_list_layout = QGridLayout(self.cover_container)
         self.clips_list_layout.setContentsMargins(0, 0, 0, 0)
         self.clips_list_layout.setSpacing(12)
         self.clips_list_layout.setAlignment(Qt.AlignTop)
-
+        
         self.cover_scroll.setWidget(self.cover_container)
         ccl.addWidget(self.cover_scroll, 1)
-
+        
         layout.addWidget(clip_list_card, 1)
 
         # Export card
@@ -1839,7 +1838,7 @@ class LiveClipPage(BasePage):
         evl = QVBoxLayout(export_card)
         evl.setSpacing(8)
         evl.addWidget(QLabel("<b>\U0001F4E4 最终导出</b>"))
-
+        
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
@@ -1862,11 +1861,11 @@ class LiveClipPage(BasePage):
         self.export_result_lbl.setWordWrap(True)
         self.export_result_lbl.setObjectName("export_result_label")
         evl.addWidget(self.export_result_lbl)
-
+        
         layout.addWidget(export_card)
 
         # Progress & Status for Page 1
-        self.stage_lbl_p1 = QLabel("")
+        self.stage_lbl_p1 = QLabel("就绪")
         self.stage_lbl_p1.setObjectName("muted_text")
         layout.addWidget(self.stage_lbl_p1)
 
@@ -1888,35 +1887,27 @@ class LiveClipPage(BasePage):
         # ===== Actions =====
 
     def _select_video(self):
-        path, _ = pick_file(self.parent_widget, "选择直播视频", "",
-                                              "Video (*.mp4 *.flv *.ts *.mov *.avi *.mkv);;All (*)")  # noqa: E501
+        path, _ = QFileDialog.getOpenFileName(self.parent_widget, "选择直播视频", "",
+                                              "Video (*.mp4 *.flv *.ts *.mov *.avi *.mkv);;All (*)")
         if path:
-            self._set_video_path(path)
-
-    def _on_video_dropped(self, paths):
-        """处理拖放的文件。"""
-        if paths and len(paths) > 0:
-            self._set_video_path(paths[0])
-
-    def _set_video_path(self, path):
-        """设置视频路径并更新相关 UI。"""
-        self.video_path = path
-        gb = os.path.getsize(path) / (1024 ** 3)
-        self.video_info_lbl.setText(f"\U0001F4E6 文件: {gb:.1f} GB  |  流式处理，内存安全")
-
-        # Auto-check if audio was already extracted previously
-        vname = os.path.splitext(os.path.basename(path))[0]
-        self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
-        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
-            self.audio_player.set_audio_path(self.audio_path)
-        else:
-            self.audio_player.setEnabled(False)
-            self.audio_player.lbl_time.setText("等待提取音频...")
+            self.video_path = path
+            self.video_path_input.setText(path)
+            gb = os.path.getsize(path) / (1024 ** 3)
+            self.video_info_lbl.setText(f"\U0001F4E6 文件: {gb:.1f} GB  |  流式处理，内存安全")
+            
+            # Auto-check if audio was already extracted previously
+            vname = os.path.splitext(os.path.basename(path))[0]
+            self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
+            if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0:
+                self.audio_player.set_audio_path(self.audio_path)
+            else:
+                self.audio_player.setEnabled(False)
+                self.audio_player.lbl_time.setText("等待提取音频...")
 
     def _start_analysis_pipeline(self):
         self._stop_requested = False
         log.info("[LiveClip] _start_analysis_pipeline")
-        video_path = self.video_path or ""
+        video_path = self.video_path_input.text().strip()
         if not video_path or not os.path.exists(video_path):
             QMessageBox.warning(self.parent_widget, "错误", "请先选择视频文件")
             return
@@ -1926,7 +1917,6 @@ class LiveClipPage(BasePage):
         os.makedirs(TMP_DIR, exist_ok=True)
         vname = os.path.splitext(os.path.basename(video_path))[0]
         self.audio_path = os.path.join(TMP_DIR, f"{vname}_audio.wav")
-        self._audio_meta_path = os.path.join(TMP_DIR, f"{vname}_audio.meta")
 
         def _do_transcribe(audio_path):
             log.info(f"[LiveClip] _do_transcribe audio_path={audio_path}")
@@ -1940,7 +1930,7 @@ class LiveClipPage(BasePage):
             self.progress_bar.setVisible(True)
             lang_choice = self.transcribe_lang.currentData()
             language = None if lang_choice == "auto" else lang_choice
-            from utils.asr_client import read_asr_url, transcribe_remote
+            from utils.asr_client import transcribe_remote, read_asr_url
             from utils.base_worker import BaseWorker
             class _RemoteWorker(BaseWorker):
                 stage = Signal(str)
@@ -1953,30 +1943,25 @@ class LiveClipPage(BasePage):
                     self.output_path = op
                     self.language = lg
                 def do_work(self):
-                    if self.isInterruptionRequested():
-                        return
+                    if self.isInterruptionRequested(): return
                     try:
                         log.info(f"[_RemoteWorker] 开始 file={self.video_path}")
-                        def _progress_cb(m: str) -> None:
-                            self.stage.emit(m)
-                            log.info(f"[_RemoteWorker] {m}")
                         segs = transcribe_remote(self.video_path, read_asr_url(),
-                            language=self.language,
-                            progress_cb=_progress_cb)
-                        if self.isInterruptionRequested():
-                            return
+                            language=self.language, task_type="transcribe",
+                            progress_cb=lambda m: (self.stage.emit(m), log.info(f"[_RemoteWorker] {m}")))
+                        if self.isInterruptionRequested(): return
                         lines = []
                         for i, s in enumerate(segs):
                             t = s.get("text","").strip().replace("\n"," ")
                             lines.append(f"{i+1}")
-                            lines.append(f"{int(s.get('start',0)//3600):02d}:{int(s.get('start',0)%3600//60):02d}:{s.get('start',0)%60:06.3f} --> {int(s.get('end',0)//3600):02d}:{int(s.get('end',0)%3600//60):02d}:{s.get('end',0)%60:06.3f}")  # noqa: E501
+                            lines.append(f"{int(s.get('start',0)//3600):02d}:{int(s.get('start',0)%3600//60):02d}:{s.get('start',0)%60:06.3f} --> {int(s.get('end',0)//3600):02d}:{int(s.get('end',0)%3600//60):02d}:{s.get('end',0)%60:06.3f}")
                             lines.append(t)
                             lines.append("")
                         with open(self.output_path, "w", encoding="utf-8") as fp:
                             fp.write("\n".join(lines))
                         self.stage.emit("转写完成")
                         self.finished.emit(self.output_path)
-                    except Exception as e:  # remote ASR API
+                    except Exception as e:
                         self.error.emit(str(e))
             self._tw = _RemoteWorker(audio_path, out, language)
             self._workers.append(self._tw)
@@ -1986,23 +1971,9 @@ class LiveClipPage(BasePage):
             self._tw.error.connect(self._on_err)
             self._tw.start()
 
-        # 音频缓存：存在且未勾选"重新提取"且视频源未变更则跳过
-        reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()  # noqa: E501
-        cache_valid = False
-        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:  # noqa: E501
-            # 校验缓存对应的视频源是否一致（mtime + size）
-            try:
-                vstat = os.stat(video_path)
-                cur_meta = f"{vstat.st_mtime_ns}_{vstat.st_size}_{video_path}"
-                if os.path.exists(self._audio_meta_path):
-                    with open(self._audio_meta_path, encoding="utf-8") as mf:
-                        saved_meta = mf.read().strip()
-                    cache_valid = (saved_meta == cur_meta)
-                if not cache_valid:
-                    log.info("[LiveClip] 视频源已变更，缓存音频失效，重新提取")
-            except OSError:
-                cache_valid = False
-        if cache_valid:
+        # 音频缓存：存在且未勾选"重新提取"则跳过
+        reextract = getattr(self, "chk_reextract", None) and self.chk_reextract.isChecked()
+        if os.path.exists(self.audio_path) and os.path.getsize(self.audio_path) > 0 and not reextract:
             log.info(f"[LiveClip] 使用缓存音频: {self.audio_path}")
             self.btn_analyze.setEnabled(False)
             self.btn_stop.setEnabled(True)
@@ -2016,8 +1987,10 @@ class LiveClipPage(BasePage):
 
         # 勾选了重新提取或首次运行，删除旧文件
         if os.path.exists(self.audio_path):
-            with contextlib.suppress(OSError):
+            try:
                 os.remove(self.audio_path)
+            except Exception:
+                pass
 
         self.btn_analyze.setEnabled(False)
         self.btn_stop.setEnabled(True)
@@ -2031,19 +2004,7 @@ class LiveClipPage(BasePage):
         self._workers.append(self._audio_worker)
         self._audio_worker.stage.connect(self.stage_lbl.setText)
         self._audio_worker.progress.connect(self.progress_bar.setValue)
-
-        def _on_audio_extracted(p):
-            # 提取完成后保存视频源元数据，供下次缓存校验
-            try:
-                vstat = os.stat(video_path)
-                meta = f"{vstat.st_mtime_ns}_{vstat.st_size}_{video_path}"
-                with open(self._audio_meta_path, "w", encoding="utf-8") as mf:
-                    mf.write(meta)
-            except OSError:
-                pass
-            _do_transcribe(p)
-
-        self._audio_worker.finished.connect(_on_audio_extracted)
+        self._audio_worker.finished.connect(lambda p: _do_transcribe(p))
         self._audio_worker.error.connect(self._on_err)
         self._audio_worker.start()
 
@@ -2060,20 +2021,20 @@ class LiveClipPage(BasePage):
                 w.wait(2000)
         self._workers.clear()
         self._reset_ui()
-        self.stage_lbl.setText("已停止")
+        self.stage_lbl.setText("⏹ 已停止")
         log.info("[LiveClip] _stop_analysis 完成")
 
     def _do_analyze(self, srt_path):
         """转写完成后的分析入口。srt_path 是 SRT 文件路径。"""
         try:
-            with open(srt_path, encoding="utf-8") as f:
+            with open(srt_path, "r", encoding="utf-8") as f:
                 srt_content = f.read()
-        except OSError:
+        except Exception:
             log.error(f"[LiveClip] 读取 SRT 失败: {srt_path}")
             QMessageBox.warning(self.parent_widget, "错误", "读取字幕文件失败")
             self._reset_ui()
             return
-        self.transcript_segments = parse_srt_to_segments(srt_content)
+        self._parse_srt(srt_content)
         self._update_transcript_preview_html()
         self.btn_export_sub.setEnabled(True)
 
@@ -2097,8 +2058,7 @@ class LiveClipPage(BasePage):
             self.stage_lbl.setText("正在使用大模型分析热点...")
         else:
             self.stage_lbl.setText("正在使用内置算法分析热点...")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
 
         self._analyzer = HotSpotAnalyzer(self.transcript_segments,
                                          use_llm=use_llm, llm_model=llm_model)
@@ -2109,6 +2069,37 @@ class LiveClipPage(BasePage):
         self._analyzer.error.connect(self._on_err)
         self._analyzer.start()
 
+    def _parse_srt(self, srt):
+        self.transcript_segments = []
+        srt = srt.replace("\r\n", "\n").replace("\r", "\n")
+        # Split by double newlines or lines containing only spaces
+        blocks = re.split(r'\n\s*\n', srt.strip())
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+            lines = block.split("\n")
+            if len(lines) < 3:
+                continue
+            
+            timestamp_line = lines[1]
+            text = " ".join(lines[2:]).strip()
+            if not text:
+                continue
+            
+            match = re.match(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{1,3})", timestamp_line)
+            if match:
+                sh, sm, ss, sms = match.group(1), match.group(2), match.group(3), match.group(4)
+                eh, em, es, ems = match.group(5), match.group(6), match.group(7), match.group(8)
+                
+                sms_val = float(sms) / (10**len(sms))
+                ems_val = float(ems) / (10**len(ems))
+                
+                start = int(sh) * 3600 + int(sm) * 60 + int(ss) + sms_val
+                end = int(eh) * 3600 + int(em) * 60 + int(es) + ems_val
+                
+                self.transcript_segments.append(type("S", (), {"start": start, "end": end, "text": text})())
+
     def _on_analysis(self, hotspots):
         self.hotspots = hotspots
         self.btn_analyze.setEnabled(True)
@@ -2117,19 +2108,15 @@ class LiveClipPage(BasePage):
 
         self.hotspot_table.setRowCount(len(hotspots))
         for i, hs in enumerate(hotspots):
-            chk = QTableWidgetItem()
-            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)  # noqa: E501
-            chk.setCheckState(Qt.Checked)
-            self.hotspot_table.setItem(i, 0, chk)
-            self.hotspot_table.setItem(i, 1, QTableWidgetItem(f"{hs['start_str']} - {hs['end_str']}"))  # noqa: E501
+            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Checked); self.hotspot_table.setItem(i, 0, chk)
+            self.hotspot_table.setItem(i, 1, QTableWidgetItem(f"{hs['start_str']} - {hs['end_str']}"))
             d = hs["duration"]
             ds = f"{d // 60}m{d % 60}s" if d >= 60 else f"{d}s"
             self.hotspot_table.setItem(i, 2, QTableWidgetItem(ds))
             si = QTableWidgetItem(str(hs["score"]))
-            if hs["score"] >= 7:
-                si.setForeground(Qt.green)
-            elif hs["score"] >= 5:
-                si.setForeground(Qt.yellow)
+            if hs["score"] >= 7: si.setForeground(Qt.green)
+            elif hs["score"] >= 5: si.setForeground(Qt.yellow)
             self.hotspot_table.setItem(i, 3, si)
             self.hotspot_table.setItem(i, 4, QTableWidgetItem(hs["title"]))
 
@@ -2139,7 +2126,7 @@ class LiveClipPage(BasePage):
     def _on_hotspot_clicked(self, r, c):
         if r < len(self.hotspots):
             hs = self.hotspots[r]
-
+            
             # Scroll left transcript preview to the start of the hotspot
             hs_start = hs["start"]
             best_idx = 1
@@ -2149,12 +2136,12 @@ class LiveClipPage(BasePage):
                 if diff < min_diff:
                     min_diff = diff
                     best_idx = idx
-
+            
             self.transcript_preview.scrollToAnchor(f"seg_{best_idx}")
 
     def _update_count(self):
         c = sum(1 for i in range(self.hotspot_table.rowCount())
-                if self.hotspot_table.item(i, 0) and self.hotspot_table.item(i, 0).checkState() == Qt.Checked)  # noqa: E501
+                if self.hotspot_table.item(i, 0) and self.hotspot_table.item(i, 0).checkState() == Qt.Checked)
         self.selected_count_lbl.setText(f"已选: {c}")
 
     def _select_all(self):
@@ -2170,13 +2157,13 @@ class LiveClipPage(BasePage):
         self._update_count()
 
     def _filter_hotspots(self):
-        min_score = self.score_filter.currentData() if hasattr(self, 'score_filter') else 0.0  # noqa: E501
+        min_score = self.score_filter.currentData() if hasattr(self, 'score_filter') else 0.0
         for i in range(self.hotspot_table.rowCount()):
             if i < len(self.hotspots):
                 score = self.hotspots[i]["score"]
                 should_hide = score < min_score
                 self.hotspot_table.setRowHidden(i, should_hide)
-
+                
                 # Automatically synchronize check state with visibility
                 if self.hotspot_table.item(i, 0):
                     if should_hide:
@@ -2205,50 +2192,54 @@ class LiveClipPage(BasePage):
     def _update_transcript_preview_html(self):
         if not self.transcript_segments:
             return
-
-        min_score = self.score_filter.currentData() if hasattr(self, 'score_filter') else 0.0  # noqa: E501
-
+        
+        min_score = self.score_filter.currentData() if hasattr(self, 'score_filter') else 0.0
+        
         html_lines = [
             "<html><head><style>"
-            "p { margin: 0px 0px 10px 0px; line-height: 1.4; font-size: 13px; color: #e2e8f0; }"  # noqa: E501
-            "span.timestamp { color: #94a3b8; font-family: monospace; font-size: 11px; }"  # noqa: E501
+            "p { margin: 0px 0px 10px 0px; line-height: 1.4; font-size: 13px; color: #e2e8f0; }"
+            "span.timestamp { color: #94a3b8; font-family: monospace; font-size: 11px; }"
             "</style></head><body style='background-color: #18181b; margin: 10px;'>"
         ]
-
+        
         for idx, seg in enumerate(self.transcript_segments, 1):
-            # Check if this segment overlaps with any active hotspot (score >= min_score)  # noqa: E501
+            # Check if this segment overlaps with any active hotspot (score >= min_score)
             best_score = -1
             for hs in self.hotspots:
-                if hs["score"] >= min_score and seg.start < hs["end"] and seg.end > hs["start"]:  # noqa: SIM102
-                    if hs["score"] > best_score:
-                        best_score = hs["score"]
-
+                if hs["score"] >= min_score:
+                    if seg.start < hs["end"] and seg.end > hs["start"]:
+                        if hs["score"] > best_score:
+                            best_score = hs["score"]
+            
             # Determine background color based on score
             bg_style = ""
             if best_score >= 10.0:
-                bg_style = "background-color: rgba(153, 27, 27, 0.45); padding: 2px 4px; border-radius: 3px;" # Deep red (10分)  # noqa: E501
+                bg_style = "background-color: rgba(153, 27, 27, 0.45); padding: 2px 4px; border-radius: 3px;" # Deep red (10分)
             elif best_score >= 9.0:
-                bg_style = "background-color: rgba(234, 88, 12, 0.4); padding: 2px 4px; border-radius: 3px;" # Orange red (9分)  # noqa: E501
+                bg_style = "background-color: rgba(234, 88, 12, 0.4); padding: 2px 4px; border-radius: 3px;" # Orange red (9分)
             elif best_score >= 8.0:
-                bg_style = "background-color: rgba(217, 119, 6, 0.35); padding: 2px 4px; border-radius: 3px;" # Orange yellow (8分)  # noqa: E501
+                bg_style = "background-color: rgba(217, 119, 6, 0.35); padding: 2px 4px; border-radius: 3px;" # Orange yellow (8分)
             elif best_score >= 6.0:
-                bg_style = "background-color: rgba(46, 204, 113, 0.25); padding: 2px 4px; border-radius: 3px;" # Soft green  # noqa: E501
+                bg_style = "background-color: rgba(46, 204, 113, 0.25); padding: 2px 4px; border-radius: 3px;" # Soft green
             elif best_score >= 3.0:
-                bg_style = "background-color: rgba(52, 152, 219, 0.25); padding: 2px 4px; border-radius: 3px;" # Soft blue  # noqa: E501
-
+                bg_style = "background-color: rgba(52, 152, 219, 0.25); padding: 2px 4px; border-radius: 3px;" # Soft blue
+                
             start_str = self._format_timestamp(seg.start)
             end_str = self._format_timestamp(seg.end)
-
+            
             anchor_html = f"<a name='seg_{idx}'></a>"
-
-            text_html = f"<span style='{bg_style}'>{seg.text}</span>" if bg_style else f"<span>{seg.text}</span>"
-
+            
+            if bg_style:
+                text_html = f"<span style='{bg_style}'>{seg.text}</span>"
+            else:
+                text_html = f"<span>{seg.text}</span>"
+                
             html_lines.append(
                 f"<p>{anchor_html}<b>{idx}</b><br>"
                 f"<span class='timestamp'>{start_str} --> {end_str}</span><br>"
                 f"{text_html}</p>"
             )
-
+            
         html_lines.append("</body></html>")
         self.transcript_preview.setHtml("".join(html_lines))
 
@@ -2256,12 +2247,12 @@ class LiveClipPage(BasePage):
         if not getattr(self, "srt_path", "") or not os.path.exists(self.srt_path):
             QMessageBox.warning(self.parent_widget, "提示", "未找到生成的字幕文件。")
             return
-
-        vname = os.path.splitext(os.path.basename(self.video_path))[0] if getattr(self, "video_path", "") else "transcript"  # noqa: E501
-        default_dir = os.path.dirname(os.path.abspath(self.video_path)) if getattr(self, "video_path", "") and os.path.exists(self.video_path) else ""  # noqa: E501
+            
+        vname = os.path.splitext(os.path.basename(self.video_path))[0] if getattr(self, "video_path", "") else "transcript"
+        default_dir = os.path.dirname(os.path.abspath(self.video_path)) if getattr(self, "video_path", "") and os.path.exists(self.video_path) else ""
         default_path = os.path.join(default_dir, f"{vname}.srt")
-
-        path, _ = pick_save_file(
+        
+        path, _ = QFileDialog.getSaveFileName(
             self.parent_widget,
             "保存字幕文件",
             default_path,
@@ -2270,13 +2261,13 @@ class LiveClipPage(BasePage):
         if path:
             try:
                 shutil.copy(self.srt_path, path)
-                QMessageBox.information(self.parent_widget, "导出成功", f"字幕文件已成功保存到：\n{path}")  # noqa: E501
-            except OSError as e:
+                QMessageBox.information(self.parent_widget, "导出成功", f"字幕文件已成功保存到：\n{path}")
+            except Exception as e:
                 QMessageBox.critical(self.parent_widget, "导出失败", f"无法保存文件：\n{e}")
 
     def _start_clip_pipeline(self):
         if not self.video_path or not os.path.exists(self.video_path):
-            QMessageBox.warning(self.parent_widget, "错误", f"视频文件不存在，请重新选择视频文件。\n路径: {self.video_path or '未选择'}")  # noqa: E501
+            QMessageBox.warning(self.parent_widget, "错误", f"视频文件不存在，请重新选择视频文件。\n路径: {self.video_path or '未选择'}")
             return
 
         selected = []
@@ -2285,7 +2276,7 @@ class LiveClipPage(BasePage):
             clip_data["burn_subtitles"] = widget.chk_subtitles.isChecked()
             clip_data["index"] = widget.clip_index
             selected.append(clip_data)
-
+            
         if not selected:
             QMessageBox.warning(self.parent_widget, "未选择", "当前没有可切片的片段")
             return
@@ -2304,7 +2295,7 @@ class LiveClipPage(BasePage):
         self.progress_bar.setRange(0, 100)
 
         self._clip_worker = VideoClipWorker(
-            self.video_path, selected, self.output_dir,
+            self.video_path, selected, self.output_dir, 
             srt_path=getattr(self, "srt_path", "")
         )
         self._clip_worker.stage.connect(self.stage_lbl.setText)
@@ -2317,8 +2308,7 @@ class LiveClipPage(BasePage):
         self.clipped_results = results
         self.clip_status_lbl.setText(f"\u2705 切片完成：{len(results)} 个视频")
         self.stage_lbl.setText("正在生成封面...")
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
+        self.progress_bar.setRange(0, 100); self.progress_bar.setValue(0)
 
         self._cover_worker = CoverGeneratorWorker(results, self.output_dir)
         self._cover_worker.stage.connect(self.stage_lbl.setText)
@@ -2333,17 +2323,17 @@ class LiveClipPage(BasePage):
             item = self.clips_list_layout.takeAt(0)
             if item.widget():
                 item.widget().setParent(None)
-
+                
         self.clip_item_widgets = []
         self.selected_clip_idx = -1
-
+        
         selected_hotspots = []
         for i in range(self.hotspot_table.rowCount()):
             it = self.hotspot_table.item(i, 0)
             if it and it.checkState() == Qt.Checked and i < len(self.hotspots):
                 hs_copy = dict(self.hotspots[i])
                 selected_hotspots.append(hs_copy)
-
+                
         for idx, hs in enumerate(selected_hotspots):
             widget = ClipListItemWidget(hs, idx, self)
             row = idx // 3
@@ -2354,12 +2344,12 @@ class LiveClipPage(BasePage):
     def select_clip_item(self, index):
         if index < 0 or index >= len(self.clip_item_widgets):
             return
-
+        
         self.selected_clip_idx = index
         for i, widget in enumerate(self.clip_item_widgets):
             widget.set_selected(i == index)
 
-    def on_clip_info_updated(self, index, new_title, cover_path, cover_vertical_path=None):  # noqa: E501
+    def on_clip_info_updated(self, index, new_title, cover_path, cover_vertical_path=None):
         for ci in self.covers_info:
             if ci["index"] == index:
                 ci["title"] = new_title
@@ -2376,7 +2366,7 @@ class LiveClipPage(BasePage):
     def update_covers_info_for_index(self, index, ci_data):
         if not hasattr(self, "covers_info") or self.covers_info is None:
             self.covers_info = []
-
+            
         found = False
         for i, item in enumerate(self.covers_info):
             if item["index"] == index:
@@ -2385,7 +2375,7 @@ class LiveClipPage(BasePage):
                 break
         if not found:
             self.covers_info.append(ci_data)
-
+            
         self.btn_export.setEnabled(len(self.covers_info) > 0)
 
     def _on_cover_ready(self, idx, cover_path):
@@ -2398,13 +2388,13 @@ class LiveClipPage(BasePage):
         self.btn_clip.setEnabled(True)
         self.btn_export.setEnabled(True)
         self.progress_bar.setVisible(False)
-        self.stage_lbl.setText(f"完成： 封面生成完成：{len(covers_info)} 个")
+        self.stage_lbl.setText(f"✅ 封面生成完成：{len(covers_info)} 个")
 
         for ci in covers_info:
             idx = ci["index"]
             if idx < len(self.clip_item_widgets):
                 self.clip_item_widgets[idx].clip_info["cover_path"] = ci["cover_path"]
-                self.clip_item_widgets[idx].clip_info["cover_vertical_path"] = ci.get("cover_vertical_path", "")  # noqa: E501
+                self.clip_item_widgets[idx].clip_info["cover_vertical_path"] = ci.get("cover_vertical_path", "")
                 self.clip_item_widgets[idx].clip_info["frame_path"] = ci["frame_path"]
                 self.clip_item_widgets[idx].clip_info["video_path"] = ci["video_path"]
                 self.clip_item_widgets[idx].clip_info["title"] = ci["title"]
@@ -2416,7 +2406,7 @@ class LiveClipPage(BasePage):
     def _start_final_export(self):
         if not self.clip_item_widgets or not self.covers_info:
             return
-
+            
         for widget in self.clip_item_widgets:
             idx = widget.clip_index
             new_title = widget.clip_info["title"].strip()
@@ -2440,7 +2430,7 @@ class LiveClipPage(BasePage):
         self.btn_open_output.setEnabled(True)
         self.progress_bar.setVisible(False)
         final_dir = os.path.join(self.output_dir, "final")
-        self.export_result_lbl.setText(f"\u2705 导出完成！{len(paths)} 个视频已保存到:\n{final_dir}")  # noqa: E501
+        self.export_result_lbl.setText(f"\u2705 导出完成！{len(paths)} 个视频已保存到:\n{final_dir}")
         self.stage_lbl.setText(f"导出完成，共 {len(paths)} 个视频")
         QMessageBox.information(self.parent_widget, "导出完成",
                                 f"成功导出 {len(paths)} 个带封面的视频！\n\n{final_dir}")
@@ -2451,18 +2441,16 @@ class LiveClipPage(BasePage):
         self.btn_export.setEnabled(True)
         self.progress_bar_p0.setVisible(False)
         self.progress_bar_p1.setVisible(False)
-        self.stage_lbl.setText("操作失败")
-
+        self.stage_lbl.setText("❌ 操作失败")
+        
         for widget in getattr(self, "clip_item_widgets", []):
             if not widget.clip_info.get("video_path"):
                 widget.btn_slice_single.setEnabled(True)
                 widget.btn_slice_single.setText("单独切片")
-
+                
         s = ""
         for line in (err or "").splitlines()[::-1]:
-            if line.strip():
-                s = line.strip()
-                break
+            if line.strip(): s = line.strip(); break
         QMessageBox.critical(self.parent_widget, "错误", f"操作失败:\n{s or err[:500]}")
 
     def _reset_ui(self):

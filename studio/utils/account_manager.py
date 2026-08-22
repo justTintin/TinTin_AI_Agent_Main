@@ -1,11 +1,9 @@
+# -*- coding: utf-8 -*-
 import json
 import os
 import time
-
-from config.paths import ACCOUNTS_DIR
-
 from utils.logger_utils import log
-
+from config.paths import ACCOUNTS_DIR
 
 class AccountManager:
     def __init__(self, base_dir=None):
@@ -27,9 +25,9 @@ class AccountManager:
     def load_accounts(self):
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, encoding='utf-8') as f:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.accounts = json.load(f)
-            except (OSError, json.JSONDecodeError) as e:
+            except Exception as e:
                 log.error(f"Failed to load accounts: {e}")
                 self.accounts = []
         else:
@@ -39,27 +37,24 @@ class AccountManager:
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.accounts, f, indent=4, ensure_ascii=False)
-        except OSError as e:
+        except Exception as e:
             log.error(f"Failed to save accounts: {e}")
 
-    def add_account(self, uid, nickname, cookie_str="", avatar_url=None, profile_id=None):  # noqa: E501
+    def add_account(self, uid, nickname, cookie_str="", avatar_url=None, profile_id=None):
         # Check for duplicates or update
         for acc in self.accounts:
             if acc['uid'] == uid:
                 acc['nickname'] = nickname
-                if cookie_str:
-                    acc['cookie'] = cookie_str
-                if avatar_url:
-                    acc['avatar'] = avatar_url
-                if profile_id:
-                    acc['profile_id'] = profile_id
+                if cookie_str: acc['cookie'] = cookie_str
+                if avatar_url: acc['avatar'] = avatar_url
+                if profile_id: acc['profile_id'] = profile_id
                 self.save_accounts()
                 return acc
-
+        
         # profile_id is used for the dedicated browser storage path
         if not profile_id:
             profile_id = f"profile_{int(time.time())}"
-
+            
         session_path = os.path.abspath(os.path.join(self.sessions_dir, profile_id))
         new_acc = {
             "uid": uid,

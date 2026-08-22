@@ -1,31 +1,22 @@
-import configparser
+# -*- coding: utf-8 -*-
 import os
+import sys
 import shutil
 import subprocess
-import sys
-from typing import Any
+import traceback
 
-import requests.exceptions
-from config.paths import KNOWLEDGE_MEDIA_DIR, MATERIALS_DIR, PROJECT_ROOT, VSR_DIR, WORKSPACE_ROOT
-from gui.elided_label import ElidedLabel
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (
-    QFrame,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                               QTextEdit, QProgressBar, QFrame, QMessageBox,
+                               QGroupBox, QScrollArea, QWidget, QLineEdit,
+                               QSpinBox, QFileDialog, QListWidget, QListWidgetItem, QInputDialog)
+from PySide6.QtCore import Signal, QThread, Qt
 from utils.base_worker import BaseWorker
-from utils.ffmpeg_utils import CREATE_NO_WINDOW, PIPE, STDOUT, popen
-from utils.file_dialog_utils import pick_directory
-from utils.gui_icons import mdi_button
+import configparser
 from utils.logger_utils import log
+from config.paths import (WORKSPACE_ROOT, APPS_DIR,
+                           KNOWLEDGE_MATERIALS_DIR,
+                           KNOWLEDGE_MEDIA_DIR,
+                           DATA_DIR, MATERIALS_DIR, CONFIG_INI_FILE, CONFIG_DIR, PROJECT_ROOT)
 
 
 class EnvInstallWorker(BaseWorker):
@@ -38,7 +29,7 @@ class EnvInstallWorker(BaseWorker):
         try:
             self.busy.emit(True)
             self.stage.emit("正在卸载 CPU 版 PyTorch 库...")
-            self.run_command([sys.executable, "-m", "pip", "uninstall", "-y", "torch", "torchvision", "torchaudio"])  # noqa: E501
+            self.run_command([sys.executable, "-m", "pip", "uninstall", "-y", "torch", "torchvision", "torchaudio"])
 
             self.stage.emit("正在通过官方源安装 CUDA 12.1 版 PyTorch (包体积较大，下载需要几分钟)...")
             self.run_command([
@@ -49,25 +40,23 @@ class EnvInstallWorker(BaseWorker):
             self.stage.emit("依赖安装/修复完成！正在刷新环境状态...")
             self.busy.emit(False)
             self.finished.emit(True, "系统环境配置一键修复成功！已成功为您安装 CUDA 版 PyTorch。")
-        except (OSError, subprocess.SubprocessError) as e:
+        except Exception as e:
             self.busy.emit(False)
-            self.stage.emit("失败： 修复失败")
+            self.stage.emit("❌ 修复失败")
             self.finished.emit(False, f"环境修复失败：\n{str(e)}")
 
     def run_command(self, cmd):
         self.log_line.emit(f"\n[执行命令] {' '.join(cmd)}\n")
-        p = popen(
+        p = subprocess.Popen(
             cmd,
-            stdout=PIPE,
-            stderr=STDOUT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="ignore",
             bufsize=1,
-            creationflags=CREATE_NO_WINDOW
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
-        if p.stdout is None:
-            raise RuntimeError("无法读取命令输出")
         while True:
             line = p.stdout.readline()
             if not line and p.poll() is not None:
@@ -90,14 +79,12 @@ class EnvCheckWorker(BaseWorker):
         try:
             info = self.check_func()
             self.finished.emit(info)
-        except Exception as e:  # 外部检测回调：可能包含 HTTP/文件/subprocess 等多类异常
+        except Exception as e:
             log.error(f"环境异步检测失败: {e}")
             self.finished.emit({})
 
 
-import contextlib  # noqa: E402
-
-from gui.base_page import BasePage  # noqa: E402
+from gui.base_page import BasePage
 
 
 class EnvConfigPage(BasePage):
@@ -108,15 +95,15 @@ class EnvConfigPage(BasePage):
         self.cached_info = None
         self.pending_callbacks = []
 
-    def setup(self, show_heading=True):
+    def setup(self):
         layout = QVBoxLayout(self.parent_widget)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(16)
 
-        if show_heading:
-            heading = QLabel(" 系统环境配置与参数设置")
-            heading.setObjectName("heading")
-            layout.addWidget(heading, 0)
+        # Title
+        heading = QLabel("⚙️ 系统环境配置与参数设置")
+        heading.setObjectName("heading")
+        layout.addWidget(heading, 0)
 
         # Status Display Card
         self.card = QFrame()
@@ -125,145 +112,101 @@ class EnvConfigPage(BasePage):
         card_layout.setContentsMargins(24, 24, 24, 24)
         card_layout.setSpacing(16)
 
-        self.status_labels: dict[str, QLabel] = {}
+        self.status_labels = {}
 
         # Scroll Area for Categories
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")  # noqa: E501
+        scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scroll_area.setMinimumHeight(300)
 
         scroll_widget = QWidget()
-        scroll_widget.setObjectName("scroll_page")
+        scroll_widget.setStyleSheet("QWidget { background: transparent; }")
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(16)
 
         # Group 1: Python & GPU 基础运行环境
-        group_py_gpu = QGroupBox(" Python & GPU 基础运行环境")
+        group_py_gpu = QGroupBox("🐍 Python & GPU 基础运行环境")
         group_py_gpu.setStyleSheet("""
-            QGroupBox {
-                font-size: 13px;
-                font-weight: bold;
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                margin-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                color: #3b82f6;
-            }
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #3b82f6; }
         """)
         layout_py_gpu = QVBoxLayout(group_py_gpu)
         layout_py_gpu.setContentsMargins(16, 20, 16, 16)
         layout_py_gpu.setSpacing(10)
-        self._add_status_row(layout_py_gpu, "python", " Python 运行环境")
-        self._add_status_row(layout_py_gpu, "gpu", " 显卡 (NVIDIA GPU) 硬件")
-        self._add_status_row(layout_py_gpu, "cuda", " CUDA (PyTorch) 开启状态")
-
+        self._add_status_row(layout_py_gpu, "python", "🐍 Python 运行环境")
+        self._add_status_row(layout_py_gpu, "gpu", "🎮 显卡 (NVIDIA GPU) 硬件")
+        self._add_status_row(layout_py_gpu, "cuda", "⚡ CUDA (PyTorch) 开启状态")
+        
         # Add local refresh button for Python & GPU
-        self.btn_refresh_py_gpu = QPushButton(" 刷新 Python & GPU 检测")
+        self.btn_refresh_py_gpu = QPushButton("🔄 刷新 Python & GPU 检测")
         self.btn_refresh_py_gpu.setObjectName("secondary_button")
         self.btn_refresh_py_gpu.setFixedWidth(200)
         self.btn_refresh_py_gpu.clicked.connect(self.refresh_python_gpu)
         layout_py_gpu.addWidget(self.btn_refresh_py_gpu)
-
+        
         scroll_layout.addWidget(group_py_gpu)
 
         # Group 1.5: 系统硬件与版本信息
-        group_sys_info = QGroupBox(" 系统硬件与版本信息")
+        group_sys_info = QGroupBox("💻 系统硬件与版本信息")
         group_sys_info.setStyleSheet("""
-            QGroupBox {
-                font-size: 13px;
-                font-weight: bold;
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                margin-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                color: #3b82f6;
-            }
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #3b82f6; }
         """)
         layout_sys_info = QVBoxLayout(group_sys_info)
         layout_sys_info.setContentsMargins(16, 20, 16, 16)
         layout_sys_info.setSpacing(10)
-        self._add_status_row(layout_sys_info, "os_ver", " 操作系统版本")
-        self._add_status_row(layout_sys_info, "cpu_info", " 处理器 (CPU)")
-        self._add_status_row(layout_sys_info, "ram_info", " 运行内存 (RAM)")
-        self._add_status_row(layout_sys_info, "gpu_info", " 显卡 (GPU) 与显存")
-
-        self.btn_auto_optimize = QPushButton(" 根据硬件自动优化 AI 并行配置")
+        self._add_status_row(layout_sys_info, "os_ver", "🖥️ 操作系统版本")
+        self._add_status_row(layout_sys_info, "cpu_info", "🧠 处理器 (CPU)")
+        self._add_status_row(layout_sys_info, "ram_info", "💾 运行内存 (RAM)")
+        self._add_status_row(layout_sys_info, "gpu_info", "🎮 显卡 (GPU) 与显存")
+        
+        self.btn_auto_optimize = QPushButton("⚡ 根据硬件自动优化 AI 并行配置")
         self.btn_auto_optimize.setObjectName("primary_button")
         self.btn_auto_optimize.setFixedWidth(240)
         self.btn_auto_optimize.clicked.connect(self.auto_optimize_hardware)
         layout_sys_info.addWidget(self.btn_auto_optimize)
-
+        
         scroll_layout.addWidget(group_sys_info)
 
         # Group 4: 其他音视频编解码与去水印算法环境
-        group_other = QGroupBox(" 其他音视频编解码与去水印算法环境")
+        group_other = QGroupBox("🎞️ 其他音视频编解码与去水印算法环境")
         group_other.setStyleSheet("""
-            QGroupBox {
-                font-size: 13px;
-                font-weight: bold;
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                margin-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                color: #f97316;
-            }
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #f97316; }
         """)
         layout_other = QVBoxLayout(group_other)
         layout_other.setContentsMargins(16, 20, 16, 16)
         layout_other.setSpacing(10)
-        self._add_status_row(layout_other, "ffmpeg", " FFmpeg 编解码器")
-        self._add_status_row(layout_other, "vsr", " VSR 去字幕算法组件")
-
+        self._add_status_row(layout_other, "ffmpeg", "🎞️ FFmpeg 编解码器")
+        self._add_status_row(layout_other, "vsr", "✂️ VSR 去字幕（算力服务端）")
+        
         # Add local refresh button for codecs
-        self.btn_refresh_codecs = QPushButton(" 刷新音视频编解码检测")
+        self.btn_refresh_codecs = QPushButton("🔄 刷新音视频编解码检测")
         self.btn_refresh_codecs.setObjectName("secondary_button")
         self.btn_refresh_codecs.setFixedWidth(200)
         self.btn_refresh_codecs.clicked.connect(self.refresh_codecs)
         layout_other.addWidget(self.btn_refresh_codecs)
-
+        
         scroll_layout.addWidget(group_other)
 
         # Group 5: 素材存储目录配置
-        group_mat = QGroupBox(" 素材存储目录配置")
+        group_mat = QGroupBox("📁 素材存储目录配置")
         group_mat.setStyleSheet("""
-            QGroupBox {
-                font-size: 13px;
-                font-weight: bold;
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                margin-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                color: #10b981;
-            }
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #10b981; }
         """)
         layout_mat = QVBoxLayout(group_mat)
         layout_mat.setContentsMargins(16, 20, 16, 16)
         layout_mat.setSpacing(10)
 
-        mat_desc = ElidedLabel(
+        mat_desc = QLabel(
             "素材浏览器下载的视频/图片等媒体文件存储至此目录。\n"
-            "可指定外置盘或网络映射盘，JSON 元数据始终保留在项目内部。",
-            max_lines=2,
+            "可指定外置盘或网络映射盘，JSON 元数据始终保留在项目内部。"
         )
         mat_desc.setObjectName("muted_text")
+        mat_desc.setWordWrap(True)
         layout_mat.addWidget(mat_desc)
 
         mat_row = QHBoxLayout()
@@ -272,11 +215,11 @@ class EnvConfigPage(BasePage):
         self.edit_mat_dir.setText(KNOWLEDGE_MEDIA_DIR)
         self.edit_mat_dir.setReadOnly(True)
         mat_row.addWidget(self.edit_mat_dir, 1)
-        btn_choose_mat = mdi_button("选择目录", "folder")
+        btn_choose_mat = QPushButton("📂 选择目录")
         btn_choose_mat.setObjectName("secondary_button")
         btn_choose_mat.clicked.connect(self._choose_materials_dir)
         mat_row.addWidget(btn_choose_mat)
-        btn_reset_mat = QPushButton(" 恢复默认")
+        btn_reset_mat = QPushButton("🔄 恢复默认")
         btn_reset_mat.setObjectName("secondary_button")
         btn_reset_mat.clicked.connect(self._reset_materials_dir)
         mat_row.addWidget(btn_reset_mat)
@@ -285,38 +228,27 @@ class EnvConfigPage(BasePage):
         scroll_layout.addWidget(group_mat)
 
         # Group 7: RustFS 对象存储配置
-        group_rustfs = QGroupBox(" RustFS 对象存储配置")
+        group_rustfs = QGroupBox("🗄️ RustFS 对象存储配置")
         group_rustfs.setStyleSheet("""
-            QGroupBox {
-                font-size: 13px;
-                font-weight: bold;
-                border: 1px solid #2e2e32;
-                border-radius: 8px;
-                margin-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 8px;
-                color: #0ea5e9;
-            }
+            QGroupBox { font-size: 13px; font-weight: bold; border: 1px solid #2e2e32; border-radius: 8px; margin-top: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 8px; color: #0ea5e9; }
         """)
         layout_rustfs = QVBoxLayout(group_rustfs)
         layout_rustfs.setContentsMargins(16, 20, 16, 16)
         layout_rustfs.setSpacing(10)
 
-        rustfs_desc = ElidedLabel(
+        rustfs_desc = QLabel(
             "RustFS 兼容 S3/MinIO 协议，用于素材文件的云端对象存储。\n"
-            "配置后可在「素材管理」页将本地素材目录同步到对象存储桶。",
-            max_lines=2,
+            "配置后可在「素材管理」页将本地素材目录同步到对象存储桶。"
         )
         rustfs_desc.setObjectName("muted_text")
+        rustfs_desc.setWordWrap(True)
         layout_rustfs.addWidget(rustfs_desc)
 
         row_rustfs1 = QHBoxLayout()
         row_rustfs1.addWidget(QLabel("服务地址："))
         self.edit_rustfs_endpoint = QLineEdit()
-        self.edit_rustfs_endpoint.setPlaceholderText("http://X.X.X.X:9000")
+        self.edit_rustfs_endpoint.setPlaceholderText("http://192.168.111.17:9000")
         row_rustfs1.addWidget(self.edit_rustfs_endpoint, 2)
         row_rustfs1.addWidget(QLabel("默认存储桶："))
         self.edit_rustfs_bucket = QLineEdit()
@@ -340,11 +272,11 @@ class EnvConfigPage(BasePage):
         self.lbl_rustfs_status = QLabel("")
         self.lbl_rustfs_status.setObjectName("muted_text")
         row_rustfs3.addWidget(self.lbl_rustfs_status, 1)
-        btn_test_rustfs = QPushButton(" 测试连接")
+        btn_test_rustfs = QPushButton("🔌 测试连接")
         btn_test_rustfs.setObjectName("secondary_button")
         btn_test_rustfs.clicked.connect(self._test_rustfs_connection)
         row_rustfs3.addWidget(btn_test_rustfs)
-        btn_save_rustfs = QPushButton(" 保存 RustFS 配置")
+        btn_save_rustfs = QPushButton("💾 保存 RustFS 配置")
         btn_save_rustfs.setObjectName("secondary_button")
         btn_save_rustfs.clicked.connect(self._save_rustfs_config)
         row_rustfs3.addWidget(btn_save_rustfs)
@@ -353,9 +285,9 @@ class EnvConfigPage(BasePage):
         # RustFS 配置组暂时隐藏，尚未接入对象存储
         # scroll_layout.addWidget(group_rustfs)
 
-        # 注：素材向量库 PostgreSQL 数据库配置已移至「平台接入」→「 数据库」标签页，此处不再重复。
+        # 注：素材向量库 PostgreSQL 数据库配置已移至「平台接入」→「🗄️ 数据库」标签页，此处不再重复。
         # CLIP 向量检索已切换为纯远程 embedding 服务模式，
-        # 服务地址请在「AI 模型配置」→「 CLIP」标签页中填写。
+        # 服务地址请在「AI 模型配置」→「🖼️ CLIP」标签页中填写。
 
         scroll_layout.addWidget(scroll_widget)
 
@@ -381,29 +313,35 @@ class EnvConfigPage(BasePage):
     # ── 素材目录配置 ──
 
     def _choose_materials_dir(self):
-        new_dir = pick_directory(
+        new_dir = QFileDialog.getExistingDirectory(
             self.parent_widget,
             "选择素材媒体存储目录（可以是外置盘或映射盘）",
             self.edit_mat_dir.text()
         )
         if not new_dir:
             return
-        from utils import config_manager as _cm
+        import json as _json
+        cfg_path = os.path.join(DATA_DIR, "knowledge_dir.json")
         try:
-            _cm.set_setting("knowledge_dir", "media_dir", new_dir)
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                _json.dump({"media_dir": new_dir}, f, ensure_ascii=False, indent=2)
             self.edit_mat_dir.setText(new_dir)
             QMessageBox.information(
                 self.parent_widget, "媒体存储目录已设置",
                 f"媒体存储目录已设置为:\n{new_dir}\n\n请重启应用以完全生效。\n"
                 "（浏览器下载的视频/图片将写入此目录，JSON 元数据仍保留在项目内）"
             )
-        except (OSError, configparser.Error, KeyError, TypeError) as e:
+        except Exception as e:
             QMessageBox.critical(self.parent_widget, "保存失败", f"写入配置失败: {e}")
 
     def _reset_materials_dir(self):
-        from utils import config_manager as _cm
-        with contextlib.suppress(OSError, configparser.Error):
-            _cm.clear_config("knowledge_dir")
+        import json as _json
+        cfg_path = os.path.join(DATA_DIR, "knowledge_dir.json")
+        try:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+        except Exception:
+            pass
         default = os.path.join(MATERIALS_DIR, "knowledge")
         self.edit_mat_dir.setText(default)
         QMessageBox.information(
@@ -412,12 +350,12 @@ class EnvConfigPage(BasePage):
         )
 
     def check_environment(self):
-        info: dict[str, Any] = {}
-
+        info = {}
+        
         # 1. Python
         info["python_path"] = sys.executable
         info["python_ok"] = True
-
+        
         # 2. CUDA & PyTorch
         info["cuda_available"] = False
         info["cuda_device"] = "无"
@@ -463,49 +401,32 @@ class EnvConfigPage(BasePage):
             info["ffmpeg_ok"] = False
             info["ffmpeg_path"] = "未在系统环境或软件目录中检测到 ffmpeg.exe"
 
-        # 6. VSR Subtitle Remover（统一使用 v1.4.0，旧版 v1.1.1 已废弃删除）
-        vsr_dir = VSR_DIR
-        vsr_python = os.path.join(vsr_dir, "Python", "python.exe")
-        # v1.4.0 入口脚本在根目录 vsr_run.py（v1.1.1 在 resources/ 下，已废弃）
-        vsr_script = os.path.join(vsr_dir, "vsr_run.py")
-        if os.path.isdir(vsr_dir) and os.path.isfile(vsr_python) and os.path.isfile(vsr_script):  # noqa: E501
-            info["vsr_ok"] = True
-            info["vsr_status"] = f"已就绪 (内嵌环境: {vsr_python})"
-        else:
-            info["vsr_ok"] = False
-            info["vsr_status"] = "未就绪 (缺少 apps/vsr-v1.4.0 主目录或内嵌 Python 环境)"
+        # 6. VSR 去字幕（纯远程模式，客户端不再内置本地算法包）
+        info["vsr_ok"] = True
+        info["vsr_status"] = "远程模式（由 compute_server_url 提供去字幕服务）"
 
         # 8. VoxCPM（纯远程模式）
         info["voxcpm_installed"] = True
         info["voxcpm_ok"] = True
         info["voxcpm_status"] = "远程模式（由 ai_config 配置 vox_api_url）"
 
-        # 9. OCR 服务端连通性（已从本地 PaddleOCR 迁移至服务端 POST /material/ocr）
-        from utils.ocr_client import check_server_ocr
-        info["paddleocr_ok"] = False
-        info["paddleocr_status"] = "未连接"
-        try:
-            if check_server_ocr():
-                info["paddleocr_ok"] = True
-                info["paddleocr_status"] = "已就绪（服务端 /material/ocr）"
-            else:
-                info["paddleocr_status"] = "未连接（服务端离线或 /material/ocr 不可用）"
-        except requests.exceptions.RequestException as e:
-            info["paddleocr_status"] = f"检测失败: {e}"
+        # 9. PaddleOCR（纯远程模式，客户端不再内置本地 OCR 引擎）
+        info["paddleocr_ok"] = True
+        info["paddleocr_status"] = "远程模式（由 compute_server_url 提供 OCR 服务）"
+        info["paddleocr_models"] = ["远程模式，无需本地模型"]
         info["paddleocr_models_dir"] = ""
-        info["paddleocr_models"] = ["OCR 由服务端提供，无需本地模型"]
 
         # 10. Hardware Info
         try:
-            from utils.hardware_utils import auto_adjust_concurrency_configs, get_system_hardware_info
+            from utils.hardware_utils import get_system_hardware_info, auto_adjust_concurrency_configs
             hw = get_system_hardware_info()
             info["os_ver"] = hw["os"]
             info["cpu_info"] = f"{hw['cpu_name']} ({hw['cpu_cores']})"
             info["ram_info"] = f"{hw['ram']} GB"
             info["gpu_info"] = f"{hw['gpu_name']} (显存: {hw['gpu_vram']} GB)"
-            # Automatically run auto-adjustment silently if configuration keys are missing  # noqa: E501
+            # Automatically run auto-adjustment silently if configuration keys are missing
             auto_adjust_concurrency_configs(force=False)
-        except Exception as e:  # 外部硬件工具：可能包含 HTTP/文件/subprocess 等多类异常
+        except Exception as e:
             log.error(f"环境检测获取硬件配置失败: {e}")
             info["os_ver"] = "未知"
             info["cpu_info"] = "未知"
@@ -517,23 +438,23 @@ class EnvConfigPage(BasePage):
     def refresh_status_async(self, callback=None):
         if callback:
             self.pending_callbacks.append(callback)
-
+            
         if self.cached_info:
             self.update_ui_with_info(self.cached_info)
             while self.pending_callbacks:
                 cb = self.pending_callbacks.pop(0)
                 try:
                     cb(self.cached_info)
-                except (AttributeError, TypeError):
-                    log.error("执行环境检测回调失败")
-
+                except Exception as e:
+                    log.error(f"执行环境检测回调失败: {e}")
+            
         if self.check_worker and self.check_worker.isRunning():
             return
-
+            
         if not self.cached_info:
-            for _key, lbl in self.status_labels.items():
+            for key, lbl in self.status_labels.items():
                 lbl.setText("正在检测...")
-
+                
         try:
             if hasattr(self, "btn_refresh_py_gpu") and self.btn_refresh_py_gpu:
                 self.btn_refresh_py_gpu.setEnabled(False)
@@ -544,7 +465,7 @@ class EnvConfigPage(BasePage):
                 self.btn_refresh_codecs.setEnabled(False)
         except RuntimeError:
             pass
-
+            
         self.check_worker = EnvCheckWorker(self.check_environment)
         self.check_worker.finished.connect(self._on_check_finished)
         self.check_worker.start()
@@ -560,29 +481,29 @@ class EnvConfigPage(BasePage):
                 self.btn_refresh_codecs.setEnabled(True)
         except RuntimeError:
             pass
-
+            
         if not info:
             return
-
+            
         self.cached_info = info
         self.update_ui_with_info(info)
-
+        
         while self.pending_callbacks:
             cb = self.pending_callbacks.pop(0)
             try:
                 cb(info)
-            except (AttributeError, TypeError):
-                log.error("执行环境检测回调失败")
+            except Exception as e:
+                log.error(f"执行环境检测回调失败: {e}")
 
     def update_ui_with_info(self, info):
         try:
             if "python" in self.status_labels:
-                py_status = f"<font color='#16a34a'><b>完成： 独立嵌入式环境</b></font> (位置: {info['python_path']})"  # noqa: E501
+                py_status = f"<font color='#16a34a'><b>✅ 独立嵌入式环境</b></font> (位置: {info['python_path']})"
                 self.status_labels["python"].setText(py_status)
 
             if "gpu" in self.status_labels:
                 if info.get("cuda_available", False):
-                    gpu_status = f"<font color='#16a34a'><b> 已就绪</b></font> ({info.get('cuda_device', '无')})"  # noqa: E501
+                    gpu_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('cuda_device', '无')})"
                 else:
                     from gui_main import HAS_NVML
                     if HAS_NVML:
@@ -593,32 +514,32 @@ class EnvConfigPage(BasePage):
                             name = pynvml.nvmlDeviceGetName(handle)
                             if isinstance(name, bytes):
                                 name = name.decode("utf-8")
-                            gpu_status = f"<font color='#d97706'><b>注意： 硬件已连接，但 PyTorch 未加载</b></font> ({name})"  # noqa: E501
-                        except Exception:  # pynvml 等外部硬件库异常，未指定具体 NVMLError
-                            gpu_status = "<font color='#dc2626'><b>失败： 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"  # noqa: E501
+                            gpu_status = f"<font color='#d97706'><b>⚠️ 硬件已连接，但 PyTorch 未加载</b></font> ({name})"
+                        except Exception:
+                            gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
                     else:
-                        gpu_status = "<font color='#dc2626'><b>失败： 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"  # noqa: E501
+                        gpu_status = "<font color='#dc2626'><b>❌ 未检测到支持 CUDA 的 NVIDIA 显卡</b></font>"
                 self.status_labels["gpu"].setText(gpu_status)
 
             if "cuda" in self.status_labels:
                 if info.get("cuda_available", False):
-                    cuda_status = f"<font color='#16a34a'><b>完成： 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"  # noqa: E501
+                    cuda_status = f"<font color='#16a34a'><b>✅ 可用</b></font> (PyTorch: {info.get('torch_version', '未安装')})"
                 else:
-                    cuda_status = f"<font color='#dc2626'><b>失败： 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"  # noqa: E501
+                    cuda_status = f"<font color='#dc2626'><b>❌ 未启用 GPU</b></font> (原因: {info.get('cuda_device', '无')})"
                 self.status_labels["cuda"].setText(cuda_status)
 
             if "ffmpeg" in self.status_labels:
                 if info.get("ffmpeg_ok", False):
-                    ffmpeg_status = f"<font color='#16a34a'><b> 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"  # noqa: E501
+                    ffmpeg_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> (路径: {info.get('ffmpeg_path', '')})"
                 else:
-                    ffmpeg_status = f"<font color='#dc2626'><b>失败： {info.get('ffmpeg_path', '')}</b></font>"  # noqa: E501
+                    ffmpeg_status = f"<font color='#dc2626'><b>❌ {info.get('ffmpeg_path', '')}</b></font>"
                 self.status_labels["ffmpeg"].setText(ffmpeg_status)
 
             if "vsr" in self.status_labels:
                 if info.get("vsr_ok", False):
-                    vsr_status = f"<font color='#16a34a'><b> 已就绪</b></font> ({info.get('vsr_status', '')})"  # noqa: E501
+                    vsr_status = f"<font color='#16a34a'><b>✅ 已就绪</b></font> ({info.get('vsr_status', '')})"
                 else:
-                    vsr_status = f"<font color='#dc2626'><b>失败： 未就绪</b></font> ({info.get('vsr_status', '')})"  # noqa: E501
+                    vsr_status = f"<font color='#dc2626'><b>❌ 未就绪</b></font> ({info.get('vsr_status', '')})"
                 self.status_labels["vsr"].setText(vsr_status)
 
             if "os_ver" in self.status_labels:
@@ -636,18 +557,18 @@ class EnvConfigPage(BasePage):
         try:
             from utils.hardware_utils import auto_adjust_concurrency_configs
             res = auto_adjust_concurrency_configs(force=True)
-
+            
             msg = (
                 f"系统硬件优化完成！已根据您的配置进行了以下参数优化调整：\n\n"
                 f"优化级别：{res['level']}\n"
-                f"1. 本地 Ollama 并行数 (ollama_num_parallel)  {res['ollama_num_parallel']} 并发\n"  # noqa: E501
-                f"2. 多线程视觉分析数 (vision_concurrency)  {res['vision_concurrency']} 并发\n"
-                f"3. 向量编码批处理大小 (batch_size)  {res['clip_batch_size']} 批处理\n\n"
+                f"1. 本地 Ollama 并行数 (ollama_num_parallel) ➔ {res['ollama_num_parallel']} 并发\n"
+                f"2. 多线程视觉分析数 (vision_concurrency) ➔ {res['vision_concurrency']} 并发\n"
+                f"3. 向量编码批处理大小 (batch_size) ➔ {res['clip_batch_size']} 批处理\n\n"
                 f"配置已写入 ai_config.json 和 material_index_config.json (已移除)。\n"
                 f"（注：若 Ollama 已经在运行，需要重启应用或重启 Ollama 才能使并发限制生效）"
             )
             QMessageBox.information(self.parent_widget, "硬件自适应优化成功", msg)
-        except Exception as e:  # 外部硬件自适应（subprocess/文件/HTTP）
+        except Exception as e:
             QMessageBox.critical(self.parent_widget, "优化失败", f"运行自适应优化失败：\n{e}")
 
     def refresh_python_gpu(self):
@@ -680,9 +601,9 @@ class EnvConfigPage(BasePage):
             self.edit_rustfs_bucket.text(),
         )
         if ok:
-            self.lbl_rustfs_status.setText("完成： 配置已保存")
+            self.lbl_rustfs_status.setText("✅ 配置已保存")
         else:
-            self.lbl_rustfs_status.setText("失败： 保存失败，请检查日志")
+            self.lbl_rustfs_status.setText("❌ 保存失败，请检查日志")
 
     def _test_rustfs_connection(self):
         self._save_rustfs_config()
@@ -690,6 +611,6 @@ class EnvConfigPage(BasePage):
         from utils.rustfs_manager import test_connection
         ok, msg = test_connection()
         color = "#16a34a" if ok else "#dc2626"
-        icon = "完成：" if ok else "失败："
+        icon = "✅" if ok else "❌"
         self.lbl_rustfs_status.setText(f"<font color='{color}'>{icon} {msg}</font>")
 

@@ -1,5 +1,5 @@
+# -*- coding: utf-8 -*-
 from PySide6.QtWidgets import QWidget
-
 
 class BaseStepView(QWidget):
     """智能混剪四步骤的通用 UI 基类"""

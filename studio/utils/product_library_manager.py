@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 产品资料数据层（服务端存储，通过机器码隔离）。
 
@@ -9,12 +10,9 @@
 
 保留的常量：FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS（驱动 GUI 表单与字段归一化）。
 """
-import json
 import os
+import json
 import time
-from typing import Any
-
-import requests
 
 from utils.logger_utils import log
 
@@ -50,12 +48,12 @@ def _get_server_url() -> str:
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return ""
 
@@ -65,10 +63,9 @@ def _get_machine_id() -> str:
     try:
         from utils.license import get_machine_id
         return get_machine_id()
-    except Exception:  # 动态导入
+    except Exception:
         # 降级：用 socket 名哈希
-        import hashlib
-        import socket
+        import hashlib, socket
         return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
 
 
@@ -87,110 +84,79 @@ class ProductLibraryManager:
         self.machine_id = machine_id or _get_machine_id()
         self.items: list[dict] = []
         self._cache_time: float = 0
-        # 构造时后台预加载（load() 会同步请求服务端 /grouped，
-        # 直接调用会在 GUI 线程阻塞，服务端异常时导致界面卡死）
-        self._load_thread = None
-        self._start_async_load()
-
-    def _start_async_load(self):
-        """后台线程预加载产品缓存，避免阻塞 GUI 线程。"""
-        import threading
-        if self._load_thread is not None and self._load_thread.is_alive():
-            return
-        self._load_thread = threading.Thread(target=self.load, daemon=True)
-        self._load_thread.start()
+        self.load()
 
     # ── HTTP 底层 ──────────────────────────────────────────────────────────
 
     def _base(self) -> str:
-        return f"{_get_server_url().rstrip('/')}/api/product-library/clients/{self.machine_id}"  # noqa: E501
+        return f"{_get_server_url().rstrip('/')}/api/product-library/clients/{self.machine_id}"
 
     def _headers(self) -> dict:
         return {"X-Machine-ID": self.machine_id, "Content-Type": "application/json"}
 
     def _http_get(self, path: str, params=None, timeout=10):
-        from utils.http_client import http_get
+        import requests
         url = f"{self._base()}{path}"
         try:
-            r = http_get(url, headers=self._headers(), params=params, timeout=timeout)
+            r = requests.get(url, headers=self._headers(), params=params, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
-            log.warning(f"[ProductLib] GET {url} → HTTP {r.status_code}: {r.text[:150]}")  # noqa: E501
-        except requests.exceptions.RequestException as e:
+            log.warning(f"[ProductLib] GET {url} → HTTP {r.status_code}: {r.text[:150]}")
+        except Exception as e:
             log.error(f"[ProductLib] GET {url} 失败: {e}")
         return None
 
     def _http_post(self, path: str, json_data=None, timeout=15):
-        from utils.http_client import http_post
+        import requests
         url = f"{self._base()}{path}"
         try:
-            r = http_post(url, headers=self._headers(), json=json_data, timeout=timeout)
+            r = requests.post(url, headers=self._headers(), json=json_data, timeout=timeout)
             if r.status_code in (200, 201):
                 return r.json()
             log.error(f"[ProductLib] POST {url} → HTTP {r.status_code}: {r.text[:200]}")
             # 把服务端错误消息返回给调用方
             try:
                 err = r.json()
-                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}  # noqa: E501
-            except json.JSONDecodeError:
+                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}
+            except Exception:
                 return {"ok": False, "message": f"HTTP {r.status_code}"}
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             log.error(f"[ProductLib] POST {url} 失败: {e}")
             return {"ok": False, "message": f"网络异常: {e}"}
 
     def _http_put(self, path: str, json_data: dict, timeout=10):
-        from utils.http_client import http_put
+        import requests
         url = f"{self._base()}{path}"
         try:
-            r = http_put(url, headers=self._headers(), json=json_data, timeout=timeout)
+            r = requests.put(url, headers=self._headers(), json=json_data, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
             log.error(f"[ProductLib] PUT {url} → HTTP {r.status_code}: {r.text[:200]}")
             try:
                 err = r.json()
-                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}  # noqa: E501
-            except json.JSONDecodeError:
+                return {"ok": False, "message": err.get("message") or err.get("detail") or f"HTTP {r.status_code}"}
+            except Exception:
                 return {"ok": False, "message": f"HTTP {r.status_code}"}
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             log.error(f"[ProductLib] PUT {url} 失败: {e}")
             return {"ok": False, "message": f"网络异常: {e}"}
 
     def _http_delete(self, path: str, timeout=10) -> bool:
-        from utils.http_client import http_delete
+        import requests
         url = f"{self._base()}{path}"
         try:
-            r = http_delete(url, headers=self._headers(), timeout=timeout)
+            r = requests.delete(url, headers=self._headers(), timeout=timeout)
             if r.status_code == 200:
                 return True
             log.warning(f"[ProductLib] DELETE {url} → HTTP {r.status_code}")
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             log.error(f"[ProductLib] DELETE {url} 失败: {e}")
         return False
 
     # ── 持久化 ─────────────────────────────────────────────────────────────
 
     def load(self):
-        """从服务端拉取全量数据到本地缓存。
-
-        服务端 /items 固定只返回前 50 条（limit/offset 参数被忽略），
-        而 /grouped 返回全部产品（含 features/selling_points），
-        因此用 /grouped 作为全量缓存源，保证树里每个产品都能命中本地缓存。
-        """
-        data = self._http_get("/grouped", timeout=15)
-        if data is not None:
-            tree = data.get("tree") if isinstance(data, dict) else None
-            if isinstance(tree, dict):
-                items = []
-                for _cat, brands in tree.items():
-                    for _brand, lst in brands.items():
-                        items.extend(lst)
-                self.items = items
-                self._cache_time = time.time()
-                return self.items
-            self.items = []
-            self._cache_time = time.time()
-            return self.items
-        # 兜底：仍尝试 /items（可能只有前 50 条）
+        """从服务端拉取全量数据到本地缓存。"""
         data = self._http_get("/items", timeout=15)
         if data is not None:
             if isinstance(data, list):
@@ -206,12 +172,16 @@ class ProductLibraryManager:
                 self.items = []
         return self.items
 
+    def save(self):
+        """服务端在每次写操作后自动持久化，此方法为兼容保留（不执行任何操作）。"""
+        pass
+
     # ── 工具 ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize(data):
         """把任意 dict 规整成只含已知字段的条目（缺失字段补空字符串）。"""
-        return {key: str(data.get(key, "") or "").strip() for key, _label, _ml in FIELDS}  # noqa: E501
+        return {key: str(data.get(key, "") or "").strip() for key, _label, _ml in FIELDS}
 
     @staticmethod
     def _norm(s):
@@ -230,7 +200,7 @@ class ProductLibraryManager:
             new_item = result.get("item", item)
             self.items.append(new_item)
             return True, result.get("message", "已添加。"), new_item
-        return False, result.get("message", "添加失败（服务端错误）。") if result else "服务端不可达。", None  # noqa: E501
+        return False, result.get("message", "添加失败（服务端错误）。") if result else "服务端不可达。", None
 
     def update_item(self, item_id, data):
         """修改已有条目。返回 (ok, msg, item)。"""
@@ -245,7 +215,7 @@ class ProductLibraryManager:
                 target.update(new)
                 target["updated_at"] = result.get("updated_at", int(time.time()))
             return True, result.get("message", "已保存。"), target
-        return False, result.get("message", "保存失败（服务端错误）。") if result else "服务端不可达。", None  # noqa: E501
+        return False, result.get("message", "保存失败（服务端错误）。") if result else "服务端不可达。", None
 
     def remove_item(self, item_id):
         """删除条目。返回 True/False。"""
@@ -264,7 +234,7 @@ class ProductLibraryManager:
         """批量 upsert 仓库同步来的条目（服务端执行）。返回 (added, updated)。"""
         if not mapped_items:
             return 0, 0
-        result = self._http_post("/upsert", json_data={"items": mapped_items}, timeout=60)  # noqa: E501
+        result = self._http_post("/upsert", json_data={"items": mapped_items}, timeout=60)
         if result and result.get("ok"):
             added = int(result.get("added", 0))
             updated = int(result.get("updated", 0))
@@ -278,7 +248,7 @@ class ProductLibraryManager:
             return 0
         result = self._http_post(
             "/apply-categories",
-            json_data={"goods_map": goods_map, "fill_brand_if_empty": fill_brand_if_empty},  # noqa: E501
+            json_data={"goods_map": goods_map, "fill_brand_if_empty": fill_brand_if_empty},
             timeout=30,
         )
         if result and result.get("ok"):
@@ -290,8 +260,16 @@ class ProductLibraryManager:
     # ── 检索 / 归类 ──────────────────────────────────────────────────────
 
     def all_items(self):
-        """返回所有条目（优先服务端全量 /grouped，降级缓存）。"""
-        return list(self.load())
+        """返回所有条目（优先服务端，降级缓存）。"""
+        # 尝试从服务端刷新
+        data = self._http_get("/items", timeout=8)
+        if data is not None:
+            if isinstance(data, list):
+                self.items = data
+            elif isinstance(data, dict) and isinstance(data.get("items"), list):
+                self.items = data["items"]
+            self._cache_time = time.time()
+        return list(self.items)
 
     def categories(self):
         """品类列表。"""
@@ -299,7 +277,7 @@ class ProductLibraryManager:
         if result and isinstance(result.get("categories"), list):
             return result["categories"]
         # 本地降级
-        return sorted({it.get("category", "").strip() for it in self.items if it.get("category", "").strip()})  # noqa: E501
+        return sorted({it.get("category", "").strip() for it in self.items if it.get("category", "").strip()})
 
     def brands(self, category=None):
         """品牌列表。"""
@@ -311,7 +289,7 @@ class ProductLibraryManager:
         return sorted({
             it.get("brand", "").strip()
             for it in self.items
-            if it.get("brand", "").strip() and (category is None or it.get("category", "").strip() == category)  # noqa: E501
+            if it.get("brand", "").strip() and (category is None or it.get("category", "").strip() == category)
         })
 
     def search(self, keyword):
@@ -336,48 +314,12 @@ class ProductLibraryManager:
         if result and isinstance(result.get("tree"), dict):
             return result["tree"]
         # 本地降级
-        tree: dict[str, Any] = {}
+        tree = {}
         for it in self.items:
             cat = it.get("category", "").strip() or "未归类"
             brand = it.get("brand", "").strip() or "未知品牌"
             tree.setdefault(cat, {}).setdefault(brand, []).append(it)
         return tree
-
-    # ── 同步 / 挖掘（供 GUI Worker 调用） ──────────────────────────────────
-
-    def sync(self, timeout=10):
-        """触发服务端 ERP 同步。返回服务端 JSON 或 None。"""
-        return self._http_post("/sync", timeout=timeout)
-
-    def sync_status(self, timeout=10):
-        """轮询同步进度。返回 dict 或 None。"""
-        return self._http_get("/sync/status", timeout=timeout)
-
-    def mine(self, item_ids=None, model="", timeout=10):
-        """触发服务端挖掘。item_ids 非空=单条挖掘，空=全量挖掘。"""
-        return self._http_post(
-            "/mine",
-            json_data={"item_ids": item_ids or [], "model": model},
-            timeout=timeout,
-        )
-
-    def mine_status(self, timeout=10):
-        """轮询挖掘进度。返回 dict 或 None。"""
-        return self._http_get("/mine/status", timeout=timeout)
-
-    def get_item(self, item_id, timeout=10):
-        """直接从服务端取单个产品（含 features/selling_points）。"""
-        result = self._http_get(f"/items/{item_id}", timeout=timeout)
-        if not result or not isinstance(result, dict):
-            return None
-        item = result.get("item") if isinstance(result.get("item"), dict) else None
-        if not item:
-            # 兼容直接返回 item dict 的响应
-            if result.get("id") or result.get("brand"):
-                item = result
-            else:
-                return None
-        return item
 
     def to_prompt_text(self, item):
         """本地格式化（纯字符串拼接，无需服务端）。"""

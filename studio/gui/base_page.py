@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 所有功能页的公共基类。
 
@@ -14,13 +15,14 @@ BasePage 收敛了各页重复的构造样板，并提供通用能力：
 子类只需实现 setup()。若子类重写 __init__，请调用 super().__init__(parent_widget, main_window)。
 """
 from PySide6.QtWidgets import QMessageBox
+
 from utils.logger_utils import log
 
 
 def _show_dev_only(parent_widget):
     """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示"""
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+    from PySide6.QtCore import Qt
     if parent_widget is None:
         return
     layout = parent_widget.layout()
@@ -39,17 +41,17 @@ def _show_dev_only(parent_widget):
     card_layout = QVBoxLayout(card)
     card_layout.setContentsMargins(0, 0, 0, 0)
     card_layout.setSpacing(12)
-    icon = QLabel("")
+    icon = QLabel("🚧")
     icon.setAlignment(Qt.AlignCenter)
-    icon.setObjectName("dev_icon")
+    icon.setStyleSheet("font-size: 48px; background: transparent; border: none;")
     card_layout.addWidget(icon)
     title = QLabel("该功能正在开发中")
     title.setAlignment(Qt.AlignCenter)
-    title.setObjectName("dev_title")
+    title.setStyleSheet("font-size: 20px; font-weight: bold; color: #9E9E9E; background: transparent; border: none;")
     card_layout.addWidget(title)
     subtitle = QLabel("敬请期待")
     subtitle.setAlignment(Qt.AlignCenter)
-    subtitle.setObjectName("dev_subtitle")
+    subtitle.setStyleSheet("font-size: 14px; color: #BDBDBD; background: transparent; border: none;")
     card_layout.addWidget(subtitle)
     layout.addWidget(card, 0, Qt.AlignCenter)
     layout.addStretch(1)
@@ -77,10 +79,7 @@ class BasePage:
         QMessageBox.warning(self.parent_widget, title, message)
 
     def show_error(self, message, title="错误"):
-        # 用统一 ErrorDialog（可滚动 + 复制日志），替代 QMessageBox.critical
-        # 避免长错误信息（traceback/多失败项/接口响应）撑满屏幕、无法滚动、无法复制
-        from gui.error_dialog import show_error_dialog
-        show_error_dialog(self.parent_widget, title, message)
+        QMessageBox.critical(self.parent_widget, title, message)
 
     def confirm(self, message, title="确认"):
         return QMessageBox.question(
@@ -92,7 +91,7 @@ class BasePage:
     def track_worker(self, worker):
         """持有 worker 引用防止被 GC；worker 结束后自动移除。返回 worker 本身。"""
         self._workers.append(worker)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)  # noqa: E501
+        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
         return worker
 
     # ---------- 日志 ----------

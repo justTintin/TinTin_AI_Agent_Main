@@ -3,12 +3,10 @@ NAS SMB 客户端 — 通过 SMB 协议直接访问 NAS 文件系统。
 
 用法:
     from utils.nas_client import NASClient
-    client = NASClient("//your-nas-host", username="user", password="pass")
+    client = NASClient("//192.168.111.17", username="x", password="y")
     for e in client.scandir("Photos"):
         print(e["name"], e["is_dir"])
 """
-
-import contextlib
 
 # smbprotocol 为可选重依赖（NAS 访问），缺失时不应阻断主程序启动。
 # 这里不顶层 import，改在 _load_smb() 首次需要时延迟加载。
@@ -19,25 +17,20 @@ def _load_smb():
     """延迟导入 smbprotocol 全部符号。缺失时抛 ModuleNotFoundError（含中文提示）。"""
     try:
         from smbprotocol.connection import Connection
-        from smbprotocol.file_info import FileInformationClass
-        from smbprotocol.open import (
-            CreateDisposition,
-            CreateOptions,
-            FileAttributes,
-            FilePipePrinterAccessMask,
-            ImpersonationLevel,
-            Open,
-            ShareAccess,
-        )
         from smbprotocol.session import Session
         from smbprotocol.tree import TreeConnect
+        from smbprotocol.open import (
+            Open, ImpersonationLevel, FileAttributes, ShareAccess,
+            CreateDisposition, CreateOptions, FilePipePrinterAccessMask,
+        )
+        from smbprotocol.file_info import FileInformationClass
     except ModuleNotFoundError as e:
         raise ModuleNotFoundError(
             "缺少 NAS 访问依赖 smbprotocol，NAS 相关功能不可用。"
             "安装：pip install smbprotocol"
         ) from e
     return (Connection, Session, TreeConnect, Open, ImpersonationLevel,
-            FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
+            FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
             FilePipePrinterAccessMask, FileInformationClass)
 
 
@@ -76,21 +69,21 @@ class NASClient:
             return
         import threading
         # 首次连接时才加载 smbprotocol
-        (Connection, Session, _TreeConnect, _Open, _Imp, _FA, _SA, _CD, _CO,  # noqa: N806
-         _FPAM, _FIC) = self._ensure_smb()  # noqa: N806
+        (Connection, Session, _TreeConnect, _Open, _Imp, _FA, _SA, _CD, _CO,
+         _FPAM, _FIC) = self._ensure_smb()
         err: list = []
         def _do():
             try:
                 conn = Connection(None, server_name=self._server, port=445)
                 conn.connect()
                 if self._username:
-                    sess = Session(conn, username=self._username, password=self._password)  # noqa: E501
+                    sess = Session(conn, username=self._username, password=self._password)
                 else:
-                    sess = Session(conn, username="guest", password="", require_encryption=False)  # noqa: E501
+                    sess = Session(conn, username="guest", password="", require_encryption=False)
                 sess.connect()
                 self._conn = conn
                 self._session = sess
-            except Exception as e:  # smbprotocol 连接（外部API调用）
+            except Exception as e:
                 err.append(e)
         t = threading.Thread(target=_do, daemon=True)
         t.start()
@@ -113,12 +106,12 @@ class NASClient:
         try:
             if self._session:
                 self._session.disconnect()
-        except Exception:  # smbprotocol session 断开（外部API调用）
+        except Exception:
             pass
         try:
             if self._conn:
                 self._conn.disconnect()
-        except Exception:  # smbprotocol connection 断开（外部API调用）
+        except Exception:
             pass
         self._conn = None
         self._session = None
@@ -145,15 +138,15 @@ class NASClient:
         if isinstance(raw, bytes):
             try:
                 return raw.decode("utf-16-le", errors="replace").rstrip("\x00")
-            except Exception:  # SMB 名称解码（外部数据解析）
+            except Exception:
                 return raw.hex()
         return str(raw)
 
     def scandir(self, path: str) -> list[dict]:
         self.connect()
-        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,  # noqa: N806
-         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
-         FilePipePrinterAccessMask, FileInformationClass) = self._ensure_smb()  # noqa: N806
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, _ShareAccess, _CreateDisposition, _CreateOptions,
+         FilePipePrinterAccessMask, FileInformationClass) = self._ensure_smb()
         share, subdir = self._parse_path(path)
 
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
@@ -190,8 +183,10 @@ class NASClient:
                         "full_path": f"{share}/{sub}",
                     })
             finally:
-                with contextlib.suppress(Exception):
+                try:
                     op.close(False)
+                except Exception:
+                    pass
         finally:
             tree.disconnect()
 
@@ -200,9 +195,9 @@ class NASClient:
 
     def isdir(self, path: str) -> bool:
         self.connect()
-        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,  # noqa: N806
-         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
-         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()  # noqa: N806
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -216,10 +211,12 @@ class NASClient:
                 CreateDisposition.FILE_OPEN,
                 CreateOptions.FILE_DIRECTORY_FILE,
             )
-            with contextlib.suppress(Exception):
+            try:
                 op.close(False)
+            except Exception:
+                pass
             return True
-        except Exception:  # smbprotocol 目录打开（外部API调用）
+        except Exception:
             return False
         finally:
             tree.disconnect()
@@ -227,9 +224,9 @@ class NASClient:
     def open_file(self, path: str):
         """以只读方式打开 NAS 文件，返回类文件对象。"""
         self.connect()
-        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,  # noqa: N806
-         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
-         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()  # noqa: N806
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -272,18 +269,22 @@ class NASClient:
                 return self._offset
 
             def close(self):
-                with contextlib.suppress(Exception):
+                try:
                     self._o.close(False)
-                with contextlib.suppress(Exception):
+                except Exception:
+                    pass
+                try:
                     self._t.disconnect()
+                except Exception:
+                    pass
 
         return _SMBFile(op, tree, file_size)
 
     def stat(self, path: str) -> dict | None:
         self.connect()
-        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,  # noqa: N806
-         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
-         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()  # noqa: N806
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         share, subdir = self._parse_path(path)
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
@@ -301,10 +302,12 @@ class NASClient:
                 "size": op.end_of_file,
                 "mtime": op.last_write_time,
             }
-            with contextlib.suppress(Exception):
+            try:
                 op.close(False)
+            except Exception:
+                pass
             return result
-        except Exception:  # smbprotocol 文件打开（外部API调用）
+        except Exception:
             return None
         finally:
             tree.disconnect()
@@ -312,9 +315,9 @@ class NASClient:
     def download_file(self, share: str, remote_path: str, local_path: str):
         """通过 SMB 下载文件到本地。"""
         self.connect()
-        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,  # noqa: N806
-         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,  # noqa: N806
-         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()  # noqa: N806
+        (_Connection, _Session, TreeConnect, Open, ImpersonationLevel,
+         FileAttributes, ShareAccess, CreateDisposition, CreateOptions,
+         FilePipePrinterAccessMask, _FIC) = self._ensure_smb()
         tree = TreeConnect(self._session, f"\\\\{self._server}\\{share}")
         tree.connect()
         try:
@@ -337,7 +340,9 @@ class NASClient:
                         f.write(data)
                         offset += len(data)
             finally:
-                with contextlib.suppress(Exception):
+                try:
                     op.close(False)
+                except Exception:
+                    pass
         finally:
             tree.disconnect()

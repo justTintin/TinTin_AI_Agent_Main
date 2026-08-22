@@ -74,18 +74,12 @@ class HardwareAccelerator:
 
     @property
     def accelerator_name(self):
-        # 顺序很关键：CUDA 优先于 DirectML。
-        # 原因：为兼容 AMD 显卡会安装 torch_directml 包，一旦该包存在，__dml 即为 True；
-        # 若 DirectML 优先，则 N 卡会被错误路由到 DirectML 后端，而 STTN/Lama/ProPainter 等
-        # PyTorch 原生算子（如 conv2d）在 DirectML 后端缺少对应 kernel，会报
-        # "no kernel image is available for execution on the device"。
-        # 因此：有 CUDA 的 N 卡一律走原生 CUDA（更快、算子全），仅在没有 CUDA 时才回退到 DirectML（供 A 卡使用）。
         if not self.__enabled:
             return "CPU"
-        if self.__cuda:
-            return "GPU"
         if self.__dml:
             return "DirectML"
+        if self.__cuda:
+            return "GPU"
         if self.__mps:
             return "MPS"
         elif len(self.__onnx_providers) > 0:
@@ -146,18 +140,16 @@ class HardwareAccelerator:
         当然SubtitleDetect放到一个独立进程去操作也是可以的
         """
         if self.__enabled:
-            # CUDA 优先于 DirectML（理由同 accelerator_name）：
-            # N 卡必须走原生 CUDA，否则 STTN/Lama/ProPainter 的 conv2d 等算子在
-            # DirectML 后端会因缺少 kernel 而报 "no kernel image is available"。
-            if self.__cuda:
-                return torch.device("cuda:0")
             if self.__dml:
                 try:
                     import torch_directml
                     return torch_directml.device(torch_directml.default_device())
+                    self.__dml = True
                 except:
                     traceback.print_exc()
                     self.__dml = False
+            if self.__cuda:
+                return torch.device("cuda:0")
             if self.__mps:
                 return torch.device("mps")
         return torch.device("cpu")

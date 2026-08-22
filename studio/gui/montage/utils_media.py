@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """智能混剪的媒体处理工具函数与全局副作用。
 
 本模块集中放置原 video_montage_page.py 的顶层工具函数（ffprobe/ffmpeg 时长探测、
@@ -9,42 +10,18 @@ subprocess.Popen monkey-patch。
 - _patched_Popen 必须在任何 subprocess.Popen 调用前执行；导入本模块即触发，
   保证 Worker 子模块（同样 import 本模块）也能享受到无黑框效果。
 """
-import hashlib
 import os
-import re
 import subprocess
 
-
 # Prevent black command prompt windows from popping up on Windows when running CLI tasks
-class _patched_Popen(subprocess.Popen):  # noqa: N801
+class _patched_Popen(subprocess.Popen):
     def __init__(self, *args, **kwargs):
         if 'creationflags' not in kwargs:
             kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs['creationflags'] |= subprocess.CREATE_NO_WINDOW
         super().__init__(*args, **kwargs)
-subprocess.Popen = _patched_Popen  # type: ignore[misc]
-
-
-def safe_source_name(video_path, max_len=40):
-    """视频文件 → 统一的短源名（splits 目录名 / 片段文件名 / srt 名共用）。
-
-    目的：避免超长视频名（如即梦分镜描述名）导致 Windows 路径超 260 字符
-    （makedirs/写片段时报 WinError 3/206）。规则：
-    - 保留中文与全角字符（它们本身合法），仅防御性替换半角非法字符与控制字符
-    - 折叠连续空白
-    - 超过 max_len 时截断并附加 MD5 短哈希保唯一（不同长名截断后不冲突）
-    全链路（目录名/片段名/读取）都经此函数，保证一致、不丢镜头。
-    """
-    base = os.path.splitext(os.path.basename(video_path or ""))[0]
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", base or "")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(".")
-    if not cleaned:
-        cleaned = "video"
-    if len(cleaned) > max_len:
-        digest = hashlib.md5((base or "").encode("utf-8", errors="ignore")).hexdigest()[:8]  # noqa: E501
-        cleaned = cleaned[:max_len] + "_" + digest
-    return cleaned
+subprocess.Popen = _patched_Popen
 
 
 def find_ffmpeg():
@@ -54,7 +31,8 @@ def find_ffmpeg():
 
 def get_media_duration(filepath):
     try:
-        from utils.platform_utils import find_ffprobe, run_subprocess
+        from utils.platform_utils import find_ffprobe, create_no_window_flag
+        creationflags = create_no_window_flag()
         ffprobe_exe = find_ffprobe()
         if not os.path.isfile(ffprobe_exe):
             ffprobe_exe = find_ffmpeg().replace("ffmpeg", "ffprobe")
@@ -62,17 +40,17 @@ def get_media_duration(filepath):
             return 0.0
         cmd = [ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
                "-of", "csv=p=0", filepath]
-        r = run_subprocess(cmd, capture_output=True, text=True, timeout=10)
-        if r.returncode == 0 and r.stdout.strip():
-            return float(r.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", creationflags=creationflags, timeout=10)
+        if r.returncode == 0 and (r.stdout or "").strip():
+            return float((r.stdout or "").strip())
+    except Exception:
         pass
     return 0.0
 
 
 def parse_srt(srt_text):
     import re
-    pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)"  # noqa: E501
+    pattern = r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:[^\n]+\n*)+)"
     matches = re.findall(pattern, srt_text)
     segments = []
 
@@ -86,16 +64,15 @@ def parse_srt(srt_text):
             end_sec = srt_time_to_seconds(m[2])
             text = m[3].strip()
             segments.append((start_sec, end_sec, text))
-        except Exception:  # SRT 时间戳解析可能失败
+        except Exception:
             pass
     return segments
 
 
 def extract_keyframes(video_path, num_frames=3):
+    import cv2
     import base64
     import os
-
-    import cv2
 
     if not video_path or not os.path.exists(video_path):
         return []
@@ -141,6 +118,7 @@ def compute_clip_hash(clip_path):
     返回 64 位整数的哈希值，失败返回 None。两帧汉明距离 < 8 视为高度相似。
     """
     import cv2
+    import numpy as np
     try:
         cap = cv2.VideoCapture(clip_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -162,18 +140,17 @@ def compute_clip_hash(clip_path):
         for b in bits:
             h = (h << 1) | int(b)
         return h
-    except Exception:  # 外部库调用（cv2 感知哈希计算）
+    except Exception:
         return None
 
 
 def compute_clip_quality(clip_path):
-    # 延迟导入（与 get_media_duration 一致），避免模块级依赖
-    from utils.platform_utils import find_ffprobe, run_subprocess
     """评估镜头质量分数（0~100）。基于清晰度、对比度、是否有音频。
     失败返回 -1。
     """
     import cv2
     import numpy as np
+    import subprocess
     try:
         cap = cv2.VideoCapture(clip_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -208,17 +185,18 @@ def compute_clip_quality(clip_path):
                 if ff:
                     ffprobe = ff.replace("ffmpeg", "ffprobe")
             if ffprobe:
-                r = run_subprocess(
+                r = subprocess.run(
                     [ffprobe, "-v", "error", "-select_streams", "a",
                      "-show_entries", "stream=codec_type", "-of", "csv=p=0", clip_path],
-                    capture_output=True, text=True, timeout=10)
+                    capture_output=True, text=True, errors="replace", timeout=10,
+                    creationflags=0x08000000)
                 if "audio" in (r.stdout or ""):
                     audio_score = 20
-        except Exception:  # cv2 操作 + subprocess 调用
+        except Exception:
             pass
 
         return min(100, round(sharpness_score + contrast_score + audio_score))
-    except Exception:  # 外部库调用（cv2 质量评估）
+    except Exception:
         return -1
 
 

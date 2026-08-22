@@ -4,7 +4,6 @@ import shutil
 import subprocess
 
 from config.paths import get_bin
-
 from utils.platform_utils import create_no_window_flag
 
 DREAMINA_EXE = get_bin("dreamina")
@@ -39,14 +38,14 @@ class DreaminaClient:
         return found or DREAMINA_EXE
 
     def is_installed(self):
-        return os.path.isfile(self.exe) or shutil.which(os.path.basename(self.exe)) is not None  # noqa: E501
+        return os.path.isfile(self.exe) or shutil.which(os.path.basename(self.exe)) is not None
 
     def run(self, args, timeout=120):
         if not self.is_installed():
             return -1, f"未找到 dreamina 可执行文件，请先安装到 {DREAMINA_EXE} 或加入 PATH。"
         cmd = [self.exe] + list(args)
-        kwargs = {"capture_output": True, "text": True, "encoding": "utf-8",
-                      "errors": "replace", "timeout": timeout}
+        kwargs = dict(capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", timeout=timeout)
         kwargs["creationflags"] = create_no_window_flag()
         try:
             r = subprocess.run(cmd, **kwargs)
@@ -54,7 +53,7 @@ class DreaminaClient:
             return r.returncode, out
         except subprocess.TimeoutExpired:
             return -1, "命令超时。"
-        except (OSError, subprocess.SubprocessError) as e:
+        except Exception as e:
             return -1, str(e)
 
     def login_headless(self, timeout=40):
@@ -80,24 +79,24 @@ class DreaminaClient:
         try:
             data = _json.loads(out)
             if isinstance(data, dict):
-                credit_val = data.get("total_credit") or data.get("balance") or data.get("credit")  # noqa: E501
+                credit_val = data.get("total_credit") or data.get("balance") or data.get("credit")
                 vip_level = data.get("vip_level")
                 if credit_val is not None:
                     credit_str = str(credit_val)
                     if vip_level:
                         credit_str += f" (VIP: {vip_level})"
                     return True, credit_str
-        except _json.JSONDecodeError:
+        except Exception:
             pass
 
         kv = parse_kv(out)
         credit = kv.get("credit") or kv.get("balance") or ""
-        logged = code == 0 and bool(out) and ("登录" not in out or bool(credit)) and "未登录" not in out  # noqa: E501
+        logged = code == 0 and bool(out) and ("登录" not in out or bool(credit)) and "未登录" not in out
         if logged:
             return True, credit or out
 
         code_sess, out_sess = self.run(["session", "list"], timeout=30)
-        if code_sess == 0 and out_sess and "未登录" not in out_sess and "login" not in out_sess.lower():  # noqa: E501
+        if code_sess == 0 and out_sess and "未登录" not in out_sess and "login" not in out_sess.lower():
             return True, "合作及本地合作权限账号"
 
         return False, (credit or out)
@@ -109,7 +108,7 @@ class DreaminaClient:
     def logout(self):
         return self.run(["logout"], timeout=20)[1]
 
-    def text2image(self, prompt, ratio="", resolution_type="", model_version="", poll=0, timeout=180):  # noqa: E501
+    def text2image(self, prompt, ratio="", resolution_type="", model_version="", poll=0, timeout=180):
         args = ["text2image", f"--prompt={prompt}"]
         if ratio:
             args.append(f"--ratio={ratio}")

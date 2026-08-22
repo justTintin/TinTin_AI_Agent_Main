@@ -64,17 +64,6 @@ studio/config/ai_config.json
 studio/config/material_index_config.json
 studio/config/erp_config.json
 
-# 运行时缓存（从服务端拉取的快照，不入库）
-studio/data/agent_registry.json
-# 工作台对话本地持久化（机器级运行时数据：消息 + 会话 ID，不入库）
-studio/data/agent_chat_history.json
-studio/data/agent_chat_history.json.tmp
-# 本地技能（用户安装的 SKILL.md 包，不入库）
-studio/data/skills/
-studio/data/skills_index.json
-# 自动上架运行时（同步数据包 / Chrome 用户目录 / 结果截图，不入库）
-studio/data/auto_listing/
-
 # Node
 node_modules/
 *.exe
@@ -121,13 +110,6 @@ apps/asset-browser/bin/node.exe
 apps/asset-browser/bin/v2rayN/bin/xray/config_generated.json
 apps/asset-browser/bin/ffmpeg.exe
 
-# Browser extension runtime artifacts (源码在 apps/browser-extension/，直接作为加载点)
-# 这些是历史遗留的 .crx 打包产物（ext_installer 已废弃）和旧复制副本
-apps/extension/
-apps/extension.crx
-apps/extension.pem
-apps/extension_store/
-
 # Studio logs
 studio/logs/
 studio/ollama_run.log
@@ -173,12 +155,4 @@ ai_skills/
 *.exe
 video_config.json
 studio/config/local_config.json
-
-# Scratch / debug scripts and temp reports (not part of the product)
-/_*.py
-/_*.txt
-/pythonw_test.txt
-/studio/ingestion_diagnose_report.txt
-
-# Local Codex tool config (not part of the product)
-.codex/
+/apps/comfyui/

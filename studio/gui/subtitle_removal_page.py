@@ -1,0 +1,920 @@
+# -*- coding: utf-8 -*-
+import os
+import sys
+import shutil
+import subprocess
+import traceback
+import time
+from PIL import Image, ImageDraw
+
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit,
+                               QFileDialog, QProgressBar, QCheckBox, QMessageBox, QFrame, QSlider, QSplitter, QWidget, QTextEdit, QSizePolicy)
+from PySide6.QtCore import Signal, QThread, Qt, QTimer, QSize
+from utils.base_worker import BaseWorker
+from PySide6.QtGui import QImage, QPixmap, QIcon, QPainter, QPen, QColor
+from utils.gui_icons import mdi_button, mdi_icon
+from utils.logger_utils import log
+from config.paths import TMP_DIR
+
+
+class InteractivePreviewLabel(QLabel):
+    boundsChanged = Signal(int, int, int, int)
+    resized = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background-color: #0b1220; border-radius: 8px; border: 1px solid #2e2e32;")
+        self.setMinimumSize(400, 300)
+        self.setMouseTracking(True)
+        
+    def sizeHint(self):
+        return QSize(400, 300)
+        
+        self.sel_x = 0
+        self.sel_y = 0
+        self.sel_w = 100
+        self.sel_h = 100
+        
+        self.frame_w = 0
+        self.frame_h = 0
+        
+        self.target_w = 0
+        self.target_h = 0
+        self.px_offset_x = 0
+        self.px_offset_y = 0
+        
+        self.drag_mode = None
+        self.drag_start_pos = None
+        self.drag_start_rect = None
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        # Draw green selection rectangle on top
+        if self.frame_w > 0 and self.frame_h > 0 and self.target_w > 0 and self.target_h > 0:
+            painter = QPainter(self)
+            w_ratio = self.target_w / self.frame_w
+            h_ratio = self.target_h / self.frame_h
+            rx0 = self.px_offset_x + self.sel_x * w_ratio
+            ry0 = self.px_offset_y + self.sel_y * h_ratio
+            rx1 = self.px_offset_x + (self.sel_x + self.sel_w) * w_ratio
+            ry1 = self.px_offset_y + (self.sel_y + self.sel_h) * h_ratio
+            painter.setPen(QPen(QColor("#00ff00"), 3))
+            painter.drawRect(int(rx0), int(ry0), int(rx1 - rx0), int(ry1 - ry0))
+            painter.end()
+
+    def get_handle_under_mouse(self, pos):
+        if self.frame_w <= 0 or self.frame_h <= 0 or self.target_w <= 0 or self.target_h <= 0:
+            return None
+            
+        mx, my = pos.x(), pos.y()
+        
+        w_ratio = self.target_w / self.frame_w
+        h_ratio = self.target_h / self.frame_h
+        
+        rx0 = self.px_offset_x + self.sel_x * w_ratio
+        ry0 = self.px_offset_y + self.sel_y * h_ratio
+        rx1 = self.px_offset_x + (self.sel_x + self.sel_w) * w_ratio
+        ry1 = self.px_offset_y + (self.sel_y + self.sel_h) * h_ratio
+        
+        threshold = 10 # pixels
+        
+        near_left = abs(mx - rx0) < threshold
+        near_right = abs(mx - rx1) < threshold
+        near_top = abs(my - ry0) < threshold
+        near_bottom = abs(my - ry1) < threshold
+        
+        if near_left and near_top:
+            return 'top-left'
+        if near_right and near_top:
+            return 'top-right'
+        if near_left and near_bottom:
+            return 'bottom-left'
+        if near_right and near_bottom:
+            return 'bottom-right'
+            
+        if near_left and ry0 <= my <= ry1:
+            return 'left'
+        if near_right and ry0 <= my <= ry1:
+            return 'right'
+        if near_top and rx0 <= mx <= rx1:
+            return 'top'
+        if near_bottom and rx0 <= mx <= rx1:
+            return 'bottom'
+            
+        if rx0 < mx < rx1 and ry0 < my < ry1:
+            return 'move'
+            
+        return None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            handle = self.get_handle_under_mouse(event.pos())
+            if handle is not None:
+                self.drag_mode = handle
+                self.drag_start_pos = event.pos()
+                self.drag_start_rect = (self.sel_x, self.sel_y, self.sel_w, self.sel_h)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_mode is not None and self.drag_start_pos is not None:
+            delta_x_widget = event.pos().x() - self.drag_start_pos.x()
+            delta_y_widget = event.pos().y() - self.drag_start_pos.y()
+            
+            w_ratio = self.frame_w / self.target_w
+            h_ratio = self.frame_h / self.target_h
+            
+            delta_x = int(delta_x_widget * w_ratio)
+            delta_y = int(delta_y_widget * h_ratio)
+            
+            sx, sy, sw, sh = self.drag_start_rect
+            
+            if self.drag_mode == 'move':
+                nx = sx + delta_x
+                ny = sy + delta_y
+                nx = max(0, min(nx, self.frame_w - sw))
+                ny = max(0, min(ny, self.frame_h - sh))
+                self.sel_x = nx
+                self.sel_y = ny
+            else:
+                x0 = sx
+                y0 = sy
+                x1 = sx + sw
+                y1 = sy + sh
+                
+                min_size = 10
+                
+                if 'left' in self.drag_mode:
+                    x0 = max(0, min(x0 + delta_x, x1 - min_size))
+                if 'right' in self.drag_mode:
+                    x1 = min(self.frame_w, max(x1 + delta_x, x0 + min_size))
+                if 'top' in self.drag_mode:
+                    y0 = max(0, min(y0 + delta_y, y1 - min_size))
+                if 'bottom' in self.drag_mode:
+                    y1 = min(self.frame_h, max(y1 + delta_y, y0 + min_size))
+                    
+                self.sel_x = x0
+                self.sel_y = y0
+                self.sel_w = x1 - x0
+                self.sel_h = y1 - y0
+                
+            self.boundsChanged.emit(self.sel_x, self.sel_y, self.sel_w, self.sel_h)
+        else:
+            handle = self.get_handle_under_mouse(event.pos())
+            if handle in ('top-left', 'bottom-right'):
+                self.setCursor(Qt.SizeFDiagCursor)
+            elif handle in ('top-right', 'bottom-left'):
+                self.setCursor(Qt.SizeBDiagCursor)
+            elif handle in ('left', 'right'):
+                self.setCursor(Qt.SizeHorCursor)
+            elif handle in ('top', 'bottom'):
+                self.setCursor(Qt.SizeVerCursor)
+            elif handle == 'move':
+                self.setCursor(Qt.SizeAllCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_mode = None
+            self.drag_start_pos = None
+            self.drag_start_rect = None
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
+from gui.base_page import BasePage
+
+
+class SubtitleRemovalPage(BasePage):
+    def __init__(self, parent_widget, main_window):
+        super().__init__(parent_widget, main_window)
+        self.worker = None
+        self.timer = None
+        self.original_frame = None
+        self.frame_width = 1280
+        self.frame_height = 720
+        self.preview_img_path = ""
+
+    def setup(self):
+        # Create temp dir if not exists
+        tmp_dir = TMP_DIR
+        os.makedirs(tmp_dir, exist_ok=True)
+        self.preview_img_path = os.path.join(tmp_dir, "vsr_preview.jpg")
+
+        # Page main layout
+        main_layout = QVBoxLayout(self.parent_widget)
+        main_layout.setContentsMargins(40, 40, 40, 40)
+        main_layout.setSpacing(12)
+
+        # Title
+        heading = QLabel("视频去字幕")
+        heading.setObjectName("heading")
+        main_layout.addWidget(heading, 0)
+
+        # Splitter: left preview / right controls
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setStyleSheet("QSplitter::handle { background-color: #2e2e32; width: 2px; }")
+        main_layout.addWidget(splitter, 1)
+
+        # --- Left Panel: File Selection & Preview ---
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 10, 0)
+        left_layout.setSpacing(14)
+
+        # Select file card (top part of left side)
+        select_card = QFrame()
+        select_card.setObjectName("card")
+        select_layout = QVBoxLayout(select_card)
+        select_layout.setContentsMargins(16, 16, 16, 16)
+        select_layout.setSpacing(10)
+
+        inp_row = QHBoxLayout()
+        inp_row.addWidget(QLabel("输入视频/图片:"))
+        self.video_path_input = QLineEdit()
+        self.video_path_input.setPlaceholderText("选择视频 (.mp4/.avi) 或图片 ...")
+        self.video_path_input.textChanged.connect(self._on_video_path_changed)
+        inp_row.addWidget(self.video_path_input)
+        btn_sel = QPushButton("选择文件")
+        btn_sel.setObjectName("secondary_button")
+        btn_sel.clicked.connect(self._select_video)
+        inp_row.addWidget(btn_sel)
+        select_layout.addLayout(inp_row)
+        left_layout.addWidget(select_card, 0)
+
+        # Video Preview card (bottom part of left side)
+        preview_card = QFrame()
+        preview_card.setObjectName("card")
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        p_layout = QVBoxLayout(preview_card)
+        p_layout.setContentsMargins(16, 16, 16, 16)
+        p_layout.setSpacing(10)
+
+        self.preview_label = InteractivePreviewLabel()
+        self.preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.preview_label.boundsChanged.connect(self._on_label_bounds_changed)
+        self.preview_label.resized.connect(self.update_preview)
+        p_layout.addWidget(self.preview_label, 1)
+
+        seek_row = QHBoxLayout()
+        seek_row.setSpacing(8)
+        
+        button_style = """
+            QPushButton {
+                background-color: #1a1a24;
+                color: #a1a1aa;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                font-size: 11px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2e2e38;
+                color: #ffffff;
+                border-color: #3b82f6;
+            }
+            QPushButton:disabled {
+                background-color: #13131a;
+                color: #4b5563;
+                border-color: #1f2937;
+            }
+        """
+
+        self.btn_prev_frame = mdi_button("", "left")
+        self.btn_prev_frame.setFixedSize(30, 24)
+        self.btn_prev_frame.setStyleSheet(button_style)
+        self.btn_prev_frame.clicked.connect(self._step_prev_frame)
+        seek_row.addWidget(self.btn_prev_frame)
+        
+        self.seek_slider = QSlider(Qt.Horizontal)
+        self.seek_slider.setRange(0, 1000)
+        self.seek_slider.setEnabled(False)
+        self.seek_slider.sliderMoved.connect(self._on_seek_moved)
+        self.seek_slider.sliderReleased.connect(self._on_seek_released)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3b82f6;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #3b82f6;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #3b82f6;
+                border: 2px solid #ffffff;
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
+        seek_row.addWidget(self.seek_slider)
+        
+        self.btn_next_frame = mdi_button("", "play")
+        self.btn_next_frame.setFixedSize(30, 24)
+        self.btn_next_frame.setStyleSheet(button_style)
+        self.btn_next_frame.clicked.connect(self._step_next_frame)
+        seek_row.addWidget(self.btn_next_frame)
+        
+        self.lbl_seek_time = QLabel("00:00 / 00:00")
+        self.lbl_seek_time.setFixedWidth(100)
+        self.lbl_seek_time.setAlignment(Qt.AlignCenter)
+        self.lbl_seek_time.setStyleSheet("""
+            QLabel {
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                color: #3b82f6;
+                background-color: #16161e;
+                border: 1px solid #2e2e38;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        """)
+        seek_row.addWidget(self.lbl_seek_time)
+        p_layout.addLayout(seek_row)
+        left_layout.addWidget(preview_card, 1)
+
+        left_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        splitter.addWidget(left_widget)
+
+        # --- Right Panel: Control Area & Processing Log ---
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(10, 0, 0, 0)
+        right_widget.setMinimumWidth(380)
+
+        # Control area card (top part of right side)
+        controls_card = QFrame()
+        controls_card.setObjectName("card")
+        controls_layout = QVBoxLayout(controls_card)
+        controls_layout.setContentsMargins(16, 14, 16, 14)
+        controls_layout.setSpacing(14)
+
+        # Area Sliders Group
+        area_group = QFrame()
+        area_group.setObjectName("area_group")
+        area_group.setStyleSheet("#area_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        area_layout = QVBoxLayout(area_group)
+        area_layout.setContentsMargins(16, 14, 16, 14)
+        area_layout.setSpacing(8)
+
+        area_title = QLabel("✂️ 字幕选区范围")
+        area_title.setStyleSheet("font-weight: bold; color: #ffffff;")
+        area_layout.addWidget(area_title)
+
+        hint_lbl = QLabel("💡 预览画面上拖动绿框也可调选区")
+        hint_lbl.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        hint_lbl.setWordWrap(True)
+        area_layout.addWidget(hint_lbl)
+
+        sliders_layout = QVBoxLayout()
+        sliders_layout.setSpacing(6)
+        for label, attr, val_attr in [
+            ("起始 X:", "x_slider", "x_val_lbl"),
+            ("选区宽 W:", "w_slider", "w_val_lbl"),
+            ("起始 Y:", "y_slider", "y_val_lbl"),
+            ("选区高 H:", "h_slider", "h_val_lbl"),
+        ]:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.valueChanged.connect(self.update_preview)
+            setattr(self, attr, slider)
+            row.addWidget(slider)
+            val_lbl = QLabel("0")
+            setattr(self, val_attr, val_lbl)
+            row.addWidget(val_lbl)
+            sliders_layout.addLayout(row)
+        area_layout.addLayout(sliders_layout)
+
+        self.btn_reset_area = mdi_button("重置到默认范围", "refresh")
+        self.btn_reset_area.setObjectName("secondary_button")
+        self.btn_reset_area.clicked.connect(self.reset_default_area)
+        area_layout.addWidget(self.btn_reset_area)
+        controls_layout.addWidget(area_group)
+
+        # Algorithm & Options Group
+        algo_group = QFrame()
+        algo_group.setObjectName("algo_group")
+        algo_group.setStyleSheet("#algo_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        algo_layout = QVBoxLayout(algo_group)
+        algo_layout.setContentsMargins(16, 14, 16, 14)
+        algo_layout.setSpacing(8)
+
+        algo_row = QHBoxLayout()
+        algo_row.addWidget(QLabel("重绘填充算法:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("STTN (真人视频)", "sttn")
+        self.mode_combo.addItem("Lama (动画视频)", "lama")
+        self.mode_combo.addItem("ProPainter (剧烈运动)", "propainter")
+        algo_row.addWidget(self.mode_combo)
+        algo_layout.addLayout(algo_row)
+
+        self.skip_detect_chk = QCheckBox("⏩ 切换为去水印模式 (跳过检测，对框选全区强制覆盖重绘)")
+        self.skip_detect_chk.setToolTip(
+            "【去字幕模式】(未勾选)：使用精准文字检测，只涂抹字幕笔画本身，保护背景，适合动态字幕。\n"
+            "【去水印模式】(已勾选)：跳过文字检测直接重绘整个框选矩形区域，适合静态台标、LOGO水印。"
+        )
+        self.skip_detect_chk.setChecked(True)
+        algo_layout.addWidget(self.skip_detect_chk)
+        self.lama_fast_chk = QCheckBox("⚡ LAMA极速模式")
+        self.lama_fast_chk.setChecked(False)
+        algo_layout.addWidget(self.lama_fast_chk)
+        self.h264_chk = QCheckBox("📱 使用 H.264 兼容编码")
+        self.h264_chk.setChecked(True)
+        algo_layout.addWidget(self.h264_chk)
+        controls_layout.addWidget(algo_group)
+
+        # Action Buttons Group
+        action_group = QFrame()
+        action_group.setObjectName("action_group")
+        action_group.setStyleSheet("#action_group { background-color: #26262a; border: 1px solid #2e2e32; border-radius: 6px; }")
+        action_layout = QVBoxLayout(action_group)
+        action_layout.setContentsMargins(16, 14, 16, 14)
+        action_layout.setSpacing(8)
+
+        btn_row = QHBoxLayout()
+        self.btn_start = mdi_button("开始去除字幕", "rocket")
+        self.btn_start.setObjectName("primary_button")
+        self.btn_start.clicked.connect(self.start_removal)
+        btn_row.addWidget(self.btn_start)
+        self.btn_stop = mdi_button("停止运行", "stop")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self.stop_removal)
+        btn_row.addWidget(self.btn_stop)
+        action_layout.addLayout(btn_row)
+
+        server_row = QHBoxLayout()
+        _srv_hint = QLabel("☁️ 去字幕由算力服务端执行（本地无需部署算法包）")
+        _srv_hint.setObjectName("muted_text")
+        server_row.addWidget(_srv_hint)
+        self.lbl_server_status = QLabel("")
+        self.lbl_server_status.setObjectName("muted_text")
+        server_row.addWidget(self.lbl_server_status)
+        server_row.addStretch()
+        action_layout.addLayout(server_row)
+
+        self.status_lbl = QLabel("状态: 就绪")
+        self.status_lbl.setObjectName("muted_text")
+        action_layout.addWidget(self.status_lbl)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #15151e;
+                text-align: center;
+                color: #ffffff;
+                font-weight: bold;
+                height: 16px;
+            }
+            QProgressBar::chunk {
+                background-color: QLinearGradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #60a5fa);
+                border-radius: 5px;
+            }
+        """)
+        action_layout.addWidget(self.progress_bar)
+        controls_layout.addWidget(action_group)
+
+        right_layout.addWidget(controls_card, 0)
+
+        # Log View Card (bottom part of right side)
+        log_card = QFrame()
+        log_card.setObjectName("card")
+        log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        log_layout = QVBoxLayout(log_card)
+        log_card.setContentsMargins(16, 12, 16, 12)
+        log_layout.setSpacing(6)
+
+        log_layout.addWidget(QLabel("📝 处理日志"))
+        self.log_view = QTextEdit()
+        self.log_view.setObjectName("log_viewer")
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(150)
+        log_layout.addWidget(self.log_view)
+        right_layout.addWidget(log_card, 1)
+
+        splitter.addWidget(right_widget)
+        splitter.setStretchFactor(0, 7)
+        splitter.setStretchFactor(1, 3)
+
+
+    def _select_video(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self.parent_widget,
+            "选择输入视频或图片",
+            "",
+            "Media Files (*.mp4 *.avi *.mov *.mkv *.png *.jpg *.jpeg);;All Files (*)"
+        )
+        if path:
+            self.video_path_input.setText(path)
+
+    def _on_video_path_changed(self, path):
+        path = path.strip()
+        if not path or not os.path.exists(path):
+            self.original_frame = None
+            self.preview_label.clear()
+            self.preview_label.setText("请选择有效的媒体文件")
+            return
+
+        try:
+            # Check if it is image or video
+            ext = os.path.splitext(path)[1].lower()
+            is_pic = ext in [".jpg", ".jpeg", ".png", ".bmp"]
+            if is_pic:
+                img = Image.open(path)
+                self.original_frame = img
+                self.frame_width, self.frame_height = img.size
+                self._preview_cache_key = None
+                
+                self.seek_slider.setEnabled(False)
+                self.seek_slider.setValue(0)
+                self.lbl_seek_time.setText("图片无进度")
+                self.btn_prev_frame.setEnabled(False)
+                self.btn_next_frame.setEnabled(False)
+            else:
+                import av
+                container = av.open(path)
+                video_stream = next(s for s in container.streams if s.type == 'video')
+                self.frame_width = video_stream.width
+                self.frame_height = video_stream.height
+                
+                # Read first frame
+                for frame in container.decode(video_stream):
+                    self.original_frame = frame.to_image()
+                    break
+                
+                total_sec = container.duration / 1000000.0 if container.duration else 0.0
+                self.lbl_seek_time.setText(f"00:00 / {self._format_time(total_sec)}")
+                container.close()
+                
+                self.seek_slider.setEnabled(True)
+                self.seek_slider.setValue(0)
+                self.btn_prev_frame.setEnabled(True)
+                self.btn_next_frame.setEnabled(True)
+                
+            # Block sliders signals during bounds setup
+            self.x_slider.blockSignals(True)
+            self.w_slider.blockSignals(True)
+            self.y_slider.blockSignals(True)
+            self.h_slider.blockSignals(True)
+
+            self.x_slider.setRange(0, self.frame_width)
+            self.w_slider.setRange(1, self.frame_width)
+            self.y_slider.setRange(0, self.frame_height)
+            self.h_slider.setRange(1, self.frame_height)
+
+            self.preview_label.frame_w = self.frame_width
+            self.preview_label.frame_h = self.frame_height
+
+            # Set VSR defaults: Y = 78%, H = 21%, X = 5%, W = 90%
+            self.x_slider.setValue(int(self.frame_width * 0.05))
+            self.w_slider.setValue(int(self.frame_width * 0.90))
+            self.y_slider.setValue(int(self.frame_height * 0.78))
+            self.h_slider.setValue(int(self.frame_height * 0.21))
+
+            self.x_slider.blockSignals(False)
+            self.w_slider.blockSignals(False)
+            self.y_slider.blockSignals(False)
+            self.h_slider.blockSignals(False)
+
+            # Force layout activation & events processing to quickly determine correct preview size
+            if self.parent_widget.layout():
+                self.parent_widget.layout().activate()
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+            self.update_preview()
+            
+            # Schedule a short deferred update as well
+            QTimer.singleShot(50, self.update_preview)
+        except Exception as e:
+            log.error(f"Failed to load video preview: {e}")
+            self.original_frame = None
+            self.preview_label.setText(f"预览加载失败: {e}")
+
+    def reset_default_area(self):
+        if self.original_frame is not None:
+            self.x_slider.blockSignals(True)
+            self.w_slider.blockSignals(True)
+            self.y_slider.blockSignals(True)
+            self.h_slider.blockSignals(True)
+
+            self.x_slider.setValue(int(self.frame_width * 0.05))
+            self.w_slider.setValue(int(self.frame_width * 0.90))
+            self.y_slider.setValue(int(self.frame_height * 0.78))
+            self.h_slider.setValue(int(self.frame_height * 0.21))
+
+            self.x_slider.blockSignals(False)
+            self.w_slider.blockSignals(False)
+            self.y_slider.blockSignals(False)
+            self.h_slider.blockSignals(False)
+
+            self.update_preview()
+
+    def update_preview(self):
+        if self.worker and self.worker.isRunning():
+            return
+            
+        x = self.x_slider.value()
+        w = self.w_slider.value()
+        y = self.y_slider.value()
+        h = self.h_slider.value()
+
+        # Update text labels
+        self.x_val_lbl.setText(str(x))
+        self.w_val_lbl.setText(str(w))
+        self.y_val_lbl.setText(str(y))
+        self.h_val_lbl.setText(str(h))
+
+        # Update the interactive preview label coordinates
+        self.preview_label.set_selection(x, y, w, h)
+
+        if self.original_frame is not None:
+            # Fit to widget layout keeping aspect ratio
+            display_w = self.preview_label.width()
+            display_h = self.preview_label.height()
+            if display_w < 100 or display_h < 100:
+                display_w, display_h = 720, 405
+
+            w_img, h_img = self.original_frame.size
+            ratio = min(display_w / w_img, display_h / h_img)
+            target_w = int(w_img * ratio)
+            target_h = int(h_img * ratio)
+            if target_w < 1: target_w = 1
+            if target_h < 1: target_h = 1
+
+            # Update interactive preview label target size and offsets
+            self.preview_label.target_w = target_w
+            self.preview_label.target_h = target_h
+            self.preview_label.px_offset_x = (display_w - target_w) // 2
+            self.preview_label.px_offset_y = (display_h - target_h) // 2
+
+            # 缓存缩略图：只在分辨率变化时才重新缩放
+            cache_key = (target_w, target_h)
+            if getattr(self, "_preview_cache_key", None) != cache_key:
+                resized_img = self.original_frame.resize((target_w, target_h), Image.Resampling.BILINEAR)
+                qimg = QImage(resized_img.tobytes("raw", "RGB"), target_w, target_h, target_w * 3, QImage.Format_RGB888)
+                self._cached_pixmap = QPixmap.fromImage(qimg)
+                self._preview_cache_key = cache_key
+                self.preview_label.setPixmap(self._cached_pixmap)
+
+            # 只触发重绘，绿框由 paintEvent 负责
+            self.preview_label.update()
+
+    def _on_label_bounds_changed(self, x, y, w, h):
+        self.x_slider.blockSignals(True)
+        self.w_slider.blockSignals(True)
+        self.y_slider.blockSignals(True)
+        self.h_slider.blockSignals(True)
+
+        self.x_slider.setValue(x)
+        self.w_slider.setValue(w)
+        self.y_slider.setValue(y)
+        self.h_slider.setValue(h)
+
+        self.x_val_lbl.setText(str(x))
+        self.w_val_lbl.setText(str(w))
+        self.y_val_lbl.setText(str(y))
+        self.h_val_lbl.setText(str(h))
+
+        self.x_slider.blockSignals(False)
+        self.w_slider.blockSignals(False)
+        self.y_slider.blockSignals(False)
+        self.h_slider.blockSignals(False)
+        
+        self.update_preview()
+
+    def _start_remote_removal(self, video_path):
+        """使用服务端 API 去除字幕（上传 → 轮询 → 下载结果到本地）。"""
+        # 根据 inpaint_mode 计算 inpaint_mode 参数
+        mode_map = {"STTN（默认）": "sttn_det", "STTN（精准）": "sttn", "ENODE": "enode", "SPADE": "spade"}
+        inpaint_mode = mode_map.get(self.mode_combo.currentText(), "sttn_det")
+
+        ymin = int(self.y_slider.value())
+        ymax = int(self.y_slider.value() + self.h_slider.value())
+        xmin = int(self.x_slider.value())
+        xmax = int(self.x_slider.value() + self.w_slider.value())
+
+        self.btn_start.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.log_view.clear()
+        self.lbl_server_status.setText("⏳ 上传中...")
+
+        # 结果保存到原视频目录：原名_no_sub.mp4
+        stem, _ = os.path.splitext(video_path)
+        out_path = f"{stem}_no_sub.mp4"
+        self._remote_out_path = out_path
+
+        class _RemoteVSRWorker(BaseWorker):
+            finished = Signal(str)
+            error = Signal(str)
+            stage = Signal(str)
+
+            def __init__(self, path, mode, ymin, ymax, xmin, xmax, out_path):
+                super().__init__()
+                self.path = path
+                self.mode = mode
+                self.ymin = ymin
+                self.ymax = ymax
+                self.xmin = xmin
+                self.xmax = xmax
+                self.out_path = out_path
+
+            def do_work(self):
+                try:
+                    from utils.vsr_client import vsr_remove_remote
+                    result = vsr_remove_remote(
+                        self.path,
+                        inpaint_mode=self.mode,
+                        sub_areas=[(self.ymin, self.ymax, self.xmin, self.xmax)],
+                        out_path=self.out_path,
+                        progress_cb=lambda t: self.stage.emit(t),
+                    )
+                    self.finished.emit(result)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        w = _RemoteVSRWorker(video_path, inpaint_mode, ymin, ymax, xmin, xmax, out_path)
+        self._remote_worker = w
+        w.stage.connect(lambda t: self.lbl_server_status.setText(t))
+        w.finished.connect(lambda p: self._on_remote_done(p))
+        w.error.connect(lambda msg: self._on_remote_error(msg))
+        w.start()
+
+    def _on_remote_done(self, out_path):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100)
+        self.lbl_server_status.setText("✅ 处理完成")
+        self.btn_start.setEnabled(True)
+
+        msg_box = QMessageBox(self.parent_widget)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("去字幕完成")
+        msg_box.setText(f"视频去字幕已完成！\n结果已保存至：\n\n{out_path}")
+        open_btn = msg_box.addButton("打开文件夹", QMessageBox.ActionRole)
+        msg_box.addButton("确定", QMessageBox.AcceptRole)
+        msg_box.exec()
+        if msg_box.clickedButton() == open_btn:
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{os.path.normpath(out_path)}"')
+            except Exception as e:
+                log.error(f"打开输出目录失败: {e}")
+
+    def _on_remote_error(self, msg):
+        self.progress_bar.setVisible(False)
+        self.lbl_server_status.setText(f"❌ 失败: {msg[:80]}")
+        self.btn_start.setEnabled(True)
+        QMessageBox.critical(self.parent_widget, "错误", f"服务端处理失败:\n{msg}")
+
+    def start_removal(self):
+        video_path = self.video_path_input.text().strip()
+        if not video_path or not os.path.exists(video_path):
+            QMessageBox.warning(self.parent_widget, "参数错误", "请先选择有效的输入视频或图片！")
+            return
+
+        # 去字幕已服务端化：统一走算力服务端（本地不再内置 VSR 算法包）
+        self._start_remote_removal(video_path)
+
+    def stop_removal(self):
+        # 去字幕已服务端化：任务提交后无法从本地终止
+        QMessageBox.information(
+            self.parent_widget,
+            "提示",
+            "去字幕任务已提交至服务端，本地无法中途终止，请等待其完成或超时。"
+        )
+
+    def cleanup_ui(self):
+        if self.timer:
+            self.timer.stop()
+            self.timer = None
+        
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.video_path_input.setEnabled(True)
+        self.x_slider.setEnabled(True)
+        self.w_slider.setEnabled(True)
+        self.y_slider.setEnabled(True)
+        self.h_slider.setEnabled(True)
+        self.btn_reset_area.setEnabled(True)
+        self.mode_combo.setEnabled(True)
+        self.skip_detect_chk.setEnabled(True)
+        self.lama_fast_chk.setEnabled(True)
+        self.h264_chk.setEnabled(True)
+        self.progress_bar.setVisible(False)
+
+        # Restore seek controls based on if it's a video
+        video_path = self.video_path_input.text().strip()
+        ext = os.path.splitext(video_path)[1].lower() if video_path else ""
+        is_pic = ext in [".jpg", ".jpeg", ".png", ".bmp"]
+        self.seek_slider.setEnabled(not is_pic and bool(video_path))
+        self.btn_prev_frame.setEnabled(not is_pic and bool(video_path))
+        self.btn_next_frame.setEnabled(not is_pic and bool(video_path))
+
+    def _seek_to_ratio(self, ratio):
+        path = self.video_path_input.text().strip()
+        if not path or not os.path.exists(path):
+            return
+            
+        ext = os.path.splitext(path)[1].lower()
+        if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+            return
+            
+        try:
+            import av
+            container = av.open(path)
+            video_stream = next(s for s in container.streams if s.type == 'video')
+            
+            duration = video_stream.duration
+            if duration is None or duration <= 0:
+                duration_sec = container.duration / 1000000.0
+                target_sec = ratio * duration_sec
+                target_ts = int(target_sec / float(video_stream.time_base))
+            else:
+                target_ts = int(ratio * duration)
+                
+            container.seek(target_ts, stream=video_stream)
+            
+            frame_found = False
+            for frame in container.decode(video_stream):
+                self.original_frame = frame.to_image()
+                frame_found = True
+                break
+                
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
+            container.close()
+            
+            if frame_found:
+                self.update_preview()
+                curr_sec = ratio * total_sec
+                self.lbl_seek_time.setText(f"{self._format_time(curr_sec)} / {self._format_time(total_sec)}")
+                
+        except Exception as e:
+            log.error(f"Seek failed: {e}")
+
+    def _format_time(self, seconds):
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins:02d}:{secs:02d}"
+
+    def _on_seek_moved(self, value):
+        ratio = value / 1000.0
+        self._seek_to_ratio(ratio)
+
+    def _on_seek_released(self):
+        ratio = self.seek_slider.value() / 1000.0
+        self._seek_to_ratio(ratio)
+
+    def _step_prev_frame(self):
+        val = self.seek_slider.value()
+        path = self.video_path_input.text().strip()
+        if not path or not os.path.exists(path):
+            return
+        try:
+            import av
+            container = av.open(path)
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
+            container.close()
+            if total_sec > 0:
+                ratio_step = 1.0 / total_sec
+                new_ratio = max(0.0, (val / 1000.0) - ratio_step)
+                self.seek_slider.setValue(int(new_ratio * 1000))
+                self._seek_to_ratio(new_ratio)
+        except Exception:
+            pass
+
+    def _step_next_frame(self):
+        val = self.seek_slider.value()
+        path = self.video_path_input.text().strip()
+        if not path or not os.path.exists(path):
+            return
+        try:
+            import av
+            container = av.open(path)
+            total_sec = container.duration / 1000000.0 if container.duration else 0.0
+            container.close()
+            if total_sec > 0:
+                ratio_step = 1.0 / total_sec
+                new_ratio = min(1.0, (val / 1000.0) + ratio_step)
+                self.seek_slider.setValue(int(new_ratio * 1000))
+                self._seek_to_ratio(new_ratio)
+        except Exception:
+            pass

@@ -1,27 +1,16 @@
-from gui.montage.base_step_view import BaseStepView
-from gui.montage.step1_split_controller import Step1SplitController
+# -*- coding: utf-8 -*-
+from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+                               QProgressBar, QMessageBox, QFrame, QListWidget, QTableWidget,
+                               QTableWidgetItem, QHeaderView, QAbstractItemView, QDoubleSpinBox, QWidget,
+                               QComboBox)
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QComboBox,
-    QDoubleSpinBox,
-    QFrame,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QTableWidget,
-    QVBoxLayout,
-)
+from gui.montage.base_step_view import BaseStepView
 from utils.gui_icons import mdi_button
-
 
 class Step1SplitView(BaseStepView):
     """步骤 1: 镜头智能分割界面"""
     def __init__(self, main_page):
         super().__init__(main_page)
-        self.controller = Step1SplitController(self, main_page)
         self.setup_ui()
 
     def setup_ui(self):
@@ -33,16 +22,20 @@ class Step1SplitView(BaseStepView):
         card.setObjectName("card")
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(12)
-        # 源目录状态(隐藏保留: 代码多处引用 folder_path_input 作为共享源目录)
-        self.main_page.folder_path_input = QLineEdit()
-        self.main_page.folder_path_input.setVisible(False)
 
-        from gui.common_widgets import DropZone as _DropZone
-        self.main_page.drop_zone = _DropZone(("mp4", "mov", "avi", "mkv", "flv", "webm", "m4v"),  # noqa: E501
-                                               hint="拖入视频素材 或 点击选择")
-        self.main_page.drop_zone.clicked.connect(self.main_page._select_folder)
-        self.main_page.drop_zone.file_dropped.connect(self.main_page._on_drop_videos)
-        card_layout.addWidget(self.main_page.drop_zone)
+        # Input source videos
+        row_dir = QHBoxLayout()
+        row_dir.addWidget(QLabel("原始素材:"))
+        self.main_page.folder_path_input = QLineEdit()
+        self.main_page.folder_path_input.setPlaceholderText("选择一个或多个视频素材，可多次追加...")
+        self.main_page.folder_path_input.setReadOnly(True)
+        row_dir.addWidget(self.main_page.folder_path_input)
+        
+        btn_sel = QPushButton("选择素材")
+        btn_sel.setObjectName("secondary_button")
+        btn_sel.clicked.connect(self.main_page._select_folder)
+        row_dir.addWidget(btn_sel)
+        card_layout.addLayout(row_dir)
 
         # Raw videos list
         card_layout.addWidget(QLabel("已选择的原始视频素材 (双击可播放预览，右键可删除):"))
@@ -50,11 +43,30 @@ class Step1SplitView(BaseStepView):
         self.main_page.video_list.setFixedHeight(120)
         self.main_page.video_list.setTextElideMode(Qt.ElideRight)
         self.main_page.video_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.main_page.video_list.itemClicked.connect(self.main_page._check_split_clips_exist)  # noqa: E501
-        self.main_page.video_list.itemDoubleClicked.connect(self.main_page._preview_video_item)  # noqa: E501
+        self.main_page.video_list.itemClicked.connect(self.main_page._check_split_clips_exist)
+        self.main_page.video_list.itemDoubleClicked.connect(self.main_page._preview_video_item)
         self.main_page.video_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)  # noqa: E501
+        self.main_page.video_list.customContextMenuRequested.connect(self.main_page._show_video_context_menu)
         card_layout.addWidget(self.main_page.video_list)
+
+        # 主要产品提示词（选填，用于 AI 镜头分析围绕该产品精确评分与描述）
+        row_prompt = QHBoxLayout()
+        row_prompt.addWidget(QLabel("主要产品提示词:"))
+        self.main_page.product_prompt_input = QLineEdit()
+        self.main_page.product_prompt_input.setMaxLength(100)
+        self.main_page.product_prompt_input.setPlaceholderText(
+            "选填，如：无线蓝牙耳机。填写后 AI 分析将围绕该产品精确评分与描述")
+        self.main_page.product_prompt_input.setToolTip(
+            "填写主要产品名称/关键词后：\n"
+            "· 分割完成会自动调用镜头分析；\n"
+            "· AI 会为包含该产品的镜头给出更高评分与聚焦描述；\n"
+            "· 留空则保持原有通用分析行为。")
+        row_prompt.addWidget(self.main_page.product_prompt_input)
+        btn_clear_prompt = QPushButton("清空")
+        btn_clear_prompt.setObjectName("secondary_button")
+        btn_clear_prompt.clicked.connect(self.main_page.product_prompt_input.clear)
+        row_prompt.addWidget(btn_clear_prompt)
+        card_layout.addLayout(row_prompt)
 
         # SceneDetect Config
         split_row = QHBoxLayout()
@@ -65,13 +77,11 @@ class Step1SplitView(BaseStepView):
         self.main_page.threshold_spin.setSingleStep(1.0)
         split_row.addWidget(self.main_page.threshold_spin)
 
-        split_row.addWidget(QLabel("最小镜头(秒):"))
+        split_row.addWidget(QLabel("最少帧数 (默认15):"))
         self.main_page.min_len_spin = QDoubleSpinBox()
-        self.main_page.min_len_spin.setDecimals(1)
-        self.main_page.min_len_spin.setRange(0.1, 60.0)
-        self.main_page.min_len_spin.setValue(0.5)
-        self.main_page.min_len_spin.setSingleStep(0.1)
-        self.main_page.min_len_spin.setSuffix(" 秒")
+        self.main_page.min_len_spin.setDecimals(0)
+        self.main_page.min_len_spin.setRange(5, 100)
+        self.main_page.min_len_spin.setValue(15)
         split_row.addWidget(self.main_page.min_len_spin)
 
         split_row.addSpacing(12)
@@ -87,6 +97,28 @@ class Step1SplitView(BaseStepView):
 
         split_row.addStretch()
 
+        # Dependencies auto check in UI
+        try:
+            import scenedetect
+            self.main_page.has_scenedetect_dep = True
+        except ImportError:
+            self.main_page.has_scenedetect_dep = False
+
+        self.main_page.dep_status_widget = QWidget()
+        dep_layout = QHBoxLayout(self.main_page.dep_status_widget)
+        dep_layout.setContentsMargins(0, 0, 0, 0)
+        
+        if self.main_page.has_scenedetect_dep:
+            lbl_dep = QLabel("✅ 镜头分割依赖就绪")
+            lbl_dep.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            dep_layout.addWidget(lbl_dep)
+        else:
+            self.main_page.btn_install_deps = mdi_button("安装智能分割依赖", "wrench")
+            self.main_page.btn_install_deps.setObjectName("secondary_button")
+            self.main_page.btn_install_deps.clicked.connect(self.main_page._install_scenedetect)
+            dep_layout.addWidget(self.main_page.btn_install_deps)
+            
+        split_row.addWidget(self.main_page.dep_status_widget)
 
         # 单视频镜头分割（合并挑精华：可分割的先分割，无法分割的自动挑精华）
         self.main_page.btn_split = mdi_button("开始智能镜头分割", "cut")
@@ -95,14 +127,29 @@ class Step1SplitView(BaseStepView):
         self.main_page.btn_split.setToolTip(
             "对列表中所有视频逐个处理：能做镜头分割的先做镜头分割，\n"
             "无法分割的视频自动挑出一段精华片段，统一写入 splits 目录。")
-        self.main_page.btn_split.clicked.connect(self.controller.start_split)
+        self.main_page.btn_split.clicked.connect(self.main_page._start_split)
         split_row.addWidget(self.main_page.btn_split)
 
+        self.main_page.btn_gen_shot_analysis = mdi_button("生成镜头分析", "sparkles")
+        self.main_page.btn_gen_shot_analysis.setObjectName("secondary_button")
+        self.main_page.btn_gen_shot_analysis.setFixedHeight(35)
+        self.main_page.btn_gen_shot_analysis.setToolTip(
+            "调用服务端 /material/score_clip 对每个镜头做 AI 分析，\n"
+            "返回的评分与画面描述自动填入下方表格。")
+        self.main_page.btn_gen_shot_analysis.clicked.connect(self.main_page._gen_shot_analysis)
+        split_row.addWidget(self.main_page.btn_gen_shot_analysis)
         card_layout.addLayout(split_row)
 
         # Split results table view (with score filter row above)
         table_header_row = QHBoxLayout()
         table_header_row.addWidget(QLabel("已分割出的最小单位镜头片段 (双击可播放预览，双击画面描述列可手动修改):"), 1)
+        btn_preview_shot = mdi_button("▶ 预览选中镜头", "play")
+        btn_preview_shot.setObjectName("secondary_button")
+        btn_preview_shot.setToolTip(
+            "从镜头起始时间点直接预览选中的镜头（播完自动关闭），\n"
+            "无需从头播放整个视频。先在表格中单击选中一行。")
+        btn_preview_shot.clicked.connect(self.main_page._preview_selected_shot)
+        table_header_row.addWidget(btn_preview_shot)
         table_header_row.addStretch()
         table_header_row.addWidget(QLabel("评分过滤:"))
         self.main_page.step1_score_filter_combo = QComboBox()
@@ -121,13 +168,13 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table.verticalHeader().setDefaultSectionSize(30)
         self.main_page.split_result_table.setColumnCount(9)
         self.main_page.split_result_table.setHorizontalHeaderLabels(
-            ["", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
-        self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)  # noqa: E501
+            ["☑", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
+        self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.main_page.split_result_table.setMinimumHeight(180)
-        self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)  # noqa: E501
-        self.main_page.split_result_table.cellChanged.connect(self.main_page._on_table_cell_changed)  # noqa: E501
-        self.main_page.split_result_table.itemChanged.connect(self.main_page._on_step1_checkbox_changed)  # noqa: E501
-
+        self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)
+        self.main_page.split_result_table.cellChanged.connect(self.main_page._on_table_cell_changed)
+        self.main_page.split_result_table.itemChanged.connect(self.main_page._on_step1_checkbox_changed)
+        
         header = self.main_page.split_result_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         self.main_page.split_result_table.setColumnWidth(0, 32)
@@ -146,7 +193,7 @@ class Step1SplitView(BaseStepView):
         header.setSectionResizeMode(8, QHeaderView.Fixed)
         self.main_page.split_result_table.setColumnWidth(8, 50)
         header.setStretchLastSection(False)
-
+        
         card_layout.addWidget(self.main_page.split_result_table)
         layout.addWidget(card, 1)
 
@@ -154,22 +201,14 @@ class Step1SplitView(BaseStepView):
         nav_row = QHBoxLayout()
         self.main_page.btn_open_splits_dir = mdi_button("打开已分割镜头目录", "folder")
         self.main_page.btn_open_splits_dir.setObjectName("secondary_button")
-        self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)  # noqa: E501
+        self.main_page.btn_open_splits_dir.clicked.connect(self.main_page._open_splits_dir)
         nav_row.addWidget(self.main_page.btn_open_splits_dir)
-
-        self.main_page.btn_clear_montage_cache = mdi_button("清空混剪缓存", "broom")
-        self.main_page.btn_clear_montage_cache.setObjectName("secondary_button")
-        self.main_page.btn_clear_montage_cache.setToolTip(
-            "清除本地混剪任务缓存（分割片段/素材清单），不会删除原始素材。")
-        self.main_page.btn_clear_montage_cache.clicked.connect(self.main_page._clear_montage_cache)  # noqa: E501
-        nav_row.addWidget(self.main_page.btn_clear_montage_cache)
 
         nav_row.addStretch()
         self.main_page.btn_next_to_step_2 = mdi_button("下一步：镜头重组", "right")
         self.main_page.btn_next_to_step_2.setObjectName("primary_button")
         self.main_page.btn_next_to_step_2.setEnabled(True)
-        self.main_page.btn_next_to_step_2.clicked.connect(self.main_page._go_next_to_step2)  # noqa: E501
+        self.main_page.btn_next_to_step_2.clicked.connect(self.main_page._go_next_to_step2)
         nav_row.addWidget(self.main_page.btn_next_to_step_2)
 
         layout.addLayout(nav_row)
-

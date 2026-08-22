@@ -7,7 +7,6 @@ The system uses a **client-server architecture**:
 - **Compute Server (remote)**: Unified AI inference server — provides Whisper (ASR), VoxCPM (TTS), Ollama (vision LLM), and CLIP (vector embedding) services.
 - **ComfyUI Server (remote)**: AI image generation.
 - **DeepSeek API (cloud)**: Text generation / copywriting.
-- **RunningHub Cloud Workflow (cloud)**: Digital human lip-sync / ComfyUI workflows via official workflow API.
 
 > **Note**: The old Flask web backend has been removed. All AI inference now goes through the remote compute server.
 
@@ -52,17 +51,6 @@ Configure the **compute server URL** in `ai_config.json`:
 Logs & temp:
 - `studio/.runtime/logs/app.log`
 - `studio/.runtime/tmp/`
-
-
-## 1.3 RunningHub Digital Human Workflow
-
-- Configure `runninghub_api_key`, `runninghub_base_url` and the workflow list in the **Platform Access -> RunningHub** page.
-- The workflow ID must come from the API detail page (`call-api/api-detail/{id}?apiType=5`), not necessarily the editor `/workflow/{id}` URL.
-- Use `instanceType=plus` for 48G workflows, and keep `usePersonalQueue=true` for Enterprise-Exclusive keys so tasks run on your rented machine.
-- The client only maps real file input nodes: `LoadImage [180]` and `LoadAudio [6]`; connected nodes are not submitted.
-- The queue is client-managed: one task at a time, 30s retry on 415, 30s gap between tasks. Results are auto-downloaded and named after the source audio file.
-- Optional: to submit via the raw ComfyUI protocol (`POST /prompt`), fill `Rh-Comfy-Auth`, `Rh-Identify` and `Rh-Accesstoken` session credentials. By default the official workflow API is used.
-
 
 ## 2. AI Services Architecture
 

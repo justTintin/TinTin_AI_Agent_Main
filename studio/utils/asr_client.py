@@ -1,20 +1,17 @@
+# -*- coding: utf-8 -*-
 """远程 ASR（语音转写）客户端。
 
 封装"提取音频 → 上传远程 Whisper 服务 → 拿回 segments → 格式化"全流程。
 与 ollama/VoxCPM 的 remote 模式一致：服务端由外部部署，客户端只负责对接。
 """
-import contextlib
-import json
 import os
+import json
 import subprocess
 import tempfile
-import uuid
-from collections.abc import Callable
+from typing import Optional, Callable
 
-import requests
-
-from utils.api_error import ApiError
 from utils.logger_utils import log
+
 
 # ═══════════════════════════════════════════════════════════════
 #  配置读取
@@ -24,21 +21,23 @@ def _read_ai_config() -> dict:
     try:
         from config.paths import AI_CONFIG_FILE
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return {}
 
 
 def read_asr_url() -> str:
-    """远程 ASR 服务地址。优先 whisper_api_url，否则从 compute_server_url 派生。"""
+    """远程 ASR 服务地址。优先 whisper_api_url，否则走统一服务端地址。"""
     cfg = _read_ai_config()
     url = (cfg.get("whisper_api_url") or "").strip()
     if not url:
-        base = (cfg.get("compute_server_url") or "").strip()
-        if base:
-            url = base
+        from utils.server_resolver import get_server_url
+        try:
+            url = get_server_url()
+        except RuntimeError:
+            pass
     return url
 
 
@@ -151,24 +150,23 @@ def transcribe_remote(
     video_path: str,
     asr_url: str,
     language: str = "",
-    task_id: str = "",
+    task_type: str = "transcribe",
+    diarize: bool = False,
     timeout: int = 600,
-    progress_cb: Callable[[str], None] | None = None,
+    progress_cb: Optional[Callable[[str], None]] = None,
 ) -> list:
     """远程转写：提取音频 → POST 到远程 ASR 服务 → 返回 segments 列表。
 
-    服务端契约（/guide 2.2 + OpenAPI）POST /whisper/transcribe，multipart/form-data：
-        - file:     音频文件（mp3/wav/m4a/flac）
-        - language: 语言代码 zh/en/ja/auto（可选，默认 zh）
-        - fmt:      输出格式 srt/json/txt（可选，默认 srt；本客户端固定 json）
-        - task_id:  客户端自定义任务ID（服务端按此登记，可用 GET /tasks/{task_id} 追踪）
+    远程服务需接受 multipart/form-data：
+        - audio: wav 文件
+        - language: 语言代码（可选）
+        - task_type: transcribe/translate
+        - diarize: 是否说话人分离
 
-    返回 [{"start": float, "end": float, "text": str, "words"?: [...]}, ...]
+    返回 [{"start": float, "end": float, "text": str, "speaker"?: str}, ...]
 
     异常时抛出 RuntimeError。
     """
-    if not task_id:
-        task_id = f"t_{uuid.uuid4().hex[:8]}"
     if not asr_url:
         raise RuntimeError("未配置远程 ASR 服务地址，请在系统设置中填写 Whisper API 地址。")
 
@@ -183,7 +181,7 @@ def transcribe_remote(
         if progress_cb:
             progress_cb("正在提取音频...")
         tmp_wav = _extract_audio(video_path, ffmpeg_path)
-        log.info(f"[ASR][{task_id}] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")  # noqa: E501
+        log.info(f"[ASR] 音频提取完成: {tmp_wav} ({os.path.getsize(tmp_wav) // 1024}KB)")
 
         # 2. 确保模型已加载
         from utils.http_client import resilient_post
@@ -192,11 +190,11 @@ def transcribe_remote(
             progress_cb("正在加载 Whisper 模型...")
         try:
             ensure_url = f"{base}/models/ensure/whisper"
-            log.info(f"[ASR][{task_id}] 确保模型加载: {ensure_url}")
-            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)  # noqa: E501
-            log.info(f"[ASR][{task_id}] 模型加载状态: HTTP {er.status_code}")
-        except requests.exceptions.RequestException as e:
-            log.warning(f"[ASR][{task_id}] 确保模型加载失败(继续尝试转写): {e}")
+            log.info(f"[ASR] 确保模型加载: {ensure_url}")
+            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)
+            log.info(f"[ASR] 模型加载状态: HTTP {er.status_code}")
+        except Exception as e:
+            log.warning(f"[ASR] 确保模型加载失败(继续尝试转写): {e}")
 
         # 3. POST 到远程
         url = f"{base}/whisper/transcribe"
@@ -206,40 +204,37 @@ def transcribe_remote(
 
         with open(tmp_wav, "rb") as f:
             files = {"file": (os.path.basename(tmp_wav), f, "audio/wav")}
-            # 服务端仅接受 file/language/fmt/task_id 四个字段（旧 task_type/diarize 已移除）
-            data = {"fmt": "json", "task_id": task_id}
+            data = {"fmt": "json"}
             if language:
                 data["language"] = language
+            if task_type:
+                data["task_type"] = task_type
+            if diarize:
+                data["diarize"] = "true"
 
-            log.info(f"[ASR][{task_id}] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")  # noqa: E501
+            log.info(f"[ASR] 上传到远程: {url} (文件大小: {os.path.getsize(tmp_wav)//1024}KB)")
             if progress_cb:
                 progress_cb("正在等待服务端处理...")
-            resp = resilient_post(url, files=files, data=data, timeout=timeout, service="whisper")  # noqa: E501
-            log.info(f"[ASR][{task_id}] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")  # noqa: E501
+            resp = resilient_post(url, files=files, data=data, timeout=timeout, service="whisper")
+            log.info(f"[ASR] 服务端返回 HTTP {resp.status_code}, 耗时 {resp.elapsed.total_seconds():.1f}s")
 
         if resp.status_code != 200:
-            log.error(f"[ASR][{task_id}] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")  # noqa: E501
-            raise ApiError(url, method="POST", params=data,
-                           status_code=resp.status_code, response_text=resp.text, service="whisper")  # noqa: E501
+            log.error(f"[ASR] 服务端返回错误 HTTP {resp.status_code}: {resp.text[:300]}")
+            raise RuntimeError(f"远程 ASR 返回 HTTP {resp.status_code}: {resp.text[:200]}")
 
         result = resp.json()
-        # 服务端可能以 HTTP 200 + {"error": "..."} 返回业务错误（如模型加载失败）。
-        # 若不拦截，会被误判成“转写结果为空”，上层静默保存空文案，用户看不到任何报错。
-        err_msg = result.get("error") if isinstance(result, dict) else None
-        if err_msg:
-            log.error(f"[ASR][{task_id}] 服务端返回业务错误: {err_msg}")
-            raise RuntimeError(f"远程 ASR 服务异常[{task_id}]: {err_msg}")
-
-        segments = result.get("segments") or result.get("result", {}).get("segments") or []  # noqa: E501
-        if not segments:  # noqa: SIM102
+        segments = result.get("segments") or result.get("result", {}).get("segments") or []
+        if not segments:
             # 某些实现可能直接返回 {"text": "..."} 无 segments
             if result.get("text"):
                 segments = [{"start": 0, "end": 0, "text": result["text"]}]
 
-        log.info(f"[ASR][{task_id}] 远程转写完成，{len(segments)} 段")
+        log.info(f"[ASR] 远程转写完成，{len(segments)} 段")
         return segments
 
     finally:
         if tmp_wav and os.path.isfile(tmp_wav):
-            with contextlib.suppress(OSError):
+            try:
                 os.remove(tmp_wav)
+            except Exception:
+                pass

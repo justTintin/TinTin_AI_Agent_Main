@@ -1,13 +1,16 @@
+# -*- coding: utf-8 -*-
 """智能混剪 - 可复用控件：双击编辑控件、可拖拽重排表格。"""
-from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtGui import QDrag
-from PySide6.QtWidgets import QAbstractItemView, QLineEdit, QTableWidget
+from PySide6.QtWidgets import (QLineEdit, QTableWidget, QTableWidgetItem,
+                               QHeaderView, QAbstractItemView)
+from PySide6.QtCore import Qt, Signal, QMimeData, QByteArray
+from PySide6.QtGui import QDrag, QColor
+
 
 
 class DoubleClickLineEdit(QLineEdit):
-    doubleClicked = Signal()  # noqa: N815
+    doubleClicked = Signal()
 
-    def mouseDoubleClickEvent(self, event):  # noqa: N802
+    def mouseDoubleClickEvent(self, event):
         super().mouseDoubleClickEvent(event)
         self.doubleClicked.emit()
 
@@ -41,11 +44,11 @@ class ReadOnlyDoubleClickLineEdit(QLineEdit):
         self.setText(text)
         self.setCursorPosition(0)
 
-    def mouseDoubleClickEvent(self, event):  # noqa: N802
+    def mouseDoubleClickEvent(self, event):
         # Show full text in a read-only popup dialog
-        from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QPushButton, QLabel, QHBoxLayout
         dlg = QDialog(self)
-        dlg.setWindowTitle(" 原文 - 完整内容")
+        dlg.setWindowTitle("📝 原文 - 完整内容")
         dlg.setMinimumSize(500, 300)
         dlg.resize(580, 350)
         dlg.setStyleSheet("""
@@ -73,7 +76,7 @@ class ReadOnlyDoubleClickLineEdit(QLineEdit):
         v = QVBoxLayout(dlg)
         v.setContentsMargins(16, 16, 16, 16)
         v.setSpacing(10)
-        v.addWidget(QLabel(" 原始视频文案（只读）:"))
+        v.addWidget(QLabel("📝 原始视频文案（只读）:"))
         te = QPlainTextEdit()
         te.setPlainText(self._full_text)
         te.setReadOnly(True)
@@ -100,7 +103,7 @@ class ReorderableClipsTable(QTableWidget):
         self.setDropIndicatorShown(True)
         self._drag_start_row = -1
 
-    def mousePressEvent(self, event):  # noqa: N802
+    def mousePressEvent(self, event):
         super().mousePressEvent(event)
         if event.button() == Qt.LeftButton:
             item = self.itemAt(event.pos())
@@ -109,7 +112,7 @@ class ReorderableClipsTable(QTableWidget):
             else:
                 self._drag_start_row = -1
 
-    def mouseMoveEvent(self, event):  # noqa: N802
+    def mouseMoveEvent(self, event):
         if self._drag_start_row >= 0 and (event.buttons() & Qt.LeftButton):
             drag = QDrag(self)
             mime = QMimeData()
@@ -120,15 +123,15 @@ class ReorderableClipsTable(QTableWidget):
         else:
             super().mouseMoveEvent(event)
 
-    def dragEnterEvent(self, event):  # noqa: N802
+    def dragEnterEvent(self, event):
         if event.source() == self:
             event.acceptProposedAction()
 
-    def dragMoveEvent(self, event):  # noqa: N802
+    def dragMoveEvent(self, event):
         if event.source() == self:
             event.acceptProposedAction()
 
-    def dropEvent(self, event):  # noqa: N802
+    def dropEvent(self, event):
         if event.source() == self:
             target_row = self.rowAt(event.pos().y())
             if target_row < 0:

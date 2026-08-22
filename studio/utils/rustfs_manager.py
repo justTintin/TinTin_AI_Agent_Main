@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 RustFS 对象存储管理器。
 
@@ -6,12 +7,11 @@ RustFS 完全兼容 S3 协议，官方推荐使用 boto3 SDK（需 s3v4 签名�
 
 参考: https://docs.rustfs.com/developer/sdk/python.html
 """
-import json
 import os
+import json
 import tempfile
 
 from config.paths import AI_CONFIG_FILE
-
 from utils.logger_utils import log
 
 try:
@@ -27,9 +27,9 @@ except ImportError:
 
 def _load_ai_config():
     try:
-        with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+        with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         return {}
 
 
@@ -38,7 +38,7 @@ def _save_ai_config(data):
         with open(AI_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
         return True
-    except OSError as e:
+    except Exception as e:
         log.error(f"保存 ai_config 失败: {e}")
         return False
 
@@ -46,7 +46,7 @@ def _save_ai_config(data):
 def get_rustfs_config():
     cfg = _load_ai_config()
     return {
-        "endpoint":   cfg.get("rustfs_endpoint",   "http://X.X.X.X:9000"),
+        "endpoint":   cfg.get("rustfs_endpoint",   "http://192.168.111.17:9000"),
         "access_key": cfg.get("rustfs_access_key", "rustfsadmin"),
         "secret_key": cfg.get("rustfs_secret_key", "rustfssecret"),
         "bucket":     cfg.get("rustfs_bucket",     "materials"),
@@ -64,7 +64,7 @@ def save_rustfs_config(endpoint, access_key, secret_key, bucket):
 
 # ─── 客户端工厂 ───────────────────────────────────────────────────────────────
 
-def _build_client(bucket_override: str | None = None):
+def _build_client(bucket_override: str = None):
     """创建 boto3 S3 客户端（s3v4 签名，兼容 RustFS）。"""
     if not HAS_BOTO3:
         raise ImportError("boto3 库未安装，请执行：pip install boto3")
@@ -95,7 +95,7 @@ def test_connection():
         return True, f"连接成功，共 {len(names)} 个存储桶：{', '.join(names) if names else '（无）'}"
     except ImportError as e:
         return False, str(e)
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, f"连接失败：{e}"
 
 
@@ -105,7 +105,7 @@ def list_buckets():
         client, _ = _build_client()
         resp = client.list_buckets()
         return True, [b["Name"] for b in resp.get("Buckets", [])]
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, str(e)
 
 
@@ -126,7 +126,7 @@ def _ensure_bucket(client, bucket_name):
 
 # ─── 对象列表 ─────────────────────────────────────────────────────────────────
 
-def list_objects(prefix: str = "", bucket_override: str | None = None,
+def list_objects(prefix: str = "", bucket_override: str = None,
                  max_keys: int = 5000):
     """
     列出存储桶对象，使用 V1 API（ListObjects）。
@@ -153,15 +153,15 @@ def list_objects(prefix: str = "", bucket_override: str | None = None,
                 })
         return True, objs
     except ClientError as e:
-        return False, f"S3 错误：{e.response['Error']['Code']} — {e.response['Error']['Message']}"  # noqa: E501
-    except Exception as e:  # boto3 S3 API
+        return False, f"S3 错误：{e.response['Error']['Code']} — {e.response['Error']['Message']}"
+    except Exception as e:
         return False, str(e)
 
 
 # ─── 对象下载 / 预签名 ────────────────────────────────────────────────────────
 
-def download_object(object_key: str, local_path: str | None = None,
-                    bucket_override: str | None = None) -> tuple[bool, str]:
+def download_object(object_key: str, local_path: str = None,
+                    bucket_override: str = None) -> tuple[bool, str]:
     """
     下载对象到本地文件。
     若 local_path 为 None，自动写入临时目录。
@@ -175,12 +175,12 @@ def download_object(object_key: str, local_path: str | None = None,
             os.close(fd)
         client.download_file(bucket, object_key, local_path)
         return True, local_path
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, str(e)
 
 
 def generate_presigned_url(object_key: str, expires_in: int = 3600,
-                           bucket_override: str | None = None) -> tuple[bool, str]:
+                           bucket_override: str = None) -> tuple[bool, str]:
     """
     生成预签名 GET URL（默认 1 小时有效）。
     返回 (ok, url | error_str)。
@@ -193,14 +193,14 @@ def generate_presigned_url(object_key: str, expires_in: int = 3600,
             ExpiresIn=expires_in,
         )
         return True, url
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, str(e)
 
 
 # ─── 单文件上传 ───────────────────────────────────────────────────────────────
 
 def upload_file(local_path: str, object_key: str,
-                bucket_override: str | None = None,
+                bucket_override: str = None,
                 progress_callback=None) -> tuple[bool, str]:
     """
     上传单个文件到对象存储。
@@ -211,6 +211,7 @@ def upload_file(local_path: str, object_key: str,
         client, bucket = _build_client(bucket_override)
         _ensure_bucket(client, bucket)
         if progress_callback:
+            size = os.path.getsize(local_path)
             client.upload_file(
                 local_path, bucket, object_key,
                 Callback=progress_callback,
@@ -218,39 +219,15 @@ def upload_file(local_path: str, object_key: str,
         else:
             client.upload_file(local_path, bucket, object_key)
         return True, f"上传成功: {object_key}"
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, str(e)
-
-
-# 媒体文件扩展名（图片/视频/音频）
-_MEDIA_EXTS = {
-    ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tiff", ".tif",
-    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mts", ".ts", ".wmv", ".flv",
-    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wma",
-}
-
-
-def _scan_media_files(directory: str, recursive: bool = True) -> list:
-    """扫描目录下的媒体文件，返回 [{path, name}, ...] 列表。"""
-    files = []
-    if recursive:
-        for root, _, fnames in os.walk(directory):
-            for fn in fnames:
-                if os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
-                    files.append({"path": os.path.join(root, fn), "name": fn})
-    else:
-        for fn in os.listdir(directory):
-            fp = os.path.join(directory, fn)
-            if os.path.isfile(fp) and os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
-                files.append({"path": fp, "name": fn})
-    return files
 
 
 # ─── 目录同步 ─────────────────────────────────────────────────────────────────
 
 def sync_directory_to_rustfs(local_dir: str, remote_prefix: str = "",
                               progress_callback=None,
-                              bucket_override: str | None = None,
+                              bucket_override: str = None,
                               all_files: bool = False):
     """
     将本地目录下的文件同步上传到 RustFS 存储桶。
@@ -269,7 +246,7 @@ def sync_directory_to_rustfs(local_dir: str, remote_prefix: str = "",
     try:
         client, bucket = _build_client(bucket_override)
         _ensure_bucket(client, bucket)
-    except Exception as e:  # boto3 S3 API
+    except Exception as e:
         return False, f"连接对象存储失败：{e}", 0, 0
 
     if all_files:
@@ -279,7 +256,7 @@ def sync_directory_to_rustfs(local_dir: str, remote_prefix: str = "",
                 fp = os.path.join(root, fn)
                 files.append({"path": fp, "name": fn})
     else:
-        files = _scan_media_files(local_dir, recursive=True)
+                files = scan_directory(local_dir, recursive=True)
 
     total = len(files)
     if total == 0:
@@ -294,7 +271,7 @@ def sync_directory_to_rustfs(local_dir: str, remote_prefix: str = "",
         try:
             client.upload_file(f["path"], bucket, key)
             synced += 1
-        except Exception as e:  # boto3 S3 API
+        except Exception as e:
             failed += 1
             errors.append(f"{f['name']}: {e}")
             log.error(f"上传失败 {f['path']}: {e}")

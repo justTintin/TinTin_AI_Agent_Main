@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 产品资料管理页。
 
@@ -10,33 +11,25 @@
 数据层见 utils/product_library_manager.py。
 文案创作对接为后续步骤（manager.to_prompt_text 已预留）。
 """
-from core.product_miner import count_mined_products, validate_mine_config
-from gui.elided_label import ElidedLabel
-from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QSplitter,
-    QTextEdit,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
+    QFrame, QWidget, QTreeWidget, QTreeWidgetItem, QMessageBox, QComboBox,
+    QSplitter, QScrollArea, QFormLayout, QSizePolicy, QFileDialog,
 )
+from PySide6.QtCore import Qt, QThread, Signal
 from utils.base_worker import BaseWorker
-from utils.file_dialog_utils import pick_file, pick_save_file
-from utils.gui_icons import mdi_button
+
 from utils.logger_utils import log
-from utils.product_library_manager import FIELDS, REQUIRED_FIELDS, ProductLibraryManager
-from utils.product_library_manager import _get_server_url as _get_product_server_url
+from utils.product_library_manager import ProductLibraryManager, FIELDS, REQUIRED_FIELDS, WAREHOUSE_FIELDS
+
+
+def _get_server_url() -> str:
+    """统一服务端地址解析。"""
+    from utils.server_resolver import get_server_url
+    try:
+        return get_server_url()
+    except RuntimeError:
+        return ""
 
 
 class StockSyncWorker(BaseWorker):
@@ -54,21 +47,37 @@ class StockSyncWorker(BaseWorker):
 
     def run(self):
         import time
-
-        from utils.product_library_manager import ProductLibraryManager
-        mgr = ProductLibraryManager()
+        import requests
+        from utils.product_library_manager import _get_machine_id
         try:
+            base = _get_server_url()
+            if not base:
+                self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
+                return
+            machine_id = _get_machine_id()
+            api = f"{base.rstrip('/')}/api/product-library/clients/{machine_id}"
+
             # 1. 触发服务端 ERP 同步（服务端内部完成 ERP 拉取 + 存储 + 品类归类）
             self.phase.emit("正在触发服务端 ERP 同步...")
-            result = mgr.sync(timeout=10)
-            if result is None:
-                self.error.emit("无法连接服务端，请检查服务端地址配置。")
+            try:
+                r = requests.post(f"{api}/sync", timeout=10)
+                if r.status_code == 409:
+                    self.phase.emit("服务端同步进行中，等待完成...")
+                elif r.status_code != 200:
+                    self.error.emit(f"触发同步失败: HTTP {r.status_code} {r.text[:200]}")
+                    return
+            except requests.exceptions.RequestException as e:
+                self.error.emit(f"无法连接服务端: {e}")
                 return
 
             # 2. 轮询同步状态
             self.phase.emit("正在等待服务端同步完成...")
             while True:
-                st = mgr.sync_status(timeout=10) or {}
+                try:
+                    sr = requests.get(f"{api}/sync/status", timeout=10)
+                    st = sr.json() if sr.status_code == 200 else {}
+                except Exception:
+                    st = {}
                 if not st.get("running", False):
                     if st.get("error"):
                         self.error.emit(f"服务端同步出错: {st['error']}")
@@ -84,18 +93,16 @@ class StockSyncWorker(BaseWorker):
                 self.phase.emit(phase_text)
                 self.progress.emit(fetched, total)
                 time.sleep(2)
-        except Exception as e:  # 外部 API 调用：服务端同步接口
+        except Exception as e:
             self.error.emit(str(e))
 
 
-from gui.base_page import BasePage  # noqa: E402
+from gui.base_page import BasePage
+
 
 
 class SingleMineWorker(BaseWorker):
-    """后台线程：按文档化接口挖掘单个产品并取回结果。
-
-    流程：POST /mine（item_ids=[当前产品]）→ 轮询 /mine/status → GET /items/{item_id}。
-    （旧实现调用的 /mine-single 在服务端不存在，返回 404。）
+    """后台线程：调用服务端 mine-single 接口，挖掘+持久化一步到位。
 
     与「一键成片」共享同一套数据源（服务端 product_items 表），
     挖掘完成后自动持久化，无需客户端再手动保存。
@@ -116,53 +123,29 @@ class SingleMineWorker(BaseWorker):
         self.llm_model = llm_model
 
     def run(self):
-        import time
-
-        from utils.product_library_manager import ProductLibraryManager
-        mgr = ProductLibraryManager()
+        import requests
+        url = (f"{self.server_url.rstrip('/')}/api/product-library"
+               f"/clients/{self.machine_id}/mine-single")
+        payload = {
+            "item_id": self.item_id,
+            "category": self.category,
+            "brand": self.brand,
+            "model_name": self.model_name,
+            "spec_name": self.spec_name,
+            "notes": self.notes,
+            "llm_model": self.llm_model,
+        }
         try:
-            # 1. 触发挖掘：item_ids 非空 = 只挖当前选中的产品
-            result = mgr.mine(item_ids=[self.item_id], model=self.llm_model, timeout=10)
-            if result is None:
-                self.error.emit("无法连接服务端，请检查服务端地址配置。")
-                return
-
-            # 2. 轮询挖掘进度（最长 10 分钟）
-            deadline = time.time() + 600
-            while time.time() < deadline:
-                st = mgr.mine_status(timeout=10) or {}
-                if not st.get("running", False):
-                    if st.get("error"):
-                        self.error.emit(f"服务端挖掘出错: {st['error']}")
-                        return
-                    break
-                time.sleep(2)
+            r = requests.post(url, json=payload, timeout=120)
+            if r.status_code == 200:
+                self.result_ready.emit(r.json())
             else:
-                self.error.emit("服务端挖掘超时（10 分钟），请稍后在批量挖掘中查看。")
-                return
-
-            # 3. 拉取挖掘后的产品数据（features / selling_points 由服务端写入）。
-            #    并小幅重试以兼容服务端状态与落库的微小时序差。
-            item = None
-            for _attempt in range(8):
-                candidate = mgr.get_item(self.item_id, timeout=10)
-                if candidate:
-                    item = candidate
-                    if (str(candidate.get("features") or "").strip()
-                            or str(candidate.get("selling_points") or "").strip()):
-                        break
-                time.sleep(1.5)
-            if item is not None:
-                self.result_ready.emit({
-                    "ok": True,
-                    "features": str(item.get("features") or ""),
-                    "selling_points": str(item.get("selling_points") or ""),
-                    "persisted": True,
-                    "item_id": self.item_id,
-                })
-            else:
-                self.error.emit("获取挖掘结果失败：服务端未返回产品数据。")
-        except Exception as e:  # 外部 API 调用：服务端挖掘接口
+                try:
+                    err = r.json().get("detail", r.text[:200])
+                except Exception:
+                    err = r.text[:200]
+                self.error.emit(f"服务端返回错误 (HTTP {r.status_code}): {err}")
+        except Exception as e:
             self.error.emit(f"请求服务端失败: {e}")
 
 
@@ -184,23 +167,36 @@ class BulkMineWorker(BaseWorker):
 
     def run(self):
         import time
-
-        from utils.product_library_manager import ProductLibraryManager
-        mgr = ProductLibraryManager()
+        import requests
+        from utils.product_library_manager import _get_machine_id
+        base = _get_server_url()
+        if not base:
+            self.error.emit("未配置服务端地址，请在系统设置中填写统一计算节点地址。")
+            return
+        machine_id = _get_machine_id()
+        api = f"{base.rstrip('/')}/api/product-library/clients/{machine_id}"
 
         # 1. 触发服务端批量挖掘
         try:
-            result = mgr.mine(item_ids=[], model=self.model, timeout=10)
-            if result is None:
-                self.error.emit("无法连接服务端，请检查服务端地址配置。")
+            r = requests.post(f"{api}/mine",
+                              json={"item_ids": [], "model": self.model},
+                              timeout=10)
+            if r.status_code == 409:
+                pass  # 已在运行中，直接轮询
+            elif r.status_code != 200:
+                self.error.emit(f"触发批量挖掘失败: HTTP {r.status_code} {r.text[:200]}")
                 return
-        except Exception as e:  # 外部 API 调用：触发服务端批量挖掘
+        except Exception as e:
             self.error.emit(f"无法连接服务端: {e}")
             return
 
         # 2. 轮询挖掘进度
         while not self._should_stop:
-            st = mgr.mine_status(timeout=10) or {}
+            try:
+                sr = requests.get(f"{api}/mine/status", timeout=10)
+                st = sr.json() if sr.status_code == 200 else {}
+            except Exception:
+                st = {}
             if not st.get("running", False):
                 if st.get("error"):
                     self.error.emit(f"服务端批量挖掘出错: {st['error']}")
@@ -232,32 +228,29 @@ class ProductLibraryPage(BasePage):
         root.setContentsMargins(40, 40, 40, 40)
         root.setSpacing(16)
 
-        hdr = QHBoxLayout()
-        heading = QLabel(" 产品资料")
+        heading = QLabel("📦 产品资料")
         heading.setObjectName("heading")
-        hdr.addWidget(heading)
+        root.addWidget(heading)
 
-        subtitle = ElidedLabel("基础数据从旺店通仓库同步，按 品类 → 品牌 → 型号 统一管理，供 AI 文案创作调用", max_lines=1)  # noqa: E501
+        subtitle = QLabel("基础数据从旺店通仓库同步（库存 + 品类自动归类），按 品类 → 品牌 → 型号 统一管理，供后续 AI 文案创作调用")
         subtitle.setObjectName("muted_text")
-        hdr.addWidget(subtitle)
-        hdr.addStretch()
-        root.addLayout(hdr)
+        root.addWidget(subtitle)
 
         # 顶部：仓库同步条
         sync_bar = QHBoxLayout()
-        self.btn_sync = QPushButton(" 从仓库同步")
+        self.btn_sync = QPushButton("🔄 从仓库同步")
         self.btn_sync.setObjectName("primary_button")
         self.btn_sync.clicked.connect(self._on_sync)
         sync_bar.addWidget(self.btn_sync)
-        self.btn_import_excel = mdi_button("导入表格", "folder")
+        self.btn_import_excel = QPushButton("📥 导入表格")
         self.btn_import_excel.setObjectName("secondary_button")
         self.btn_import_excel.clicked.connect(self._on_import_excel)
         sync_bar.addWidget(self.btn_import_excel)
-        self.btn_export_template = mdi_button("导出模板", "save")
+        self.btn_export_template = QPushButton("📄 导出模板")
         self.btn_export_template.setObjectName("secondary_button")
         self.btn_export_template.clicked.connect(self._on_export_template)
         sync_bar.addWidget(self.btn_export_template)
-        self.btn_mine_all = QPushButton(" 全量挖掘")
+        self.btn_mine_all = QPushButton("⚡ 挖掘")
         self.btn_mine_all.setObjectName("secondary_button")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点")
         self.btn_mine_all.clicked.connect(self._on_mine_all)
@@ -289,12 +282,7 @@ class ProductLibraryPage(BasePage):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索 品牌 / 型号 / 编码 / 条码 ...")
-        # 搜索防抖：避免每次按键都重建 600+ 节点树并发一次服务端请求
-        self._search_timer = QTimer(self.parent_widget)
-        self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(300)
-        self._search_timer.timeout.connect(self.refresh_tree)
-        self.search_input.textChanged.connect(self._search_timer.start)
+        self.search_input.textChanged.connect(self.refresh_tree)
         layout.addWidget(self.search_input)
 
         self.tree = QTreeWidget()
@@ -302,7 +290,7 @@ class ProductLibraryPage(BasePage):
         self.tree.itemClicked.connect(self._on_tree_clicked)
         layout.addWidget(self.tree, 1)
 
-        btn_new = QPushButton(" 新增型号（清空表单）")
+        btn_new = QPushButton("➕ 新增型号（清空表单）")
         btn_new.setObjectName("secondary_button")
         btn_new.clicked.connect(self.clear_form)
         layout.addWidget(btn_new)
@@ -317,7 +305,7 @@ class ProductLibraryPage(BasePage):
 
         # Create vertical splitter
         v_splitter = QSplitter(Qt.Vertical)
-
+        
         # --- Top frame: Basic Info ---
         top_panel = QFrame()
         top_panel.setObjectName("card")
@@ -325,74 +313,69 @@ class ProductLibraryPage(BasePage):
         top_layout.setContentsMargins(16, 16, 16, 16)
         top_layout.setSpacing(10)
 
-        title_basic = QLabel(" 产品基本资料")
+        title_basic = QLabel("📋 产品基本资料")
         title_basic.setObjectName("card_title")
         top_layout.addWidget(title_basic)
 
-        tip = ElidedLabel(
-            "仓库同步的产品：仅「商品名称/型号、品类、备注」可改，其余为仓库只读数据；"
-            "所有修改仅保存在本地，不会回写仓库。",
-            max_lines=2,
-        )
+        tip = QLabel("仓库同步的产品：仅「商品名称/型号、品类、备注」可改，其余为仓库只读数据；"
+                     "所有修改仅保存在本地，不会回写仓库。")
         tip.setObjectName("muted_text")
+        tip.setWordWrap(True)
         top_layout.addWidget(tip)
 
         form_container = QWidget()
         form_grid = QGridLayout(form_container)
         form_grid.setSpacing(6)
         form_grid.setContentsMargins(0, 0, 0, 0)
-
-        # Set stretch factors for the 4 widget columns (1, 3, 5, 7) to distribute space evenly  # noqa: E501
+        
+        # Set stretch factors for the 4 widget columns (1, 3, 5, 7) to distribute space evenly
         form_grid.setColumnStretch(1, 1)
         form_grid.setColumnStretch(3, 1)
         form_grid.setColumnStretch(5, 1)
         form_grid.setColumnStretch(7, 1)
 
         existing_cats = self.manager.categories()
-        basic_fields = [(k, label, m) for k, label, m in FIELDS if k not in ("features", "selling_points")]  # noqa: E501
-
-        # Exact positions for a compact 3-row layout (row, widget_col_index, widget_span)  # noqa: E501
+        basic_fields = [(k, l, m) for k, l, m in FIELDS if k not in ("features", "selling_points")]
+        
+        # Exact positions for a compact 3-row layout (row, widget_col_index, widget_span)
         # widget_col_index is 0, 1, 2, or 3.
         field_positions = {
             "category":      (0, 0, 1),
             "brand":         (0, 1, 1),
             "model":         (0, 2, 1),
             "goods_no":      (0, 3, 1),
-
+            
             "spec_no":       (1, 0, 1),
             "spec_name":     (1, 1, 1),
             "barcode":       (1, 2, 1),
             "stock_num":     (1, 3, 1),
-
+            
             "available_num": (2, 0, 1),
             "warehouse":     (2, 1, 1),
-            "notes":         (2, 2, 2), # Spans widget columns index 2 and 3 (grid columns 5, 6, 7)  # noqa: E501
+            "notes":         (2, 2, 2), # Spans widget columns index 2 and 3 (grid columns 5, 6, 7)
         }
 
-        for key, label, _multiline in basic_fields:
+        for key, label, multiline in basic_fields:
             req = " *" if key in REQUIRED_FIELDS else ""
             if key == "category":
-                w = QComboBox()
-                w.setEditable(True)
-                w.addItems(existing_cats)
-                w.setCurrentText("")  # noqa: E501
+                w = QComboBox(); w.setEditable(True); w.addItems(existing_cats); w.setCurrentText("")
             elif key == "notes":
-                # Convert notes to QLineEdit to fit perfectly on Row 3 alongside other single-line fields  # noqa: E501
+                # Convert notes to QLineEdit to fit perfectly on Row 3 alongside other single-line fields
                 w = QLineEdit()
             else:
                 w = QLineEdit()
-
+            
             self.inputs[key] = w
             lbl = QLabel(label + req)
             lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
+            
             row, col_idx, col_span = field_positions[key]
             lbl_col = col_idx * 2
             widget_col = col_idx * 2 + 1
-
+            
             form_grid.addWidget(lbl, row, lbl_col)
             if col_span > 1:
-                # Spans multiple columns (specifically for notes: widget_col is 5, spans 3 columns to cover 5, 6, 7)  # noqa: E501
+                # Spans multiple columns (specifically for notes: widget_col is 5, spans 3 columns to cover 5, 6, 7)
                 form_grid.addWidget(w, row, widget_col, 1, col_span * 2 - 1)
             else:
                 form_grid.addWidget(w, row, widget_col)
@@ -413,11 +396,11 @@ class ProductLibraryPage(BasePage):
         bottom_layout.setSpacing(10)
 
         bottom_title_bar = QHBoxLayout()
-        title_ai = QLabel(" 智能挖掘 (性能参数 & 核心卖点)")
+        title_ai = QLabel("✨ 智能挖掘 (性能参数 & 核心卖点)")
         title_ai.setObjectName("card_title")
         bottom_title_bar.addWidget(title_ai)
-
-        self.btn_mine = QPushButton(" 智能挖掘")
+        
+        self.btn_mine = QPushButton("🪄 智能挖掘")
         self.btn_mine.setObjectName("primary_button")
         self.btn_mine.clicked.connect(self._on_mine)
         bottom_title_bar.addWidget(self.btn_mine)
@@ -436,7 +419,7 @@ class ProductLibraryPage(BasePage):
         lbl_features.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self.inputs["features"] = QTextEdit()
         self.inputs["features"].setPlaceholderText("点击【智能挖掘】自动从大模型获取性能参数，或在此手动输入...")
-        self.inputs["features"].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # noqa: E501
+        self.inputs["features"].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.inputs["features"].setMinimumHeight(80)
         grid_ai.addWidget(lbl_features, 0, 0)
         grid_ai.addWidget(self.inputs["features"], 0, 1)
@@ -444,8 +427,8 @@ class ProductLibraryPage(BasePage):
         lbl_selling = QLabel("核心卖点")
         lbl_selling.setAlignment(Qt.AlignRight | Qt.AlignTop)
         self.inputs["selling_points"] = QTextEdit()
-        self.inputs["selling_points"].setPlaceholderText("点击【智能挖掘】自动从大模型获取核心卖点，或在此手动输入...")  # noqa: E501
-        self.inputs["selling_points"].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # noqa: E501
+        self.inputs["selling_points"].setPlaceholderText("点击【智能挖掘】自动从大模型获取核心卖点，或在此手动输入...")
+        self.inputs["selling_points"].setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.inputs["selling_points"].setMinimumHeight(80)
         grid_ai.addWidget(lbl_selling, 1, 0)
         grid_ai.addWidget(self.inputs["selling_points"], 1, 1)
@@ -453,18 +436,18 @@ class ProductLibraryPage(BasePage):
         bottom_layout.addLayout(grid_ai)
         v_splitter.addWidget(bottom_panel)
 
-        # Set default splitter sizes (e.g. 180px for 3-row top basic info, rest 420px for AI Mining)  # noqa: E501
+        # Set default splitter sizes (e.g. 180px for 3-row top basic info, rest 420px for AI Mining)
         v_splitter.setSizes([180, 420])
         container_layout.addWidget(v_splitter, 1)
 
         # --- Bottom Button Bar (outside splitter for consistency) ---
         btn_row = QHBoxLayout()
-        self.btn_save = QPushButton(" 保存（新增）")
+        self.btn_save = QPushButton("💾 保存（新增）")
         self.btn_save.setObjectName("primary_button")
         self.btn_save.clicked.connect(self._on_save)
         btn_row.addWidget(self.btn_save)
 
-        self.btn_delete = QPushButton(" 删除")
+        self.btn_delete = QPushButton("🗑️ 删除")
         self.btn_delete.setObjectName("secondary_button")
         self.btn_delete.clicked.connect(self._on_delete)
         btn_row.addWidget(self.btn_delete)
@@ -509,7 +492,7 @@ class ProductLibraryPage(BasePage):
             return
 
         # 3. 服务端地址 + 机器码
-        server_url = _get_product_server_url()
+        server_url = _get_server_url()
         if not server_url:
             QMessageBox.warning(self.parent_widget, "服务端未配置",
                                 "请先在系统设置中配置统一计算节点地址。")
@@ -614,44 +597,23 @@ class ProductLibraryPage(BasePage):
 
     # ---------------- 树 ----------------
     def refresh_tree(self):
-        """刷新产品树（HTTP 放后台线程，避免服务端异常时卡界面）。"""
-        from utils.thread_worker import TaskWorker as Worker
-        self._tree_worker: Worker | None = None
-        if self._tree_worker is not None and self._tree_worker.isRunning():
-            return
-        keyword = self.search_input.text().strip() if hasattr(self, "search_input") else ""  # noqa: E501
-        # search()/grouped() 会同步请求服务端，放后台线程执行
-        w = Worker(self._fetch_tree_data, keyword)
-        self._tree_worker = w
-        w.finished.connect(self._on_tree_data_ready)
-        w.error.connect(lambda e: log.error(f"刷新产品库失败: {e}"))
-        w.start()
-
-    def _fetch_tree_data(self, keyword):
-        """后台线程：按关键词搜索或取 grouped 树（只碰 manager，不碰 UI）。"""
-        if keyword:
-            return keyword, list(self.manager.search(keyword))
-        return keyword, self.manager.grouped()
-
-    def _on_tree_data_ready(self, payload):
-        keyword, tree = payload
+        keyword = self.search_input.text().strip() if hasattr(self, "search_input") else ""
         self.tree.clear()
         if keyword:
-            items = tree or []
-            for it in items:
+            for it in self.manager.search(keyword):
                 label = f"{it.get('brand','')} {it.get('model','')}".strip() or "(未命名)"
                 node = QTreeWidgetItem([label])
                 node.setData(0, Qt.UserRole, it.get("id"))
                 self.tree.addTopLevelItem(node)
             self.tree.expandAll()
             return
-        tree = tree or {}
+        tree = self.manager.grouped()
         for cat in sorted(tree.keys()):
-            cat_node = QTreeWidgetItem([f" {cat}"])
+            cat_node = QTreeWidgetItem([f"📂 {cat}"])
             cat_node.setData(0, Qt.UserRole, None)
             self.tree.addTopLevelItem(cat_node)
             for brand in sorted(tree[cat].keys()):
-                brand_node = QTreeWidgetItem([f" {brand}"])
+                brand_node = QTreeWidgetItem([f"🏷️ {brand}"])
                 brand_node.setData(0, Qt.UserRole, None)
                 cat_node.addChild(brand_node)
                 for it in sorted(tree[cat][brand], key=lambda x: x.get("model", "")):
@@ -667,27 +629,14 @@ class ProductLibraryPage(BasePage):
             return
         record = self.manager.get(item_id)
         if not record:
-            # 缓存未命中（服务端 /items 只返回前 50 条；/grouped 全量但可能滞后）：
-            # 直接向服务端取该产品，保证任何树节点都能立即显示详情
-            record = self._fetch_item_direct(item_id)
-        if not record:
-            self._set_status(f"未找到产品（id={item_id}），请稍后重试或先同步。")
             return
         self.current_id = item_id
         self._fill_form(record)
         is_warehouse = bool(record.get("goods_no") or record.get("spec_no"))
         self._apply_field_locks(is_warehouse)
-        self.btn_save.setText(" 保存修改")
+        self.btn_save.setText("💾 保存修改")
         self._set_status(f"正在编辑：{record.get('brand','')} {record.get('model','')}"
                          + ("（仓库产品：仅可改 商品名称/品类/备注）" if is_warehouse else ""))
-
-    def _fetch_item_direct(self, item_id):
-        """缓存未命中时直接从服务端取单个产品（含 features/selling_points）。"""
-        try:
-            return self.manager.get_item(item_id, timeout=10)
-        except Exception as e:  # 外部 API 调用：直接获取单个产品
-            log.warning(f"[产品库] 直接获取产品失败 {item_id}: {e}")
-            return None
 
     # ---------------- 手动增删改 ----------------
     def clear_form(self):
@@ -695,7 +644,7 @@ class ProductLibraryPage(BasePage):
         for w in self.inputs.values():
             self._set_widget_value(w, "")
         self._apply_field_locks(False)  # 新增/手工录入：全部可改
-        self.btn_save.setText(" 保存（新增）")
+        self.btn_save.setText("💾 保存（新增）")
         self._set_status("新增模式")
 
     def _on_save(self):
@@ -706,7 +655,7 @@ class ProductLibraryPage(BasePage):
             ok, msg, item = self.manager.add_item(data)
             if ok:
                 self.current_id = item["id"]
-                self.btn_save.setText(" 保存修改")
+                self.btn_save.setText("💾 保存修改")
         self._set_status(msg)
         if ok:
             self._refresh_combo_choices()
@@ -719,7 +668,7 @@ class ProductLibraryPage(BasePage):
             self._set_status("当前为新增模式，无可删除条目。")
             return
         record = self.manager.get(self.current_id)
-        name = f"{record.get('brand','')} {record.get('model','')}".strip() if record else ""  # noqa: E501
+        name = f"{record.get('brand','')} {record.get('model','')}".strip() if record else ""
         reply = QMessageBox.question(
             self.parent_widget, "确认删除",
             f"确定删除「{name}」吗？此操作不可撤销。",
@@ -735,14 +684,12 @@ class ProductLibraryPage(BasePage):
             self._set_status("删除失败。")
 
     def _refresh_combo_choices(self):
-        for key, getter in (("category", self.manager.categories), ("brand", lambda: self.manager.brands())):  # noqa: E501
+        for key, getter in (("category", self.manager.categories), ("brand", lambda: self.manager.brands())):
             w = self.inputs.get(key)
             if isinstance(w, QComboBox):
                 cur = w.currentText()
                 w.blockSignals(True)
-                w.clear()
-                w.addItems(getter())
-                w.setCurrentText(cur)
+                w.clear(); w.addItems(getter()); w.setCurrentText(cur)
                 w.blockSignals(False)
 
     # ---------------- 仓库同步 ----------------
@@ -786,23 +733,28 @@ class ProductLibraryPage(BasePage):
     def _on_mine_all(self):
         if self.bulk_mine_worker and self.bulk_mine_worker.isRunning():
             self.bulk_mine_worker.stop()
-            self.btn_mine_all.setText("\u26a1 全量挖掘")
+            self.btn_mine_all.setText("\u26a1 一键挖掘")
             self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
             self._set_sync_status("已请求停止\u2026")
             return
         ai = self.ai_config
         model = ai.get("llm_model", "deepseek-chat")
-        server_url = _get_product_server_url()
-        errors = validate_mine_config(model, server_url)
-        if errors:
-            QMessageBox.warning(self.parent_widget, "配置不完整", "\n".join(errors))
+        if not model:
+            QMessageBox.warning(self.parent_widget, "大模型未配置",
+                                '请先在【AI 设置 / 大模型配置】中填写模型名称。')
             return
-        items = self.manager.all_items()
-        total = len(items)
+        server_url = _get_server_url()
+        if not server_url:
+            QMessageBox.warning(self.parent_widget, "服务端未配置",
+                                "请先在系统设置中配置统一计算节点地址。")
+            return
+        total = len(self.manager.all_items())
         if total == 0:
             QMessageBox.information(self.parent_widget, "无产品", "产品库为空，请先同步仓库库存。")
             return
-        already, pending = count_mined_products(items)
+        already = sum(1 for it in self.manager.all_items()
+                      if it.get("features", "").strip() and it.get("selling_points", "").strip())
+        pending = total - already
         reply = QMessageBox.question(
             self.parent_widget, "一键挖掘确认",
             f"共 {total} 个产品，其中 {already} 个已有挖掘数据（将跳过），"
@@ -825,7 +777,7 @@ class ProductLibraryPage(BasePage):
         self._set_sync_status(f"一键挖掘中\u2026（{done}/{total}）{msg}")
 
     def _on_mine_all_done(self, done_count, total):
-        self.btn_mine_all.setText("\u26a1 全量挖掘")
+        self.btn_mine_all.setText("\u26a1 一键挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
         self._set_sync_status(f"一键挖掘完成：处理 {done_count}/{total} 条。")
         self.manager.load()  # 刷新本地缓存
@@ -836,7 +788,7 @@ class ProductLibraryPage(BasePage):
                 self._fill_form(record)
 
     def _on_mine_all_err(self, err):
-        self.btn_mine_all.setText("\u26a1 全量挖掘")
+        self.btn_mine_all.setText("\u26a1 一键挖掘")
         self.btn_mine_all.setToolTip("批量为所有产品自动挖掘性能参数和核心卖点（跳过已有数据的产品）")
         self._set_sync_status(f"一键挖掘出错：{err}")
 
@@ -848,7 +800,7 @@ class ProductLibraryPage(BasePage):
         import openpyxl
         from openpyxl.styles import Font, PatternFill
         from utils.product_library_manager import FIELDS
-        path, _ = pick_save_file(
+        path, _ = QFileDialog.getSaveFileName(
             self.parent_widget, "导出导入模板", "产品资料导入模板.xlsx",
             "Excel 文件 (*.xlsx)")
         if not path:
@@ -859,7 +811,7 @@ class ProductLibraryPage(BasePage):
         keys = [f[0] for f in FIELDS]    # 内部字段名
         labels = [f[1] for f in FIELDS]  # 中文显示名
         # 表头（中文名）
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")  # noqa: E501
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
         for col, label in enumerate(labels, 1):
             cell = ws.cell(row=1, column=col, value=label)
@@ -882,7 +834,7 @@ class ProductLibraryPage(BasePage):
         """从 Excel 导入产品数据（通过服务端存储）。"""
         import openpyxl
         from utils.product_library_manager import FIELDS
-        path, _ = pick_file(
+        path, _ = QFileDialog.getOpenFileName(
             self.parent_widget, "选择 Excel 文件", "",
             "Excel 文件 (*.xlsx *.xls)")
         if not path:
@@ -910,13 +862,13 @@ class ProductLibraryPage(BasePage):
             if valid_items:
                 added, updated = self.manager.upsert_stocks(valid_items)
                 self.refresh_tree()
-            msg = f"导入完成：成功 {added + updated} 条（新增 {added}、更新 {updated}）" if valid_items else "未导入任何数据。"  # noqa: E501
+            msg = f"导入完成：成功 {added + updated} 条（新增 {added}、更新 {updated}）" if valid_items else "未导入任何数据。"
             if errors:
                 msg += f"\n失败 {len(errors)} 条：\n" + "\n".join(errors[:10])
                 if len(errors) > 10:
                     msg += f"\n... 还有 {len(errors)-10} 条错误"
             QMessageBox.information(self.parent_widget, "导入结果", msg)
-        except (OSError, KeyError, TypeError, AttributeError) as e:
+        except Exception as e:
             QMessageBox.critical(self.parent_widget, "导入失败", f"文件读取失败：{e}")
 
     # ---------------- 杂项 ----------------

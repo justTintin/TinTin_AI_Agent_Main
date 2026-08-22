@@ -1,7 +1,5 @@
 """
-浅色主题 QSS · 螺丝钉-电商智能体矩阵 v3.0
-设计系统：Luosiding Design Library
-背景：--background #fff；主色：--primary #4f46e5；强调：--accent #8b5cf6
+炫白主题 QSS · 扁平化浅色风格
 """
 import os as _os
 
@@ -14,441 +12,155 @@ _ARROW_DOWN_LIGHT_ICON = _os.path.join(BUNDLE_ICONS_DIR, "arrow_down_light.svg")
 _ARROW_DOWN_LIGHT_URL = _ARROW_DOWN_LIGHT_ICON.replace(_os.sep, '/')
 
 LIGHT_STYLE_SHEET = """
-/* ═══════════════════════════════════════════════════════════════
-   基础元素 / Base
-   tokens: --background #fff, --foreground #151722
-   ═══════════════════════════════════════════════════════════════ */
-
 * {
-    font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", "Segoe UI", sans-serif;
-    outline: none;
+    font-family: "Microsoft YaHei", "微软雅黑", "Noto Sans SC", sans-serif;
 }
 
-QMainWindow, QWidget {
-    background-color: #ffffff /* --background */;
+QMainWindow {
+    background-color: #f5f5f7;
 }
 
 QToolTip {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
-    border: 1px solid #9ca1b1 /* --border */;
-    border-radius: 8px /* --radius-md */;
-    padding: 7px 11px;
+    background-color: #ffffff;
+    color: #1d1d1f;
+    border: 1px solid #d2d2d7;
+    border-radius: 6px;
+    padding: 6px 10px;
     font-size: 12px;
 }
 
 QLabel {
-    color: #5f6475 /* --muted-foreground */;
-    background: transparent;
+    color: #3a3a3f;
 }
-
-QStatusBar {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #5f6475 /* --muted-foreground */;
-    border-top: 1px solid #c3c6d2 /* --surface-container */;
-}
-
-QMenuBar {
-    background-color: #ffffff /* --surface */;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-QMenuBar::item {
-    padding: 5px 12px;
-    border-radius: 6px /* --radius-sm */;
-    background: transparent;
-}
-
-QMenuBar::item:selected {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #151722 /* --foreground */;
-}
-
-QMenu {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
-    border: 1px solid #c3c6d2 /* --surface-container */;
-    border-radius: 10px /* --radius-lg */;
-    padding: 6px;
-}
-
-QMenu::item {
-    padding: 7px 26px 7px 12px;
-    border-radius: 6px /* --radius-sm */;
-    background: transparent;
-}
-
-QMenu::item:selected {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    color: #4f46e5 /* --primary */;
-}
-
-QMenu::separator {
-    height: 1px;
-    background: #c3c6d2 /* --surface-container */;
-    margin: 6px 8px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   侧边栏 / Sidebar
-   token: --color-sidebar --surface-container-low #f0f1f7
-   ═══════════════════════════════════════════════════════════════ */
 
 #sidebar {
-    background-color: #f0f1f7 /* --surface-container-low */;
-    border-right: 1px solid #c3c6d2 /* --surface-container */;
-    min-width: 264px;
-    max-width: 264px;
+    background-color: #ebebed;
+    border-right: 1px solid #dcdce0;
+    min-width: 260px;
+    max-width: 260px;
 }
 
 #sidebar_title {
-    font-size: 21px;
+    font-size: 20px;
     font-weight: 700;
-    color: #151722 /* --foreground */;
-    padding: 24px 22px 14px 22px;
-    letter-spacing: 0.5px;
+    color: #1d1d1f;
+    padding: 22px 20px 16px 20px;
 }
 
-#sidebar QLabel#section_header,
 #sidebar_section_header {
     font-size: 11px;
     font-weight: 700;
-    color: #73788c /* --luosiding-slate-300 */;
+    color: #86868b;
     text-transform: uppercase;
-    letter-spacing: 1.4px;
-    padding: 6px 14px 2px 14px;
+    letter-spacing: 1px;
+    padding: 8px 16px 4px 16px;
+    margin: 8px 12px 0px 12px;
 }
 
 #sidebar_footer {
-    color: #9ca1b1 /* --luosiding-slate-200 */;
-    padding: 14px 20px;
+    color: #aeaeb2;
+    padding: 18px 20px;
     font-size: 11px;
-    letter-spacing: 0.5px;
-}
-
-#sidebar QFrame[section_type="ai"],
-#sidebar QFrame[section_type="system"] {
-    background-color: transparent;
-    border: none;
-}
-
-/* 系统设置二级菜单侧边栏 */
-#settings_menu_panel {
-    background-color: #f0f1f7 /* --surface-container-low */;
-    border-right: 1px solid #c3c6d2 /* --surface-container */;
-    min-width: 200px;
-    max-width: 200px;
-}
-
-#settings_stack {
-    background-color: transparent;
-    border: none;
-}
-
-QScrollArea {
-    background: transparent;
-    border: none;
-}
-
-QScrollArea > QWidget > QWidget {
-    background: transparent;
-}
-
-QWidget#tab_page,
-QWidget#scroll_page {
-    background: transparent;
 }
 
 QPushButton#nav_button {
     text-align: left;
-    padding: 9px 14px 9px 14px;
+    padding: 9px 14px;
     border: none;
-    border-left: 3px solid transparent;
     background-color: transparent;
     font-size: 13px;
     font-weight: 500;
-    color: #5f6475 /* --muted-foreground */;
-    border-radius: 8px /* --radius-md */;
-    margin: 2px 8px;
+    color: #6e6e73;
+    border-radius: 8px;
+    margin: 2px 10px;
 }
 
 QPushButton#nav_button:hover {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    color: #151722 /* --foreground */;
-}
-
-QPushButton#nav_button:pressed {
-    background-color: rgba(99, 102, 241, 0.16) /* --interactive-press */;
+    background-color: #dedee3;
+    color: #1d1d1f;
 }
 
 QPushButton#nav_button[active="true"] {
-    border-left: 3px solid #4f46e5 /* --primary */;
-    background-color: rgba(99, 102, 241, 0.08);
-    color: #4f46e5 /* --primary */;
+    background-color: rgba(99, 102, 241, 0.12);
+    color: #4f46e5;
     font-weight: 600;
-    padding-left: 11px;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   内容区 / 页面文字
-   ═══════════════════════════════════════════════════════════════ */
-
-#content_area {
-    background-color: #ffffff /* --background */;
+#card {
+    background-color: #ffffff;
+    border-radius: 10px;
+    border: 1px solid #e5e5ea;
 }
 
-#section_label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-    letter-spacing: 0.3px;
+#feature_card {
+    background-color: #ffffff;
+    border-radius: 12px;
+    border: 1px solid #e5e5ea;
 }
 
-#page_subtitle {
-    color: #5f6475 /* --muted-foreground */;
-    font-size: 13px;
-}
-
-#page_section_label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-    margin-top: 4px;
+#feature_card:hover {
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    background-color: #fafafe;
 }
 
 #heading {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
-    color: #151722 /* --foreground */;
+    color: #1d1d1f;
 }
 
 #card_title {
     font-size: 16px;
     font-weight: 700;
-    color: #151722 /* --foreground */;
+    color: #1d1d1f;
 }
 
 #muted_text {
-    color: #5f6475 /* --muted-foreground */;
+    color: #86868b;
     font-size: 12px;
 }
 
 #accent_text {
-    color: #4f46e5 /* --primary */;
+    color: #4f46e5;
     font-size: 12px;
     font-weight: 600;
 }
 
 #success_text {
-    color: #10b981 /* --color-success */;
+    color: #059669;
     font-weight: 600;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   卡片 / Card
-   token: --color-card --surface #fff, --border #9ca1b1, --radius-xl 12px
-   ═══════════════════════════════════════════════════════════════ */
-
-#card {
-    background-color: #ffffff /* --surface --color-card */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 12px /* --radius-xl */;
-}
-
-#search_sidebar {
-    background-color: #ffffff /* --surface --color-card */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-right: none;
-    border-top-left-radius: 12px /* --radius-xl */;
-    border-bottom-left-radius: 12px /* --radius-xl */;
-    border-top-right-radius: 0px;
-    border-bottom-right-radius: 0px;
-}
-
-/* 即梦素材网格：与素材库页保持一致的紧凑网格 */
-#dreamina_file_list {
-    background-color: transparent;
-    border: none;
-    padding: 0;
-    margin: 0;
-}
-
-#dreamina_file_list::item {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 6px /* --radius-sm */;
-    color: #5f6475 /* --muted-foreground */;
-    padding: 0;
-    margin: 0;
-}
-
-#dreamina_file_list::item:selected {
-    background-color: rgba(99, 102, 241, 0.16);
-    border: 1px solid #6366f1 /* --primary */;
-    color: #151722 /* --foreground */;
-}
-
-#dreamina_file_list::item:hover {
-    background-color: #f0f1f7 /* --surface-container-high */;
-}
-
-#feature_card {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 14px /* --radius-2xl */;
-}
-
-#feature_card:hover {
-    border: 1px solid #4f46e5 /* --primary */;
-    background-color: #f0f1f7 /* --surface-dim */;
-}
-
-#feature_title {
-    font-size: 15px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-}
-
-#feature_desc {
-    font-size: 12px;
-    color: #5f6475 /* --muted-foreground */;
-    line-height: 1.6;
-}
-
-#model_status_card {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-#model_info_label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-}
-
-#model_status_label {
-    font-weight: 700;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-#model_status_label[state="green"] { color: #10b981 /* --color-success */; }
-#model_status_label[state="red"] { color: #ef4444 /* --color-error */; }
-#model_status_label[state="yellow"] { color: #f59e0b /* --color-warning */; }
-
-#dim_score_card {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 12px /* --radius-xl */;
-}
-
-#preview_panel {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-#thumbnail_placeholder {
-    border: 1px dashed #9ca1b1 /* --border */;
-    border-radius: 8px /* --radius-md */;
-    color: #73788c /* --luosiding-slate-300 */;
-    background-color: #ffffff /* --background */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   输入控件 / Input
-   tokens: --surface #fff, --border #9ca1b1, --radius-md 8px
-   ═══════════════════════════════════════════════════════════════ */
-
-QLineEdit,
-QTextEdit,
-QPlainTextEdit,
-QSpinBox,
-QDoubleSpinBox,
-QDateEdit,
-QTimeEdit,
-QDateTimeEdit {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
+QLineEdit, QTextEdit, QPlainTextEdit,
+QSpinBox, QDoubleSpinBox,
+QDateEdit, QTimeEdit, QDateTimeEdit {
+    background-color: #ffffff;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
     padding: 8px 12px;
     font-size: 13px;
-    color: #151722 /* --foreground */;
-    selection-background-color: rgba(99, 102, 241, 0.25);
-    selection-color: #ffffff /* --primary-foreground */;
+    color: #1d1d1f;
+    selection-background-color: rgba(99, 102, 241, 0.2);
 }
 
-QLineEdit:hover,
-QTextEdit:hover,
-QPlainTextEdit:hover,
-QSpinBox:hover,
-QDoubleSpinBox:hover,
-QDateEdit:hover,
-QTimeEdit:hover,
-QDateTimeEdit:hover {
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid #6366f1;
 }
-
-QLineEdit:focus,
-QTextEdit:focus,
-QPlainTextEdit:focus,
-QSpinBox:focus,
-QDoubleSpinBox:focus,
-QDateEdit:focus,
-QTimeEdit:focus,
-QDateTimeEdit:focus {
-    border: 1px solid #6366f1 /* --ring */;
-    background-color: #f0f1f7 /* --surface-dim */;
-}
-
-QLineEdit:disabled,
-QTextEdit:disabled,
-QPlainTextEdit:disabled {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #9ca1b1 /* --luosiding-slate-200 */;
-    border: 1px solid #c3c6d2 /* --border */;
-}
-
-QLineEdit {
-    placeholder-text-color: #9ca1b1 /* --luosiding-slate-200 */;
-}
-
-QTextEdit,
-QPlainTextEdit {
-    placeholder-text-color: #9ca1b1 /* --luosiding-slate-200 */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   下拉框 / ComboBox
-   ═══════════════════════════════════════════════════════════════ */
 
 QComboBox {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
+    background-color: #ffffff;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
     padding: 6px 12px;
     font-size: 13px;
-    color: #151722 /* --foreground */;
+    color: #1d1d1f;
     min-width: 80px;
 }
 
-QComboBox:focus {
-    border: 1px solid #6366f1 /* --ring */;
-}
+QComboBox:focus { border: 1px solid #6366f1; }
+QComboBox:hover { border: 1px solid #b0b0b8; }
 
-QComboBox:hover {
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-}
-
-QComboBox:on {
-    border: 1px solid #6366f1 /* --ring */;
-    background-color: #f0f1f7 /* --surface-dim */;
-}
-
-QComboBox::drop-down {
-    border: none;
-    width: 30px;
-}
+QComboBox::drop-down { border: none; width: 28px; }
 
 QComboBox::down-arrow {
     image: url("__ARROW_DOWN_LIGHT_URL__");
@@ -457,1236 +169,483 @@ QComboBox::down-arrow {
 }
 
 QComboBox QAbstractItemView {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
+    background-color: #ffffff;
+    color: #1d1d1f;
+    border: 1px solid #d2d2d7;
+    border-radius: 6px;
     padding: 4px;
-    selection-background-color: #4f46e5 /* --primary */;
-    selection-color: #ffffff /* --primary-foreground */;
+    selection-background-color: #6366f1;
+    selection-color: #ffffff;
     outline: none;
 }
 
 QComboBox QAbstractItemView::item {
     padding: 8px 12px;
-    border-radius: 6px /* --radius-sm */;
-    min-height: 20px;
+    border-radius: 4px;
 }
 
 QComboBox QAbstractItemView::item:hover {
-    background-color: #f0f1f7 /* --surface-dim */;
+    background-color: #f0f0f5;
 }
 
 QComboBox QAbstractItemView::item:selected {
-    background-color: #4f46e5 /* --primary */;
-    color: #ffffff /* --primary-foreground */;
+    background-color: #6366f1;
+    color: #ffffff;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   按钮 / Button
-   tokens: .btn.primary #4f46e5, .secondary #c3c6d2, .ghost transparent
-   ═══════════════════════════════════════════════════════════════ */
-
 QPushButton {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
-    padding: 7px 14px;
-    color: #151722 /* --foreground */;
+    background-color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: #1d1d1f;
     font-size: 13px;
     font-weight: 500;
 }
 
 QPushButton:hover {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-    color: #151722 /* --foreground */;
+    background-color: #f5f5f7;
 }
 
-QPushButton:pressed {
-    background-color: #c3c6d2 /* --surface-container */;
-}
-
+QPushButton:pressed { background-color: #e5e5ea; }
 QPushButton:disabled {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    color: #9ca1b1 /* --luosiding-slate-200 */;
+    background-color: #f5f5f7;
+    color: #aeaeb2;
 }
 
 QPushButton#primary_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
-    border: 1px solid rgba(79, 70, 229, 0.5);
-    color: #ffffff /* --primary-foreground */;
+    background-color: #6366f1;
+    border: none;
+    color: #ffffff;
     font-weight: 600;
 }
 
 QPushButton#primary_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6366f1 /* --luosiding-indigo-400 */, stop:1 #a78bfa /* --luosiding-violet-400 */);  # noqa: E501
-    color: #ffffff /* --primary-foreground */;
-}
-
-QPushButton#primary_button:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4338ca /* --luosiding-indigo-600 */, stop:1 #7c3aed /* --luosiding-violet-600 */);  # noqa: E501
-}
-
-QPushButton#primary_button:disabled {
-    background-color: #c3c6d2 /* --surface-container */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-    color: #73788c /* --luosiding-slate-300 */;
+    background-color: #4f46e5;
 }
 
 QPushButton#secondary_button {
-    background-color: transparent;
-    border: 1px solid #c3c6d2 /* --border */;
-    color: #5f6475 /* --muted-foreground */;
-    font-weight: 500;
+    background-color: #e8e8ed;
+    border: none;
 }
 
 QPushButton#secondary_button:hover {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-    color: #151722 /* --foreground */;
-}
-
-QPushButton#secondary_button[pressed="true"] {
-    background-color: #f0f1f7 /* --surface-dim */;
-}
-
-QPushButton#icon_only_button {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 6px /* --radius-sm */;
-    padding: 4px;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-QPushButton#icon_only_button:hover {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    border: 1px solid #6366f1 /* --primary */;
-    color: #151722 /* --foreground */;
-}
-
-QPushButton#icon_only_button:pressed {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-}
-
-QPushButton#icon_only_button:disabled {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    color: #9ca1b1 /* --luosiding-slate-200 */;
+    background-color: #dcdce0;
 }
 
 QPushButton#action_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);  # noqa: E501
-    border: 1px solid rgba(5, 150, 105, 0.5);
-    color: #ffffff /* --primary-foreground */;
-    font-weight: 600;
+    background-color: #10b981;
+    border: none;
+    color: #ffffff;
 }
 
 QPushButton#action_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);  # noqa: E501
-    color: #ffffff /* --primary-foreground */;
+    background-color: #059669;
 }
 
 QPushButton#action_button:disabled {
-    background-color: #c3c6d2 /* --surface-container */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-    color: #73788c /* --luosiding-slate-300 */;
+    background-color: #d1d1d6;
+    color: #8e8e93;
 }
 
-QPushButton#pill_button {
-    background-color: transparent;
-    border: 1px solid #c3c6d2 /* --border */;
-    color: #5f6475 /* --muted-foreground */;
-    padding: 6px 16px;
-    border-radius: 18px;
-    font-weight: 500;
-}
-
-QPushButton#pill_button:hover {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    border: 1px solid #9ca1b1 /* --surface-container-high */;
-    color: #151722 /* --foreground */;
-}
-
-QPushButton#pill_button:checked {
-    background-color: rgba(99, 102, 241, 0.12);
-    border: 1px solid rgba(79, 70, 229, 0.4);
-    color: #4f46e5 /* --primary */;
-    font-weight: 600;
-}
-
-QPushButton#floating_action_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981 /* --luosiding-success-500 */, stop:1 #059669 /* --luosiding-success-600 */);  # noqa: E501
-    border: none;
-    color: #ffffff /* --primary-foreground */;
-    font-weight: 700;
-    border-radius: 22px;
-    padding: 9px 18px;
-    margin: 10px;
-}
-
-QPushButton#floating_action_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #34d399 /* --luosiding-success-400 */, stop:1 #10b981 /* --luosiding-success-500 */);  # noqa: E501
-}
-
-QPushButton#floating_action_button:disabled {
-    background-color: #c3c6d2 /* --surface-container */;
-    color: #73788c /* --luosiding-slate-300 */;
-}
-
-QPushButton#secondary_button[danger="true"] {
-    color: #ef4444 /* --color-error */;
-    border-color: rgba(239, 68, 68, 0.4);
-    font-weight: 600;
-}
-
-QPushButton#secondary_button[danger="true"]:hover {
-    background-color: rgba(239, 68, 68, 0.08);
-    color: #dc2626 /* --luosiding-error-600 */;
-    border-color: rgba(239, 68, 68, 0.55);
-}
-
-QPushButton#danger_button {
-    background-color: #ef4444 /* --color-error */;
-    border: 1px solid rgba(239, 68, 68, 0.5);
-    color: #ffffff /* --primary-foreground */;
-    font-weight: 600;
-}
-
-QPushButton#danger_button:hover {
-    background-color: #f87171 /* --luosiding-error-400 */;
-}
-
-QPushButton#delete_btn,
-QPushButton#close_btn {
-    color: #ef4444 /* --color-error */;
-}
-
-QPushButton#delete_btn:hover,
-QPushButton#close_btn:hover {
-    background-color: rgba(239, 68, 68, 0.08);
-    color: #dc2626 /* --luosiding-error-600 */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   复选框 / 单选按钮
-   ═══════════════════════════════════════════════════════════════ */
-
-QCheckBox, QRadioButton {
-    color: #5f6475 /* --muted-foreground */;
-    spacing: 8px;
-    background: transparent;
-}
+QCheckBox { color: #3a3a3f; spacing: 8px; }
 
 QCheckBox::indicator {
     width: 18px;
     height: 18px;
-    border: 2px solid #c3c6d2 /* --border */;
-    border-radius: 5px;
-    background-color: #ffffff /* --surface */;
+    border: 2px solid #c7c7cc;
+    border-radius: 4px;
+    background-color: #ffffff;
 }
 
-QCheckBox::indicator:hover {
-    border: 2px solid #4f46e5 /* --primary */;
-}
-
+QCheckBox::indicator:hover { border: 2px solid #6366f1; }
 QCheckBox::indicator:checked {
-    background-color: rgba(99, 102, 241, 0.22);
-    border: 2px solid #4f46e5 /* --primary */;
+    background-color: rgba(99, 102, 241, 0.12);
+    border: 2px solid #6366f1;
     image: url("__CHECK_LIGHT_URL__");
 }
 
-QCheckBox::indicator:disabled {
-    border: 2px solid #c3c6d2 /* --border */;
-    background-color: #f0f1f7 /* --surface-dim */;
-}
-
-QRadioButton::indicator {
-    width: 17px;
-    height: 17px;
-    border: 2px solid #c3c6d2 /* --border */;
-    border-radius: 9px;
-    background-color: #ffffff /* --surface */;
-}
-
-QRadioButton::indicator:hover {
-    border: 2px solid #4f46e5 /* --primary */;
-}
-
-QRadioButton::indicator:checked {
-    background-color: #4f46e5 /* --primary */;
-    border: 2px solid #4f46e5 /* --primary */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   表格 / 列表 / Table & List
-   ═══════════════════════════════════════════════════════════════ */
-
-QTableWidget,
-QTableView,
-QListWidget {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 12px /* --radius-xl */;
-    gridline-color: #f0f1f7 /* --surface-dim */;
-    selection-background-color: rgba(99, 102, 241, 0.18);
-    selection-color: #151722 /* --foreground */;
-    alternate-background-color: #f0f1f7 /* --surface-dim */;
-    color: #5f6475 /* --muted-foreground */;
-    outline: none;
+QTableWidget, QTableView, QListWidget {
+    background-color: #ffffff;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
+    gridline-color: #f0f0f5;
+    selection-background-color: rgba(99, 102, 241, 0.15);
+    selection-color: #1d1d1f;
+    alternate-background-color: #fafafa;
+    color: #1d1d1f;
 }
 
 QTableWidget::item,
 QTableView::item,
 QListWidget::item {
-    color: #5f6475 /* --muted-foreground */;
-    padding: 6px 10px;
-    min-height: 30px;
-    border: none;
-}
-
-QTableWidget::item:hover,
-QTableView::item:hover {
-    background-color: rgba(0, 0, 0, 0.025);
-}
-
-QTableWidget::item:selected,
-QTableView::item:selected,
-QListWidget::item:selected {
-    background-color: rgba(99, 102, 241, 0.18);
-    color: #151722 /* --foreground */;
-}
-
-QListWidget::item:hover {
-    background-color: rgba(0, 0, 0, 0.03);
-    border-radius: 6px /* --radius-sm */;
+    color: #3a3a3f;
+    padding: 5px 8px;
+    min-height: 28px;
 }
 
 QTableView::indicator {
     width: 16px;
     height: 16px;
-    border: 2px solid #c3c6d2 /* --border */;
+    border: 2px solid #c7c7cc;
     border-radius: 4px;
-    background-color: #ffffff /* --surface */;
+    background-color: #ffffff;
 }
 
 QTableView::indicator:checked {
-    background-color: rgba(99, 102, 241, 0.22);
-    border: 2px solid #4f46e5 /* --primary */;
+    background-color: rgba(99, 102, 241, 0.12);
+    border: 2px solid #6366f1;
     image: url("__CHECK_LIGHT_URL__");
 }
 
 QHeaderView::section {
-    background-color: #f0f1f7 /* --surface-dim */;
+    background-color: #f5f5f7;
     padding: 10px 12px;
     border: none;
-    border-bottom: 2px solid #c3c6d2 /* --border */;
-    border-right: 1px solid #f0f1f7 /* --surface-dim */;
+    border-bottom: 2px solid #e5e5ea;
     font-weight: 700;
     font-size: 12px;
-    color: #73788c /* --luosiding-slate-300 */;
+    color: #86868b;
     text-transform: uppercase;
-    letter-spacing: 0.6px;
 }
-
-QTableCornerButton::section {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: none;
-    border-bottom: 2px solid #c3c6d2 /* --border */;
-}
-
-#side_list {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   进度条 / ProgressBar
-   ═══════════════════════════════════════════════════════════════ */
 
 QProgressBar {
     border: none;
-    border-radius: 4px;
-    background-color: #c3c6d2 /* --surface-container */;
-    text-align: center;
-    height: 6px;
-    color: transparent;
+    border-radius: 6px;
+    background-color: #e5e5ea;
+    height: 8px;
 }
 
 QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
-    border-radius: 4px;
+    background-color: #6366f1;
+    border-radius: 6px;
 }
-
-/* ═══════════════════════════════════════════════════════════════
-   日志查看器 / 日志输出框
-   ═══════════════════════════════════════════════════════════════ */
 
 QTextEdit#log_viewer {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #5f6475 /* --muted-foreground */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
+    background-color: #fafafa;
+    color: #3a3a3f;
+    border: 1px solid #e5e5ea;
+    border-radius: 8px;
     padding: 12px;
-    font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+    font-family: "JetBrains Mono", Consolas, monospace;
     font-size: 12px;
-    line-height: 1.6;
-}
-
-QTextEdit#log_box {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #151722 /* --foreground */;
-    font-size: 12px;
-    border-radius: 8px /* --radius-md */;
-    border: 1px solid #c3c6d2 /* --border */;
-    font-family: "Consolas", "JetBrains Mono", monospace;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   滚动条 / ScrollBar
+   缩略图占位 / 素材缩略图
    ═══════════════════════════════════════════════════════════════ */
 
-QScrollBar:vertical {
-    width: 9px;
-    background: transparent;
-    margin: 4px 2px;
+#thumbnail_placeholder {
+    border: 1px solid #d2d2d7;
+    border-radius: 4px;
+    color: #86868b;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   页面副标题 / 提示文字
+   ═══════════════════════════════════════════════════════════════ */
+
+#page_subtitle {
+    color: #86868b;
+    font-size: 13px;
+}
+
+#page_section_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #3a3a3f;
+    margin-top: 4px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   模型状态卡片（hook_score / marketing_detect）
+   ═══════════════════════════════════════════════════════════════ */
+
+#model_status_card {
+    background-color: #f0f0f5;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+}
+
+#model_info_label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #1d1d1f;
+}
+
+#model_status_label {
+    font-weight: bold;
+    color: #86868b;
+}
+
+#model_status_label[state="green"] { color: #059669; }
+#model_status_label[state="red"] { color: #dc2626; }
+#model_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   日志输出框（全页）
+   ═══════════════════════════════════════════════════════════════ */
+
+QTextEdit#log_box {
+    background-color: #f5f5f7;
+    color: #3a3a3f;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid #e5e5ea;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   登录状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#login_status_label {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#login_status_label[state="green"] { color: #059669; }
+#login_status_label[state="red"] { color: #dc2626; }
+#login_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   LLM 状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#llm_status_label {
+    font-weight: bold;
+}
+
+#llm_status_label[state="green"] { color: #059669; }
+#llm_status_label[state="red"] { color: #dc2626; }
+#llm_status_label[state="yellow"] { color: #d97706; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Ollama 状态标签 (light)
+   ═══════════════════════════════════════════════════════════════ */
+
+#ollama_status_lbl {
+    font-size: 12px;
+}
+
+#ollama_status_lbl[state="green"] { color: #059669; }
+#ollama_status_lbl[state="red"] { color: #dc2626; }
+#ollama_status_lbl[state="yellow"] { color: #d97706; }
+#ollama_status_lbl[state="gray"] { color: #86868b; }
+
+QScrollBar:vertical { width: 8px; background: transparent; margin: 4px 2px; }
 QScrollBar::handle:vertical {
-    background: #c3c6d2 /* --surface-container */;
+    background: #c7c7cc;
     border-radius: 4px;
     min-height: 30px;
 }
+QScrollBar::handle:vertical:hover { background: #aeaeb2; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 
-QScrollBar::handle:vertical:hover {
-    background: #9ca1b1 /* --surface-container-high */;
-}
-
-QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical {
-    height: 0px;
-}
-
-QScrollBar:horizontal {
-    height: 9px;
-    background: transparent;
-    margin: 2px 4px;
-}
-
+QScrollBar:horizontal { height: 8px; background: transparent; }
 QScrollBar::handle:horizontal {
-    background: #c3c6d2 /* --surface-container */;
+    background: #c7c7cc;
     border-radius: 4px;
     min-width: 30px;
 }
-
-QScrollBar::handle:horizontal:hover {
-    background: #9ca1b1 /* --surface-container-high */;
-}
-
-QScrollBar::add-line:horizontal,
-QScrollBar::sub-line:horizontal {
-    width: 0px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   分组框 / Tab
-   ═══════════════════════════════════════════════════════════════ */
+QScrollBar::handle:horizontal:hover { background: #aeaeb2; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 
 QGroupBox {
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
+    border: 1px solid #e5e5ea;
+    border-radius: 10px;
     margin-top: 12px;
     padding-top: 16px;
-    color: #5f6475 /* --muted-foreground */;
+    color: #3a3a3f;
     font-weight: 600;
-    background-color: rgba(255, 255, 255, 0.5);
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
     padding: 0 8px;
-    color: #73788c /* --luosiding-slate-300 */;
+    color: #86868b;
     font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
 }
 
 QTabWidget::pane {
-    border: 1px solid #c3c6d2 /* --border */;
-    background-color: #ffffff /* --surface */;
-    border-radius: 0 0 12px 12px;
+    border: 1px solid #e5e5ea;
+    background-color: #ffffff;
+    border-radius: 0 0 10px 10px;
 }
 
 QTabBar::tab {
-    background-color: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: #73788c /* --luosiding-slate-300 */;
+    background-color: #f5f5f7;
+    border: 1px solid #e5e5ea;
+    border-bottom: none;
+    color: #86868b;
     padding: 10px 20px;
-    margin-right: 4px;
+    margin-right: 2px;
     border-radius: 8px 8px 0 0;
-    font-weight: 500;
 }
 
 QTabBar::tab:selected {
-    background-color: rgba(99, 102, 241, 0.08);
-    color: #4f46e5 /* --primary */;
+    background-color: #ffffff;
+    color: #4f46e5;
     font-weight: 700;
-    border-bottom: 2px solid #4f46e5 /* --primary */;
+    border-bottom: 2px solid #6366f1;
 }
 
 QTabBar::tab:hover:!selected {
-    color: #151722 /* --foreground */;
-    background-color: #f0f1f7 /* --surface-dim */;
+    color: #3a3a3f;
+    background-color: #ebebed;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   对话框 / 消息框
-   ═══════════════════════════════════════════════════════════════ */
+QDialog, QMessageBox { background-color: #ffffff; color: #1d1d1f; }
+QDialog QLabel, QMessageBox QLabel { color: #1d1d1f; }
 
-QDialog {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
+QDialog QPushButton, QMessageBox QPushButton {
+    background-color: #e8e8ed;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 16px;
+    color: #1d1d1f;
+    min-width: 80px;
 }
 
-QMessageBox {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
+QDialog QPushButton:hover, QMessageBox QPushButton:hover {
+    background-color: #e5e5ea;
 }
-
-QDialog QLabel,
-QMessageBox QLabel {
-    color: #151722 /* --foreground */;
-}
-
-QDialog QPushButton,
-QMessageBox QPushButton {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
-    padding: 7px 18px;
-    color: #151722 /* --foreground */;
-    min-width: 84px;
-    font-weight: 500;
-}
-
-QDialog QPushButton:hover,
-QMessageBox QPushButton:hover {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #151722 /* --foreground */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   滑块 / Slider
-   ═══════════════════════════════════════════════════════════════ */
 
 QSlider::groove:horizontal {
-    height: 5px;
-    background: #c3c6d2 /* --surface-container */;
+    height: 6px;
+    background: #e5e5ea;
     border-radius: 3px;
 }
 
 QSlider::handle:horizontal {
-    width: 16px;
-    height: 16px;
-    margin: -5px 0;
-    background: #4f46e5 /* --primary */;
-    border: 2px solid #ffffff /* --surface */;
-    border-radius: 8px;
-}
-
-QSlider::handle:horizontal:hover {
-    background: #6366f1 /* --luosiding-indigo-400 */;
+    width: 18px;
+    height: 18px;
+    margin: -6px 0;
+    background: #6366f1;
+    border: 2px solid #ffffff;
+    border-radius: 9px;
 }
 
 QSlider::sub-page:horizontal {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f46e5 /* --primary */, stop:1 #8b5cf6 /* --accent */);  # noqa: E501
+    background: #6366f1;
     border-radius: 3px;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   分割线 / 分隔条
-   ═══════════════════════════════════════════════════════════════ */
-
-#separator {
-    color: #c3c6d2 /* --surface-container */;
-    background-color: #c3c6d2 /* --surface-container */;
-}
-
-QFrame[frameShape="4"],
-QFrame[frameShape="5"] {
-    color: #c3c6d2 /* --surface-container */;
-}
-
-QSplitter::handle {
-    background-color: #c3c6d2 /* --surface-container */;
-}
-
-QSplitter::handle:horizontal {
-    width: 2px;
-}
-
-QSplitter::handle:vertical {
-    height: 2px;
-}
+QFrame[frameShape="4"], QFrame[frameShape="5"] { color: #e5e5ea; }
 
 /* ═══════════════════════════════════════════════════════════════
-   状态栏浮层 / Status Overlay
+   状态栏
    ═══════════════════════════════════════════════════════════════ */
 
 #status_overlay {
-    background-color: rgba(255, 255, 255, 0.94);
-    border: 1px solid rgba(0, 0, 0, 0.09);
-    border-radius: 10px /* --radius-lg */;
+    background-color: rgba(240, 240, 245, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 6px;
 }
-
 #status_overlay QLabel {
     background: transparent;
     border: none;
-    font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
-    font-size: 12px;
+    color: #6b7280;
+    font-family: 'Consolas', 'Segoe UI', monospace;
+    font-size: 11px;
+    font-weight: bold;
 }
-
-#status_overlay QWidget#ov_chip {
-    background: transparent;
-    border: none;
-}
-
-#status_overlay QLabel#ov_server {
-    color: #5f6475 /* --muted-foreground */;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-
-#status_overlay QLabel#ov_icon {
-    font-size: 13px;
-}
-
-#status_overlay QLabel#ov_name {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-weight: 500;
-}
-
-#status_overlay QLabel#ov_value {
-    color: #151722 /* --foreground */;
-    font-weight: 700;
-}
-
-#status_overlay QLabel#ov_value[level="ok"] {
-    color: #10b981 /* --color-success */;
-}
-
-#status_overlay QLabel#ov_value[level="warn"] {
-    color: #f59e0b /* --color-warning */;
-}
-
-#status_overlay QLabel#ov_value[level="bad"] {
-    color: #ef4444 /* --color-error */;
-}
-
-#status_overlay QLabel#ov_value[level="idle"] {
-    color: #9ca1b1 /* --luosiding-slate-200 */;
-}
-
-#status_overlay QLabel#ov_service {
-    color: #5f6475 /* --muted-foreground */;
-    font-weight: 500;
-}
-
-#status_overlay QLabel#ov_service[state="ok"] {
-    color: #10b981 /* --color-success */;
-    font-weight: 600;
-}
-
-#status_overlay QLabel#ov_service[state="bad"] {
-    color: #ef4444 /* --color-error */;
-    font-weight: 600;
-}
-
-#status_overlay QLabel#ov_service[state="unknown"] {
-    color: #9ca1b1 /* --luosiding-slate-200 */;
-}
-
 #status_separator {
-    background-color: rgba(0, 0, 0, 0.12);
+    background-color: rgba(0, 0, 0, 0.1);
     border: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   状态标签 / Status Labels
+   素材管理
    ═══════════════════════════════════════════════════════════════ */
-
-#login_status_label {
-    font-size: 16px;
-    font-weight: 700;
-}
-
-#login_status_label[state="green"] { color: #10b981 /* --color-success */; }
-#login_status_label[state="red"] { color: #ef4444 /* --color-error */; }
-#login_status_label[state="yellow"] { color: #f59e0b /* --color-warning */; }
-
-#llm_status_label {
-    font-weight: 700;
-}
-
-#llm_status_label[state="green"] { color: #10b981 /* --color-success */; }
-#llm_status_label[state="red"] { color: #ef4444 /* --color-error */; }
-#llm_status_label[state="yellow"] { color: #f59e0b /* --color-warning */; }
-
-#ollama_status_lbl {
-    font-size: 12px;
-}
-
-#ollama_status_lbl[state="green"] { color: #10b981 /* --color-success */; }
-#ollama_status_lbl[state="red"] { color: #ef4444 /* --color-error */; }
-#ollama_status_lbl[state="yellow"] { color: #f59e0b /* --color-warning */; }
-#ollama_status_lbl[state="gray"] { color: #73788c /* --luosiding-slate-300 */; }
-
-/* ═══════════════════════════════════════════════════════════════
-   素材管理 / NAS
-   ═══════════════════════════════════════════════════════════════ */
-
-#step_bar {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
 
 #step_label {
-    color: #73788c /* --luosiding-slate-300 */;
-    padding: 4px 0;
-    font-size: 13px;
+    color: #86868b; padding: 4px 0; font-size: 13px;
 }
-
 #step_label[status="active"] {
-    color: #3b82f6 /* --color-info */;
-    font-weight: 700;
-    background-color: rgba(59, 130, 246, 0.1);
-    border-radius: 6px /* --radius-sm */;
-    padding: 4px 8px;
+    color: #2563eb; font-weight: bold;
+    background-color: rgba(37, 99, 235, 0.1); border-radius: 4px;
 }
-
 #step_label[status="done"] {
-    color: #10b981 /* --color-success */;
-    background-color: rgba(16, 185, 129, 0.08);
-    border-radius: 6px /* --radius-sm */;
-    padding: 4px 8px;
+    color: #059669;
+    background-color: rgba(5, 150, 105, 0.08); border-radius: 4px;
 }
-
 #step_label[status="pending"] {
-    color: #73788c /* --luosiding-slate-300 */;
+    color: #86868b;
 }
-
-#nas_root_label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-}
-
-#stats_analyze, #stats_ingest {
-    font-size: 13px;
-    color: #151722 /* --foreground */;
-}
-
+#nas_root_label { font-size: 13px; font-weight: bold; color: #1d1d1f; }
+#stats_analyze, #stats_ingest { font-size: 13px; color: #1d1d1f; }
 #btn_refresh_stats {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 6px /* --radius-sm */;
-    color: #151722 /* --foreground */;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 700;
+    background-color: #f0f0f5; border: none; border-radius: 4px;
+    color: #3a3a3f; padding: 3px 8px; font-size: 11px; font-weight: bold;
 }
-
-#btn_refresh_stats:hover {
-    background-color: #c3c6d2 /* --surface-container */;
-    color: #151722 /* --foreground */;
-}
-
+#btn_refresh_stats:hover { background-color: #e8e8ed; }
 #btn_align {
-    background-color: #dbeafe /* --luosiding-info-100 */;
-    border: 1px solid #bfdbfe /* --luosiding-info-200 */;
-    border-radius: 6px /* --radius-sm */;
-    color: #1e40af /* --luosiding-info-800 */;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 700;
+    background-color: #dbeafe; border: none; border-radius: 4px;
+    color: #1e40af; padding: 3px 8px; font-size: 11px; font-weight: bold;
 }
-
-#btn_align:hover {
-    background-color: #bfdbfe /* --luosiding-info-200 */;
-    color: #1e3a8a /* --luosiding-info-900 */;
-}
+#btn_align:hover { background-color: #bfdbfe; }
+#secondary_button[danger="true"] { color: #dc2626; font-weight: bold; }
 
 /* ═══════════════════════════════════════════════════════════════
    live_clip_page 专用样式
    ═══════════════════════════════════════════════════════════════ */
 
-#cover_edit_dialog {
-    background-color: #ffffff /* --surface */;
-    color: #151722 /* --foreground */;
-}
+#cover_edit_dialog { background-color: #ffffff; color: #1d1d1f; }
 
-#cover_section_title {
-    font-size: 13px;
-    color: #73788c /* --luosiding-slate-300 */;
-}
+#cover_section_title { font-size: 13px; color: #6b7280; }
 
-#cover_video_widget {
-    background-color: #000000;
-    border-radius: 8px /* --radius-md */;
-    border: 1px solid #c3c6d2 /* --border */;
-}
+#cover_video_widget { background-color: #000000; border-radius: 6px; border: 1px solid #d2d2d7; }
 
-#cover_time_label {
-    color: #73788c /* --luosiding-slate-300 */;
-}
+#cover_time_label { color: #6b7280; }
 
 #cover_preview_h,
-#cover_preview_v {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border-radius: 8px /* --radius-md */;
-    border: 1px solid #c3c6d2 /* --border */;
-}
+#cover_preview_v { background-color: #f0f0f5; border-radius: 6px; border: 1px solid #d2d2d7; }
 
-#clip_list_item_title {
-    font-size: 13px;
-    color: #151722 /* --foreground */;
-}
+#clip_list_item_title { font-size: 13px; color: #1d1d1f; }
 
-#clip_list_item_score {
-    color: #f59e0b /* --color-warning */;
-    font-weight: 700;
-}
+#clip_list_item_score { color: #eab308; font-weight: bold; }
 
-#clip_list_item_meta {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 11px;
-}
+#clip_list_item_meta { color: #6b7280; font-size: 11px; }
 
-#clip_list_separator {
-    background-color: #c3c6d2 /* --border */;
-    max-height: 1px;
-}
+#clip_list_separator { background-color: #e5e5ea; max-height: 1px; }
 
-#clip_list_item_time {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 11px;
-}
+#clip_list_item_time { color: #6b7280; font-size: 11px; }
 
-#export_step_label {
-    padding: 6px 12px;
-}
+#export_step_label { padding: 6px 12px; }
+#export_step_label[status="active"] { color: #2563eb; font-weight: bold; background-color: rgba(37,99,235,0.1); border-radius: 4px; }
+#export_step_label[status="done"] { color: #059669; background-color: rgba(5,150,105,0.08); border-radius: 4px; }
+#export_step_label[status="pending"] { color: #86868b; }
 
-#export_step_label[status="active"] {
-    color: #3b82f6 /* --color-info */;
-    font-weight: 700;
-    background-color: rgba(59, 130, 246, 0.1);
-    border-radius: 6px /* --radius-sm */;
-}
+#clip_page_title { font-size: 14px; color: #1d1d1f; }
 
-#export_step_label[status="done"] {
-    color: #10b981 /* --color-success */;
-    background-color: rgba(16, 185, 129, 0.08);
-    border-radius: 6px /* --radius-sm */;
-}
+#clip_status_label { color: #6b7280; }
 
-#export_step_label[status="pending"] {
-    color: #73788c /* --luosiding-slate-300 */;
-}
+#export_result_label { color: #10b981; font-weight: bold; }
 
-#clip_page_title {
-    font-size: 14px;
-    color: #151722 /* --foreground */;
-}
-
-#clip_status_label {
-    color: #73788c /* --luosiding-slate-300 */;
-}
-
-#export_result_label {
-    color: #10b981 /* --color-success */;
-    font-weight: 700;
-}
-
-#video_info_label {
-    color: #3b82f6 /* --color-info */;
-}
+#video_info_label { color: #3b82f6; }
 
 /* ═══════════════════════════════════════════════════════════════
    模型配置 Ollama
    ═══════════════════════════════════════════════════════════════ */
 
 #model_groupbox {
-    font-size: 13px;
-    font-weight: 700;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-    margin-top: 12px;
-    background-color: rgba(255, 255, 255, 0.5);
+    font-size: 13px; font-weight: bold;
+    border: 1px solid #e5e5ea; border-radius: 8px; margin-top: 12px;
 }
-
 #model_groupbox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
+    subcontrol-origin: margin; subcontrol-position: top left;
     padding: 0 8px;
 }
+#ollama_status_lbl { color: #86868b; font-size: 12px; }
+#ollama_models_lbl { color: #6b7280; font-size: 11px; }
+#ollama_runners_warn { color: #dc2626; font-size: 12px; }
+#ollama_progress_lbl { color: #d97706; font-size: 11px; }
 
-#ollama_models_lbl {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 11px;
-}
+#model_groupbox[section="llm"]::title     { color: #2563eb; }
+#model_groupbox[section="vox"]::title     { color: #7c3aed; }
+#model_groupbox[section="whisper"]::title { color: #059669; }
+#model_groupbox[section="ocr"]::title     { color: #d97706; }
 
-#ollama_runners_warn {
-    color: #ef4444 /* --color-error */;
-    font-size: 12px;
-}
-
-#ollama_progress_lbl {
-    color: #f59e0b /* --color-warning */;
-    font-size: 11px;
-}
-
-#model_groupbox[section="llm"]::title     { color: #3b82f6 /* --color-info */; }
-#model_groupbox[section="vox"]::title     { color: #7c3aed /* --luosiding-violet-600 */; }  # noqa: E501
-#model_groupbox[section="whisper"]::title { color: #10b981 /* --color-success */; }
-#model_groupbox[section="ocr"]::title     { color: #f59e0b /* --color-warning */; }
-
-#comfyui_local_status {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 12px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   AI 重命名 / 视频播放器 对话框
-   ═══════════════════════════════════════════════════════════════ */
-
-#aiRenameTable {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-#aiRenameLogPanel,
-#aiRenameLogTitle {
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 8px /* --radius-md */;
-}
-
-#aiRenameModelInfo {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 12px;
-}
-
-#aiRenameDesc {
-    color: #5f6475 /* --muted-foreground */;
-    font-size: 12px;
-}
-
-#videoPlayerDialog {
-    background-color: #ffffff /* --surface */;
-}
-
-#videoPlayerLeft,
-#videoPlayerRight {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-#videoPlayerInfoLabel,
-#videoPlayerFileLabel {
-    color: #151722 /* --foreground */;
-    font-size: 13px;
-    font-weight: 600;
-}
-
-#videoPlayerFrameStatus,
-#videoPlayerTime,
-#videoPlayerHint {
-    color: #73788c /* --luosiding-slate-300 */;
-    font-size: 12px;
-}
-
-#videoPlayerDivider {
-    background-color: #c3c6d2 /* --border */;
-    max-height: 1px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   其他 / Misc
-   ═══════════════════════════════════════════════════════════════ */
-
-#batchReplaceDialog {
-    background-color: #ffffff /* --surface */;
-}
-
-#terminalPrompt {
-    color: #10b981 /* --color-success */;
-    font-family: 'Consolas', monospace;
-}
-
-#themeSplitter::handle {
-    background-color: #c3c6d2 /* --surface-container */;
-}
-
-#themeSeparator {
-    background-color: #c3c6d2 /* --surface-container */;
-    max-height: 1px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   启动/关闭闪屏 · 激活对话框 / Splash & Activation
-   ═══════════════════════════════════════════════════════════════ */
-
-QWidget#startup_splash {
-    background: transparent;
-}
-
-QFrame#splash_card {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 14px /* --radius-2xl */;
-}
-
-QFrame#splash_card QLabel {
-    color: #151722 /* --foreground */;
-    background: transparent;
-    font-family: "Microsoft YaHei", "微软雅黑";
-}
-
-QLabel#splash_title {
-    font-size: 18px;
-    color: #151722 /* --foreground */;
-}
-
-QLabel#splash_status {
-    font-size: 13px;
-    color: #4f46e5 /* --primary */;
-}
-
-QDialog#close_splash {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 14px /* --radius-2xl */;
-}
-
-QDialog#close_splash QLabel {
-    color: #151722 /* --foreground */;
-    font-family: "Microsoft YaHei", "微软雅黑";
-}
-
-QLabel#close_splash_title {
-    font-size: 15px;
-    color: #151722 /* --foreground */;
-}
-
-QLabel#close_splash_status {
-    font-size: 12px;
-    color: #73788c /* --luosiding-slate-300 */;
-}
-
-QLabel#activation_title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-}
-
-QLabel#activation_machine_id {
-    color: #4f46e5 /* --primary */;
-    font-family: monospace;
-    font-size: 12px;
-    background-color: #f0f1f7 /* --surface-dim */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 6px /* --radius-sm */;
-    padding: 6px 10px;
-}
-
-QPlainTextEdit#activation_code_edit {
-    font-family: Consolas, "Courier New", monospace;
-    font-size: 12px;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   帮助页卡片（关于）/ About
-   ═══════════════════════════════════════════════════════════════ */
-
-#brand_card,
-#license_card,
-#version_card {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 12px /* --radius-xl */;
-}
-
-QLabel#about_app_title {
-    font-size: 18px;
-    font-weight: 700;
-    color: #151722 /* --foreground */;
-}
-
-QLabel#about_dev_info {
-    font-size: 13px;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-QLabel#about_contact {
-    font-size: 13px;
-    color: #151722 /* --foreground */;
-}
-
-QLabel#about_license_title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #10b981 /* --color-success */;
-}
-
-QLabel#about_version_title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #3b82f6 /* --color-info */;
-}
-
-QLineEdit#about_machine_id {
-    color: #3b82f6 /* --color-info */;
-    font-size: 12px;
-    font-family: Consolas, monospace;
-    padding: 3px 8px;
-}
-
-QPushButton#about_copy_btn {
-    font-size: 11px;
-    padding: 4px 8px;
-}
-
-QLabel#about_section_value {
-    font-size: 12px;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   节拍视图（智能混剪）专用 / Beat View
-   ═══════════════════════════════════════════════════════════════ */
-
-#segment_card {
-    background-color: #ffffff /* --surface */;
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-}
-
-QScrollArea#beat_cards_scroll {
-    border: 1px solid #c3c6d2 /* --border */;
-    border-radius: 10px /* --radius-lg */;
-    background: #f0f1f7 /* --surface-dim */;
-}
-
-QLabel#beat_time_label {
-    background-color: #f0f1f7 /* --surface-dim */;
-    color: #f59e0b /* --color-warning */;
-    font-family: Consolas, monospace;
-    font-size: 9pt;
-    font-weight: 700;
-    border-radius: 3px;
-    padding: 2px 6px;
-}
-
-QLabel#beat_clips_info {
-    color: #10b981 /* --color-success */;
-    font-weight: 700;
-}
-
-QLabel#beat_preview_title {
-    color: #f59e0b /* --color-warning */;
-    font-weight: 700;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   表格操作按钮 / 开发中占位 / Table Action & Dev Placeholder
-   ═══════════════════════════════════════════════════════════════ */
-
-QPushButton#table_action_button {
-    border: none;
-    background: transparent;
-    padding: 1px 5px;
-    font-size: 13px;
-    color: #73788c /* --luosiding-slate-300 */;
-    border-radius: 4px;
-}
-
-QPushButton#table_action_button:hover {
-    color: #151722 /* --foreground */;
-    background: rgba(0, 0, 0, 0.07);
-}
-
-QLabel#dev_icon {
-    font-size: 48px;
-}
-
-QLabel#dev_title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #5f6475 /* --muted-foreground */;
-}
-
-QLabel#dev_subtitle {
-    font-size: 14px;
-    color: #9ca1b1 /* --luosiding-slate-200 */;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   Badge / 标签徽章
-   ═══════════════════════════════════════════════════════════════ */
-
-QLabel#badge,
-QLabel.badge {
-    padding: 2px 8px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-QLabel#badge.success,
-QLabel.badge.success { background-color: #10b981 /* --color-success */; color: #ffffff; }  # noqa: E501
-QLabel#badge.warning,
-QLabel.badge.warning { background-color: #f59e0b /* --color-warning */; color: #151722; }  # noqa: E501
-QLabel#badge.error,
-QLabel.badge.error { background-color: #ef4444 /* --color-error */; color: #ffffff; }
-QLabel#badge.info,
-QLabel.badge.info { background-color: #3b82f6 /* --color-info */; color: #ffffff; }
-QLabel#badge.platform,
-QLabel.badge.platform { background-color: #f0f1f7 /* --surface-dim */; color: #151722; border-radius: 8px; }  # noqa: E501
-QLabel#badge.tag,
-QLabel.badge.tag { background-color: #c3c6d2 /* --surface-container */; color: #151722; border-radius: 8px; }  # noqa: E501
-
-/* ═══════════════════════════════════════════════════════════════
-   Tab 按钮 / Tab Button
-   ═══════════════════════════════════════════════════════════════ */
-
-QPushButton#tab_button {
-    background-color: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: #73788c /* --luosiding-slate-300 */;
-    padding: 10px 20px;
-    border-radius: 8px 8px 0 0;
-    font-weight: 500;
-}
-
-QPushButton#tab_button:hover {
-    background-color: rgba(99, 102, 241, 0.08) /* --interactive-hover */;
-    color: #151722 /* --foreground */;
-}
-
-QPushButton#tab_button:checked,
-QPushButton#tab_button[active="true"] {
-    background-color: rgba(99, 102, 241, 0.08);
-    color: #4f46e5 /* --primary */;
-    font-weight: 700;
-    border-bottom: 2px solid #4f46e5 /* --primary */;
-}
-""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)  # noqa: E501
+#comfyui_local_status { color: #86868b; font-size: 12px; }
+""".replace("__CHECK_LIGHT_URL__", _CHECK_LIGHT_URL).replace("__ARROW_DOWN_LIGHT_URL__", _ARROW_DOWN_LIGHT_URL)

@@ -21,17 +21,10 @@
         "path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\六六-声音-样本1.mp3"
     },
     {
-        "id": "cba32e4e",
+        "id": "f5defdd2",
         "name": "100_oral5",
         "filename": "100_oral5.wav",
         "ref_text": "就是好久不见，你还记得咱们大学那会儿吗？你听到的是开源项目TTS list的，那可是风华正茂的岁月啊！那还记得咱俩爬那个山顶看那日出吗？那当时许的那个愿望啊，我到现在还记得呢。",
         "path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\100_oral5.wav"
-    },
-    {
-        "id": "f297a03c",
-        "name": "庄导",
-        "filename": "惠普暗影精灵0727(1).wav",
-        "ref_text": "玩这种重视视觉体验的游戏，我手头这台惠普暗影精灵用起来真的是太爽了。它搭载着全新酷睿Ultra 7处理器加ITX5060显卡，性能给到了极致。正因为性能完全溢出，跑这种画质拉满的大风景时，散热能压的死一样的安静，耳边只有纯粹的游戏音效。",
-        "path": "D:\\Project\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\惠普暗影精灵0727(1).wav"
     }
 ]

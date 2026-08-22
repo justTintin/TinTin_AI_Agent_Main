@@ -1,5 +1,3 @@
-import contextlib
-import json
 import os
 import sys
 
@@ -27,9 +25,9 @@ if getattr(sys, "frozen", False):
     _BUNDLE_STUDIO_DIR = os.path.join(_BUNDLE_DIR, "studio")      # 打包进去的 studio/ 资源
 else:
     # 源码模式：保持原有行为
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # studio/  # noqa: E501
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # studio/
     WORKSPACE_ROOT = os.path.dirname(PROJECT_ROOT)                               # 工程根
-    _BUNDLE_DIR = PROJECT_ROOT                                                   # 资源也在 studio/  # noqa: E501
+    _BUNDLE_DIR = PROJECT_ROOT                                                   # 资源也在 studio/
     _BUNDLE_STUDIO_DIR = PROJECT_ROOT
 
 # Central runtime dir (studio/.runtime/)
@@ -38,41 +36,14 @@ LOG_DIR = os.path.join(RUNTIME_DIR, "logs")
 TMP_DIR = os.path.join(RUNTIME_DIR, "tmp")
 COOKIES_DIR = os.path.join(RUNTIME_DIR, "cookies")
 ACCOUNTS_DIR = os.path.join(PROJECT_ROOT, "accounts")
-
-# ── 输出总目录（可在「系统设置 → 本地配置」中自定义）────────────────────
-_DEFAULT_OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
-_LOCAL_CFG_FILE = os.path.join(PROJECT_ROOT, "config", "local_config.json")
-
-def _resolve_outputs_dir():
-    """优先读取 local_config.json 中用户配置的 output_dir，否则回退默认值。"""
-    try:
-        if os.path.isfile(_LOCAL_CFG_FILE):
-            import json as _json
-            with open(_LOCAL_CFG_FILE, encoding="utf-8") as f:
-                data = _json.load(f)
-            d = (data.get("output_dir") or data.get("cache_dir") or "").strip()
-            if d:
-                os.makedirs(d, exist_ok=True)
-                return d
-    except (OSError, json.JSONDecodeError):
-        pass
-    return _DEFAULT_OUTPUTS_DIR
-
-OUTPUTS_DIR = _resolve_outputs_dir()
+OUTPUTS_DIR = os.path.join(PROJECT_ROOT, "outputs")
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
-SKILLS_DIR = os.path.join(DATA_DIR, "skills")
-SKILLS_INDEX_FILE = os.path.join(DATA_DIR, "skills_index.json")
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 VIDEO_CONFIG_FILE = os.path.join(CONFIG_DIR, "video_config.json")
 ERP_CONFIG_FILE = os.path.join(CONFIG_DIR, "erp_config.json")
 UPDATE_CONFIG_FILE = os.path.join(CONFIG_DIR, "update.json")
 CONFIG_INI_FILE = os.path.join(PROJECT_ROOT, "config.ini")
-AUTO_LISTING_DIR = os.path.join(DATA_DIR, "auto_listing")
-AUTO_LISTING_SYNC_DIR = os.path.join(AUTO_LISTING_DIR, "sync")
-AUTO_LISTING_RESULTS_DIR = os.path.join(AUTO_LISTING_DIR, "results")
-AUTO_LISTING_CHROME_USER_DATA = os.path.join(AUTO_LISTING_DIR, "chrome_user_data")
-AUTO_LISTING_CONFIG_FILE = os.path.join(CONFIG_DIR, "auto_listing_config.json")
 VOICE_SAMPLES_DIR = os.path.join(PROJECT_ROOT, "assets", "voice_samples")
 BACKUP_DIR = os.path.join(PROJECT_ROOT, "backups")
 PRODUCT_LIBRARY_FILE = os.path.join(DATA_DIR, "product_library.json")
@@ -92,15 +63,11 @@ VOICE_SAMPLES_BUNDLE_DIR = os.path.join(BUNDLE_ASSETS_DIR, "voice_samples")
 APPS_DIR = os.path.join(WORKSPACE_ROOT, "apps")
 PW_BROWSERS_DIR = os.path.join(APPS_DIR, "pw-browsers")
 WHISPER_MODELS_DIR = os.path.join(APPS_DIR, "whisper-models")
-# 注：vsr-v1.1.1（旧版去字幕，已废弃删除）现统一指向 v1.4.0。
-# VSR_DIR 仅为兼容旧代码（subtitle_removal_page 孤儿页）保留别名。
-VSR_V14_DIR = os.path.join(APPS_DIR, "vsr-v1.4.0")
-VSR_DIR = VSR_V14_DIR
-# OCR 已迁移至服务端 POST /material/ocr，不再使用本地 PaddleOCR 环境/脚本。
-# 原 PADDLEOCR_VENV_DIR/PADDLEOCR_PYTHON/PADDLEOCR_SCRIPT/IMAGE_FOLDER_OCR_SCRIPT 已移除。
+# VSR 去字幕已服务端化：客户端不再内置本地 VSR 算法包，去字幕由算力服务端执行（见 utils/vsr_client.py）
+# PaddleOCR 已服务端化：客户端不再内置本地 OCR 引擎，识别由算力服务端执行（见 utils/ocr_client.py）
 REMBG_DIR = os.path.join(APPS_DIR, "rembg")
 # 只读资源：assets 下的内置浏览器包（frozen 时在 _BUNDLE_DIR）
-BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")  # noqa: E501
+BUNDLED_PW_BROWSERS_ZIP = os.path.join(_BUNDLE_STUDIO_DIR, "assets", "playwright", "pw-browsers-win.zip")
 CREATOR_CONTENT_MANAGE_URL = "https://creator.douyin.com/creator-micro/content/manage"
 DREAMINA_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "dreamina")
 COVER_OUTPUT_DIR = os.path.join(OUTPUTS_DIR, "covers")
@@ -111,8 +78,6 @@ VOXCPM2_DIR = os.path.join(APPS_DIR, "voxcpm2")
 QWEN_IMAGE_LAYERED_DIR = os.path.join(APPS_DIR, "Qwen-Image-Layered")
 COMFYUI_DIR = os.path.join(APPS_DIR, "comfyui")
 ASSET_BROWSER_DIR = os.path.join(APPS_DIR, "asset-browser")
-# 浏览器扩展模块（随 apps/ 一起打包分发；浏览器开发者模式直接加载此目录）
-EXTENSION_DIR = os.path.join(APPS_DIR, "browser-extension")
 MATERIALS_DIR = os.path.join(OUTPUTS_DIR, "materials")
 # JSON 元数据目录（固定项目内部，kb_items.json / kb_sync.json 存放于此）
 KNOWLEDGE_MATERIALS_DIR = os.path.join(MATERIALS_DIR, "knowledge")
@@ -178,7 +143,7 @@ if os.path.exists(_kb_dir_cfg):
         _custom = (_kd.get("media_dir") or _kd.get("materials_dir") or "").strip()
         if _custom and os.path.isdir(_custom):
             KNOWLEDGE_MEDIA_DIR = _custom
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
 
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -188,12 +153,10 @@ os.makedirs(ACCOUNTS_DIR, exist_ok=True)
 os.makedirs(WHISPER_MODELS_DIR, exist_ok=True)
 os.makedirs(OUTPUTS_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(AUTO_LISTING_DIR, exist_ok=True)
-os.makedirs(AUTO_LISTING_SYNC_DIR, exist_ok=True)
-os.makedirs(AUTO_LISTING_RESULTS_DIR, exist_ok=True)
-os.makedirs(AUTO_LISTING_CHROME_USER_DATA, exist_ok=True)
 
 _old_product_file = os.path.join(DATA_DIR, "knowledge_base.json")
 if os.path.exists(_old_product_file) and not os.path.exists(PRODUCT_LIBRARY_FILE):
-    with contextlib.suppress(OSError):
+    try:
         os.rename(_old_product_file, PRODUCT_LIBRARY_FILE)
+    except OSError:
+        pass

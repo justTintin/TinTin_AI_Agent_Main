@@ -1,38 +1,37 @@
+# -*- coding: utf-8 -*-
 """Ollama 远程客户端（纯远程模式，不再管理本地进程）。
 
 所有推理请求走 llm_vision_api_url 配置的远程 Ollama 服务。
 本模块仅保留远程只读 API：连通性检测、模型列表、配置读取。
 """
-import json
 import os
-
 import requests
-
-from utils.http_client import resilient_get
 from utils.logger_utils import log
+from utils.http_client import resilient_get
 
 
 def _read_ai_config() -> dict:
     try:
-        import json
-
         from config.paths import AI_CONFIG_FILE
+        import json
         if os.path.isfile(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, encoding="utf-8") as f:
+            with open(AI_CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except Exception:
         pass
     return {}
 
 
 def _read_ollama_api() -> str:
-    """返回远程 Ollama API 基地址。优先读 llm_vision_api_url，否则从 compute_server_url 派生。"""
+    """返回远程 Ollama API 基地址。优先读 llm_vision_api_url，否则走统一服务端地址。"""
     cfg = _read_ai_config()
     url = (cfg.get("llm_vision_api_url") or "").strip()
     if not url:
-        base = (cfg.get("compute_server_url") or "").strip()
-        if base:
-            url = base
+        from utils.server_resolver import get_server_url
+        try:
+            url = get_server_url()
+        except RuntimeError:
+            pass
     if not url:
         return "http://127.0.0.1:11434"
     if not url.startswith("http://") and not url.startswith("https://"):
@@ -61,7 +60,7 @@ class OllamaManager:
             ok = r.status_code == 200
             log.info(f"[Ollama] GET {url} -> HTTP {r.status_code}")
             return ok
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             log.warning(f"[Ollama] GET {url} 失败: {e}")
             return False
 
@@ -75,10 +74,10 @@ class OllamaManager:
                 data = r.json()
                 models = data.get("models") or data.get("data") or []
                 return [m.get("name", m.get("model", str(m))) for m in models]
-        except (requests.exceptions.RequestException, json.JSONDecodeError):
+        except Exception:
             pass
         return []
 
     def get_configured_model(self) -> str:
-        """视觉模型由服务端选择，客户端不再配置模型名。"""
-        return ""
+        """从 ai_config.json 读取当前配置的视觉模型名；读不到返回空串。"""
+        return str(_read_ai_config().get("llm_vision_model", "") or "").strip()

@@ -11,7 +11,6 @@ except Exception:
 import argparse
 import cv2
 import multiprocessing
-import traceback
 
 # Add backend to system path so backend imports find config and tools
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -104,23 +103,7 @@ def main():
 
     sr.add_progress_listener(progress_listener)
 
-    # 顶层兜底：backend/main.py 内层 try 只覆盖了 inpaint 调用本身，
-    # 模型加载、run() 前半段、merge_audio_to_video 等处的异常会绕过它，
-    # 导致子进程被异常终止、前端只拿到一个无信息的退出码（常表现为 -1）。
-    # 这里统一捕获并强制 flush，保证前端能从日志里看到真实异常（如 CUDA OOM）。
-    try:
-        sr.run()
-    except Exception:
-        print("[ERROR] Subtitle removal crashed with an uncaught exception:", flush=True)
-        traceback.print_exc()
-        # 强制刷新，避免崩溃前缓冲区里的 traceback 丢失
-        try:
-            sys.stdout.flush()
-            sys.stderr.flush()
-        except Exception:
-            pass
-        # 退出码 2：明确表示“后端捕获到 Python 异常”，区别于 -1（原生崩溃）与 1（逻辑未完成）
-        sys.exit(2)
+    sr.run()
 
     if sr.isFinished:
         print("[PROGRESS] 100", flush=True)

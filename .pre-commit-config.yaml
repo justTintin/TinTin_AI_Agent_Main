@@ -1,0 +1,28 @@
+repos:
+  - repo: local
+    hooks:
+      - id: py-compile-staged
+        name: py_compile staged python files
+        entry: python_embeded/python.exe -m py_compile
+        language: system
+        files: \.py$
+        pass_filenames: true
+      - id: ruff-check-fix
+        name: ruff check and fix
+        entry: .venv/Scripts/python.exe -m ruff check --fix --exit-non-zero-on-fix
+        language: system
+        files: ^(studio|tests)/.*\.py$
+        pass_filenames: true
+      - id: mypy-staged
+        name: mypy type check
+        entry: .venv/Scripts/python.exe -m mypy
+        language: system
+        files: ^(studio|tests)/.*\.py$
+        pass_filenames: true
+      - id: unit-tests
+        name: run unit tests
+        entry: python_embeded/python.exe -m unittest discover tests/unit
+        language: system
+        pass_filenames: false
+        always_run: false
+        stages: [pre-push]

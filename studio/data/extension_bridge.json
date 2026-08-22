@@ -1,0 +1,10 @@
+{
+  "port": 51233,
+  "save_dir": "D:/资产输出\\materials\\collected",
+  "auto_start": true,
+  "server_scan_dir": "",
+  "nas_sync_dir": "X:/插件素材",
+  "cookies_browser": "",
+  "auto_subtitle": false,
+  "proxy": "127.0.0.1:10808"
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "screensGenerated": 3,
+  "coreComponentsUsed": ["button", "card", "input", "navigation", "table", "badge"],
+  "supportComponentsUsed": [],
+  "previewClassReuseRate": 0.85,
+  "hasProductContext": true,
+  "inventedComponents": [],
+  "renderedFromEvidence": [],
+  "interactiveStatesRendered": ["hover", "focus", "active", "disabled"],
+  "primaryActionPerScreen": ["创建任务", "新建成片", "保存设置"],
+  "warnings": []
+}

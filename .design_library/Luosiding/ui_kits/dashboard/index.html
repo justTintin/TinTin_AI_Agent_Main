@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luosiding Dashboard UI Kit</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<link rel="stylesheet" href="../../components.css">
+<script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:var(--color-background);color:var(--color-foreground);font-family:var(--font-family-base);font-size:var(--font-size-body)}
+.uikit-shell{width:100%;max-width:1184px;margin:0 auto;overflow:hidden;display:grid;grid-template-columns:var(--uikit-sidebar-w,240px) minmax(0,1fr);gap:var(--space-4);padding:var(--space-4)}
+.uikit-sidebar,.uikit-main,.uikit-toolbar{min-width:0}
+.uikit-sidebar{overflow:hidden;max-width:100%;background:var(--color-sidebar);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:var(--space-4)}
+.uikit-main{overflow:hidden}
+.uikit-toolbar{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-4);flex-wrap:wrap}
+.uikit-responsive-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4);margin-bottom:var(--space-4)}
+.uikit-table-wrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+.uikit-truncate{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.uikit-nowrap{white-space:nowrap;flex-shrink:0}
+.uikit-action-cell{display:flex;align-items:center;gap:8px;min-width:0;max-width:160px;overflow:hidden}
+.uikit-action{min-width:0;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-component]{min-width:0;max-width:100%;overflow:hidden}
+.sidebar-brand{display:flex;align-items:center;gap:var(--space-2);font-weight:var(--font-weight-h4);margin-bottom:var(--space-4);color:var(--color-on-surface)}
+.sidebar-brand i{color:var(--color-primary)}
+.sidebar-nav{display:flex;flex-direction:column;gap:var(--space-1)}
+.sidebar-foot{margin-top:var(--space-6);padding-top:var(--space-4);border-top:1px solid var(--color-border);color:var(--color-muted-foreground);font-size:var(--font-size-caption)}
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4);gap:var(--space-2);flex-wrap:wrap}
+.page-title{font-size:var(--font-size-h2);font-weight:var(--font-weight-h2);margin:0}
+.metric-value{font-size:var(--font-size-h2);font-weight:var(--font-weight-h1);color:var(--color-on-surface)}
+.metric-label{font-size:var(--font-size-caption);color:var(--color-muted-foreground)}
+.metric-delta{font-size:var(--font-size-caption);margin-top:var(--space-1)}
+.positive{color:var(--color-success)}.negative{color:var(--color-error)}
+.chart-bar{display:flex;align-items:flex-end;gap:var(--space-2);height:96px;padding-top:var(--space-2)}
+.bar{flex:1;background:var(--color-primary);border-radius:var(--radius-sm) var(--radius-sm) 0 0;min-width:16px}
+.bar:nth-child(2){background:var(--luosiding-violet-500)}
+.bar:nth-child(3){background:var(--luosiding-success-400)}
+.bar:nth-child(4){background:var(--luosiding-warning-400)}
+.bar:nth-child(5){background:var(--luosiding-error-400)}
+.bar:nth-child(6){background:var(--luosiding-info-400)}
+.bar:nth-child(7){background:var(--luosiding-indigo-400)}
+.screen{display:none;animation:fade .25s ease}
+.screen.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);padding:var(--space-3) 0;border-bottom:1px solid var(--color-border)}
+.setting-row:last-child{border-bottom:none}
+.filter-group{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.nav-crumbs{margin-bottom:var(--space-4)}
+@media(max-width:900px){.uikit-shell{grid-template-columns:minmax(0,1fr)}.uikit-sidebar{display:none}.uikit-responsive-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:640px){.uikit-toolbar{flex-direction:column;align-items:stretch}.uikit-responsive-grid{grid-template-columns:minmax(0,1fr)}.page-header{flex-direction:column;align-items:stretch;gap:var(--space-2)}}
+</style>
+</head>
+<body>
+<div class="uikit-shell" data-layout-guard="uikit-v1" style="--uikit-sidebar-w:240px">
+  <aside class="uikit-sidebar" data-component="navigation">
+    <div class="sidebar-brand"><i data-lucide="layout-dashboard" style="width:24px;height:24px;display:inline-block"></i><span class="uikit-truncate">洛思丁创作台</span></div>
+    <nav class="sidebar-nav">
+      <div class="sb-item active" data-target="overview"><i data-lucide="layout-dashboard" style="width:20px;height:20px;display:inline-block"></i><span class="uikit-truncate">工作台概览</span></div>
+      <div class="sb-item" data-target="tasks"><i data-lucide="film" style="width:20px;height:20px;display:inline-block"></i><span class="uikit-truncate">成片任务</span></div>
+      <div class="sb-item" data-target="settings"><i data-lucide="settings" style="width:20px;height:20px;display:inline-block"></i><span class="uikit-truncate">系统设置</span></div>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="sb-item"><i data-lucide="user" style="width:20px;height:20px;display:inline-block"></i><span class="uikit-truncate">管理员</span></div>
+      <div class="sb-item"><i data-lucide="log-out" style="width:20px;height:20px;display:inline-block"></i><span class="uikit-truncate">退出登录</span></div>
+    </div>
+  </aside>
+
+  <main class="uikit-main">
+    <!-- 工作台概览 -->
+    <section class="screen active" id="screen-overview">
+      <header class="page-header">
+        <h1 class="page-title uikit-truncate">工作台概览</h1>
+        <div class="uikit-toolbar">
+          <div class="input-wrap" data-component="input">
+            <input class="input search" type="text" placeholder="搜索任务">
+            <span class="input-icon"><i data-lucide="search" style="width:20px;height:20px;display:inline-block"></i></span>
+          </div>
+          <button class="btn icon size-md" data-component="button"><i data-lucide="bell" style="width:20px;height:20px;display:inline-block"></i></button>
+          <button class="btn primary size-md" data-component="button"><i data-lucide="plus" style="width:16px;height:16px;display:inline-block"></i>创建任务</button>
+        </div>
+      </header>
+      <div class="uikit-responsive-grid">
+        <div class="card standard" data-component="card">
+          <div class="card-icon"><i data-lucide="film" style="width:24px;height:24px;display:inline-block"></i></div>
+          <div class="card-title uikit-truncate">今日成片数</div>
+          <div class="metric-value">128</div>
+          <div class="metric-delta positive">↑ 12% 较昨日</div>
+        </div>
+        <div class="card standard" data-component="card">
+          <div class="card-icon"><i data-lucide="play" style="width:24px;height:24px;display:inline-block"></i></div>
+          <div class="card-title uikit-truncate">运行中任务</div>
+          <div class="metric-value">24</div>
+          <div class="metric-delta positive">↑ 3 个新增</div>
+        </div>
+        <div class="card standard" data-component="card">
+          <div class="card-icon"><i data-lucide="eye" style="width:24px;height:24px;display:inline-block"></i></div>
+          <div class="card-title uikit-truncate">待审核任务</div>
+          <div class="metric-value">7</div>
+          <div class="metric-delta positive">↓ 2 个已处理</div>
+        </div>
+        <div class="card standard" data-component="card">
+          <div class="card-icon"><i data-lucide="rotate-ccw" style="width:24px;height:24px;display:inline-block"></i></div>
+          <div class="card-title uikit-truncate">失败重试</div>
+          <div class="metric-value">2</div>
+          <div class="metric-delta negative">↑ 1 个需关注</div>
+        </div>
+      </div>
+      <div class="card standard" data-component="card">
+        <div class="card-title uikit-truncate">近7日成片趋势</div>
+        <div class="chart-bar"><div class="bar" style="height:40%"></div><div class="bar" style="height:70%"></div><div class="bar" style="height:55%"></div><div class="bar" style="height:80%"></div><div class="bar" style="height:45%"></div><div class="bar" style="height:65%"></div><div class="bar" style="height:90%"></div></div>
+      </div>
+    </section>
+
+    <!-- 成片任务 -->
+    <section class="screen" id="screen-tasks">
+      <header class="page-header">
+        <h1 class="page-title uikit-truncate">成片任务</h1>
+        <div class="uikit-toolbar">
+          <div class="input-wrap" data-component="input">
+            <input class="input search" type="text" placeholder="搜索任务">
+            <span class="input-icon"><i data-lucide="search" style="width:20px;height:20px;display:inline-block"></i></span>
+          </div>
+          <button class="btn primary size-md" data-component="button"><i data-lucide="plus" style="width:16px;height:16px;display:inline-block"></i>新建成片</button>
+        </div>
+      </header>
+      <div class="uikit-toolbar filter-group">
+        <button class="btn secondary size-sm" data-component="button">全部</button>
+        <button class="btn ghost size-sm" data-component="button">运行中</button>
+        <button class="btn ghost size-sm" data-component="button">已完成</button>
+        <button class="btn ghost size-sm" data-component="button">失败</button>
+      </div>
+      <div class="uikit-table-wrap" data-component="table">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="uikit-nowrap">任务名称</th><th class="uikit-nowrap">平台</th><th class="uikit-nowrap">状态</th><th class="uikit-nowrap">进度</th><th class="uikit-nowrap">更新时间</th><th class="uikit-nowrap">操作</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="uikit-truncate">夏季穿搭一键成片</td>
+                <td><span class="badge platform sm" data-component="badge">小红书</span></td>
+                <td><span class="badge sm status-success" data-component="badge">运行中</span></td>
+                <td class="uikit-nowrap">68%</td>
+                <td class="uikit-nowrap">10:23</td>
+                <td class="uikit-action-cell"><a class="act uikit-action" href="#">详情</a><button class="btn icon size-sm" data-component="button"><i data-lucide="edit" style="width:16px;height:16px;display:inline-block"></i></button></td>
+              </tr>
+              <tr>
+                <td class="uikit-truncate">智能混剪·美食探店</td>
+                <td><span class="badge platform sm" data-component="badge">抖音</span></td>
+                <td><span class="badge sm status-warning" data-component="badge">待审核</span></td>
+                <td class="uikit-nowrap">100%</td>
+                <td class="uikit-nowrap">09:56</td>
+                <td class="uikit-action-cell"><a class="act uikit-action" href="#">详情</a><button class="btn icon size-sm" data-component="button"><i data-lucide="edit" style="width:16px;height:16px;display:inline-block"></i></button></td>
+              </tr>
+              <tr class="selected">
+                <td class="uikit-truncate">品牌口播字幕版</td>
+                <td><span class="badge platform sm" data-component="badge">视频号</span></td>
+                <td><span class="badge sm status-error" data-component="badge">失败</span></td>
+                <td class="uikit-nowrap">32%</td>
+                <td class="uikit-nowrap">09:12</td>
+                <td class="uikit-action-cell"><a class="act uikit-action" href="#">重试</a><button class="btn icon size-sm" data-component="button"><i data-lucide="trash" style="width:16px;height:16px;display:inline-block"></i></button></td>
+              </tr>
+              <tr>
+                <td class="uikit-truncate">产品对比横屏版</td>
+                <td><span class="badge platform sm" data-component="badge">B站</span></td>
+                <td><span class="badge sm status-info" data-component="badge">排队中</span></td>
+                <td class="uikit-nowrap">0%</td>
+                <td class="uikit-nowrap">08:47</td>
+                <td class="uikit-action-cell"><a class="act uikit-action" href="#">详情</a><button class="btn icon size-sm" data-component="button"><i data-lucide="edit" style="width:16px;height:16px;display:inline-block"></i></button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 系统设置 -->
+    <section class="screen" id="screen-settings">
+      <header class="page-header">
+        <h1 class="page-title uikit-truncate">系统设置</h1>
+        <div class="uikit-toolbar">
+          <button class="btn secondary size-md" data-component="button">重置</button>
+          <button class="btn primary size-md" data-component="button"><i data-lucide="save" style="width:16px;height:16px;display:inline-block"></i>保存设置</button>
+        </div>
+      </header>
+      <div class="uikit-responsive-grid">
+        <div class="card standard" data-component="card">
+          <div class="card-title uikit-truncate">账号信息</div>
+          <div class="setting-row"><span class="uikit-truncate">用户名</span><input class="input" type="text" value="luosiding_admin" data-component="input"></div>
+          <div class="setting-row"><span class="uikit-truncate">邮箱</span><input class="input" type="text" value="admin@luosiding.com" data-component="input"></div>
+        </div>
+        <div class="card standard" data-component="card">
+          <div class="card-title uikit-truncate">输出偏好</div>
+          <div class="setting-row"><span class="uikit-truncate">默认分辨率</span><button class="btn secondary size-sm" data-component="button">1080P</button></div>
+          <div class="setting-row"><span class="uikit-truncate">水印开关</span><button class="btn primary size-sm" data-component="button">已开启</button></div>
+        </div>
+      </div>
+      <div class="card standard" data-component="card">
+        <div class="card-title uikit-truncate">通知设置</div>
+        <div class="setting-row"><span class="uikit-truncate">任务完成推送</span><span class="badge status-success sm" data-component="badge">开启</span></div>
+        <div class="setting-row"><span class="uikit-truncate">失败告警</span><span class="badge status-warning sm" data-component="badge">仅站内</span></div>
+        <div class="setting-row"><span class="uikit-truncate">实验功能</span><button class="btn ghost size-sm" data-component="button" disabled>暂不可用</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+document.querySelectorAll('.sb-item[data-target]').forEach(item=>{
+  item.addEventListener('click',()=>{
+    const target=item.dataset.target;
+    document.querySelectorAll('.sb-item[data-target]').forEach(el=>el.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+    document.getElementById('screen-'+target).classList.add('active');
+    lucide.createIcons();
+  });
+});
+lucide.createIcons();
+</script>
+</body>
+</html>

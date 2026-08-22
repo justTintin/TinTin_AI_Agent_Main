@@ -1,0 +1,55 @@
+{
+  "name": "Input",
+  "slug": "input",
+  "description": "输入框组件，包括文本输入、搜索框、文本域和数字输入。",
+  "tags": ["form", "control", "text"],
+  "variants": [
+    {
+      "name": "Text",
+      "slug": "text",
+      "description": "单行文本输入框。",
+      "tokens": ["--color-surface", "--color-border", "--color-on-surface", "--radius-md"]
+    },
+    {
+      "name": "Search",
+      "slug": "search",
+      "description": "搜索框，左侧带搜索图标。",
+      "tokens": ["--color-surface", "--color-border", "--color-muted-foreground", "--radius-md"]
+    },
+    {
+      "name": "Textarea",
+      "slug": "textarea",
+      "description": "多行文本输入框。",
+      "tokens": ["--color-surface", "--color-border", "--color-on-surface", "--radius-md"]
+    },
+    {
+      "name": "Number",
+      "slug": "number",
+      "description": "数字输入框。",
+      "tokens": ["--color-surface", "--color-border", "--color-on-surface", "--radius-md"]
+    }
+  ],
+  "states": [
+    { "name": "Default", "slug": "default" },
+    { "name": "Hover", "slug": "hover" },
+    { "name": "Focus", "slug": "focus" },
+    { "name": "Disabled", "slug": "disabled" },
+    { "name": "Error", "slug": "error" }
+  ],
+  "sizes": [
+    { "name": "Small", "slug": "sm", "height": "28px" },
+    { "name": "Medium", "slug": "md", "height": "36px" },
+    { "name": "Large", "slug": "lg", "height": "44px" }
+  ],
+  "usage": {
+    "dos": [
+      "输入框标签左对齐，统一宽度",
+      "错误状态时显示明确的错误文案",
+      "占位符文案使用 muted 色"
+    ],
+    "donts": [
+      "避免在输入框内使用占位符替代标签",
+      "不要混合不同高度的输入框"
+    ]
+  }
+}

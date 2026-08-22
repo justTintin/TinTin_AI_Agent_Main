@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 0; padding: 10px; font: 13px/1.6 -apple-system, "Microsoft YaHei", sans-serif; background: #1e1f24; color: #eee; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; flex-shrink: 0; }
+  .dot.ok { background: #188038; }
+  .dot.err { background: #d93025; }
+  #status { flex: 1; font-size: 12px; color: #aaa; }
+  button { background: #3b82f6; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  button.ghost { background: #2d2f36; border: 1px solid #444; }
+  button:hover { filter: brightness(1.12); }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .toolbar button { flex: 1; min-width: 70px; }
+  #media-list { margin-top: 4px; }
+  .m-item { display: flex; align-items: center; gap: 6px; padding: 6px 4px; border-bottom: 1px solid #26272c; }
+  .m-item .m-thumb { width: 46px; height: 34px; border-radius: 4px; background: #141519; object-fit: cover; flex-shrink: 0; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .m-item .m-name { flex: 1; font-size: 12px; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-item .m-size { font-size: 11px; color: #777; flex-shrink: 0; }
+  .m-item button { padding: 3px 10px; font-size: 12px; flex-shrink: 0; }
+  .empty { color: #666; font-size: 12px; padding: 14px 4px; text-align: center; }
+  .sec-title { font-size: 12px; color: #aaa; display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  .sec-title .clear { margin-left: auto; font-size: 11px; color: #3b82f6; cursor: pointer; }
+  .filter-bar { display: flex; gap: 4px; margin: 6px 0 2px; }
+  .filter-bar button { flex: 1; padding: 4px 0; font-size: 12px; background: #2d2f36; border: 1px solid #444; color: #ccc; }
+  .filter-bar button.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+  .t-item { padding: 5px 4px; border-bottom: 1px solid #26272c; }
+  .t-name { font-size: 12px; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-bar { height: 4px; background: #2d2f36; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .t-bar > div { height: 100%; background: #3b82f6; border-radius: 2px; transition: width .4s; }
+  .t-bar.done > div { background: #188038; }
+  .t-bar.fail > div { background: #d93025; }
+  .t-stat { font-size: 11px; color: #888; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+  .t-stat button { padding: 1px 8px; font-size: 11px; margin: 0; }
+  #task-sec { display: none; }
+  #info { color: #888; font-size: 11px; margin-top: 8px; word-break: break-all; }
+  .cfg-toggle { font-size: 11px; color: #3b82f6; cursor: pointer; margin-left: auto; }
+  #cfg-row { display: none; margin-bottom: 8px; gap: 4px; align-items: center; }
+  #cfg-row input { width: 100%; box-sizing: border-box; background: #141519; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+  #cfg-row #cfg-port { width: 70px; flex-shrink: 0; }
+  #cfg-row button { padding: 4px 10px; font-size: 12px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <span class="dot" id="dot"></span>
+    <span id="status">检测客户端…</span>
+    <span class="cfg-toggle" id="cfg-toggle">⚙ 设置</span>
+    <button id="open-dir" class="ghost" title="打开素材保存目录">📂 打开目录</button>
+  </div>
+  <div id="cfg-row">
+    <input id="cfg-host" placeholder="127.0.0.1">
+    <input id="cfg-port" type="number" placeholder="51233">
+    <button id="cfg-save" class="ghost">保存</button>
+  </div>
+  <div class="toolbar">
+    <button id="sniff" title="扫描当前页面的图片/视频">🔍 素材嗅探</button>
+    <button id="collect-all" class="ghost">全部下载</button>
+  </div>
+  <div id="task-sec">
+    <div class="sec-title">⬇ 下载任务</div>
+    <div id="task-list"></div>
+  </div>
+  <div class="sec-title">🖼 页面素材（图片/视频） <span class="clear" id="manual-sniff">手动嗅探</span></div>
+  <div class="filter-bar">
+    <button data-f="all" class="active">全部</button>
+    <button data-f="image">🖼 图片</button>
+    <button data-f="video">🎬 视频</button>
+  </div>
+  <div id="media-list"><div class="empty">播放页面视频自动嗅探；或点「手动嗅探」扫描页面</div></div>
+  <div id="info"></div>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

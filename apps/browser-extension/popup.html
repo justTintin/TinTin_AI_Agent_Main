@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { width: 280px; margin: 0; padding: 14px; font: 13px/1.6 -apple-system, "Microsoft YaHei", sans-serif; background: #1e1f24; color: #eee; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; flex-shrink: 0; }
+  .dot.ok { background: #188038; }
+  .dot.err { background: #d93025; }
+  #status { flex: 1; }
+  label { color: #aaa; font-size: 12px; display: block; margin-bottom: 2px; }
+  input { width: 100%; box-sizing: border-box; background: #141519; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+  .two { display: flex; gap: 8px; }
+  .two > div { flex: 1; }
+  button { width: 100%; background: #3b82f6; color: #fff; border: none; border-radius: 6px; padding: 7px 0; font-size: 13px; cursor: pointer; margin-top: 4px; }
+  button.ghost { background: #2d2f36; border: 1px solid #444; }
+  button:hover { filter: brightness(1.12); }
+  .info { color: #888; font-size: 12px; margin-top: 8px; word-break: break-all; }
+  .sec { margin-top: 12px; border-top: 1px solid #333; padding-top: 8px; }
+  .sec-title { font-size: 12px; color: #aaa; display: flex; align-items: center; gap: 6px; }
+  .sec-title .clear { margin-left: auto; font-size: 11px; color: #3b82f6; cursor: pointer; }
+  #media-list { max-height: 220px; overflow-y: auto; margin-top: 6px; }
+  .m-item { display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-bottom: 1px solid #26272c; }
+  .m-item .m-name { flex: 1; font-size: 12px; color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-item .m-size { font-size: 11px; color: #777; flex-shrink: 0; }
+  .m-item button { width: auto; padding: 3px 10px; font-size: 12px; margin: 0; flex-shrink: 0; }
+  .empty { color: #666; font-size: 12px; padding: 8px 4px; }
+</style>
+</head>
+<body>
+  <div class="row">
+    <span class="dot" id="dot"></span>
+    <span id="status">正在检测客户端…</span>
+  </div>
+  <div class="two">
+    <div>
+      <label>桥接地址</label>
+      <input id="host" value="127.0.0.1">
+    </div>
+    <div>
+      <label>端口</label>
+      <input id="port" type="number" value="51233">
+    </div>
+  </div>
+  <button id="save" class="ghost">保存设置</button>
+  <button id="batch">批量采集当前页</button>
+  <div class="sec">
+    <div class="sec-title">🎬 本页嗅探到的视频/音频 <span class="clear" id="clear-sniffed">清空</span></div>
+    <div id="media-list"><div class="empty">暂无（播放页面视频后自动出现）</div></div>
+    <button id="collect-all" class="ghost">全部采集</button>
+  </div>
+  <div class="info" id="info"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

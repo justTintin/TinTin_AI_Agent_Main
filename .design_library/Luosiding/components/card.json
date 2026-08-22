@@ -1,0 +1,48 @@
+{
+  "name": "Card",
+  "slug": "card",
+  "description": "卡片组件，用于承载相关内容块，是工作台和设置页的核心容器。",
+  "tags": ["container", "surface", "layout"],
+  "variants": [
+    {
+      "name": "Standard",
+      "slug": "standard",
+      "description": "标准卡片，用于信息展示。",
+      "tokens": ["--color-card", "--color-border", "--radius-xl", "--shadow-1"]
+    },
+    {
+      "name": "Feature",
+      "slug": "feature",
+      "description": "功能入口卡片，用于工作台任务入口。",
+      "tokens": ["--color-card", "--color-primary", "--radius-xl", "--shadow-1"]
+    },
+    {
+      "name": "Interactive",
+      "slug": "interactive",
+      "description": "可交互卡片，hover 时带有品牌发光效果。",
+      "tokens": ["--color-card", "--color-primary", "--radius-xl", "--shadow-2"]
+    }
+  ],
+  "states": [
+    { "name": "Default", "slug": "default" },
+    { "name": "Hover", "slug": "hover" },
+    { "name": "Active", "slug": "active" },
+    { "name": "Disabled", "slug": "disabled" }
+  ],
+  "anatomy": [
+    { "name": "Container", "description": "卡片外层容器，包含背景、边框、圆角和阴影" },
+    { "name": "Accent Bar", "description": "功能卡片顶部的品牌色强调条" },
+    { "name": "Icon Area", "description": "卡片左上角的图标区域" },
+    { "name": "Content", "description": "标题、描述和操作的组合区域" }
+  ],
+  "usage": {
+    "dos": [
+      "同一列表中的卡片保持相同尺寸和内边距",
+      "功能卡片使用一致的图标大小和标题层级"
+    ],
+    "donts": [
+      "避免在卡片内嵌套多层卡片",
+      "不要在卡片标题中使用 Emoji"
+    ]
+  }
+}

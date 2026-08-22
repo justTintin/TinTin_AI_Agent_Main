@@ -1,0 +1,86 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [
+    "apps",
+    "python_embeded",
+    ".runtime",
+    "build",
+    "dist",
+    "__pycache__",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+]
+ignore = [
+    "E501",   # line too long: 项目已有大量长行，先抓语法/缩进，不强制换行
+    "W191",   # indentation contains tabs: 项目用空格，但已有文件混用会爆炸
+    "B904",   # raise ... from err：现有代码大量直接 raise，逐步迁移
+    "SIM105", # try/except/pass：现有代码大量，逐步迁移
+    "SIM115", # open 未用上下文管理器：部分是故意的（multipart 上传期间保持打开）
+    "E702",   # 一行多个语句：现有代码少量，逐步迁移
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "skip"
+disallow_untyped_defs = false
+warn_return_any = false
+warn_unused_ignores = false
+show_error_codes = true
+exclude = [
+    "apps",
+    "python_embeded",
+    ".runtime",
+]
+
+[[tool.mypy.overrides]]
+module = "PySide6.*"
+ignore_missing_imports = true
+follow_imports = "silent"
+disable_error_code = "syntax"
+
+[[tool.mypy.overrides]]
+module = "shiboken6.*"
+ignore_missing_imports = true
+follow_imports = "silent"
+disable_error_code = "syntax"
+
+[[tool.mypy.overrides]]
+module = "numpy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "cv2.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "PIL.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "boto3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "botocore.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "av.*"
+ignore_missing_imports = true

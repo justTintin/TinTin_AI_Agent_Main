@@ -63,6 +63,25 @@ _SYSTEM_PROMPT = (
 # 素材类型显示标签（服务端 media_type → 中文）
 _MEDIA_TYPE_LABEL = {"image": "图片", "video": "视频", "audio": "音频", "document": "文档"}
 
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".tiff")
+_VIDEO_EXTS = (".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v")
+_AUDIO_EXTS = (".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma")
+_DOC_EXTS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md")
+
+
+def _infer_media_type(path):
+    """根据文件路径的扩展名推断媒体类型。"""
+    ext = (path or "").lower().rsplit(".", 1)[-1] if "." in (path or "") else ""
+    if ext in _IMAGE_EXTS:
+        return "image"
+    if ext in _VIDEO_EXTS:
+        return "video"
+    if ext in _AUDIO_EXTS:
+        return "audio"
+    if ext in _DOC_EXTS:
+        return "document"
+    return ""
+
 # 对话回复中的成片视频资产识别（供气泡挂播放/下载按钮）
 _URL_RE = re.compile(r"https?://[^\s)\]}>，。；、]+")
 _REL_URL_RE = re.compile(r"/editor/render/(\d+)/result[^\s]*")
@@ -1765,23 +1784,48 @@ class _ChatPanel(QWidget):
                 self._rebuild_ctx_bar()
 
     def _pick_material(self):
-        dlg = _MaterialPickerDialog(self)
+        from gui.storyboard_page import ShotMaterialDialog
+        dlg = ShotMaterialDialog(
+            shot_desc="",
+            ratio="9:16",
+            brand="",
+            model="",
+            category="",
+            shot_type="",
+            main_window=self.main_window,
+            parent=self,
+        )
         if dlg.exec() == QDialog.Accepted:
-            item = dlg.selected_item()
-            if item:
-                mid = str(item.get("id") or item.get("material_id") or "")
+            mats = dlg.selected_materials or (
+                [dlg.selected_material] if dlg.selected_material else [])
+            for mat in mats:
+                if not mat:
+                    continue
+                mid = str(mat.get("mid") or mat.get("id") or mat.get("material_id") or "")
+                name = mat.get("name") or mat.get("filename") or mid or "未命名"
+                path = mat.get("path") or ""
+                mat_type = mat.get("type", "local")
+                mtype = "图片" if mat_type == "dreamina" else ""
                 if mid and not any(
                         str(m.get("id") or m.get("material_id") or "") == mid
                         for m in self._ctx_materials):
-                    item["mid"] = mid
+                    item = {
+                        "id": mid,
+                        "material_id": mid,
+                        "filename": name,
+                        "media_type": mtype or _infer_media_type(path),
+                        "brand": "",
+                        "model": "",
+                        "path": path,
+                        "mid": mid,
+                    }
                     if self._mode == "agent" and self._session_id:
-                        # 已有会话 → 立即入池（素材库引用，多轮自动注入）
                         item["pending"] = True
                         self._ctx_materials.append(item)
                         self._start_pool_add([item])
                     else:
                         self._ctx_materials.append(item)
-                self._rebuild_ctx_bar()
+            self._rebuild_ctx_bar()
 
     def _pick_script(self):
         dlg = _ScriptPickerDialog(self)

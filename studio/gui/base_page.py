@@ -13,19 +13,30 @@ BasePage 收敛了各页重复的构造样板，并提供通用能力：
 
 子类只需实现 setup()。若子类重写 __init__，请调用 super().__init__(parent_widget, main_window)。
 """
+import traceback
+
 from PySide6.QtWidgets import QMessageBox
 from utils.logger_utils import log
 
 
 def _show_dev_only(parent_widget):
-    """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示"""
+    """隐藏页面原有所有子控件，并在布局中插入居中的'开发中'提示。
+
+    会把调用栈打到 app.log（[_show_dev_only] 关键字），便于定位谁在触发。
+    """
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+    # 记录调用栈以便定位谁在误调用「开发中」提示
+    stack = traceback.format_list(traceback.extract_stack()[:-1])
+    log.info("[_show_dev_only] 被调用，parent_widget=%s\n调用栈:\n%s",
+             parent_widget, "".join(stack))
     if parent_widget is None:
         return
     layout = parent_widget.layout()
     if layout is None:
-        return
+        # 父控件没有布局时自动创建，否则后续无法放置错误卡片
+        layout = QVBoxLayout(parent_widget)
+        log.info("[_show_dev_only] parent_widget 无布局，已自动创建 QVBoxLayout")
     # 递归隐藏原有所有子控件（不销毁，保留原界面以便恢复）
     for child in parent_widget.findChildren(QWidget):
         child.setVisible(False)

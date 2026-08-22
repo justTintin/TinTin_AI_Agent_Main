@@ -948,10 +948,10 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.content_stack.addWidget(self.page_dreamina)
         self._register_lazy_page(31, self.setup_dreamina_page)
 
-        # 33: Cover Maker (封面制作) Page
+        # 33: Cover Maker (封面制作) Page — 懒加载，首次进入时才构建
         self.page_cover_maker = QWidget()
-        self.setup_cover_maker_page()
         self.content_stack.addWidget(self.page_cover_maker)
+        self._register_lazy_page(32, self.setup_cover_maker_page)
 
         # 34: One-click Compile Video (一键成片) Page
         self.page_compile_video = QWidget()

@@ -1837,6 +1837,8 @@ class AIGenMixin:
         elif backend_idx == 2:
             items = [it for it in items if (it.get("backend") or "").lower() == "runninghub"]
 
+        # 按服务端 output_type 过滤视频类工作流
+        items = [it for it in items if it.get("output_type") == "video"]
         self._populate_rh_dh_selector(items)
 
         def fetch():
@@ -1848,7 +1850,7 @@ class AIGenMixin:
                 if not isinstance(w, dict):
                     continue
                 item = wfc.normalize_server_workflow(w)
-                if item:
+                if item and item.get("output_type") == "video":
                     out.append(item)
             return out
 

@@ -80,6 +80,8 @@ def normalize_server_workflow(w) -> dict | None:
         "audio_nodes": w.get("audio_nodes") or [],
         "backend": w.get("backend") or "",
         "scope": w.get("scope") or "client",
+        # 服务端固定的输出类型字段：image / video
+        "output_type": w.get("output_type") or "",
         # 统一工作流输入组件清单（kind: image/video/audio/text/select；key=multipart 字段名）
         "inputs": w.get("inputs") or [],
         "io": w.get("io") or {},

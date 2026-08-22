@@ -68,14 +68,62 @@ class PageSetupMixin:
         self._lazy_pages[index] = setup_method
 
     def _ensure_page_built(self, index):
-        """确保 index 对应的懒加载页面已构建（只构建一次）。"""
+        """确保 index 对应的懒加载页面已构建（只构建一次）。
+
+        失败时把错误信息渲染到目标页容器上（带错误卡片样式），而不是白屏或
+        退化为通用「开发中」提示；便于用户直接看到异常、排查 app.log。
+        """
         setup_method = getattr(self, "_lazy_pages", {}).pop(index, None)
         if setup_method is None:
             return
+        method_name = getattr(setup_method, "__name__", str(setup_method))
+        log.info("[页面懒加载] 开始构建 index=%s, method=%s", index, method_name)
         try:
             setup_method()
+            log.info("[页面懒加载] index=%s 构建成功", index)
         except Exception as e:  # 页面构建方法可能抛出各种 GUI/初始化异常
-            log.error(f"[页面懒加载] index={index} 构建失败: {e}")
+            log.exception("[页面懒加载] index=%s 构建失败: %s", index, e)
+            # 拿到对应 page 容器并渲染错误卡片
+            stack = getattr(self, "content_stack", None)
+            page = None
+            if stack is not None and 0 <= index < stack.count():
+                page = stack.widget(index)
+            if page is not None:
+                try:
+                    # 复用 _show_dev_only 的模式：隐藏旧控件 + 错误卡片
+                    from gui.base_page import _show_dev_only
+                    _show_dev_only(page)
+                    # 覆盖掉开发中的文字，换成具体错误
+                    layout = page.layout()
+                    if layout is not None and layout.count() >= 3:
+                        card_item = layout.itemAt(1)
+                        if card_item is not None:
+                            card = card_item.widget()
+                            if card is not None:
+                                # 清除 card 原有子控件，重新填错误信息
+                                cl = card.layout()
+                                while cl and cl.count():
+                                    w = cl.takeAt(0).widget()
+                                    if w is not None:
+                                        w.deleteLater()
+                                if cl is not None:
+                                    err_t = QLabel("页面初始化失败")
+                                    err_t.setAlignment(Qt.AlignCenter)
+                                    err_t.setStyleSheet(
+                                        "font-size:16px; font-weight:700; color:#fca5a5;")
+                                    cl.addWidget(err_t)
+                                    err_d = QLabel(
+                                        f"{e}\n\n详情请查看 app.log"
+                                        f"（关键字：[页面懒加载] index={index}）")
+                                    err_d.setWordWrap(True)
+                                    err_d.setAlignment(Qt.AlignCenter)
+                                    err_d.setStyleSheet(
+                                        "font-size:12px; color:#9ca3af;"
+                                        " background:#1a1518; border:1px solid #7f1d1d;"
+                                        " border-radius:8px; padding:12px;")
+                                    cl.addWidget(err_d)
+                except Exception:
+                    log.exception("[页面懒加载] 渲染错误卡片失败 index=%s", index)
 
     def setup_transcription_page(self):
         self.transcription_tool = TranscriptionToolPage(self.page_transcription, self)
@@ -279,9 +327,38 @@ class PageSetupMixin:
         pass
 
     def setup_cover_maker_page(self):
-        from gui.cover_maker_page import CoverMakerPage
-        self.cover_maker_tool = CoverMakerPage(self.page_cover_maker, self)
-        self.cover_maker_tool.setup()
+        try:
+            from gui.cover_maker_page import CoverMakerPage
+            log.info("[工作台] 开始构建封面制作工具 page_cover_maker")
+            self.cover_maker_tool = CoverMakerPage(self.page_cover_maker, self)
+            self.cover_maker_tool.setup()
+            log.info("[工作台] 封面制作工具构建完成")
+        except Exception as e:  # 封面制作构建失败时显示用户可见错误
+            log.exception("[工作台] 封面制作工具构建异常: %s", e)
+            err = QLabel(
+                f"封面制作初始化失败：\n{e}\n\n"
+                f"详情请查看 app.log 中 [工作台] 封面制作相关日志。"
+            )
+            err.setWordWrap(True)
+            err.setStyleSheet(
+                "padding:20px; color:#fca5a5; font-size:13px;"
+                " background:#1a1518; border:1px solid #7f1d1d; border-radius:8px;"
+            )
+            # 确保 page_cover_maker 有布局
+            page = self.page_cover_maker
+            layout = page.layout()
+            if layout is None:
+                layout = QVBoxLayout(page)
+                layout.setContentsMargins(40, 40, 40, 40)
+            layout.addWidget(err)
+            try:
+                QMessageBox.critical(
+                    page,
+                    "封面制作初始化失败",
+                    f"{e}\n\n详情请查看 app.log",
+                )
+            except Exception:
+                pass
 
     def setup_compile_video_page(self):
         from gui.compile_video_page import CompileVideoPage

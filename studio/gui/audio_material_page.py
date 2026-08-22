@@ -420,6 +420,32 @@ class AudioMaterialPage(BasePage):
         self._tab_bar.currentChanged.connect(self._stack.setCurrentIndex)
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
 
+        # ── 统一播放控制条（所有 tab 共享）──
+        play_row = QHBoxLayout()
+        play_row.setSpacing(6)
+        self.btn_play_pause = icon_button("play", "播放 / 暂停")
+        self.btn_play_pause.setEnabled(False)
+        self.btn_play_pause.clicked.connect(self._toggle_play_pause)
+        play_row.addWidget(self.btn_play_pause)
+        self.btn_stop = icon_button("stop", "停止")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._stop_preview)
+        play_row.addWidget(self.btn_stop)
+        self.slider_progress = QSlider(Qt.Horizontal)
+        self.slider_progress.setRange(0, 0)
+        self.slider_progress.setEnabled(False)
+        self.slider_progress.sliderMoved.connect(self._on_seek)
+        play_row.addWidget(self.slider_progress, 1)
+        self.lbl_time = QLabel("0:00 / 0:00")
+        self.lbl_time.setObjectName("muted_text")
+        self.lbl_time.setMinimumWidth(84)
+        play_row.addWidget(self.lbl_time)
+        root.addLayout(play_row)
+
+        self.lbl_now_playing = QLabel("未在播放")
+        self.lbl_now_playing.setObjectName("muted_text")
+        root.addWidget(self.lbl_now_playing)
+
         self._pm_audio = _make_audio_icon()
         QTimer.singleShot(100, self._do_search)
 
@@ -501,7 +527,7 @@ class AudioMaterialPage(BasePage):
         hdr.setSectionResizeMode(self._COL_DESC, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, 1)
 
-        # 全选/取消全选
+        # 操作行
         sel_row = QHBoxLayout()
         self.btn_select_all = QPushButton(" 全选")
         self.btn_select_all.setObjectName("secondary_button")
@@ -515,37 +541,13 @@ class AudioMaterialPage(BasePage):
         self.lbl_hint = QLabel(" 双击试听 · 勾选后可发送到卡点成片")
         self.lbl_hint.setObjectName("muted_text")
         sel_row.addWidget(self.lbl_hint)
-        layout.addLayout(sel_row)
-
-        # 播放控制条
-        play_row = QHBoxLayout()
-        play_row.setSpacing(6)
-        self.btn_play_pause = icon_button("play", "播放 / 暂停")
-        self.btn_play_pause.setEnabled(False)
-        self.btn_play_pause.clicked.connect(self._toggle_play_pause)
-        play_row.addWidget(self.btn_play_pause)
-        self.btn_stop = icon_button("stop", "停止")
-        self.btn_stop.setEnabled(False)
-        self.btn_stop.clicked.connect(self._stop_preview)
-        play_row.addWidget(self.btn_stop)
-        self.slider_progress = QSlider(Qt.Horizontal)
-        self.slider_progress.setRange(0, 0)
-        self.slider_progress.setEnabled(False)
-        self.slider_progress.sliderMoved.connect(self._on_seek)
-        play_row.addWidget(self.slider_progress, 1)
-        self.lbl_time = QLabel("0:00 / 0:00")
-        self.lbl_time.setObjectName("muted_text")
-        self.lbl_time.setMinimumWidth(84)
-        play_row.addWidget(self.lbl_time)
         self.btn_beat = QPushButton(" 卡点成片")
         self.btn_beat.setObjectName("primary_button")
         self.btn_beat.clicked.connect(self._send_to_beat_montage)
-        play_row.addWidget(self.btn_beat)
-        layout.addLayout(play_row)
+        sel_row.addWidget(self.btn_beat)
+        layout.addLayout(sel_row)
 
-        self.lbl_now_playing = QLabel("未在播放")
-        self.lbl_now_playing.setObjectName("muted_text")
-        layout.addWidget(self.lbl_now_playing)
+
 
         # 分页
         page_row = QHBoxLayout()
@@ -776,17 +778,28 @@ class AudioMaterialPage(BasePage):
         if player.mediaStatus() == QMediaPlayer.MediaStatus.LoadedMedia:
             self._pending_play = False
             player.play()
-            self.lbl_now_playing.setText(
-                f"播放中: {self._playing_name or ''}")
+            name = self._playing_name or ''
+            self.lbl_now_playing.setText(f"播放中: {name}")
+            # 更新所有 tab 的状态标签
+            self._update_tab_status_labels(f"播放中: {name}")
         self.btn_stop.setEnabled(True)
         self.slider_progress.setEnabled(True)
+
+    def _update_tab_status_labels(self, text):
+        """更新所有 tab 的播放状态标签。"""
+        for lbl in [getattr(self, 'lbl_bgm_now', None),
+                    getattr(self, 'lbl_sfx_now', None),
+                    getattr(self, 'lbl_voice_now', None)]:
+            if lbl is not None:
+                lbl.setText(text)
 
     def _on_preview_error(self, msg):
         self._preview_mid = None
         self._playing_mid = None
         self._playing_name = ""
-        self.lbl_now_playing.setText(
-            f"播放失败: {msg}")
+        err_text = f"播放失败: {msg}"
+        self.lbl_now_playing.setText(err_text)
+        self._update_tab_status_labels(err_text)
         self._update_play_button()
 
     def _stop_preview(self):
@@ -796,6 +809,7 @@ class AudioMaterialPage(BasePage):
         self._playing_mid = None
         self._playing_name = ""
         self.lbl_now_playing.setText("未在播放")
+        self._update_tab_status_labels("未在播放")
         self.slider_progress.setRange(0, 0)
         self.slider_progress.setValue(0)
         self.slider_progress.setEnabled(False)
@@ -1049,22 +1063,18 @@ class AudioMaterialPage(BasePage):
         bgm_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self._bgm_table, 1)
 
-        # 播放 + 操作条
-        bgm_play_row = QHBoxLayout()
-        self.btn_bgm_play = icon_button("play", "播放")
-        self.btn_bgm_play.clicked.connect(lambda: self._play_bgm_row())
-        bgm_play_row.addWidget(self.btn_bgm_play)
-        self.btn_bgm_stop = icon_button("stop", "停止")
-        self.btn_bgm_stop.clicked.connect(self._stop_preview)
-        bgm_play_row.addWidget(self.btn_bgm_stop)
+        # 双击播放 + 发送按钮
+        self._bgm_table.cellDoubleClicked.connect(self._on_bgm_cell_double_clicked)
+        bgm_action_row = QHBoxLayout()
+        bgm_action_row.addStretch(1)
         self.lbl_bgm_now = QLabel("未在播放")
         self.lbl_bgm_now.setObjectName("muted_text")
-        bgm_play_row.addWidget(self.lbl_bgm_now, 1)
+        bgm_action_row.addWidget(self.lbl_bgm_now)
         self.btn_bgm_to_beat = QPushButton(" 发送到卡点成片")
         self.btn_bgm_to_beat.setObjectName("primary_button")
         self.btn_bgm_to_beat.clicked.connect(self._send_bgm_to_beat)
-        bgm_play_row.addWidget(self.btn_bgm_to_beat)
-        layout.addLayout(bgm_play_row)
+        bgm_action_row.addWidget(self.btn_bgm_to_beat)
+        layout.addLayout(bgm_action_row)
 
         # 分页
         bgm_page_row = QHBoxLayout()
@@ -1134,6 +1144,61 @@ class AudioMaterialPage(BasePage):
             self._bgm_table.setCellWidget(ri, 6, btn_play)
             self._bgm_table.setRowHeight(ri, 28)
 
+    # ── 双击处理 ──
+    def _on_bgm_cell_double_clicked(self, row, col):
+        """BGM 库双击行：切换播放/暂停/切换曲目。"""
+        it = self._bgm_table.item(row, 0)
+        if it is None:
+            return
+        data = it.data(Qt.UserRole) or {}
+        audio_id = str(data.get("audio_id") or "")
+        if not audio_id:
+            return
+        if self._playing_mid == audio_id and self._player is not None:
+            state = self._player.playbackState()
+            if state == QMediaPlayer.PlaybackState.PlayingState:
+                self._player.pause()
+            else:
+                self._player.play()
+            return
+        self._play_bgm_row(row)
+
+    def _on_sfx_cell_double_clicked(self, row, col):
+        """音效库双击行：切换播放/暂停/切换曲目。"""
+        it = self._sfx_table.item(row, 0)
+        if it is None:
+            return
+        data = it.data(Qt.UserRole) or {}
+        sfx_id = str(data.get("sfx_id") or "")
+        if not sfx_id:
+            return
+        if self._playing_mid == sfx_id and self._player is not None:
+            state = self._player.playbackState()
+            if state == QMediaPlayer.PlaybackState.PlayingState:
+                self._player.pause()
+            else:
+                self._player.play()
+            return
+        self._play_sfx_row(row)
+
+    def _on_voice_cell_double_clicked(self, row, col):
+        """口播管理双击行：切换播放/暂停/切换曲目。"""
+        it = self._voice_table.item(row, 0)
+        if it is None:
+            return
+        data = it.data(Qt.UserRole) or {}
+        audio_id = str(data.get("audio_id") or "")
+        if not audio_id:
+            return
+        if self._playing_mid == audio_id and self._player is not None:
+            state = self._player.playbackState()
+            if state == QMediaPlayer.PlaybackState.PlayingState:
+                self._player.pause()
+            else:
+                self._player.play()
+            return
+        self._play_voice_row(row)
+
     def _play_bgm_row(self, row=-1):
         if row < 0:
             row = self._bgm_table.currentRow()
@@ -1146,10 +1211,75 @@ class AudioMaterialPage(BasePage):
         audio_id = str(data.get("audio_id") or "")
         if not audio_id:
             return
-        url = alc.bgm_serve_url(audio_id)
+        raw = data.get("raw") or {}
+        mid = raw.get("source_material_id") or raw.get("material_id")
+        if mid:
+            from utils import material_client
+            url = material_client.serve_url(str(mid))
+        else:
+            url = alc.bgm_serve_url(audio_id)
+        self._play_audio(audio_id, it.text(), url, self.lbl_bgm_now)
+
+    def _play_sfx_row(self, row=-1):
+        if row < 0:
+            row = self._sfx_table.currentRow()
+        if row < 0:
+            return
+        it = self._sfx_table.item(row, 0)
+        if it is None:
+            return
+        data = it.data(Qt.UserRole) or {}
+        sfx_id = str(data.get("sfx_id") or "")
+        if not sfx_id:
+            return
+        raw = data.get("raw") or {}
+        mid = raw.get("source_material_id") or raw.get("material_id")
+        if mid:
+            from utils import material_client
+            url = material_client.serve_url(str(mid))
+        elif hasattr(alc, "sfx_serve_url"):
+            url = alc.sfx_serve_url(sfx_id)
+        else:
+            from utils import material_client
+            url = material_client.serve_url(sfx_id)
+        self._play_audio(sfx_id, it.text(), url, self.lbl_sfx_now)
+
+    def _play_voice_row(self, row=-1):
+        if row < 0:
+            row = self._voice_table.currentRow()
+        if row < 0:
+            return
+        it = self._voice_table.item(row, 0)
+        if it is None:
+            return
+        data = it.data(Qt.UserRole) or {}
+        audio_id = str(data.get("audio_id") or "")
+        if not audio_id:
+            return
+        raw = data.get("raw") or {}
+        mid = raw.get("source_material_id") or raw.get("material_id")
+        if mid:
+            from utils import material_client
+            url = material_client.serve_url(str(mid))
+        else:
+            url = alc.bgm_serve_url(audio_id)
+        self._play_audio(audio_id, it.text(), url, self.lbl_voice_now)
+
+    def _play_audio(self, audio_id, name, url, status_label):
+        """统一的音频播放方法。"""
+        if self._playing_mid is not None:
+            self._stop_preview()
+        if (self._preview_worker is not None
+                and self._preview_worker.isRunning()
+                and self._preview_mid == audio_id):
+            return
         self._playing_mid = audio_id
-        self._playing_name = it.text()
-        self.lbl_bgm_now.setText(f"加载中: {self._playing_name}…")
+        self._playing_name = name
+        self._preview_mid = audio_id
+        self.lbl_now_playing.setText(f"加载中: {name}…")
+        status_label.setText(f"加载中: {name}…")
+        _set_button_icon(self.btn_play_pause, "play")
+        self._update_play_button()
         self._preview_worker = _AudioPreviewWorker(url, audio_id)
         self._preview_worker.finished.connect(self._on_preview_ready)
         self._preview_worker.error.connect(self._on_preview_error)
@@ -1165,7 +1295,13 @@ class AudioMaterialPage(BasePage):
         audio_id = str(data.get("audio_id") or "")
         if not audio_id:
             return
-        url = alc.bgm_serve_url(audio_id)
+        raw = data.get("raw") or {}
+        mid = raw.get("source_material_id") or raw.get("material_id")
+        if mid:
+            from utils import material_client
+            url = material_client.serve_url(str(mid))
+        else:
+            url = alc.bgm_serve_url(audio_id)
         self._preview_worker = _AudioPreviewWorker(url, audio_id)
         self._preview_worker.finished.connect(self._on_bgm_to_beat_downloaded)
         self._preview_worker.error.connect(
@@ -1316,9 +1452,13 @@ class AudioMaterialPage(BasePage):
         sfx_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self._sfx_table, 1)
 
+        self._sfx_table.cellDoubleClicked.connect(self._on_sfx_cell_double_clicked)
+        sfx_action_row = QHBoxLayout()
         self.lbl_sfx_now = QLabel("未在播放")
         self.lbl_sfx_now.setObjectName("muted_text")
-        layout.addWidget(self.lbl_sfx_now)
+        sfx_action_row.addWidget(self.lbl_sfx_now)
+        sfx_action_row.addStretch(1)
+        layout.addLayout(sfx_action_row)
 
         sfx_page_row = QHBoxLayout()
         self.btn_sfx_prev = icon_button("previous", "上一页")
@@ -1475,11 +1615,18 @@ class AudioMaterialPage(BasePage):
         self.ai_bgm_result_label.setWordWrap(True)
         bgm_layout.addWidget(self.ai_bgm_result_label)
 
+        bgm_action_row = QHBoxLayout()
+        self.btn_ai_bgm_play = icon_button("play", "播放生成的 BGM")
+        self.btn_ai_bgm_play.setEnabled(False)
+        self.btn_ai_bgm_play.clicked.connect(self._on_play_ai_bgm)
+        bgm_action_row.addWidget(self.btn_ai_bgm_play)
         self.btn_ai_bgm_save = QPushButton(" 保存到 BGM 库")
         self.btn_ai_bgm_save.setObjectName("secondary_button")
         self.btn_ai_bgm_save.setEnabled(False)
         self.btn_ai_bgm_save.clicked.connect(self._on_save_bgm_to_lib)
-        bgm_layout.addWidget(self.btn_ai_bgm_save)
+        bgm_action_row.addWidget(self.btn_ai_bgm_save)
+        bgm_action_row.addStretch(1)
+        bgm_layout.addLayout(bgm_action_row)
 
         layout.addWidget(bgm_group)
 
@@ -1517,11 +1664,18 @@ class AudioMaterialPage(BasePage):
         self.ai_sfx_result_label.setWordWrap(True)
         sfx_layout.addWidget(self.ai_sfx_result_label)
 
+        sfx_action_row = QHBoxLayout()
+        self.btn_ai_sfx_play = icon_button("play", "播放生成的音效")
+        self.btn_ai_sfx_play.setEnabled(False)
+        self.btn_ai_sfx_play.clicked.connect(self._on_play_ai_sfx)
+        sfx_action_row.addWidget(self.btn_ai_sfx_play)
         self.btn_ai_sfx_save = QPushButton(" 保存到音效库")
         self.btn_ai_sfx_save.setObjectName("secondary_button")
         self.btn_ai_sfx_save.setEnabled(False)
         self.btn_ai_sfx_save.clicked.connect(self._on_save_sfx_to_lib)
-        sfx_layout.addWidget(self.btn_ai_sfx_save)
+        sfx_action_row.addWidget(self.btn_ai_sfx_save)
+        sfx_action_row.addStretch(1)
+        sfx_layout.addLayout(sfx_action_row)
 
         layout.addWidget(sfx_group)
         layout.addStretch(1)
@@ -1553,6 +1707,7 @@ class AudioMaterialPage(BasePage):
         name = data.get("filename") or data.get("name") or "AI 生成 BGM"
         self.ai_bgm_result_label.setText(
             f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\nURL: {url}")
+        self.btn_ai_bgm_play.setEnabled(bool(url))
         self.btn_ai_bgm_save.setEnabled(bool(url))
         self._ai_bgm_url = url
         self._ai_bgm_name = name
@@ -1561,6 +1716,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_bgm_gen.setEnabled(True)
         self.ai_bgm_progress.setVisible(False)
         self.ai_bgm_result_label.setText(f"BGM 生成失败：{msg}")
+
+    def _on_play_ai_bgm(self):
+        url = getattr(self, "_ai_bgm_url", "")
+        name = getattr(self, "_ai_bgm_name", "AI 生成 BGM")
+        if not url:
+            return
+        self._play_audio("ai_bgm", name, url, self.ai_bgm_result_label)
 
     def _on_save_bgm_to_lib(self):
         url = getattr(self, "_ai_bgm_url", "")
@@ -1627,6 +1789,7 @@ class AudioMaterialPage(BasePage):
         name = data.get("name") or data.get("filename") or "AI 生成音效"
         self.ai_sfx_result_label.setText(
             f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\nURL: {url}")
+        self.btn_ai_sfx_play.setEnabled(bool(url))
         self.btn_ai_sfx_save.setEnabled(bool(url))
         self._ai_sfx_url = url
         self._ai_sfx_name = name
@@ -1635,6 +1798,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_sfx_gen.setEnabled(True)
         self.ai_sfx_progress.setVisible(False)
         self.ai_sfx_result_label.setText(f"音效生成失败：{msg}")
+
+    def _on_play_ai_sfx(self):
+        url = getattr(self, "_ai_sfx_url", "")
+        name = getattr(self, "_ai_sfx_name", "AI 生成音效")
+        if not url:
+            return
+        self._play_audio("ai_sfx", name, url, self.ai_sfx_result_label)
 
     def _on_save_sfx_to_lib(self):
         url = getattr(self, "_ai_sfx_url", "")
@@ -1730,9 +1900,13 @@ class AudioMaterialPage(BasePage):
         voice_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self._voice_table, 1)
 
+        self._voice_table.cellDoubleClicked.connect(self._on_voice_cell_double_clicked)
+        voice_action_row = QHBoxLayout()
         self.lbl_voice_now = QLabel("未在播放")
         self.lbl_voice_now.setObjectName("muted_text")
-        layout.addWidget(self.lbl_voice_now)
+        voice_action_row.addWidget(self.lbl_voice_now)
+        voice_action_row.addStretch(1)
+        layout.addLayout(voice_action_row)
 
         voice_page_row = QHBoxLayout()
         self.btn_voice_prev = icon_button("previous", "上一页")

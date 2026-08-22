@@ -9,6 +9,7 @@
   提示词：图片反推提示词 / 视频反推提示词
 """
 import logging
+from functools import partial
 
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -215,7 +217,7 @@ class MediaToolsPage(BasePage):
         btn_back.setObjectName("secondary_button")
         stack = self._stack
         if stack is not None:
-            btn_back.clicked.connect(lambda s=stack: s.setCurrentIndex(0))
+            btn_back.clicked.connect(partial(stack.setCurrentIndex, 0))
         bar.addWidget(btn_back)
         bar.addStretch()
         lay.addLayout(bar)
@@ -225,8 +227,34 @@ class MediaToolsPage(BasePage):
 
         mw = self.main_window
         if key == "cover_maker":
-            from gui.cover_maker_page import CoverMakerPage
-            self._tool_pages[key] = CoverMakerPage(content, mw)
+            try:
+                from gui.cover_maker_page import CoverMakerPage
+                log.info("[媒体工具] 开始构建封面制作工具")
+                tool = CoverMakerPage(content, mw)
+                tool.setup()
+                log.info("[媒体工具] 封面制作工具构建完成")
+                self._tool_pages[key] = tool
+            except Exception as e:  # 封面制作构建失败时显示用户可见错误
+                log.exception("[媒体工具] 封面制作工具构建异常: %s", e)
+                err = QLabel(
+                    f"封面制作初始化失败：\n{e}\n\n"
+                    f"详情请查看 app.log 中 [媒体工具] 相关日志。"
+                )
+                err.setWordWrap(True)
+                err.setStyleSheet(
+                    "padding:20px; color:#fca5a5; font-size:13px;"
+                    " background:#1a1518; border:1px solid #7f1d1d; border-radius:8px;"
+                )
+                content_layout = QVBoxLayout(content)
+                content_layout.addWidget(err)
+                try:
+                    QMessageBox.critical(
+                        page,
+                        "封面制作初始化失败",
+                        f"{e}\n\n详情请查看 app.log",
+                    )
+                except Exception:
+                    pass
         elif key == "image_matting":
             from gui.image_matting_page import ImageMattingPage
             self._tool_pages[key] = ImageMattingPage(content, mw)
@@ -258,7 +286,7 @@ class MediaToolsPage(BasePage):
             self._tool_pages[key] = VideoPromptReversePage(content, mw)
         else:
             raise ValueError(f"未知媒体工具: {key}")
-        if self._tool_pages.get(key) is not None:
+        if self._tool_pages.get(key) is not None and key != "cover_maker":
             page_cls = self._tool_pages[key]
             setup_fn = getattr(page_cls, "setup", None)
             if setup_fn is not None:

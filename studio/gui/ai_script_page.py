@@ -638,10 +638,19 @@ class AIScriptPage(BasePage):
         # Pass copywriting text and Feishu record info to Storyboard Page
         if hasattr(self.main_window, "storyboard_tool") and self.main_window.storyboard_tool:  # noqa: E501
             style_id = self._selected_stylization.get("id") if self._selected_stylization else None  # noqa: E501
+            # 从飞书选题 record 中提取产品字段，供素材检索（相似度+品牌/分类过滤）使用
+            rec = self.selected_record or {}
+            product = {
+                "brand": str(rec.get("brand") or rec.get("product_brand") or "").strip(),
+                "model": str(rec.get("model") or rec.get("product_model") or "").strip(),
+                "category": str(rec.get("category") or rec.get("product_category") or "").strip(),
+                "name": str(rec.get("product") or rec.get("product_name") or "").strip(),
+            }
             self.main_window.storyboard_tool.set_copywriting(
                 copy_text,
                 feishu_record=self.selected_record,
                 stylization_id=style_id,
+                product=product,
             )
 
         # Switch to storyboard page (index 38)

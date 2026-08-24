@@ -541,8 +541,12 @@ class CompileVideoPage(BasePage):
 
         # tab4：爆款仿制（复用 ViralClonePage 组件，与工作台对话框同一实现）
         tab_viral = QWidget()
+        tab_viral_lay = QVBoxLayout(tab_viral)
+        tab_viral_lay.setContentsMargins(0, 0, 0, 0)
+        tab_viral_lay.setSpacing(0)
         from gui.viral_clone_dialog import ViralClonePage
         self.viral_clone_page = ViralClonePage(tab_viral, self.main_window, show_close=False)  # noqa: E501
+        tab_viral_lay.addWidget(self.viral_clone_page)
         self._tab_bar.addTab(" 爆款仿制")
         self._stack.addWidget(tab_viral)
 

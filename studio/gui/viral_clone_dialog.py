@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressBar,
+    QSizePolicy,
     QSplitter,
     QTextBrowser,
     QVBoxLayout,
@@ -184,6 +185,7 @@ class ViralClonePage(QWidget):
 
     def __init__(self, parent_widget=None, main_window=None, show_close=False):
         super().__init__(parent_widget)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.main_window = main_window
         self.show_close = show_close
         self._result = None
@@ -201,7 +203,8 @@ class ViralClonePage(QWidget):
     # ── UI ────────────────────────────────────────────────────────────
     def build(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
+        # 右边距设为 0，让右侧视频编辑工作流贴紧边框
+        root.setContentsMargins(20, 18, 0, 18)
         root.setSpacing(12)
 
         # 顶部标题
@@ -225,6 +228,7 @@ class ViralClonePage(QWidget):
 
         # 左侧：拆解复刻
         left_widget = QWidget()
+        left_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         left_lay = QVBoxLayout(left_widget)
         left_lay.setContentsMargins(0, 0, 0, 0)
         left_lay.setSpacing(12)
@@ -233,6 +237,7 @@ class ViralClonePage(QWidget):
 
         # 右侧：视频编辑工作流
         right_widget = QWidget()
+        right_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_lay = QVBoxLayout(right_widget)
         right_lay.setContentsMargins(0, 0, 0, 0)
         right_lay.setSpacing(12)
@@ -242,7 +247,9 @@ class ViralClonePage(QWidget):
         # 右侧占满更多空间：左侧 35%，右侧 65%
         splitter.setStretchFactor(0, 35)
         splitter.setStretchFactor(1, 65)
-        splitter.setSizes([420, 980])
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 初始按 35:65 比例分配，后续随窗口缩放自动调整
+        splitter.setSizes([350, 650])
         root.addWidget(splitter, 1)
 
         if self.show_close:

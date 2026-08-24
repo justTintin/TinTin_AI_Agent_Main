@@ -167,7 +167,7 @@ class ExtensionPage(BasePage):
         root.addWidget(self._build_browser_card())
         root.addWidget(self._build_bridge_card())
         root.addWidget(self._build_records_card(), 1)
-        self._tab_bar.addTab("⬇ 下载插件")
+        self._tab_bar.addTab("下载插件")
         self._stack.addWidget(download_tab)
 
         self.bridge.record_added.connect(lambda _rec: self._refresh_records())

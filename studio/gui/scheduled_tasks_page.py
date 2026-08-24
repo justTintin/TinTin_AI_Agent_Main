@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from utils import scheduled_task_client as stc
-from utils.gui_icons import table_action_button
+from utils.gui_icons import icon_button, table_action_button
 from utils.logger_utils import log
 
 
@@ -174,15 +174,17 @@ class ScheduledTasksPage(BasePage):
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeToContents)   #  勾选
         h.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # ID
-        h.setSectionResizeMode(2, QHeaderView.Interactive)        # 标题（收窄，可拖动）
-        self.table.setColumnWidth(2, 320)
+        h.setSectionResizeMode(2, QHeaderView.Interactive)        # 标题（可拖动）
+        self.table.setColumnWidth(2, 300)
         h.setSectionResizeMode(3, QHeaderView.ResizeToContents)   # 类型
         h.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # 状态
         h.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # 进度
-        h.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # 播放
-        h.setSectionResizeMode(7, QHeaderView.ResizeToContents)   # 下载
+        h.setSectionResizeMode(6, QHeaderView.Interactive)   # 播放
+        self.table.setColumnWidth(6, 130)
+        h.setSectionResizeMode(7, QHeaderView.Interactive)        # 下载
+        self.table.setColumnWidth(7, 130)
         h.setSectionResizeMode(8, QHeaderView.ResizeToContents)   # 时间
-        h.setSectionResizeMode(9, QHeaderView.ResizeToContents)   # 操作
+        h.setSectionResizeMode(9, QHeaderView.Stretch)            # 操作（占满剩余）
         self._last_items = []        # 最近一次列表数据（供勾选行反查任务）
         self._all_checked = False    # 全选状态
         ll.addWidget(self.table)
@@ -251,9 +253,9 @@ class ScheduledTasksPage(BasePage):
         dl.addWidget(self.dim_title)
         self._dim_widgets = {}  # {dim_key: {"label": ..., "spin": ..., "orig_score": ...}}
         self._dim_spins_group = QWidget()
-        self._dim_spins_layout = QVBoxLayout(self._dim_spins_group)
+        self._dim_spins_layout = QHBoxLayout(self._dim_spins_group)
         self._dim_spins_layout.setContentsMargins(0, 0, 0, 0)
-        self._dim_spins_layout.setSpacing(4)
+        self._dim_spins_layout.setSpacing(12)
         self._dim_spins_group.setVisible(False)
         dl.addWidget(self._dim_spins_group)
         self.btn_dim_submit = QPushButton(" 提交维度反馈")
@@ -700,22 +702,23 @@ class ScheduledTasksPage(BasePage):
         self._current_task_id = t.get("id")
 
         for key, label in self._DIMENSION_LABELS.items():
-            row = QWidget()
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(2, 2, 2, 2)
-            rl.setSpacing(8)
-            rl.addWidget(QLabel(f"{label}："))
+            box = QFrame()
+            box.setStyleSheet(
+                "QFrame { background:#151722; border:1px solid #2b3040; border-radius:6px; }")
+            bl = QHBoxLayout(box)
+            bl.setContentsMargins(8, 4, 8, 4)
+            bl.setSpacing(6)
+            bl.addWidget(QLabel(f"{label}："))
             orig = ls.get(key)
             spin = QSpinBox()
             spin.setRange(0, 10)
             spin.setSingleStep(1)
             spin.setValue(int(orig) if orig is not None else 5)
-            spin.setFixedWidth(60)
+            spin.setFixedWidth(55)
             spin.setToolTip(f"当前服务端评分：{orig if orig is not None else '未评分'}")
-            rl.addWidget(spin)
-            rl.addStretch()
+            bl.addWidget(spin)
             self._dim_widgets[key] = {"spin": spin, "orig": orig}
-            self._dim_spins_layout.addWidget(row)
+            self._dim_spins_layout.addWidget(box)
 
     def _on_dimension_feedback_submit(self):
         """提交维度改分到服务端。"""
@@ -761,11 +764,13 @@ class ScheduledTasksPage(BasePage):
     def _make_del_widget(self, t):
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
-        btn_del = table_action_button("", "删除")
+        lay.setContentsMargins(2, 0, 2, 0)
+        lay.setSpacing(0)
+        btn_del = icon_button("delete", "删除任务", size=16)
+        btn_del.setCursor(Qt.PointingHandCursor)
         btn_del.clicked.connect(lambda _=False: self._delete(t.get("id")))
         lay.addWidget(btn_del)
+        lay.addStretch()
         return w
 
     def _make_download_cell(self, task):

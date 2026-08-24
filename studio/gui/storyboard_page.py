@@ -1,10 +1,9 @@
-﻿"""
+"""
 「分镜脚本创作」页
 
 流程：输入/接收视频文案 → 生成分镜脚本（竖向列表，每镜头含镜别/时长/音效/画面描述/旁白）
       → 每镜头可引用素材（本地/即梦/MG/联网） → 批量生成即梦镜头图 → 飞书同步
 """
-import contextlib
 import json
 import os
 import time
@@ -14,12 +13,12 @@ from typing import Any
 import requests.exceptions
 from config.paths import CONFIG_INI_FILE, DREAMINA_OUTPUT_DIR, KNOWLEDGE_MEDIA_DIR
 from gui._tab_compat import setup_tab_widget
-from gui.ai_script_page import FeishuUploadWorker, LLMWorker, WebSearchWorker
+from gui.ai_script_page import FeishuUploadWorker, LLMWorker
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
 from gui.searchable_combo import SearchableComboBox
 from gui.vector_search_page import VideoPreviewDialog, _ThumbWorker
-from PySide6.QtCore import QRect, QSize, Qt, Signal
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -47,7 +46,6 @@ from PySide6.QtWidgets import (
 from utils import material_client
 from utils.base_worker import BaseWorker
 from utils.dreamina_client import DreaminaClient
-from utils.llm_output_utils import safe_json_parse
 from utils.logger_utils import log
 from utils.my_knowledge_manager import STYLIZATION_TYPE, MyKnowledgeManager
 
@@ -188,6 +186,53 @@ class _SimilarSearchWorker(BaseWorker):
         merged = sorted(best.values(), key=lambda x: x.get("score", 0) or 0, reverse=True)  # noqa: E501
         self.finished.emit(merged[: self.top_k])
 
+class _StockSearchWorker(BaseWorker):
+    """服务端联网素材搜索（POST /material/stock_search，Pexels/Pixabay）。
+
+    与 WebSearchWorker 的 DuckDuckGo 网页搜索不同，本 Worker
+    专门用于「引用素材」对话框的联网素材 Tab：返回带缩略图/直链/时长/分辨率
+    的可商用素材列表，供用户直接选中后以 URL 形式绑定镜头。
+    """
+    finished = Signal(str, list)  # provider, items
+
+    def __init__(self, query, kind="all"):
+        super().__init__()
+        self.query = query.strip()
+        self.kind = kind if kind in ("image", "video", "all") else "all"
+
+    def do_work(self):
+        if not self.query:
+            self.finished.emit("", [])
+            return
+        try:
+            data = material_client.stock_search(self.query, self.kind, timeout=20)
+            if data is None:
+                # stock_search 不可达：不抛出 error，UI 层提示用户
+                self.finished.emit("", [])
+                return
+            provider = (data or {}).get("provider", "")
+            items = (data or {}).get("items") or []
+            # 统一字段供 UI 渲染 / 绑定
+            normalized = []
+            for it in items:
+                url = it.get("url") or ""
+                thumb = it.get("thumb") or url
+                normalized.append({
+                    "stock_id": str(it.get("id") or it.get("stock_id") or hash(url) & 0xFFFFFFFF),
+                    "type": (it.get("type") or self.kind).lower(),
+                    "provider": it.get("provider") or provider or "",
+                    "author": it.get("author") or "",
+                    "title": it.get("title") or it.get("filename") or "",
+                    "thumb": thumb,
+                    "url": url,
+                    "duration_sec": it.get("duration_sec") or 0,
+                    "width": it.get("width") or 0,
+                    "height": it.get("height") or 0,
+                })
+            self.finished.emit(provider, normalized)
+        except requests.exceptions.RequestException as e:
+            self.error.emit(str(e))
+
 class _AutoBindShotsWorker(BaseWorker):
     """为每个镜头按其画面描述做相似度检索，自动匹配最相似素材。"""
     progress = Signal(int, int)          # done, total
@@ -243,41 +288,57 @@ class _AutoBindShotsWorker(BaseWorker):
 # ─────────────────────────── 引用素材对话框 ─────────────────────────────────
 
 class ShotMaterialDialog(QDialog):
-    """每个镜头的「引用素材」弹窗，包含四个来源：本地素材/即梦生成/MG动画/联网素材。"""
+    """每个镜头的「引用素材」弹窗，包含三个来源：本地素材/MG动画/联网素材。"""
 
     def __init__(self, shot_desc="", ratio="9:16", brand="", model="",
                  category="", shot_type="", extra_ctx="", style="", topic="",
                  main_window=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("引用素材")
-        self.resize(1300, 850)
-        self.setMinimumSize(1100, 750)
-        self.selected_material = None
-        self.selected_materials = []     # 复选结果（本地素材）
-        self._web_worker = None
-        self._img_worker = None
-        self._thumb_cache = {}
-        self._thumb_queue = []
-        self._active_thumb = 0
-        self._thumb_workers = []
-        self._selected_mids = set()      # 角标选中的素材 mid（相册式选择）
-        self._local_placeholder = self._make_local_placeholder()
-        self._ratio = ratio
-        self._main_window = main_window
-        self.brand = (brand or "").strip()
-        self.model = (model or "").strip()
-        self.category = (category or "").strip()
-        self.shot_type = (shot_type or "").strip()
-        self._extra_ctx = (extra_ctx or "").strip()
-        self.style = (style or "").strip()
-        self._topic = (topic or "").strip()
-        self._setup(shot_desc)
+        try:
+            super().__init__(parent)
+            log.info(f"[引用素材] ShotMaterialDialog.__init__ 开始: parent={parent}, parent_widget_type={type(parent).__name__ if parent else 'None'}")
+            self.setWindowTitle("引用素材")
+            self.resize(1300, 850)
+            self.setMinimumSize(1100, 750)
+            self.selected_material = None
+            self.selected_materials = []     # 复选结果（本地素材）
+            self._web_worker = None
+            self._img_worker = None
+            self._thumb_cache = {}           # 本地素材缩略图：{mid: QPixmap}
+            self._web_thumb_cache = {}       # 联网素材缩略图：{stock_id: QPixmap}
+            self._thumb_queue = []
+            self._web_thumb_queue = []
+            self._active_thumb = 0
+            self._web_active_thumb = 0
+            self._thumb_workers = []
+            self._web_thumb_workers = []
+            self._selected_mids = set()      # 本地素材角标选中 mid
+            self._web_selected_ids = set()   # 联网素材角标选中 stock_id
+            self._local_placeholder = self._make_local_placeholder()
+            self._web_placeholder = self._make_web_placeholder()
+            self._ratio = ratio
+            self._main_window = main_window
+            self.brand = (brand or "").strip()
+            self.model = (model or "").strip()
+            self.category = (category or "").strip()
+            self.shot_type = (shot_type or "").strip()
+            self._extra_ctx = (extra_ctx or "").strip()
+            self.style = (style or "").strip()
+            self._topic = (topic or "").strip()
+            log.info("[引用素材] ShotMaterialDialog 初始化成员变量完成，开始 _setup")
+            self._setup(shot_desc)
+            log.info("[引用素材] ShotMaterialDialog.__init__ 完成")
+        except Exception as e:
+            log.exception(f"[引用素材] ShotMaterialDialog.__init__ 异常: {e}")
+            raise
 
     def _setup(self, shot_desc):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        try:
+            log.info(f"[引用素材] _setup 开始: shot_desc_len={len(shot_desc or '')}")
+            layout = QVBoxLayout(self)
+            layout.setSpacing(10)
 
-        self._tab_bar, self._stack, self.tabs = setup_tab_widget(layout, 1)
+            self._tab_bar, self._stack, self.tabs = setup_tab_widget(layout, 1)
+            log.info("[引用素材] setup_tab_widget 完成")
 
         # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 风格 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
         self._search_ctx = " ".join(
@@ -350,18 +411,27 @@ class ShotMaterialDialog(QDialog):
         self._tab_bar.addTab(" MG动画")
         self._stack.addWidget(mg_tab)
 
-        # ── Tab 3: 联网素材 ──────────────────────────────────────────
+        # ── Tab 3: 联网素材（服务端 /material/stock_search，Pexels/Pixabay 免版权）──
         web_tab = QWidget()
         wt = QVBoxLayout(web_tab)
         wt.setSpacing(8)
         web_row = QHBoxLayout()
+        # 类型筛选：支持 image/video/all 三种
+        self.web_kind_combo = QComboBox()
+        self.web_kind_combo.addItem("全部", "all")
+        self.web_kind_combo.addItem("图片", "image")
+        self.web_kind_combo.addItem("视频", "video")
+        self.web_kind_combo.setFixedWidth(80)
+        self.web_kind_combo.currentIndexChanged.connect(self._search_web)
+        web_row.addWidget(self.web_kind_combo)
         self.web_input = QLineEdit()
-        self.web_input.setPlaceholderText("输入搜索词，联网查找免版权参考素材（服务端 Pexels/Pixabay）")
+        self.web_input.setPlaceholderText("输入搜索词，联网查找免版权素材（服务端 Pexels/Pixabay，可多选确认绑定）")
         # 与本地素材一致：默认带入景别/品牌/型号/产品类型 + 镜头文案
         self.web_input.setText((self._search_ctx + " " + shot_desc)[:80] if (self._search_ctx or shot_desc) else "")  # noqa: E501
         self.web_input.returnPressed.connect(self._search_web)
         web_row.addWidget(self.web_input, 1)
         self.btn_web = QPushButton("联网搜索")
+        self.btn_web.setObjectName("primary_button")
         self.btn_web.clicked.connect(self._search_web)
         web_row.addWidget(self.btn_web)
         wt.addLayout(web_row)
@@ -369,10 +439,19 @@ class ShotMaterialDialog(QDialog):
         self.web_pbar.setRange(0, 0)
         self.web_pbar.setVisible(False)
         wt.addWidget(self.web_pbar)
-        self.web_results = QTextEdit()
-        self.web_results.setReadOnly(True)
-        self.web_results.setPlaceholderText("点击「联网搜索」查找相关参考资料...")
-        wt.addWidget(self.web_results, 1)
+        # 结果网格（与本地素材一致的相册式缩略图网格）
+        self.web_list = QListWidget()
+        self.web_list.setViewMode(QListWidget.IconMode)
+        self.web_list.setIconSize(QSize(160, 160))
+        self.web_list.setGridSize(QSize(185, 215))
+        self.web_list.setResizeMode(QListWidget.Adjust)
+        self.web_list.setMovement(QListWidget.Static)
+        self.web_list.setSpacing(8)
+        self.web_list.setUniformItemSizes(True)
+        self.web_list.itemDoubleClicked.connect(self._preview_web_item)
+        self.web_list.itemClicked.connect(self._on_web_item_clicked)
+        wt.addWidget(self.web_list, 1)
+        wt.addWidget(self._muted("勾选所需联网素材（可多选，确认后以 URL 形式绑定镜头；Pexels/Pixabay 免版权可商用）。"))
         self._tab_bar.addTab(" 联网素材")
         self._stack.addWidget(web_tab)
 
@@ -391,37 +470,21 @@ class ShotMaterialDialog(QDialog):
 
         self._tab_bar.currentChanged.connect(self._stack.setCurrentIndex)
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
-        self._search_local()   # auto-load local on open
-
-    # ── Tab 切换时更新确认按钮 ───────────────────────────────────────
-    def _on_tab_changed(self, idx):
-        if idx == 0:
-            self._on_local_sel_changed()
-        else:
-            self.btn_confirm.setEnabled(False)
-
-    # ── 确认 ─────────────────────────────────────────────────────────
-    def _confirm(self):
-        tab = self.tabs.currentIndex()
-        if tab == 0:
-            items = self._checked_local_items()
-            if items:
-                mats = []
-                for it in items:
-                    d = it.data(Qt.UserRole)
-                    if not d:
-                        continue
-                    mats.append({
-                        "type": "local",
-                        "path": d.get("path", ""),
-                        "name": d.get("filename") or d.get("name", ""),
-                        "hash": d.get("file_hash", ""),
-                        "mid": d.get("mid", ""),
-                    })
-                if mats:
-                    self.selected_materials = mats
-                    self.selected_material = mats[0]
-                    self.accept()
+        log.info("[引用素材] 开始自动加载本地素材搜索")
+        try:
+            self._search_local()   # auto-load local on open
+        except Exception as e:
+            log.exception(f"[引用素材] 自动加载本地素材搜索失败: {e}")
+        # 联网素材也默认加载一次（带脚本上下文过滤）
+        if self._search_ctx or self.web_input.text().strip():
+            try:
+                QTimer(self).singleShot(0, self._search_web)
+            except Exception as e:
+                log.exception(f"[引用素材] 自动加载联网素材搜索失败: {e}")
+        log.info("[引用素材] _setup 完成")
+        except Exception as e:
+            log.exception(f"[引用素材] _setup 异常: {e}")
+            raise
 
     @staticmethod
     def _muted(text):
@@ -637,6 +700,19 @@ class ShotMaterialDialog(QDialog):
         p.end()
         return pm
 
+    @staticmethod
+    def _make_web_placeholder():
+        pm = QPixmap(160, 160)
+        pm.fill(QColor("#243b55"))
+        p = QPainter(pm)
+        p.setPen(QColor("#888"))
+        f = p.font()
+        f.setPointSize(11)
+        p.setFont(f)
+        p.drawText(pm.rect(), Qt.AlignCenter, "免版权素材\n加载中…")
+        p.end()
+        return pm
+
     # ── 即梦生成 ─────────────────────────────────────────────────────
     def _dreamina_gen(self):
         prompt = self.dreamina_input.toPlainText().strip()
@@ -687,31 +763,232 @@ class ShotMaterialDialog(QDialog):
     def _open_mg(self):
         try:
             if self._main_window:
-                self._main_window.switch_page(35)
+                # MG动画在素材生成页（index 31）的内部 Tab2
+                self._main_window.switch_page(31)
+                if hasattr(self._main_window, "switch_dreamina_tab"):
+                    self._main_window.switch_dreamina_tab(2)
         except Exception:
             pass
         self.reject()
 
-    # ── 联网搜索 ─────────────────────────────────────────────────────
+    # ── 联网搜索（服务端 /material/stock_search，缩略图网格）─────────
     def _search_web(self):
         query = self._with_ctx(self.web_input.text().strip())
         if not query:
             return
+        kind = self.web_kind_combo.currentData() if hasattr(self, "web_kind_combo") else "all"
         self.btn_web.setEnabled(False)
         self.web_pbar.setVisible(True)
-        self.web_results.setPlainText("正在搜索，请稍候...")
-        self._web_worker = WebSearchWorker(query)
-        self._web_worker.finished.connect(lambda t: (
-            self.btn_web.setEnabled(True),
-            self.web_pbar.setVisible(False),
-            self.web_results.setPlainText(t or "未找到结果"),
-        ))
+        self.web_list.clear()
+        self._web_thumb_queue.clear()
+        self._web_thumb_cache.clear()
+        self._web_selected_ids.clear()
+        self.web_list.addItem(QListWidgetItem("正在联网搜索，请稍候（Pexels/Pixabay）…"))
+        self._web_worker = _StockSearchWorker(query, kind)
+        self._web_worker.finished.connect(self._on_stock_results)
         self._web_worker.error.connect(lambda m: (
             self.btn_web.setEnabled(True),
             self.web_pbar.setVisible(False),
-            self.web_results.setPlainText(f"搜索失败：{m}"),
+            self.web_list.clear(),
+            self.web_list.addItem(QListWidgetItem(f"联网搜索失败: {m}")),
         ))
         self._web_worker.start()
+
+    def _on_stock_results(self, provider, items):
+        self.btn_web.setEnabled(True)
+        self.web_pbar.setVisible(False)
+        self.web_list.blockSignals(True)
+        self.web_list.clear()
+        if not items:
+            self.web_list.blockSignals(False)
+            self.web_list.addItem(QListWidgetItem(
+                f"未找到相关在线素材（来源: {provider or '服务端'}），可换关键词重试。"))
+            self._on_web_sel_changed()
+            return
+        for it in items:
+            sid = str(it.get("stock_id") or "")
+            stype = (it.get("type") or "").lower()
+            meta = []
+            if it.get("duration_sec"):
+                meta.append(f"{it['duration_sec']}s")
+            if it.get("width") and it.get("height"):
+                meta.append(f"{it['width']}x{it['height']}")
+            if it.get("author"):
+                meta.append(f"© {it['author']}")
+            title = (it.get("title") or "").strip() or (it.get("provider", "") or "免版权素材")
+            label = title if len(title) <= 16 else title[:15] + "…"
+            if meta:
+                label += "\n" + " ".join(meta)
+            lw = QListWidgetItem(label)
+            lw.setData(Qt.UserRole, it)
+            lw.setForeground(QColor("#d1d5db"))
+            self._apply_web_icon(sid, lw, stype)
+            if it.get("url"):
+                lw.setToolTip(
+                    f"{title}\n来源: {it.get('provider') or 'Pexels/Pixabay'}\n作者: {it.get('author') or '—'}\n"
+                    f"尺寸: {(it.get('width') or '—')}x{(it.get('height') or '—')}\n直链: {it['url']}"
+                )
+            self.web_list.addItem(lw)
+            thumb = it.get("thumb") or ""
+            if thumb and sid and sid not in self._web_thumb_cache:
+                self._web_thumb_queue.append((sid, thumb))
+        self.web_list.blockSignals(False)
+        self._drain_web_thumbs()
+        self._on_web_sel_changed()
+
+    # ── 联网素材缩略图加载（URL 下载 → QPixmap，并发节流）─────────────
+    def _apply_web_icon(self, sid, lw_item, mtype):
+        sid = str(sid or "")
+        if sid and sid in self._web_thumb_cache:
+            base = self._web_thumb_cache[sid]
+        else:
+            base = self._pm_web_stock_video if mtype == "video" else self._web_placeholder
+        if sid:
+            base = self._draw_corner_badge(base, sid in self._web_selected_ids)
+        lw_item.setIcon(base)
+
+    @property
+    def _pm_web_stock_video(self):
+        """联网视频类型占位缩略图：深蓝色 + 播放角标。"""
+        if not hasattr(self, "__pm_web_video"):
+            pm = QPixmap(160, 160)
+            pm.fill(QColor("#2b2d42"))
+            p = QPainter(pm)
+            p.setPen(QColor("#9aa0a6"))
+            f = p.font()
+            f.setPointSize(11)
+            p.setFont(f)
+            p.drawText(pm.rect(), Qt.AlignCenter, "▶ 联网视频")
+            p.end()
+            self.__pm_web_video = pm
+        return self.__pm_web_video
+
+    def _drain_web_thumbs(self):
+        from utils.http_client import http_get
+
+        def _load(sid, url):
+            """下载 URL 缩略图并缓存，更新图标。"""
+            try:
+                resp = http_get(url, timeout=15)
+                data = resp.content if resp.status_code == 200 and resp.content else b""
+            except Exception:  # URL 缩略图下载涉及 HTTP 请求
+                data = b""
+            self._web_active_thumb = max(0, self._web_active_thumb - 1)
+            if data:
+                pm = QPixmap()
+                if pm.loadFromData(data) and not pm.isNull():
+                    sc = pm.scaled(160, 160, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                    # 居中裁剪到正方形
+                    cropped = QPixmap(160, 160)
+                    cropped.fill(QColor("#16161f"))
+                    p = QPainter(cropped)
+                    x = (160 - sc.width()) // 2
+                    y = (160 - sc.height()) // 2
+                    p.drawPixmap(x, y, sc)
+                    p.end()
+                    self._web_thumb_cache[sid] = cropped
+                    # 刷新列表项图标
+                    for i in range(self.web_list.count()):
+                        it = self.web_list.item(i)
+                        d = it.data(Qt.UserRole)
+                        if d and str(d.get("stock_id") or "") == sid:
+                            self._apply_web_icon(sid, it, (d.get("type") or "").lower())
+                            break
+            QTimer(self).singleShot(0, self._drain_web_thumbs)
+
+        while self._web_active_thumb < 6 and self._web_thumb_queue:
+            sid, url = self._web_thumb_queue.pop(0)
+            if sid in self._web_thumb_cache:
+                continue
+            self._web_active_thumb += 1
+            import threading as _th
+
+            t = _th.Thread(target=_load, args=(sid, url), daemon=True)
+            t.start()
+
+    # ── 联网素材选择 / 预览 ──────────────────────────────────────────
+    def _on_web_item_clicked(self, item):
+        """单击：只有点击右上角选择方框区域才切换选中。"""
+        d = item.data(Qt.UserRole) or {}
+        sid = str(d.get("stock_id") or "")
+        if not sid:
+            return
+        vp_pos = self.web_list.viewport().mapFromGlobal(QCursor.pos())
+        item_rect = self.web_list.visualItemRect(item)
+        badge_zone = QRect(item_rect.right() - 42, item_rect.top() + 2, 40, 40)
+        if not badge_zone.contains(vp_pos):
+            return
+        if sid in self._web_selected_ids:
+            self._web_selected_ids.discard(sid)
+        else:
+            self._web_selected_ids.add(sid)
+        self._apply_web_icon(sid, item, (d.get("type") or "").lower())
+        self._on_web_sel_changed()
+
+    def _on_web_sel_changed(self):
+        if self._tab_bar.currentIndex() != 2:
+            return
+        count = sum(1 for i in range(self.web_list.count())
+                    if str((self.web_list.item(i).data(Qt.UserRole) or {}).get("stock_id") or "") in self._web_selected_ids)
+        self.btn_confirm.setEnabled(count > 0)
+
+    def _preview_web_item(self, item):
+        """双击联网素材：视频预览 / 图片大图预览。"""
+        d = item.data(Qt.UserRole) or {}
+        url = d.get("url") or ""
+        if not url:
+            return
+        title = d.get("title") or d.get("provider") or "免版权素材"
+        stock_id = str(d.get("stock_id") or "")
+        media_type = (d.get("type") or "").lower()
+        if media_type == "video":
+            VideoPreviewDialog(url, title, stock_id, "video", self).exec()
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"联网预览 - {title}")
+        dlg.setMinimumSize(900, 560)
+        dlg.resize(1080, 680)
+        v = QVBoxLayout(dlg)
+        lbl = QLabel("加载中…")
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("background:#000;color:#888;")
+        v.addWidget(lbl, 1)
+        info = QLabel(f"来源: {d.get('provider') or 'Pexels/Pixabay'} | 作者: {d.get('author') or '—'} | 直链: {url}")
+        info.setObjectName("muted_text")
+        info.setWordWrap(True)
+        v.addWidget(info)
+
+        def on_done(path):
+            pm = QPixmap(path)
+            if not pm.isNull():
+                lbl.setPixmap(pm.scaled(lbl.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                lbl.setText("图片加载失败")
+
+        import threading as _th
+
+        def _download():
+            try:
+                from utils.http_client import http_get
+                r = http_get(url, timeout=30)
+                if r.status_code == 200 and r.content:
+                    import hashlib
+                    tmp_dir = os.path.join(DREAMINA_OUTPUT_DIR, "_web_preview")
+                    os.makedirs(tmp_dir, exist_ok=True)
+                    ext = os.path.splitext(url.split("?")[0])[1].lower()[:4]
+                    ext = ext if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp") else ".jpg"
+                    fpath = os.path.join(tmp_dir, hashlib.md5(url.encode("utf-8")).hexdigest() + ext)
+                    with open(fpath, "wb") as f:
+                        f.write(r.content)
+                    QTimer(dlg).singleShot(0, lambda: on_done(fpath))
+                    return
+            except Exception:  # 下载联网图片预览涉及 HTTP/文件操作
+                pass
+            QTimer(dlg).singleShot(0, lambda: lbl.setText("图片加载失败"))
+
+        t = _th.Thread(target=_download, daemon=True)
+        t.start()
+        dlg.exec()
 
     # ── Tab 切换时更新确认按钮 ───────────────────────────────────────
     def _on_tab_changed(self, idx):
@@ -719,12 +996,14 @@ class ShotMaterialDialog(QDialog):
             self._on_local_sel_changed()
         elif idx == 1:
             self.btn_confirm.setEnabled(self._dreamina_file is not None)
+        elif idx == 2:
+            self._on_web_sel_changed()
         else:
             self.btn_confirm.setEnabled(False)
 
     # ── 确认 ─────────────────────────────────────────────────────────
     def _confirm(self):
-        tab = self.tabs.currentIndex()
+        tab = self._tab_bar.currentIndex()
         if tab == 0:
             items = self._checked_local_items()
             if items:
@@ -746,6 +1025,32 @@ class ShotMaterialDialog(QDialog):
                     self.accept()
         elif tab == 1:
             self._select_dreamina()
+        elif tab == 2:
+            # 联网素材：按勾选的角标绑定多个，素材以 URL/类型保存
+            mats = []
+            for i in range(self.web_list.count()):
+                it = self.web_list.item(i)
+                d = it.data(Qt.UserRole) or {}
+                sid = str(d.get("stock_id") or "")
+                if not sid or sid not in self._web_selected_ids:
+                    continue
+                mats.append({
+                    "type": "web_stock",
+                    "path": d.get("url", ""),
+                    "thumb": d.get("thumb", ""),
+                    "name": (d.get("title") or "").strip() or "免版权素材",
+                    "provider": d.get("provider", ""),
+                    "author": d.get("author", ""),
+                    "stock_id": sid,
+                    "media_type": (d.get("type") or "").lower(),
+                    "width": d.get("width") or 0,
+                    "height": d.get("height") or 0,
+                    "duration_sec": d.get("duration_sec") or 0,
+                })
+            if mats:
+                self.selected_materials = mats
+                self.selected_material = mats[0]
+                self.accept()
 
 
 # ─────────────────────────────── Main Page ──────────────────────────────────
@@ -754,10 +1059,11 @@ def _sb_server_url():
     """读取服务端统一地址（compute_server_url）。"""
     try:
         import json as _json
-        from config.paths import AI_CONFIG_FILE
         import os as _os
+
+        from config.paths import AI_CONFIG_FILE
         if _os.path.isfile(AI_CONFIG_FILE):
-            cfg = _json.load(open(AI_CONFIG_FILE, "r", encoding="utf-8"))
+            cfg = _json.load(open(AI_CONFIG_FILE, encoding="utf-8"))
             url = (cfg.get("compute_server_url") or "").strip().rstrip("/")
             if url:
                 return url
@@ -964,13 +1270,13 @@ class StoryboardPage(BasePage):
         lbl_ratio = QLabel("画幅")
         lbl_ratio.setObjectName("muted_text")
         hdr.addWidget(lbl_ratio)
-        
+
         self.combo_shot_ratio = QComboBox()
         self.combo_shot_ratio.addItems(["9:16", "16:9", "1:1"])
         self.combo_shot_ratio.setFixedWidth(80)
         self.combo_shot_ratio.currentTextChanged.connect(self._update_sb_header)
         hdr.addWidget(self.combo_shot_ratio)
-        
+
         sb.addLayout(hdr)
 
         # 另起一行放画幅、时长等信息（使用橙色）
@@ -1316,6 +1622,13 @@ class StoryboardPage(BasePage):
                     self._reload_sb_scripts()
                 except Exception:
                     pass
+                # 同时刷新「一键成片 → 脚本成片」的脚本列表
+                try:
+                    compile_tool = getattr(self.main_window, "compile_video_tool", None)
+                    if compile_tool and hasattr(compile_tool, "_populate_scripts"):
+                        compile_tool._populate_scripts()
+                except Exception:
+                    pass
 
         def _err(e):
             self.lbl_status.setText("注意： 分镜脚本已保存到本地，但同步服务端失败")
@@ -1331,7 +1644,7 @@ class StoryboardPage(BasePage):
     def _export_storyboard_excel(self, path, topic, ratio, orient, style_name, total_dur, shots):
         try:
             import openpyxl
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         except ImportError:
             raise RuntimeError("缺少 openpyxl，请运行：pip install openpyxl")
 
@@ -1360,7 +1673,7 @@ class StoryboardPage(BasePage):
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
         hdr_fill = PatternFill("solid", fgColor="1E3A5F")
         hdr_font = Font(bold=True, color="FFFFFF")
-        for ci, (col, w) in enumerate(zip(cols, widths), 1):
+        for ci, (col, w) in enumerate(zip(cols, widths, strict=True), 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
             cell = ws.cell(1, ci, col)
             cell.font = hdr_font
@@ -1647,34 +1960,44 @@ class StoryboardPage(BasePage):
         return card
 
     def _open_material_dialog(self, card):
-        shot_desc = card["desc"].toPlainText().strip()
-        ratio = self.combo_shot_ratio.currentText()
-        prod = getattr(self, "current_product", {}) or {}
-        # 产品上下文兜底：飞书选题 + 视频文案首句，保证检索带上产品信息
-        extra = []
-        topic = (getattr(self, "feishu_record", {}) or {}).get("topic", "")
-        if topic:
-            extra.append(str(topic)[:60])
-        copy = self.edit_copy.toPlainText().strip()
-        if copy:
-            extra.append(copy[:120])
-        dlg = ShotMaterialDialog(
-            shot_desc=shot_desc, ratio=ratio,
-            brand=str(prod.get("brand") or ""),
-            model=str(prod.get("model") or ""),
-            category=str(prod.get("category") or ""),
-            shot_type=card["combo_type"].currentText(),
-            extra_ctx="，".join(extra),
-            style=(self.combo_stylization.currentText() if self._selected_stylization else ""),
-            topic=str(topic),
-            main_window=self.main_window,
-            parent=self.parent_widget,
-        )
-        if dlg.exec() == QDialog.Accepted:
-            mats = getattr(dlg, "selected_materials", None) or (
-                [dlg.selected_material] if dlg.selected_material else [])
-            if mats:
-                self._bind_materials(card, mats)
+        try:
+            log.info(f"[引用素材] 按钮被点击，镜头 idx={card.get('idx')}")
+            shot_desc = card["desc"].toPlainText().strip()
+            ratio = self.combo_shot_ratio.currentText()
+            prod = getattr(self, "current_product", {}) or {}
+            # 产品上下文兜底：飞书选题 + 视频文案首句，保证检索带上产品信息
+            extra = []
+            topic = (getattr(self, "feishu_record", {}) or {}).get("topic", "")
+            if topic:
+                extra.append(str(topic)[:60])
+            copy = self.edit_copy.toPlainText().strip()
+            if copy:
+                extra.append(copy[:120])
+            log.info(f"[引用素材] 创建对话框: desc_len={len(shot_desc)} brand={prod.get('brand')} model={prod.get('model')}")
+            dlg = ShotMaterialDialog(
+                shot_desc=shot_desc, ratio=ratio,
+                brand=str(prod.get("brand") or ""),
+                model=str(prod.get("model") or ""),
+                category=str(prod.get("category") or ""),
+                shot_type=card["combo_type"].currentText(),
+                extra_ctx="，".join(extra),
+                style=(self.combo_stylization.currentText() if self._selected_stylization else ""),
+                topic=str(topic),
+                main_window=self.main_window,
+                parent=self.parent_widget,
+            )
+            log.info(f"[引用素材] 对话框已创建，准备 exec()")
+            result = dlg.exec()
+            log.info(f"[引用素材] 对话框关闭，result={result}")
+            if result == QDialog.Accepted:
+                mats = getattr(dlg, "selected_materials", None) or (
+                    [dlg.selected_material] if dlg.selected_material else [])
+                if mats:
+                    log.info(f"[引用素材] 选中 {len(mats)} 个素材")
+                    self._bind_materials(card, mats)
+        except Exception as e:
+            log.exception(f"[引用素材] 对话框打开失败: {e}")
+            self.show_error(f"引用素材对话框打开失败：{e}", "错误")
 
     def _set_shot_thumb(self, card, mat):
         """把素材缩略图显示到镜头卡片的右侧区域（本地文件直读，服务端素材异步下载）。"""
@@ -1932,7 +2255,10 @@ class StoryboardPage(BasePage):
 
     def _open_mg(self):
         try:
-            self.main_window.switch_page(35)
+            # MG动画在素材生成页（index 31）的内部 Tab2
+            self.main_window.switch_page(31)
+            if hasattr(self.main_window, "switch_dreamina_tab"):
+                self.main_window.switch_dreamina_tab(2)
             tool = getattr(self.main_window, "mg_animation_tool", None)
             if tool and self.shot_cards and hasattr(tool, "set_default_text"):
                 tool.set_default_text(self.shot_cards[0]["desc"].toPlainText().strip()[:20])

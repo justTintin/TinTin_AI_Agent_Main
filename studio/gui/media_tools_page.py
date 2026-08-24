@@ -97,7 +97,6 @@ class MediaToolsPage(BasePage):
         ("声音克隆", "voice_clone", "audio", "克隆音色生成配音"),
         ("视频去水印字幕", "subtitle_removal", "closed-caption", "去除字幕 / 台标水印"),
         ("视频框选OCR", "video_ocr", "text-box-search", "视频帧文字识别"),
-        ("批量LUT调色", "video_lut", "gradient", "批量应用 LUT 调色"),
     ]
     _PROMPT_TOOLS = [
         ("图片反推提示词", "image_prompt", "image", "上传图片，AI 生成绘画提示词"),
@@ -275,9 +274,6 @@ class MediaToolsPage(BasePage):
         elif key == "video_ocr":
             from gui.video_ocr_page import VideoOcrPage
             self._tool_pages[key] = VideoOcrPage(content, mw)
-        elif key == "video_lut":
-            from gui.video_lut_page import VideoLutPage
-            self._tool_pages[key] = VideoLutPage(content, mw)
         elif key == "image_prompt":
             from gui.prompt_reverse_page import ImagePromptReversePage
             self._tool_pages[key] = ImagePromptReversePage(content, mw)

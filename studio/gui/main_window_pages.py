@@ -296,7 +296,7 @@ class PageSetupMixin:
         p2.setObjectName("tab_page")
         self.product_image_tool = ProductImagePage(p2, self)
         self.product_image_tool.setup()  # noqa: E501
-        tab_bar.addTab(" 产品生图")
+        tab_bar.addTab(" 图片生成")
         stack.addWidget(p2)
 
         # Tab 3: 数字人（外层滚动容器：音频列表加高后窗口偏矮时也能滚动查看）
@@ -307,7 +307,7 @@ class PageSetupMixin:
         dh_scroll.setWidgetResizable(True)
         dh_scroll.setWidget(p3)
         dh_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")  # noqa: E501
-        tab_bar.addTab(" 数字人")
+        tab_bar.addTab(" 视频生成")
         stack.addWidget(dh_scroll)
 
         # Tab 4: MG 动画
@@ -318,6 +318,15 @@ class PageSetupMixin:
         self.mg_animation_tool.setup(show_heading=False)
         tab_bar.addTab(" MG 动画")
         stack.addWidget(p4)
+        # 暴露素材生成页内部 Tab 切换句柄，供其他页面跳转
+        self._dreamina_tab_bar = tab_bar
+        self._dreamina_stack = stack
+        tab_bar.currentChanged.connect(stack.setCurrentIndex)
+
+    def switch_dreamina_tab(self, idx):
+        """切换素材生成页（index 31）的内部 Tab：0=图片生成 1=视频生成 2=MG动画。"""
+        if hasattr(self, "_dreamina_tab_bar"):
+            self._dreamina_tab_bar.setCurrentIndex(max(0, idx))
 
     def setup_dreamina_assets_page(self):
         """即梦素材已并入素材检索页（index 38 Tab2），本容器仅保留占位。
@@ -1985,7 +1994,7 @@ class PageSetupMixin:
         p2 = QWidget()
         p2.setObjectName("tab_page")
         self._build_about_tab(p2)
-        tab_bar.addTab("ℹ 关于与版本")
+        tab_bar.addTab("关于与版本")
         stack.addWidget(p2)
 
         p3 = QWidget()

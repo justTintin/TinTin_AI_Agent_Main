@@ -225,8 +225,7 @@ try:
 except ImportError:
     psutil = None
 
-from gui.threads import AIStatusCheckThread, SystemMonitorThread  # noqa: E402
-from utils.runninghub_manager import RunningHubManager  # noqa: E402
+from gui.threads import AIStatusCheckThread  # noqa: E402
 from utils.thread_worker import TaskWorker as Worker  # noqa: E402
 
 
@@ -318,7 +317,7 @@ class SystemStatusOverlay(QWidget):
         self.server_dot.setObjectName("ov_server_dot")
         self.server_dot.setToolTip("服务端连接状态")
         layout.addWidget(self.server_dot)
-        self.server_lbl = QLabel(" 服务器")
+        self.server_lbl = QLabel(" 服务器状态")
         self.server_lbl.setObjectName("ov_server")
         layout.addWidget(self.server_lbl)
 
@@ -340,13 +339,11 @@ class SystemStatusOverlay(QWidget):
             chip_layout.addWidget(value_lbl)
             layout.addWidget(chip)
             return value_lbl
-
+        # 服务端资源监控（来自 /health gpu 字段）：显存占用 / GPU 利用率
         self.cpu_lbl = metric("", "CPU")
         self.ram_lbl = metric("", "内存")
         self.vram_lbl = metric("", "显存")
-
-        # 服务端资源监控（来自 /health gpu 字段）：显存占用 / GPU 利用率
-        self.server_gpu_lbl = metric("", "服务端GPU")
+        self.server_gpu_lbl = metric("", "GPU")
 
         def create_sep():
             sep = QFrame()
@@ -456,11 +453,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
         self._update_splash("正在配置独立浏览器 Profile...", 45)
 
-        # 初始化 RunningHub 管理器（API key 在 ai_config 中维护）
-        self.runninghub = RunningHubManager(
-            api_key=self.ai_config.get("runninghub_api_key", ""),
-            base_url=self.ai_config.get("runninghub_base_url", "https://www.runninghub.cn")  # noqa: E501
-        )
+        # RunningHub 配置由服务端管理，客户端不再直连
+        self.runninghub = None  # 已迁移到服务端管理
         self.rh_pending_tasks = []
         self.rh_submitted_tasks = {}
         self.rh_queue_paused = False
@@ -482,12 +476,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self._pw_ready = False
         self.account_pw_controllers = {}
 
-        self.refresh_timer = QTimer(self)
         self._avatar_workers = []
         self.active_workers = []
-        self.refresh_timer.setInterval(5000)
-        self.refresh_timer.timeout.connect(self.refresh_server_tasks)
-
         self.task_progress_bars = {}
         self.task_status_items = {}
         self.task_outputs = {}
@@ -509,15 +499,8 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
         self.ensure_playwright_chromium_ready()
 
         self._update_splash("正在建立后台通信与系统资源监控服务...", 95)
-        from utils import comfyui_client as comfy
-        # 监控为被动探活：不为看状态而启动本地（auto_start=False），外部优先、本地已跑则用本地
-        self.monitor = SystemMonitorThread(
-            lambda: comfy.resolve_addr(self.ai_config, auto_start=False))
-        # ComfyUI 默认不启动检测，用户可在「AI 设置」手动开启
-        # self.monitor.start()
 
         self.comfy_ws = None
-        # self.start_comfyui_websocket()
 
         # 启动服务端心跳监测（只关心服务端状态，不检测具体模型）
         self.ai_status_collector = AIStatusCheckThread(self.ai_config_file)
@@ -1047,11 +1030,7 @@ class MainWindow(QMainWindow, PageSetupMixin, ServicesMixin, AccountsMixin, AIGe
 
     def trigger_page_logic(self, index):
         """Triggers data refresh or UI reset for specific pages"""
-        if index == 9: # Task List
-            self.refresh_server_tasks()
-            self.refresh_timer.start()
-        elif hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
-            self.refresh_timer.stop()
+        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
             self.refresh_timer.stop()
 
         # 热点页面：只在活跃时轮询，离开后立即停止（减少主线程常驻 2次/秒 事件回调）

@@ -30,10 +30,7 @@ class AIConfigMixin:
         否则会用过期的内存值覆盖用户在其它 Tab 已修改但未保存的字段。
         所有 getattr 都容忍控件不存在（不同页面加载顺序）。
         """
-        # ComfyUI / VoiceClone 直连地址
-        comfyui_input = getattr(self, "comfyui_input", None)
-        if comfyui_input is not None:
-            self.ai_config["comfyui_addr"] = comfyui_input.text().strip()
+        # VoiceClone 直连地址
         voice_clone_input = getattr(self, "voice_clone_input", None)
         if voice_clone_input is not None:
             self.ai_config["voice_clone_addr"] = voice_clone_input.text().strip()
@@ -76,25 +73,6 @@ class AIConfigMixin:
             self.ai_config["vox_cfg"] = vox_cfg.value()
         self.ai_config["vox_source"] = "remote"
         self.ai_config["vox_mode"] = "api"
-        # RunningHub
-        rh_key = getattr(self, "runninghub_api_key_input", None)
-        if rh_key is not None:
-            self.ai_config["runninghub_api_key"] = rh_key.text().strip()
-        rh_url = getattr(self, "runninghub_base_url_input", None)
-        if rh_url is not None:
-            self.ai_config["runninghub_base_url"] = rh_url.text().strip().rstrip("/")
-        rh_comfy_auth = getattr(self, "runninghub_comfy_auth_input", None)
-        if rh_comfy_auth is not None:
-            self.ai_config["runninghub_comfy_auth"] = rh_comfy_auth.text().strip()
-        rh_comfy_identify = getattr(self, "runninghub_comfy_identify_input", None)
-        if rh_comfy_identify is not None:
-            self.ai_config["runninghub_comfy_identify"] = rh_comfy_identify.text().strip()  # noqa: E501
-        rh_access_token = getattr(self, "runninghub_access_token_input", None)
-        if rh_access_token is not None:
-            self.ai_config["runninghub_access_token"] = rh_access_token.text().strip()
-        rh_personal_queue = getattr(self, "runninghub_use_personal_queue_check", None)
-        if rh_personal_queue is not None:
-            self.ai_config["runninghub_use_personal_queue"] = rh_personal_queue.isChecked()  # noqa: E501
 
     def _save_all_ai_config(self):
         """保存所有模型Tab的配置（含VoxCPM和统一服务端地址），由「保存全部」按钮触发。"""
@@ -177,7 +155,6 @@ class AIConfigMixin:
 
     def load_ai_config(self):
         default_config = {
-            "comfyui_addr": "http://X.X.X.X:8188",
             "voice_clone_addr": "http://X.X.X.X:7860",
             "llm_provider": "deepseek",
             "llm_api_key": "",
@@ -193,12 +170,6 @@ class AIConfigMixin:
             "vox_mode": "api",
             "vox_timesteps": 20,
             "vox_cfg": 2.0,
-            "runninghub_api_key": "",
-            "runninghub_base_url": "https://www.runninghub.cn",
-            "runninghub_comfy_auth": "",
-            "runninghub_comfy_identify": "",
-            "runninghub_access_token": "",
-            "runninghub_use_personal_queue": True
         }
         loaded = cm.load_config("ai_config")
         if loaded:
@@ -236,27 +207,11 @@ class AIConfigMixin:
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
     def test_ai_connections(self):
-        comfyui_addr = self.comfyui_input.text().strip().rstrip("/")
         voice_addr = self.voice_clone_input.text().strip().rstrip("/")
 
         results = []
         try:
-            from utils import comfyui_client as comfy
             from utils.http_client import http_get
-            # Test ComfyUI：外部地址 + 本地引擎双后端
-            if comfyui_addr and comfy.is_alive(comfyui_addr):
-                results.append("ComfyUI(外部): 完成： 在线")
-            elif comfyui_addr:
-                results.append("ComfyUI(外部):  无法连接")
-            else:
-                results.append("ComfyUI(外部):  未配置")
-            local = comfy.ComfyUILocal.get()
-            if not local.is_present():
-                results.append("ComfyUI(本地):  未安装 (apps/comfyui)")
-            elif local.is_running():
-                results.append("ComfyUI(本地): 完成： 运行中")
-            else:
-                results.append("ComfyUI(本地):  已就位 (未运行，提交任务时自动启动)")
 
             # Test Voice Clone
             try:

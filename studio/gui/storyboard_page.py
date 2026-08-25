@@ -340,148 +340,148 @@ class ShotMaterialDialog(QDialog):
             self._tab_bar, self._stack, self.tabs = setup_tab_widget(layout, 1)
             log.info("[引用素材] setup_tab_widget 完成")
 
-        # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 风格 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
-        self._search_ctx = " ".join(
-            x for x in (self.shot_type, self.brand, self.model, self.category,
-                        self.style, self._extra_ctx) if x)
+            # 检索上下文：景别 + 品牌 + 型号 + 产品类型 + 风格 + 文案/选题兜底，帮助 CLIP 命中产品相关素材
+            self._search_ctx = " ".join(
+                x for x in (self.shot_type, self.brand, self.model, self.category,
+                            self.style, self._extra_ctx) if x)
 
-        # ── 脚本基本信息（所有 tab 可见，作为全部素材搜索的统一过滤上下文）──
-        info_parts = []
-        if self._topic:
-            info_parts.append(f"选题：{self._topic[:40]}")
-        prod_txt = " ".join(x for x in (self.brand, self.model, self.category) if x)
-        if prod_txt:
-            info_parts.append(f"产品：{prod_txt}")
-        if self.style:
-            info_parts.append(f"风格：{self.style}")
-        if self.shot_type:
-            info_parts.append(f"景别：{self.shot_type}")
-        if self._ratio:
-            info_parts.append(f"画幅：{self._ratio}")
-        self._script_info = " ｜ ".join(info_parts)
-        if self._script_info:
-            layout.addWidget(self._muted(" 脚本信息（所有素材搜索自动带上）：" + self._script_info))
+            # ── 脚本基本信息（所有 tab 可见，作为全部素材搜索的统一过滤上下文）──
+            info_parts = []
+            if self._topic:
+                info_parts.append(f"选题：{self._topic[:40]}")
+            prod_txt = " ".join(x for x in (self.brand, self.model, self.category) if x)
+            if prod_txt:
+                info_parts.append(f"产品：{prod_txt}")
+            if self.style:
+                info_parts.append(f"风格：{self.style}")
+            if self.shot_type:
+                info_parts.append(f"景别：{self.shot_type}")
+            if self._ratio:
+                info_parts.append(f"画幅：{self._ratio}")
+            self._script_info = " ｜ ".join(info_parts)
+            if self._script_info:
+                layout.addWidget(self._muted(" 脚本信息（所有素材搜索自动带上）：" + self._script_info))
 
-        # ── Tab 1: 本地素材 ──────────────────────────────────────────
-        local_tab = QWidget()
-        lt = QVBoxLayout(local_tab)
-        lt.setSpacing(8)
-        row = QHBoxLayout()
-        self.local_input = QLineEdit()
-        self.local_input.setPlaceholderText("自动带入景别/品牌/型号/产品类型 + 镜头文案检索素材库")
-        base = shot_desc[:120] if shot_desc else ""
-        self.local_input.setText((self._search_ctx + " " + base).strip() if self._search_ctx else base)  # noqa: E501
-        self.local_input.returnPressed.connect(self._search_local)
-        row.addWidget(self.local_input, 1)
-        btn_local = QPushButton(" 相似度检索")
-        btn_local.clicked.connect(self._search_local)
-        row.addWidget(btn_local)
-        lt.addLayout(row)
-        # 素材库结果：缩略图网格（右上角角标勾选可多选，双击预览/播放，确认后绑定 Hash）
-        self.local_list = QListWidget()
-        self.local_list.setViewMode(QListWidget.IconMode)
-        self.local_list.setIconSize(QSize(160, 160))
-        self.local_list.setGridSize(QSize(185, 205))
-        self.local_list.setResizeMode(QListWidget.Adjust)
-        self.local_list.setMovement(QListWidget.Static)
-        self.local_list.setSpacing(8)
-        self.local_list.setUniformItemSizes(True)
-        self.local_list.itemDoubleClicked.connect(self._preview_local_item)
-        self.local_list.itemClicked.connect(self._on_item_clicked)
-        lt.addWidget(self.local_list, 1)
-        lt.addWidget(self._muted("勾选所需素材（可多选）；双击缩略图预览/播放；确认后素材 Hash 绑定到当前镜头。"))
-        self._tab_bar.addTab(" 素材库")
-        self._stack.addWidget(local_tab)
+            # ── Tab 1: 本地素材 ──────────────────────────────────────────
+            local_tab = QWidget()
+            lt = QVBoxLayout(local_tab)
+            lt.setSpacing(8)
+            row = QHBoxLayout()
+            self.local_input = QLineEdit()
+            self.local_input.setPlaceholderText("自动带入景别/品牌/型号/产品类型 + 镜头文案检索素材库")
+            base = shot_desc[:120] if shot_desc else ""
+            self.local_input.setText((self._search_ctx + " " + base).strip() if self._search_ctx else base)  # noqa: E501
+            self.local_input.returnPressed.connect(self._search_local)
+            row.addWidget(self.local_input, 1)
+            btn_local = QPushButton(" 相似度检索")
+            btn_local.clicked.connect(self._search_local)
+            row.addWidget(btn_local)
+            lt.addLayout(row)
+            # 素材库结果：缩略图网格（右上角角标勾选可多选，双击预览/播放，确认后绑定 Hash）
+            self.local_list = QListWidget()
+            self.local_list.setViewMode(QListWidget.IconMode)
+            self.local_list.setIconSize(QSize(160, 160))
+            self.local_list.setGridSize(QSize(185, 205))
+            self.local_list.setResizeMode(QListWidget.Adjust)
+            self.local_list.setMovement(QListWidget.Static)
+            self.local_list.setSpacing(8)
+            self.local_list.setUniformItemSizes(True)
+            self.local_list.itemDoubleClicked.connect(self._preview_local_item)
+            self.local_list.itemClicked.connect(self._on_item_clicked)
+            lt.addWidget(self.local_list, 1)
+            lt.addWidget(self._muted("勾选所需素材（可多选）；双击缩略图预览/播放；确认后素材 Hash 绑定到当前镜头。"))
+            self._tab_bar.addTab(" 素材库")
+            self._stack.addWidget(local_tab)
 
-        # ── Tab 2: MG 动画 ───────────────────────────────────────────
-        mg_tab = QWidget()
-        mg = QVBoxLayout(mg_tab)
-        mg.setSpacing(12)
-        mg.addStretch()
-        mg_lbl = QLabel("MG 动画素材适合用作开场/标题/卡点/数字增长等动态素材，\n"
-                         "请在「MG 动画」页完成制作后，回到此处通过「素材库」选项卡选取。")
-        mg_lbl.setAlignment(Qt.AlignCenter)
-        mg_lbl.setWordWrap(True)
-        mg.addWidget(mg_lbl)
-        btn_mg_jump = QPushButton(" 跳转到 MG 动画页")
-        btn_mg_jump.setObjectName("secondary_button")
-        btn_mg_jump.clicked.connect(self._open_mg)
-        mg.addWidget(btn_mg_jump, 0, Qt.AlignCenter)
-        mg.addStretch()
-        self._tab_bar.addTab(" MG动画")
-        self._stack.addWidget(mg_tab)
+            # ── Tab 2: MG 动画 ───────────────────────────────────────────
+            mg_tab = QWidget()
+            mg = QVBoxLayout(mg_tab)
+            mg.setSpacing(12)
+            mg.addStretch()
+            mg_lbl = QLabel("MG 动画素材适合用作开场/标题/卡点/数字增长等动态素材，\n"
+                             "请在「MG 动画」页完成制作后，回到此处通过「素材库」选项卡选取。")
+            mg_lbl.setAlignment(Qt.AlignCenter)
+            mg_lbl.setWordWrap(True)
+            mg.addWidget(mg_lbl)
+            btn_mg_jump = QPushButton(" 跳转到 MG 动画页")
+            btn_mg_jump.setObjectName("secondary_button")
+            btn_mg_jump.clicked.connect(self._open_mg)
+            mg.addWidget(btn_mg_jump, 0, Qt.AlignCenter)
+            mg.addStretch()
+            self._tab_bar.addTab(" MG动画")
+            self._stack.addWidget(mg_tab)
 
-        # ── Tab 3: 联网素材（服务端 /material/stock_search，Pexels/Pixabay 免版权）──
-        web_tab = QWidget()
-        wt = QVBoxLayout(web_tab)
-        wt.setSpacing(8)
-        web_row = QHBoxLayout()
-        # 类型筛选：支持 image/video/all 三种
-        self.web_kind_combo = QComboBox()
-        self.web_kind_combo.addItem("全部", "all")
-        self.web_kind_combo.addItem("图片", "image")
-        self.web_kind_combo.addItem("视频", "video")
-        self.web_kind_combo.setFixedWidth(80)
-        self.web_kind_combo.currentIndexChanged.connect(self._search_web)
-        web_row.addWidget(self.web_kind_combo)
-        self.web_input = QLineEdit()
-        self.web_input.setPlaceholderText("输入搜索词，联网查找免版权素材（服务端 Pexels/Pixabay，可多选确认绑定）")
-        # 与本地素材一致：默认带入景别/品牌/型号/产品类型 + 镜头文案
-        self.web_input.setText((self._search_ctx + " " + shot_desc)[:80] if (self._search_ctx or shot_desc) else "")  # noqa: E501
-        self.web_input.returnPressed.connect(self._search_web)
-        web_row.addWidget(self.web_input, 1)
-        self.btn_web = QPushButton("联网搜索")
-        self.btn_web.setObjectName("primary_button")
-        self.btn_web.clicked.connect(self._search_web)
-        web_row.addWidget(self.btn_web)
-        wt.addLayout(web_row)
-        self.web_pbar = QProgressBar()
-        self.web_pbar.setRange(0, 0)
-        self.web_pbar.setVisible(False)
-        wt.addWidget(self.web_pbar)
-        # 结果网格（与本地素材一致的相册式缩略图网格）
-        self.web_list = QListWidget()
-        self.web_list.setViewMode(QListWidget.IconMode)
-        self.web_list.setIconSize(QSize(160, 160))
-        self.web_list.setGridSize(QSize(185, 215))
-        self.web_list.setResizeMode(QListWidget.Adjust)
-        self.web_list.setMovement(QListWidget.Static)
-        self.web_list.setSpacing(8)
-        self.web_list.setUniformItemSizes(True)
-        self.web_list.itemDoubleClicked.connect(self._preview_web_item)
-        self.web_list.itemClicked.connect(self._on_web_item_clicked)
-        wt.addWidget(self.web_list, 1)
-        wt.addWidget(self._muted("勾选所需联网素材（可多选，确认后以 URL 形式绑定镜头；Pexels/Pixabay 免版权可商用）。"))
-        self._tab_bar.addTab(" 联网素材")
-        self._stack.addWidget(web_tab)
+            # ── Tab 3: 联网素材（服务端 /material/stock_search，Pexels/Pixabay 免版权）──
+            web_tab = QWidget()
+            wt = QVBoxLayout(web_tab)
+            wt.setSpacing(8)
+            web_row = QHBoxLayout()
+            # 类型筛选：支持 image/video/all 三种
+            self.web_kind_combo = QComboBox()
+            self.web_kind_combo.addItem("全部", "all")
+            self.web_kind_combo.addItem("图片", "image")
+            self.web_kind_combo.addItem("视频", "video")
+            self.web_kind_combo.setFixedWidth(80)
+            self.web_kind_combo.currentIndexChanged.connect(self._search_web)
+            web_row.addWidget(self.web_kind_combo)
+            self.web_input = QLineEdit()
+            self.web_input.setPlaceholderText("输入搜索词，联网查找免版权素材（服务端 Pexels/Pixabay，可多选确认绑定）")
+            # 与本地素材一致：默认带入景别/品牌/型号/产品类型 + 镜头文案
+            self.web_input.setText((self._search_ctx + " " + shot_desc)[:80] if (self._search_ctx or shot_desc) else "")  # noqa: E501
+            self.web_input.returnPressed.connect(self._search_web)
+            web_row.addWidget(self.web_input, 1)
+            self.btn_web = QPushButton("联网搜索")
+            self.btn_web.setObjectName("primary_button")
+            self.btn_web.clicked.connect(self._search_web)
+            web_row.addWidget(self.btn_web)
+            wt.addLayout(web_row)
+            self.web_pbar = QProgressBar()
+            self.web_pbar.setRange(0, 0)
+            self.web_pbar.setVisible(False)
+            wt.addWidget(self.web_pbar)
+            # 结果网格（与本地素材一致的相册式缩略图网格）
+            self.web_list = QListWidget()
+            self.web_list.setViewMode(QListWidget.IconMode)
+            self.web_list.setIconSize(QSize(160, 160))
+            self.web_list.setGridSize(QSize(185, 215))
+            self.web_list.setResizeMode(QListWidget.Adjust)
+            self.web_list.setMovement(QListWidget.Static)
+            self.web_list.setSpacing(8)
+            self.web_list.setUniformItemSizes(True)
+            self.web_list.itemDoubleClicked.connect(self._preview_web_item)
+            self.web_list.itemClicked.connect(self._on_web_item_clicked)
+            wt.addWidget(self.web_list, 1)
+            wt.addWidget(self._muted("勾选所需联网素材（可多选，确认后以 URL 形式绑定镜头；Pexels/Pixabay 免版权可商用）。"))
+            self._tab_bar.addTab(" 联网素材")
+            self._stack.addWidget(web_tab)
 
-        # ── 底部按钮 ─────────────────────────────────────────────────
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        self.btn_confirm = QPushButton("完成： 确认选择")
-        self.btn_confirm.setObjectName("primary_button")
-        self.btn_confirm.setEnabled(False)
-        self.btn_confirm.clicked.connect(self._confirm)
-        btn_row.addWidget(self.btn_confirm)
-        btn_cancel = QPushButton("取消")
-        btn_cancel.clicked.connect(self.reject)
-        btn_row.addWidget(btn_cancel)
-        layout.addLayout(btn_row)
+            # ── 底部按钮 ─────────────────────────────────────────────────
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            self.btn_confirm = QPushButton("完成： 确认选择")
+            self.btn_confirm.setObjectName("primary_button")
+            self.btn_confirm.setEnabled(False)
+            self.btn_confirm.clicked.connect(self._confirm)
+            btn_row.addWidget(self.btn_confirm)
+            btn_cancel = QPushButton("取消")
+            btn_cancel.clicked.connect(self.reject)
+            btn_row.addWidget(btn_cancel)
+            layout.addLayout(btn_row)
 
-        self._tab_bar.currentChanged.connect(self._stack.setCurrentIndex)
-        self._tab_bar.currentChanged.connect(self._on_tab_changed)
-        log.info("[引用素材] 开始自动加载本地素材搜索")
-        try:
-            self._search_local()   # auto-load local on open
-        except Exception as e:
-            log.exception(f"[引用素材] 自动加载本地素材搜索失败: {e}")
-        # 联网素材也默认加载一次（带脚本上下文过滤）
-        if self._search_ctx or self.web_input.text().strip():
+            self._tab_bar.currentChanged.connect(self._stack.setCurrentIndex)
+            self._tab_bar.currentChanged.connect(self._on_tab_changed)
+            log.info("[引用素材] 开始自动加载本地素材搜索")
             try:
-                QTimer(self).singleShot(0, self._search_web)
+                self._search_local()   # auto-load local on open
             except Exception as e:
-                log.exception(f"[引用素材] 自动加载联网素材搜索失败: {e}")
-        log.info("[引用素材] _setup 完成")
+                log.exception(f"[引用素材] 自动加载本地素材搜索失败: {e}")
+            # 联网素材也默认加载一次（带脚本上下文过滤）
+            if self._search_ctx or self.web_input.text().strip():
+                try:
+                    QTimer(self).singleShot(0, self._search_web)
+                except Exception as e:
+                    log.exception(f"[引用素材] 自动加载联网素材搜索失败: {e}")
+            log.info("[引用素材] _setup 完成")
         except Exception as e:
             log.exception(f"[引用素材] _setup 异常: {e}")
             raise

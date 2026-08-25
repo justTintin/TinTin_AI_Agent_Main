@@ -15,6 +15,7 @@ import requests.exceptions
 from gui.base_page import BasePage
 from gui.elided_label import ElidedLabel
 from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QColor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -153,6 +154,23 @@ class ScheduledTasksPage(BasePage):
         list_header = QHBoxLayout()
         list_header.addWidget(QLabel(" 成片任务列表（来自服务端）"))
         list_header.addStretch()
+        # ── 批量操作按钮（全选/下载/打包）──────────────────────────────────
+        self.btn_select_all = QPushButton(" 全选")
+        self.btn_select_all.setObjectName("secondary_button")
+        self.btn_select_all.setToolTip("勾选 / 取消勾选列表全部任务（表格第一列 ）")
+        self.btn_select_all.clicked.connect(self._toggle_select_all)
+        list_header.addWidget(self.btn_select_all)
+        self.btn_download_selected = QPushButton("⬇ 下载所选")
+        self.btn_download_selected.setObjectName("secondary_button")
+        self.btn_download_selected.setToolTip("下载所有已勾选任务的成片视频到指定目录")
+        self.btn_download_selected.clicked.connect(self._download_selected)
+        list_header.addWidget(self.btn_download_selected)
+        self.btn_download_selected_pkg = QPushButton(" 打包所选")
+        self.btn_download_selected_pkg.setObjectName("secondary_button")
+        self.btn_download_selected_pkg.setToolTip(
+            "下载所有已勾选且支持打包任务（成片+全部素材+manifest.json）")
+        self.btn_download_selected_pkg.clicked.connect(self._download_selected_package)
+        list_header.addWidget(self.btn_download_selected_pkg)
         from PySide6.QtWidgets import QCheckBox
         self.chk_autorefresh = QCheckBox("自动刷新")
         self.chk_autorefresh.setChecked(True)   # 默认开启：有进行中任务时每 5 秒自动刷新
@@ -164,9 +182,10 @@ class ScheduledTasksPage(BasePage):
         list_header.addWidget(self.btn_refresh)
         ll.addLayout(list_header)
 
-        self.table = QTableWidget(0, 10)
+        # 列表改为 11 列，新增「总分」列
+        self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels(
-            ["", "task_id", "标题", "类型", "状态", "进度", "播放", "下载", "创建时间", "操作"])
+            ["", "task_id", "标题", "类型", "状态", "进度", "总分", "播放", "下载", "创建时间", "操作"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -179,12 +198,14 @@ class ScheduledTasksPage(BasePage):
         h.setSectionResizeMode(3, QHeaderView.ResizeToContents)   # 类型
         h.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # 状态
         h.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # 进度
-        h.setSectionResizeMode(6, QHeaderView.Interactive)   # 播放
-        self.table.setColumnWidth(6, 130)
-        h.setSectionResizeMode(7, QHeaderView.Interactive)        # 下载
+        h.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # 总分
+        self.table.setColumnWidth(6, 80)
+        h.setSectionResizeMode(7, QHeaderView.Interactive)   # 播放
         self.table.setColumnWidth(7, 130)
-        h.setSectionResizeMode(8, QHeaderView.ResizeToContents)   # 时间
-        h.setSectionResizeMode(9, QHeaderView.Stretch)            # 操作（占满剩余）
+        h.setSectionResizeMode(8, QHeaderView.Interactive)        # 下载
+        self.table.setColumnWidth(8, 130)
+        h.setSectionResizeMode(9, QHeaderView.ResizeToContents)   # 时间
+        h.setSectionResizeMode(10, QHeaderView.Stretch)           # 操作（占满剩余）
         self._last_items = []        # 最近一次列表数据（供勾选行反查任务）
         self._all_checked = False    # 全选状态
         ll.addWidget(self.table)
@@ -202,33 +223,6 @@ class ScheduledTasksPage(BasePage):
         self.detail.setMinimumHeight(100)
         self.detail.setPlaceholderText("点击上方任务行查看其参数与执行结果…")
         dl.addWidget(self.detail, 1)
-
-        # 底部操作行：全选/取消全选 + 下载所选（播放/下载单条操作在表格列内）
-        log_row = QHBoxLayout()
-        self.btn_select_all = QPushButton(" 全选")
-        self.btn_select_all.setObjectName("secondary_button")
-        self.btn_select_all.setToolTip("勾选 / 取消勾选列表全部任务（表格第一列 ）")
-        self.btn_select_all.clicked.connect(self._toggle_select_all)
-        log_row.addWidget(self.btn_select_all)
-        self.btn_download_selected = QPushButton("⬇ 下载所选")
-        self.btn_download_selected.setObjectName("secondary_button")
-        self.btn_download_selected.setToolTip("下载所有已勾选任务的成片视频到指定目录")
-        self.btn_download_selected.clicked.connect(self._download_selected)
-        log_row.addWidget(self.btn_download_selected)
-        self.btn_download_selected_pkg = QPushButton(" 打包所选")
-        self.btn_download_selected_pkg.setObjectName("secondary_button")
-        self.btn_download_selected_pkg.setToolTip(
-            "下载所有已勾选且支持打包任务（成片+全部素材+manifest.json）")
-        self.btn_download_selected_pkg.clicked.connect(self._download_selected_package)
-        log_row.addWidget(self.btn_download_selected_pkg)
-        log_row.addStretch()
-        self.btn_view_log = QPushButton(" 查看日志")
-        self.btn_view_log.setObjectName("secondary_button")
-        self.btn_view_log.setToolTip("查看该任务的服务端执行日志（logs）")
-        self.btn_view_log.clicked.connect(self._view_task_log)
-        self.btn_view_log.setVisible(False)
-        log_row.addWidget(self.btn_view_log)
-        dl.addLayout(log_row)
 
         # 变体打分区（仅当任务已完成且有 all_variants 时显示）
         self.variants_title = QLabel(" 变体打分（对本次成片的好/坏反馈，供服务端进化选择）")
@@ -404,27 +398,84 @@ class ScheduledTasksPage(BasePage):
             self.table.setItem(i, 4, status_item)
             # 进度
             self.table.setItem(i, 5, QTableWidgetItem(f"{t.get('progress', 0)}%"))
+            # 总分：服务端深度评审优先 → 成片质量评分兜底
+            #   - 深度评审接口字段: ev.total / ev.total_score
+            #   - storyboard_montage result.quality_score.total
+            #   - 变体打分首条: variants[0].score
+            total_score = ""
+            eval_obj = self._task_eval.get(str(tid))
+            if not isinstance(eval_obj, dict) and agent_tid:
+                eval_obj = self._agent_eval.get(str(agent_tid))
+            if isinstance(eval_obj, dict):
+                # 成片评审（服务端深度评审）主字段：total 才是 2.51/10 这种
+                for _k in ("total", "total_score", "score", "overall_score"):
+                    v = eval_obj.get(_k)
+                    if v is not None:
+                        try:
+                            total_score = f"{float(v):.2f}"
+                        except (TypeError, ValueError):
+                            total_score = str(v)
+                        break
+            if not total_score:
+                qs = (t.get("result") or {}).get("quality_score") if isinstance(t.get("result"), dict) else None  # noqa: E501
+                if isinstance(qs, dict):
+                    for _k in ("total", "total_score"):
+                        v = qs.get(_k)
+                        if v is not None:
+                            try:
+                                total_score = f"{float(v):.2f}"
+                            except (TypeError, ValueError):
+                                total_score = str(v)
+                            break
+            if not total_score:
+                variants = t.get("all_variants") or (t.get("result") or {}).get("all_variants") or t.get("variants") or []  # noqa: E501
+                if isinstance(variants, list) and variants:
+                    first = variants[0] if isinstance(variants[0], dict) else {}
+                    s = first.get("score")
+                    if s is not None:
+                        try:
+                            total_score = f"{float(s):.2f}"
+                        except (TypeError, ValueError):
+                            total_score = str(s)
+            if not total_score:
+                for _k in ("total_score", "score", "quality_score", "overall_score", "total"):
+                    v = t.get(_k)
+                    if v is not None and not isinstance(v, dict):
+                        try:
+                            total_score = f"{float(v):.2f}"
+                        except (TypeError, ValueError):
+                            total_score = str(v)
+                        break
+            score_item = QTableWidgetItem(total_score)
+            score_item.setTextAlignment(Qt.AlignCenter)
+            # 高分(>=7)绿色 / 低分(<5)红色，和结论颜色一致
+            if total_score:
+                try:
+                    ts = float(total_score)
+                    if ts >= 7.0:
+                        score_item.setForeground(QColor("#10b981"))
+                    elif ts < 5.0:
+                        score_item.setForeground(QColor("#ef4444"))
+                except (TypeError, ValueError):
+                    pass
+            self.table.setItem(i, 6, score_item)
             # 播放/下载列（completed 且有视频结果才显示）
             url = self._resolve_video_url(t)
             if status == "completed" and url:
                 btn_play = table_action_button("播放", "播放成片")
                 btn_play.clicked.connect(lambda _=False, u=url: self._play_video(u))
-                self.table.setCellWidget(i, 6, btn_play)
-                self.table.setCellWidget(i, 7, self._make_download_cell(t))
+                self.table.setCellWidget(i, 7, btn_play)
+                self.table.setCellWidget(i, 8, self._make_download_cell(t))
             # 创建时间
-            self.table.setItem(i, 8, QTableWidgetItem(self._fmt_time(t.get("created_at"))))  # noqa: E501
+            self.table.setItem(i, 9, QTableWidgetItem(self._fmt_time(t.get("created_at"))))  # noqa: E501
             # 操作列：删除
-            self.table.setCellWidget(i, 9, self._make_del_widget(t))
+            self.table.setCellWidget(i, 10, self._make_del_widget(t))
             if status in ("pending", "running"):
                 has_active = True
 
         self.detail.setMarkdown("*点击任务行查看参数与结果*")
         self._current_task_full = None
         self._hide_dimension_feedback()
-        for _b in ("btn_view_log",):
-            b = getattr(self, _b, None)
-            if b is not None:
-                b.setVisible(False)
         # 列表刷新后重置全选状态
         self._all_checked = False
         if hasattr(self, "btn_select_all"):
@@ -454,7 +505,6 @@ class ScheduledTasksPage(BasePage):
     def _on_task_detail_loaded(self, t):
         if t:
             self._current_task_full = t
-            self.btn_view_log.setVisible(True)
             self.detail.setMarkdown(self._render_detail(t))
             self._populate_variants(t)   # 填充变体打分区
             self._populate_dimension_feedback(t)   # 填充维度打分区
@@ -559,8 +609,14 @@ class ScheduledTasksPage(BasePage):
         return "\n".join(lines)
 
     def _view_task_log(self):
-        """弹窗查看任务服务端执行日志（logs / error_msg）。"""
+        """弹窗查看任务服务端执行日志（logs / error_msg）——兼容旧调用，使用当前选中任务。"""
         t = getattr(self, "_current_task_full", None)
+        if not t:
+            return
+        self._view_task_log_for(t)
+
+    def _view_task_log_for(self, t):
+        """弹窗查看指定任务的服务端执行日志（logs / error_msg）。"""
         if not t:
             return
         logs = t.get("logs") or ""
@@ -764,8 +820,16 @@ class ScheduledTasksPage(BasePage):
     def _make_del_widget(self, t):
         w = QWidget()
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(2, 0, 2, 0)
-        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        # 查看日志按钮（每个任务行都可见，带 logs 或 error_msg 时才可点击）
+        btn_log = table_action_button("日志", "查看任务执行日志")
+        logs = t.get("logs") or t.get("error_msg") or ""
+        if not logs:
+            btn_log.setEnabled(False)
+            btn_log.setToolTip("该任务暂无日志")
+        btn_log.clicked.connect(lambda _=False, tk=t: self._view_task_log_for(tk))
+        lay.addWidget(btn_log)
         btn_del = icon_button("delete", "删除任务", size=16)
         btn_del.setCursor(Qt.PointingHandCursor)
         btn_del.clicked.connect(lambda _=False: self._delete(t.get("id")))

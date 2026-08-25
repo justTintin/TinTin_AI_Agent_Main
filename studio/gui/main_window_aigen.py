@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from utils import comfyui_client as comfy
 from utils.file_dialog_utils import pick_file
 from utils.http_download_utils import download_file
 from utils.json_utils import deep_copy
@@ -71,68 +70,16 @@ def _classify_runninghub_input_nodes(workflow_json):
 
 class AIGenMixin:
     def start_comfyui_websocket(self):
-        # 被动解析后端（不为监听进度而启动本地）；无可用后端则跳过
-        addr = comfy.resolve_addr(self.ai_config, auto_start=False)
-        if hasattr(self, 'comfy_ws') and self.comfy_ws:
-            self.comfy_ws.running = False
-            self.comfy_ws.wait()
-        if not addr:
-            self.comfy_ws = None
-            return
-        self.comfy_ws = ComfyWSThread(addr)
-        self.comfy_ws.progress_received.connect(self.on_ws_progress)
-        self.comfy_ws.status_received.connect(self.on_ws_status)
-        self.comfy_ws.start()
+        """ComfyUI 已下线，WebSocket 不再启动。"""
+        pass
 
     def refresh_comfyui_local_status(self):
-        """刷新配置卡里的本地 ComfyUI 引擎状态标签。"""
-        if not hasattr(self, "comfyui_local_status"):
-            return
-        local = comfy.ComfyUILocal.get()
-        if not local.is_present():
-            txt = "本地引擎： 未安装（apps/comfyui 缺源码）"
-        elif local.is_running():
-            txt = "本地引擎：完成： 运行中（127.0.0.1:8188）"
-        else:
-            txt = "本地引擎： 已就位（未运行，提交任务/打开编辑器时自动启动）"
-        self.comfyui_local_status.setText(txt)
+        """ComfyUI 已下线，本地引擎状态不再刷新。"""
+        pass
 
     def open_comfyui_editor(self):
-        """打开 ComfyUI 网页节点编辑器用于调试工作流（客户端走 API，编辑器走网页）。
-
-        优先用已在线的后端（外部优先）；都不在线则后台拉起本地引擎，就绪后自动打开浏览器。
-        """
-        import webbrowser
-        # 1. 已有在线后端 → 直接打开
-        addr = comfy.resolve_addr(self.ai_config, auto_start=False)
-        if addr and comfy.is_alive(addr):
-            webbrowser.open(addr)
-            return
-        # 2. 无在线后端：本地引擎是否就位？
-        if not comfy.ComfyUILocal.get().is_present():
-            QMessageBox.warning(
-                self, "无法打开",
-                "没有可用的外部 ComfyUI，本地引擎也未安装。\n"
-                "请在 [AI 设置] 填写外部地址，或获取 ComfyUI 源码到 apps/comfyui。")
-            return
-        # 3. 后台启动本地，避免阻塞界面；就绪后打开浏览器
-        QMessageBox.information(
-            self, "正在启动",
-            "正在启动本地 ComfyUI 节点编辑器，就绪后会自动打开浏览器，请稍候…")
-
-        def run_task():
-            return comfy.resolve_addr(self.ai_config, auto_start=True)
-
-        def on_finished(ready_addr):
-            self.refresh_comfyui_local_status()
-            if ready_addr:
-                webbrowser.open(ready_addr)
-            else:
-                QMessageBox.critical(
-                    self, "启动失败",
-                    "本地 ComfyUI 启动超时，请查看日志：\n.runtime/logs/comfyui_local.log")
-
-        self.start_worker(run_task, on_finished)
+        """ComfyUI 已下线，编辑器不再可用。"""
+        QMessageBox.information(self, "提示", "ComfyUI 已迁移到服务端管理，本地编辑器不再可用。")
 
     def refresh_vt_workflows(self):
         self.vt_workflow_selector.clear()
@@ -174,34 +121,16 @@ class AIGenMixin:
 
         def run_task():
             try:
-                client = comfy.get_client(self.ai_config)
-
-                # 1. 上传视频
-                log.info(f"Uploading video to ComfyUI: {video_path}")
-                upload_name = client.upload_file(video_path, accept="video")
-                if not upload_name:
-                    return False, "视频上传失败（无可用 ComfyUI 后端或上传出错）"
-
-                # 2. Update workflow JSON with uploaded video name
-                # Heuristic: find nodes with 'video' or 'LoadVideo'
-                modified_wf = deep_copy(self.vt_current_workflow_data)
-                found = False
-                for _node_id, node in modified_wf.items():
-                    if node.get("class_type") in ["LoadVideo", "VHS_VideoCombine", "LoadVideoPath"]:  # noqa: E501 SIM102
-                        if "video" in node.get("inputs", {}):
-                            node["inputs"]["video"] = upload_name
-                            found = True
-
-                if not found:
-                    # Fallback string replace
-                    wf_str = json.dumps(self.vt_current_workflow_data)
-                    wf_str = wf_str.replace("input_video.mp4", upload_name)
-                    modified_wf = json.loads(wf_str)
-
-                # 3. 提交（视频工具无对应 /apps 应用，走原始 workflow 提交）
-                prompt_id = client.submit_raw_prompt(modified_wf)
-                return True, prompt_id
-            except Exception as e:  # ComfyUI 外部API调用
+                from utils import workflow_client as wfc
+                result = wfc.run_workflow(
+                    workflow_id="",
+                    files={"video": video_path},
+                    values={"workflow_json": json.dumps(self.vt_current_workflow_data)},
+                )
+                if result and result.get("task_id"):
+                    return True, result["task_id"]
+                return False, result.get("error", "提交失败")
+            except Exception as e:
                 return False, str(e)
 
         def on_finished(result):
@@ -239,9 +168,6 @@ class AIGenMixin:
 
     def view_rh_api_detail(self):
         """获取 RunningHub 工作流 JSON，在节点列表中展示所有图片/音频输入节点。"""
-        if not self.runninghub:
-            self.rh_workflow_info.setText("RunningHub 模块未初始化，无法获取节点")
-            return
         wf_id = self.rh_workflow_id_input.text().strip()
         if not wf_id:
             self.rh_workflow_info.setText("失败： 请先填写 RunningHub 工作流 ID")
@@ -252,12 +178,9 @@ class AIGenMixin:
         self._reset_rh_node_list()
 
         def fetch():
-            # 优先走服务端工作流 JSON 接口，失败回退直连 RunningHub
+            # 走服务端工作流 JSON 接口
             from utils import digital_human_client as dhc
-            wf = dhc.get_workflow_json(wf_id)
-            if wf is not None:
-                return wf
-            return self.runninghub.get_workflow_json(wf_id)
+            return dhc.get_workflow_json(wf_id)
 
         def on_done(wf):
             if not wf or not isinstance(wf, dict):
@@ -358,10 +281,7 @@ class AIGenMixin:
                 self.rh_duration_spinbox.setValue(duration_default)
 
     def run_runninghub_task(self):
-        """RunningHub 数字人：根据勾选节点提交任务（图片 + 音频/视频 + 可选时长）。"""
-        if not self.runninghub:
-            self.rh_workflow_info.setText("RunningHub 模块未初始化，无法提交任务")
-            return
+        """RunningHub 数字人：通过服务端 workflow_client 提交任务。"""
         wf_id = self.rh_workflow_id_input.text().strip()
         if not wf_id:
             self.rh_workflow_info.setText("请先选择 RunningHub 数字人工作流")
@@ -469,9 +389,6 @@ class AIGenMixin:
 
     def add_single_rh_task(self, img_file, aud_file):
         """表单方式添加单个 RunningHub 数字人任务并开始执行。"""
-        if not self.runninghub:
-            QMessageBox.warning(self, "未初始化", "RunningHub 模块未初始化")
-            return
         wf_id = self.rh_workflow_id_input.text().strip()
         if not wf_id:
             QMessageBox.warning(self, "未配置工作流", "请先在平台接入中配置数字人工作流")
@@ -671,62 +588,21 @@ class AIGenMixin:
         return has_any_image and has_any_media
 
     def _test_runninghub_config(self):
-        """在 AI 设置页测试 RunningHub API Key 是否可用。"""
-        if not self.runninghub:
-            self.rh_config_status.setText("失败： RunningHub 模块未初始化")
-            return
-        api_key = self.runninghub_api_key_input.text().strip()
-        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
-        if not api_key:
-            self.rh_config_status.setText("失败： 请先填写 API Key")
-            return
-        self.rh_config_status.setText("正在测试...")
-        def run():
-            self.runninghub.update_config(api_key=api_key, base_url=base_url)
-            return self.runninghub.test_connection()
-        def on_done(info):
-            if info:
-                self.rh_config_status.setText(f"完成： 连接成功 (类型: {info.get('apiType', '-')}, 余额: {info.get('remainCoins', '-')})")  # noqa: E501
-            else:
-                self.rh_config_status.setText("失败： 连接失败，请检查 API Key 和基础地址")
-        self.start_worker(run, on_done)
+        """RunningHub 配置已迁移到服务端管理，客户端不再测试直连。"""
+        from utils import digital_human_client as dhc
+        status = dhc.get_server_status()
+        if status and status.get("configured"):
+            self.rh_config_status.setText(
+                f"完成： 服务端 RunningHub 已配置 (类型: {status.get('api_type', '-')}, 余额: {status.get('remain_coins', '-')})")
+        else:
+            self.rh_config_status.setText("失败： 服务端 RunningHub 未配置或不可达，请在服务端配置 API Key")
 
     def _test_runninghub_comfy_protocol(self):
-        """测试 RunningHub 在线工作流的 ComfyUI 协议接口可用性。"""
-        from utils.runninghub_comfy_client import RunningHubComfyClient
-        base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
-        comfy_auth = self.runninghub_comfy_auth_input.text().strip()
-        identify = self.runninghub_comfy_identify_input.text().strip()
-        access_token = self.runninghub_access_token_input.text().strip()
-        if not comfy_auth or not identify:
-            self.rh_comfy_status.setText("失败： 请先填写 Rh-Comfy-Auth 和 Rh-Identify（登录 RunningHub 后在浏览器 localStorage 中查看）")  # noqa: E501
-            return
-        client = RunningHubComfyClient(base_url=base_url, comfy_auth=comfy_auth, identify=identify, access_token=access_token)  # noqa: E501
-        self.rh_comfy_status.setText("正在检测 RunningHub ComfyUI 协议接口...")
-
-        def run():
-            ok = client.is_alive()
-            info = client.get_object_info() if ok else None
-            required = ["LoadImage", "LoadAudio", "WanVideoModelLoader", "MultiTalkModelLoader"]  # noqa: E501
-            missing = [k for k in required if not (info or {}).get(k)] if isinstance(info, dict) else []  # noqa: E501
-            return ok, bool(info), missing
-
-        def on_done(result):
-            ok, has_info, missing = result
-            if ok and has_info:
-                if missing:
-                    self.rh_comfy_status.setText(f"完成： 协议可用，但缺少节点: {', '.join(missing)}")  # noqa: E501
-                else:
-                    self.rh_comfy_status.setText("完成： ComfyUI 协议可用，所需节点齐全")
-            elif ok:
-                self.rh_comfy_status.setText("完成： /system_stats 可用，但 /object_info 未返回节点")  # noqa: E501
-            else:
-                self.rh_comfy_status.setText("失败： ComfyUI 协议不可用，请检查会话凭证")
-
-        self.start_worker(run, on_done)
+        """RunningHub ComfyUI 协议已迁移到服务端管理。"""
+        self.rh_comfy_status.setText("已迁移到服务端管理，无需客户端测试")
 
     def run_comfyui_dh_task(self):
-        """数字人 ComfyUI 本地/外部后端：上传图片+音频，patch 工作流并提交。"""
+        """数字人任务：通过服务端 workflow_client 提交。"""
         if not self.current_workflow_data:
             QMessageBox.warning(self, "未加载工作流", "请先加载数字人工作流。")
             return
@@ -736,28 +612,22 @@ class AIGenMixin:
             QMessageBox.warning(self, "输入缺失", "请选择人物图片和驱动语音。")
             return
 
-        self.workflow_status.setText("正在上传文件并提交 ComfyUI 任务...")
+        self.workflow_status.setText("正在上传文件并提交任务...")
         self.btn_run_workflow.setEnabled(False)
 
         def run_task():
             try:
-                client = comfy.get_client(self.ai_config)
-                img_name = client.upload_file(img_file, accept="image")
-                aud_name = client.upload_file(aud_file, accept="audio")
-                wf = deep_copy(self.current_workflow_data)
-                for _node_id, node in wf.items():
-                    if not isinstance(node, dict):
-                        continue
-                    class_type = node.get("class_type", "")
-                    inputs = node.get("inputs", {})
-                    if class_type == "LoadImage" and "image" in inputs:
-                        inputs["image"] = img_name
-                    elif class_type == "VHS_LoadAudioUpload" and "audio" in inputs:
-                        inputs["audio"] = aud_name
-                prompt_id = client.submit_raw_prompt(wf)
-                return True, prompt_id
-            except Exception as e:  # ComfyUI 外部API调用
-                log.exception("ComfyUI digital human task failed")
+                from utils import workflow_client as wfc
+                result = wfc.run_workflow(
+                    workflow_id="",
+                    files={"image": img_file, "audio": aud_file},
+                    values={"workflow_json": json.dumps(self.current_workflow_data)},
+                )
+                if result and result.get("task_id"):
+                    return True, result["task_id"]
+                return False, result.get("error", "提交失败")
+            except Exception as e:
+                log.exception("Digital human task failed")
                 return False, str(e)
 
         def on_finished(result):
@@ -849,129 +719,32 @@ class AIGenMixin:
 
         def run_task():
             try:
-                use_protocol = False
-                if (self.ai_config or {}).get("runninghub_comfy_auth") and getattr(self, "current_rh_workflow_json", None):  # noqa: E501
-                    use_protocol = True
-                if use_protocol:
-                    from utils.runninghub_comfy_client import get_runninghub_comfy_client
-                    client = get_runninghub_comfy_client(self.ai_config)
-                    img_name = client.upload_file(img_file)
-                    if task.get("video_nodes"):
-                        media_name = client.upload_file(task["vid_file"])
-                    else:
-                        media_name = client.upload_file(aud_file)
-                    wf = deep_copy(self.current_rh_workflow_json)
-                    for node_id, node in wf.items():
-                        if not isinstance(node, dict):
-                            continue
-                        class_type = node.get("class_type", "")
-                        inputs = node.get("inputs", {})
-                        if class_type == "LoadImage" and "image" in inputs:
-                            inputs["image"] = img_name
-                        elif task.get("video_nodes"):
-                            if class_type in ("LoadVideo", "VHS_LoadVideo", "LoadVideoPath") and "video" in inputs:  # noqa: E501
-                                inputs["video"] = media_name
-                        elif task.get("audio_nodes"):  # noqa: SIM102
-                            if class_type == "LoadAudio" and "audio" in inputs:
-                                inputs["audio"] = media_name
-                        # 时长节点直接写入数值
-                        for dur_node in task.get("duration_nodes") or []:
-                            dur_id, dur_class, dur_field = dur_node[:3]
-                            if node_id == dur_id and dur_field in inputs:
-                                inputs[dur_field] = task.get("duration_value", inputs.get(dur_field, 0))  # noqa: E501
-                    prompt_id = client.submit_prompt(wf)
-                    meta = {"img_url": img_name, "media_url": media_name, "img_file": img_file, "protocol": True}  # noqa: E501
+                # 统一走服务端 workflow_client 提交（服务端管理 RunningHub API Key）
+                from utils import workflow_client as wfc
+                instance_type = task.get("instance_type") or "default"
+                files = {"image": img_file}
+                if vid_file:
+                    files["video"] = vid_file
+                elif aud_file:
+                    files["audio"] = aud_file
+                wf_resp = wfc.run_workflow(
+                    wf_id,
+                    files=files,
+                    instance_type=instance_type,
+                )
+                if wf_resp and wf_resp.get("ok"):
+                    task_id = wf_resp.get("task_id")
+                    if not task_id:
+                        return False, "统一提交返回异常（缺 task_id）", None
+                    meta = {"img_file": img_file, "unified": True}
                     if aud_file:
                         meta["aud_file"] = aud_file
                     if vid_file:
                         meta["vid_file"] = vid_file
-                    return True, prompt_id, meta
-
-                # 方案A：经典数字人（image+audio，非视频、非 Comfy 协议）走服务端统一提交
-                if not task.get("video_nodes") and aud_file:
-                    from utils import workflow_client as wfc
-                    instance_type = task.get("instance_type") or "default"
-                    wf_resp = wfc.run_workflow(
-                        wf_id,
-                        image_path=img_file,
-                        audio_path=aud_file,
-                        instance_type=instance_type,
-                    )
-                    if wf_resp and wf_resp.get("ok"):
-                        task_id = wf_resp.get("task_id")
-                        if not task_id:
-                            return False, "统一提交返回异常（缺 task_id）", None
-                        meta = {"img_file": img_file, "aud_file": aud_file, "unified": True}
-                        return True, task_id, meta
-                    detail = (wf_resp or {}).get("detail") or (wf_resp or {}).get("error") or "统一提交失败"
-                    return False, str(detail), None
-
-                img_url = self.runninghub.upload_file(img_file)
-                if not img_url:
-                    return False, "图片上传失败", None
-
-                node_info_list = []
-                for node_id, _class_type, field_name in task.get("image_nodes", []):
-                    node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": img_url})  # noqa: E501
-
-                if task.get("video_nodes"):
-                    vid_url = self.runninghub.upload_file(task["vid_file"])
-                    if not vid_url:
-                        return False, "视频上传失败", None
-                    for node_id, _class_type, field_name in task.get("video_nodes", []):
-                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": vid_url})  # noqa: E501
-                else:
-                    aud_url = self.runninghub.upload_file(aud_file)
-                    if not aud_url:
-                        return False, "音频上传失败", None
-                    for node_id, _class_type, field_name in task.get("audio_nodes", []):
-                        node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": aud_url})  # noqa: E501
-
-                # 时长节点直接透传数值
-                for node_id, _class_type, field_name, default_val in task.get("duration_nodes", []):  # noqa: E501
-                    node_info_list.append({
-                        "nodeId": node_id,
-                        "fieldName": field_name,
-                        "fieldValue": task.get("duration_value") if task.get("duration_value") is not None else default_val,  # noqa: E501
-                    })
-
-                meta = {"img_url": img_url, "img_file": img_file}
-                if aud_file:
-                    meta["aud_file"] = aud_file
-                if vid_file:
-                    meta["vid_file"] = vid_file
-                instance_type = task.get("instance_type") or "default"
-                use_personal_queue = bool((self.ai_config or {}).get("runninghub_use_personal_queue", True))  # noqa: E501
-                result = self.runninghub.run_workflow(
-                    wf_id, node_info_list,
-                    instance_type=instance_type,
-                    use_personal_queue=use_personal_queue,
-                )
-                if result.get("success"):
-                    return True, result.get("task_id"), meta
-
-                # 错误码 435 = 未找到独占实例，官方建议 48G 显存工作流传 instanceType=plus
-                if result.get("error_code") == "435" and instance_type != "plus":
-                    log.warning("RunningHub 435, retry with plus instance for %s", wf_id)  # noqa: E501
-                    retry = self.runninghub.run_workflow(
-                        wf_id, node_info_list,
-                        instance_type="plus",
-                        use_personal_queue=use_personal_queue,
-                    )
-                    if retry.get("success"):
-                        task["instance_type"] = "plus"
-                        meta["retried_plus"] = True
-                        return True, retry.get("task_id"), meta
-                    result = retry
-
-                err_code = str(result.get("error_code") or "")
-                err_msg = str(result.get("error_message") or "")
-                if err_code and err_msg:
-                    err = f"[{err_code}] {err_msg}"
-                else:
-                    err = (err_code + " " + err_msg).strip() or "任务启动失败"
-                return False, err, None
-            except Exception as e:  # RunningHub/ComfyUI 外部API调用
+                    return True, task_id, meta
+                detail = (wf_resp or {}).get("detail") or (wf_resp or {}).get("error") or "统一提交失败"
+                return False, str(detail), None
+            except Exception as e:
                 log.exception("RunningHub queue task failed")
                 return False, str(e), None
 
@@ -1059,8 +832,6 @@ class AIGenMixin:
             resp = wfc.task_status(task_id)
             if resp and isinstance(resp, dict) and resp.get("data"):
                 return resp
-            if self.runninghub:
-                return self.runninghub.get_task_status(task_id)
             return None
 
         def on_done(resp):
@@ -1620,52 +1391,8 @@ class AIGenMixin:
         return {"id": wf_id, "name": name or wf_id, "type": wf_type, "instanceType": instance_type}  # noqa: E501
 
     def _rh_refresh_workflow_list(self):
-        """拉取 RunningHub 工作流列表并合并到本地表格。"""
-        if not self.runninghub:
-            self.rh_workflow_list_status.setText("RunningHub 模块未初始化")
-            return
-        self.rh_workflow_list_status.setText("正在获取工作流列表...")
-
-        def run_task():
-            api_key = self.runninghub_api_key_input.text().strip()
-            if not api_key:
-                return None
-            base_url = self.runninghub_base_url_input.text().strip().rstrip("/") or "https://www.runninghub.cn"  # noqa: E501
-            self.runninghub.update_config(api_key=api_key, base_url=base_url)
-            return self.runninghub.get_workflow_list()
-
-        def on_done(items):
-            if items is None:
-                self.rh_workflow_list_status.setText(
-                    "无法读取工作流列表。RunningHub 未公开列表接口，请手动添加工作流 ID。")
-                return
-            if not items:
-                self.rh_workflow_list_status.setText("接口返回成功，但当前没有工作流。")
-                return
-            existing_ids = set()
-            for row in range(self.rh_workflow_table.rowCount()):
-                data = self.rh_workflow_table.item(row, 0).data(Qt.UserRole) or {}
-                existing_ids.add(data.get("id"))
-            added = 0
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                wf_id = item.get("id") or item.get("workflowId") or item.get("webappId")
-                name = item.get("name") or item.get("title") or wf_id
-                if wf_id and wf_id not in existing_ids:
-                    self._rh_add_workflow_row({
-                        "id": wf_id,
-                        "name": name,
-                        "type": item.get("type") or "其他",
-                        "instanceType": item.get("instance_type") or item.get("instanceType") or "default",  # noqa: E501
-                    })
-                    existing_ids.add(wf_id)
-                    added += 1
-            self._rh_save_workflow_list()
-            self._rh_maybe_refresh_dh_selector()
-            self.rh_workflow_list_status.setText(f"已从 RunningHub API 刷新，新增 {added} 个工作流")  # noqa: E501
-
-        self.start_worker(run_task, on_done)
+        """工作流列表由服务端管理，客户端仅维护本地列表。"""
+        self.rh_workflow_list_status.setText("工作流列表由服务端管理，可手动添加工作流 ID。")
 
     def _rh_show_add_workflow_dialog(self):
         """弹出对话框添加工作流，添加后自动选中并显示节点。"""
@@ -1726,12 +1453,9 @@ class AIGenMixin:
         self.rh_workflow_list_status.setText("正在获取 " + wf_id + " 的节点...")
 
         def run_task():
-            # 优先走服务端工作流 JSON 接口，失败回退直连 RunningHub
+            # 走服务端工作流 JSON 接口
             from utils import digital_human_client as dhc
-            wf = dhc.get_workflow_json(wf_id)
-            if wf is not None:
-                return wf
-            return self.runninghub.get_workflow_json(wf_id)
+            return dhc.get_workflow_json(wf_id)
 
         def on_done(wf):
             if not wf or not isinstance(wf, dict):

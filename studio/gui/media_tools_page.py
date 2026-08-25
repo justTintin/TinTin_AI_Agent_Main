@@ -89,14 +89,12 @@ class MediaToolsPage(BasePage):
     _IMAGE_TOOLS = [
         ("封面制作", "cover_maker", "image-edit", "商品封面图快速制作"),
         ("图像抠图", "image_matting", "image", "智能抠图 / 去除背景"),
-        ("图片框选OCR", "image_folder_ocr", "text-box-search", "批量识别图片文字"),
     ]
     _VIDEO_TOOLS = [
         ("视频修复", "video_tools", "wrench", "画质修复 / 工作流处理"),
         ("视频转文字", "transcription", "subtitles", "视频语音自动转写"),
         ("声音克隆", "voice_clone", "audio", "克隆音色生成配音"),
         ("视频去水印字幕", "subtitle_removal", "closed-caption", "去除字幕 / 台标水印"),
-        ("视频框选OCR", "video_ocr", "text-box-search", "视频帧文字识别"),
     ]
     _PROMPT_TOOLS = [
         ("图片反推提示词", "image_prompt", "image", "上传图片，AI 生成绘画提示词"),
@@ -257,9 +255,6 @@ class MediaToolsPage(BasePage):
         elif key == "image_matting":
             from gui.image_matting_page import ImageMattingPage
             self._tool_pages[key] = ImageMattingPage(content, mw)
-        elif key == "image_folder_ocr":
-            from gui.image_folder_ocr_page import ImageFolderOcrPage
-            self._tool_pages[key] = ImageFolderOcrPage(content, mw)
         elif key == "video_tools":
             self._tool_pages[key] = mw.setup_video_tools_page(content)
         elif key == "transcription":
@@ -271,9 +266,6 @@ class MediaToolsPage(BasePage):
         elif key == "subtitle_removal":
             from gui.subtitle_removal_page_v14 import SubtitleRemovalPageV14
             self._tool_pages[key] = SubtitleRemovalPageV14(content, mw)
-        elif key == "video_ocr":
-            from gui.video_ocr_page import VideoOcrPage
-            self._tool_pages[key] = VideoOcrPage(content, mw)
         elif key == "image_prompt":
             from gui.prompt_reverse_page import ImagePromptReversePage
             self._tool_pages[key] = ImagePromptReversePage(content, mw)

@@ -357,8 +357,6 @@ class EnvConfigPage(BasePage):
         # CLIP 向量检索已切换为纯远程 embedding 服务模式，
         # 服务地址请在「AI 模型配置」→「 CLIP」标签页中填写。
 
-        scroll_layout.addWidget(scroll_widget)
-
         card_layout.addWidget(scroll_area)
 
         layout.addWidget(self.card, 1)

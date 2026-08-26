@@ -820,28 +820,93 @@ class VideoMontagePage(BasePage):
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
+        """获取片段时长列表。
+
+        优先级：
+        1. 从文件名解析时间戳（服务端返回的片段名已包含起止时间）
+        2. 从缓存读取
+        3. 用 cv2 读取（仅当文件名无法解析且缓存未命中时）
+        """
         if hasattr(self, "temp_scenes") and self.temp_scenes and len(self.temp_scenes) == len(files):  # noqa: E501
             return self.temp_scenes
 
-        import cv2
+        # 缓存已计算的时长，避免重复 cv2 读取
+        if not hasattr(self, "_clip_duration_cache"):
+            self._clip_duration_cache = {}
+
         scenes = []
         current_time = 0.0
+        need_cv2_fallback = []
+
+        # 第一遍：优先从文件名解析时长（零 CPU 开销）
         for f in files:
-            # f 可能是文件名或完整路径
+            fname = os.path.basename(f) if not os.path.isabs(f) else os.path.basename(f)
             p = f if os.path.isabs(f) else os.path.join(splits_dir, f)
-            cap = cv2.VideoCapture(p)
+            norm_p = os.path.abspath(p)
+
+            # 尝试从文件名解析时间戳（格式：_shot_XXX_HH-MM-SS,mmm_HH-MM-SS,mmm_）
+            parsed = self._parse_split_filename(fname)
             duration = 0.0
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                if fps > 0:
-                    duration = frame_count / fps
-                cap.release()
+            if parsed:
+                _idx, start_str, end_str, _desc = parsed
+                _s = self._srt_ts_to_seconds(start_str)
+                _e = self._srt_ts_to_seconds(end_str)
+                if _s is not None and _e is not None and _e > _s:
+                    duration = _e - _s
+
+            # 文件名无法解析时，尝试从缓存读取
+            if duration <= 0 and norm_p in self._clip_duration_cache:
+                duration = self._clip_duration_cache[norm_p]
+
             if duration <= 0:
-                # cv2 读不了（10-bit/特殊编码）时用 ffprobe 兜底，避免时长全 0
-                duration = get_media_duration(p)
+                # 需要 cv2 兜底，先记录下来
+                need_cv2_fallback.append((f, p, norm_p))
+                duration = 0.0  # 占位
+
             scenes.append((current_time, current_time + duration))
             current_time += duration
+
+        # 第二遍：仅对文件名无法解析且缓存未命中的片段用 cv2 读取
+        if need_cv2_fallback:
+            import cv2
+            for f, p, norm_p in need_cv2_fallback:
+                cap = cv2.VideoCapture(p)
+                duration = 0.0
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    if fps > 0:
+                        duration = frame_count / fps
+                    cap.release()
+                if duration <= 0:
+                    # cv2 读不了（10-bit/特殊编码）时用 ffprobe 兜底
+                    duration = get_media_duration(p)
+                # 写入缓存
+                self._clip_duration_cache[norm_p] = duration
+                # 更新 scenes 中对应项（需要重新计算累积时间）
+                idx = files.index(f)
+                # 重新计算从该位置开始的累积时间
+                new_scenes = []
+                t = 0.0
+                for i, ff in enumerate(files):
+                    if i < idx:
+                        new_scenes.append(scenes[i])
+                        t = scenes[i][1]
+                    elif i == idx:
+                        new_scenes.append((t, t + duration))
+                        t += duration
+                    else:
+                        # 后续片段需要重新计算
+                        break
+                # 更新后续片段的累积时间
+                for i in range(idx + 1, len(files)):
+                    old_start, old_end = scenes[i]
+                    old_dur = old_end - old_start
+                    new_scenes.append((t, t + old_dur))
+                    t += old_dur
+                scenes = new_scenes
+                current_time = t
+
         return scenes
     # [3·分割]  _parse_split_filename
     def _parse_split_filename(self, filename):

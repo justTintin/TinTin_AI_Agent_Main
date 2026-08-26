@@ -1154,9 +1154,8 @@ class VideoMontagePage(BasePage):
                             duration_sec = float(cached.get("duration") or 0.0)
                         except (TypeError, ValueError):
                             duration_sec = 0.0
-                    if duration_sec <= 0 and os.path.isfile(norm_path):
-                        # 文件名时间戳异常（如全 0）时直接探测片段文件
-                        duration_sec = get_media_duration(norm_path)
+                    # 不再在 UI 主线程调用 get_media_duration()（会 spawn ffprobe 子进程导致卡死）
+                    # 时长为 0 时显示 "—"，后续由后台异步评分时补充
 
                     # 缓存先占位（后台异步评分）；命中缓存则预填已有字段
                     self.split_clips_cache[norm_path] = {
@@ -2762,6 +2761,21 @@ class VideoMontagePage(BasePage):
         clip_urls = self._manifest_clip_urls()
         if clip_urls:
             self.stage_label.setText(f" 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")  # noqa: E501
+
+        # 保存本地回退所需参数（服务端 402 等异常时自动回退）
+        self._server_concat_fallback_params = {
+            "selected_clips": list(selected_clips),
+            "out_montage_dir": out_montage_dir,
+            "recombine_mode": recombine_mode,
+            "target_clip_count": target_clip_count,
+            "batch_count": batch_count,
+            "randomness": randomness,
+            "selected_descriptions_list": selected_descriptions_list,
+            "beat_times": beat_times,
+            "music_path": music_path,
+            "music_range": music_range,
+        }
+
         self.concat_worker = MontageConcatServerWorker(
             local_output_path=local_output_path,
             clips=list(selected_clips),
@@ -2775,6 +2789,7 @@ class VideoMontagePage(BasePage):
         self.concat_worker.concat_finished.connect(lambda p: self._on_concat_finished([p]), type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.error.connect(self._on_concat_error, type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.task_id_obtained.connect(self._on_concat_task_id, type=Qt.QueuedConnection)  # noqa: E501
+        self.concat_worker.fallback_to_local.connect(self._on_server_concat_fallback, type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.start()
 
 
@@ -2985,6 +3000,16 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("失败： 排列失败")
         self._show_long_error("排列错误", f"处理过程中发生错误：\n{err}")
+    # [5·拼接合成]  _on_server_concat_fallback
+    def _on_server_concat_fallback(self, reason):
+        """服务端合成不可用（402 等），自动回退到本地合成。"""
+        log.info(f"[montage_concat] 服务端回退本地合成: {reason}")
+        self.stage_label.setText(f"注意： {reason}")
+        params = getattr(self, "_server_concat_fallback_params", None)
+        if not params:
+            self._on_concat_error("服务端回退本地合成，但缺少必要参数")
+            return
+        self._launch_local_concat_worker(**params)
 
 
     # --- Step 3 Voice synthesis execution ---
@@ -5143,23 +5168,21 @@ class VideoMontagePage(BasePage):
                 dur = float(cache_item.get("duration") or 0.0)
             except (TypeError, ValueError):
                 dur = 0.0
+        # 优先读 split_clips_cache（_build_precompose_plans 后台线程已预填），
+        # 避免在 UI 主线程对每个镜头 spawn ffprobe 子进程导致卡死。
+        if dur <= 0 and path:
+            norm = os.path.abspath(path)
+            cache = getattr(self, "split_clips_cache", {})
+            cached = cache.get(norm)
+            if cached and isinstance(cached, dict) and cached.get("duration", 0) > 0:
+                dur = cached["duration"]
         if dur <= 0 and time_str and "-->" in time_str:
             s = self._srt_ts_to_seconds(time_str.split("-->")[0])
             e = self._srt_ts_to_seconds(time_str.split("-->")[1])
             if s is not None and e is not None:
                 dur = max(0.0, e - s)
-        if dur <= 0 and path and os.path.isfile(path):
-            dur = get_media_duration(path)
-            if dur > 0:
-                # 无条件回写缓存（无缓存条目则新建），保证下次切换方案直接读缓存不再 ffprobe
-                try:
-                    norm = os.path.abspath(path)
-                    cache = getattr(self, "split_clips_cache", {})
-                    if norm not in cache or not isinstance(cache.get(norm), dict):
-                        cache[norm] = {}
-                    cache[norm]["duration"] = dur
-                except (KeyError, TypeError, AttributeError):
-                    pass
+        # 不再在 UI 主线程调用 get_media_duration()（会 spawn ffprobe 子进程导致卡死）
+        # 时长为 0 时显示 "—"，后续由后台异步评分时补充
         return f"{dur:.1f}s" if dur > 0 else "—"
     # [2·基础设施]  _refresh_sources_for_plan
     def _refresh_sources_for_plan(self, plan_index):
@@ -5366,17 +5389,15 @@ class VideoMontagePage(BasePage):
         if not self._preview_sequence_clips:
             return
         clip = self._preview_sequence_clips[self._preview_sequence_idx]
-        from PySide6.QtCore import QUrl
-        self.preview_player.stop()
+        from PySide6.QtCore import QUrl, QTimer as _QT  # noqa: N814
         # 记录待加载片段（若已有待加载则覆盖，防止连播快速切换时旧定时器串号）
         self._pending_play_clip = clip
-        # 清空旧源触发 NoMedia
-        self.preview_player.setSource(QUrl())
-        # 兜底：若 Qt 未触发 NoMedia（文件占用/解码异常），200ms 后直接加载，避免永远不播
-        from PySide6.QtCore import QTimer as _QT  # noqa: N814
+        # 停止旧定时器
         if self._pending_play_timer is not None:
             self._pending_play_timer.stop()
-        self._pending_play_timer = _QT.singleShot(200, self._on_preview_no_media)
+        # 用 QTimer 延迟执行 stop + setSource，避免在 UI 主线程同步调用导致卡死
+        # （Windows Media Foundation 后端的 stop()/setSource() 可能阻塞）
+        self._pending_play_timer = _QT.singleShot(50, self._do_play_sequence_clip)
 
     def _on_preview_no_media(self):
         """mediaStatusChanged == NoMedia 时回调：加载待播放片段。"""
@@ -5405,6 +5426,23 @@ class VideoMontagePage(BasePage):
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")  # noqa: E501
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
+
+    def _do_play_sequence_clip(self):
+        """实际执行播放序列片段（由定时器延迟调用，避免 UI 卡死）。"""
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
+                return
+        except (ImportError, ModuleNotFoundError):
+            return
+        clip = getattr(self, "_pending_play_clip", "")
+        if not clip:
+            return
+        from PySide6.QtCore import QUrl
+        # 先停止当前播放（异步执行，不阻塞 UI）
+        self.preview_player.stop()
+        # 清空旧源，触发 NoMedia 信号，然后加载新文件
+        self.preview_player.setSource(QUrl())
     def _get_video_scene_sources(self, path):
         """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
         sources_file = os.path.splitext(path)[0] + "_sources.txt"
@@ -5880,12 +5918,14 @@ class VideoMontagePage(BasePage):
                     self.btn_preview_play.setIcon(mdi_icon("play"))
             elif status == QMediaPlayer.NoMedia:
                 # 旧源已释放，加载待播放片段（信号驱动，避免固定延时不可靠）
-                self._on_preview_no_media()
-
+                # 仅当有待播放片段时才加载，避免无限循环
+                if getattr(self, "_pending_play_clip", ""):
+                    self._on_preview_no_media()
+    
             elif status == QMediaPlayer.InvalidMedia:  # noqa: SIM102
                 # 当前片段无法播放，跳过并尝试下一个
                 if self._preview_sequence_clips:
-                    log.warning(f"[预览] 无法播放片段: {self._preview_sequence_clips[self._preview_sequence_idx]}")  # noqa: E501
+                    log.warning(f"[预览] 无法播放片段：{self._preview_sequence_clips[self._preview_sequence_idx]}")  # noqa: E501
                     QTimer.singleShot(50, self._skip_to_next_preview_clip)
         except (OSError, RuntimeError):
             pass

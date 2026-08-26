@@ -32,6 +32,7 @@ class MontageConcatServerWorker(BaseWorker):
     progress = Signal(int)
     concat_finished = Signal(str)
     task_id_obtained = Signal(str)
+    fallback_to_local = Signal(str)  # 服务端不可用时通知客户端回退本地合成（含原因）
 
     # 轮询间隔（秒）
     _POLL_INTERVAL = 3.0
@@ -58,6 +59,9 @@ class MontageConcatServerWorker(BaseWorker):
             if not self.clips and not self.clip_urls:
                 raise RuntimeError("没有可合成的镜头（本地 files 或 clip_urls 至少一项）")
             self.task_id = self._submit_concat()
+            if self.task_id is None:
+                # _submit_concat 返回 None 表示已触发 fallback_to_local 信号，无需继续
+                return
         self._poll_and_download()
 
     def _submit_concat(self):
@@ -98,6 +102,12 @@ class MontageConcatServerWorker(BaseWorker):
             try:
                 resp = concat(server, files, data, timeout)
             except Exception as e:
+                err_str = str(e)
+                # 402 Payment Required：服务端授权/配额问题，通知客户端回退本地合成
+                if "402" in err_str:
+                    log.warning(f"[montage_concat] 服务端返回 402，回退本地合成: {err_str}")
+                    self.fallback_to_local.emit(f"服务端返回 402 (Payment Required)，已自动回退到本地合成")
+                    return None
                 raise RuntimeError(f"提交 montage_concat 失败: {e}") from e
 
         task_id = resp.get("id")

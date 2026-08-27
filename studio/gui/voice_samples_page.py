@@ -49,6 +49,23 @@ class PunctuationLLMWorker(BaseWorker):
         except Exception as e:
             self.error.emit(str(e))
 
+
+class RemoteAsrSampleWorker(BaseWorker):
+    """远程 ASR 转写 Worker（模块级定义，避免局部类导致 PySide6 元对象系统崩溃）。"""
+    finished = Signal(list)
+
+    def __init__(self, audio_path):
+        super().__init__()
+        self.audio_path = audio_path
+
+    def do_work(self):
+        from utils.asr_client import read_asr_url, transcribe_remote
+        segments = transcribe_remote(
+            self.audio_path, read_asr_url(),
+            language="",
+        )
+        self.finished.emit(segments)
+
 def load_voice_samples():
     os.makedirs(VOICE_SAMPLES_DIR, exist_ok=True)
     if not os.path.exists(METADATA_PATH):
@@ -422,78 +439,69 @@ class VoiceSamplesPage(BasePage):
 
         self.status_label.setText(f"正在识别样本音频文本 (ID: {sample_id})...")
 
-        # 远程 ASR worker：transcribe_remote → segments → segments_to_plain
-        class RemoteAsrSampleWorker(BaseWorker):
-            finished = Signal(list)
-            error = Signal(str)
-
-            def __init__(self, audio_path):
-                super().__init__()
-                self.audio_path = audio_path
-
-            def do_work(self):
-                try:
-                    from utils.asr_client import read_asr_url, transcribe_remote
-                    segments = transcribe_remote(
-                        self.audio_path, read_asr_url(),
-                        language="",
-                    )
-                    self.finished.emit(segments)
-                except Exception as e:
-                    self.error.emit(str(e))
-
+        # 使用模块级定义的 RemoteAsrSampleWorker（避免局部类导致 PySide6 崩溃）
         worker = RemoteAsrSampleWorker(wav_path)
         self.transcribe_workers[sample_id] = worker
 
         def on_finished(segments):
-            self.status_label.setText("完成： 识别参考音频文本完成")
-            from utils.asr_client import segments_to_plain
-            plain_text = segments_to_plain(segments)
+            try:
+                self.status_label.setText("完成： 识别参考音频文本完成")
+                from utils.asr_client import segments_to_plain
+                plain_text = segments_to_plain(segments)
 
-            # 识别结果为空（音频无人声 / 服务端未返回内容）：给出提示，不静默保存空文案
-            if not plain_text.strip():
-                self.status_label.setText("注意： 未识别到文字")
-                if sample_id in self.transcribe_workers:
-                    del self.transcribe_workers[sample_id]
-                self._load_table_data()
-                QMessageBox.warning(
-                    self.parent_widget, "未识别到文字",
-                    "音频转写完成，但未识别出任何文字内容。\n\n"
-                    "可能原因：音频中没有人声 / 音质过差 / 服务端 Whisper 模型异常。"
-                )
-                return
+                # 识别结果为（音频无人声 / 服务端未返回内容）：给出提示，不静默保存空文案
+                if not plain_text.strip():
+                    self.status_label.setText("注意： 未识别到文字")
+                    if sample_id in self.transcribe_workers:
+                        del self.transcribe_workers[sample_id]
+                    self._load_table_data()
+                    QMessageBox.warning(
+                        self.parent_widget, "未识别到文字",
+                        "音频转写完成，但未识别出任何文字内容。\n\n"
+                        "可能原因：音频中没有人声 / 音质过差 / 服务端 Whisper 模型异常。"
+                    )
+                    return
 
-            def save_text(text_val):
-                samples = load_voice_samples()
-                for s in samples:
-                    if s.get("id") == sample_id:
-                        s["ref_text"] = text_val
-                        break
-                save_voice_samples(samples)
+                def save_text(text_val):
+                    samples = load_voice_samples()
+                    for s in samples:
+                        if s.get("id") == sample_id:
+                            s["ref_text"] = text_val
+                            break
+                    save_voice_samples(samples)
 
-                if sample_id in self.transcribe_workers:
-                    del self.transcribe_workers[sample_id]
+                    if sample_id in self.transcribe_workers:
+                        del self.transcribe_workers[sample_id]
 
-                self._load_table_data()
+                    self._load_table_data()
 
-            llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
+                llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
-            if llm_model and plain_text.strip():
-                self.status_label.setText("正在使用 AI 模型自动优化断句与标点...")
-                self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
+                if llm_model and plain_text.strip():
+                    self.status_label.setText("正在使用 AI 模型自动优化断句与标点...")
+                    self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
 
-                def on_punc_done(punctuated_text):
-                    save_text(punctuated_text)
+                    def on_punc_done(punctuated_text):
+                        save_text(punctuated_text)
 
-                def on_punc_err(err):
-                    log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
+                    def on_punc_err(err):
+                        log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
+                        save_text(plain_text)
+
+                    self.punc_worker.finished.connect(on_punc_done)
+                    self.punc_worker.error.connect(on_punc_err)
+                    self.punc_worker.start()
+                else:
                     save_text(plain_text)
-
-                self.punc_worker.finished.connect(on_punc_done)
-                self.punc_worker.error.connect(on_punc_err)
-                self.punc_worker.start()
-            else:
-                save_text(plain_text)
+            except Exception as e:
+                log.error(f"ASR 回调处理异常: {e}", exc_info=True)
+                if sample_id in self.transcribe_workers:
+                    del self.transcribe_workers[sample_id]
+                self._load_table_data()
+                QMessageBox.critical(
+                    self.parent_widget, "处理异常",
+                    f"转写结果处理时发生错误：\n{e}"
+                )
 
         def on_error(err):
             self.status_label.setText("失败： 识别文本失败")

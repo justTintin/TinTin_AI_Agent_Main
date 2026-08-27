@@ -17,6 +17,8 @@
 | #007 | 2026-08-26 | 智能混剪 | 切换预览视频时 QMediaPlayer 卡死主线程 |
 | #008 | 2026-08-26 | 智能混剪 | 视频预览时 CPU 占用率忽高忽低（NoMedia 信号循环） |
 | #009 | 2026-08-26 | 智能混剪 | 分割完成后 CPU 占用忽高忽低（cv2 读视频） |
+| #010 | 2026-08-27 | 智能混剪 | 镜头重组"与原片一致"画幅输出不正确（未处理旋转元数据） |
+| #011 | 2026-08-27 | 声音样本 | 点击"根据音频生成文案"时客户端闪退（局部 Worker 类 + 回调无异常保护） |
 
 ---
 
@@ -729,6 +731,142 @@ def _get_split_scenes_times(self, splits_dir, files):
 2. 选择多个视频进行批量分割
 3. 观察分割完成后 CPU 占用率
 4. 预期：CPU 占用率正常，无忽高忽低现象
+
+---
+
+## #010 镜头重组"与原片一致"画幅输出不正确（未处理旋转元数据）
+
+**日期**：2026-08-27  
+**文件**：  
+- `studio/gui/video_montage_page.py`  
+- `studio/gui/montage/workers/concat_workers.py`  
+**方法**：`_probe_first_clip_resolution()` / `_probe_resolution()`  
+**严重级别**：中（输出画幅与用户选择不一致）
+
+### 问题描述
+
+用户在「智能混剪」→「镜头重组」时选择输出画幅"与原片一致"，但生成视频的宽高比与原片不同。例如原片是竖屏（9:16），输出却变成了横屏（16:9）。
+
+### 根因分析
+
+#### 根本原因
+
+`_probe_first_clip_resolution()` 和 `VideoConcatWorker._probe_resolution()` 都只读取了 ffprobe 的 `stream=width,height`（原始流像素尺寸），**没有考虑视频的旋转元数据（rotation metadata）**。
+
+手机拍摄的竖屏视频，实际存储方式是：
+- 流像素尺寸：1920x1080（横着存的）
+- 旋转元数据：`rotate=90` 或 `side_data_list.rotation=-90`
+- 实际显示尺寸：1080x1920（竖屏）
+
+代码读到 `width=1920, height=1080` 就当成横屏输出，导致输出画幅与原片不一致。
+
+#### 影响路径
+
+| 合成路径 | 调用方法 | 问题 |
+|---------|---------|------|
+| 服务端合成 | `_probe_first_clip_resolution()` | 传 1920x1080 给服务端，输出横屏 |
+| 本地合成 | `VideoConcatWorker._probe_resolution()` | 同上 |
+
+### 修复方案
+
+修改 ffprobe 命令，同时读取 `side_data_list`（displaymatrix rotation）和 `tag:rotate`，当旋转角度为 90/270 度时自动交换宽高。
+
+#### ffprobe 命令变更
+
+```python
+# 修改前（只读原始流尺寸）：
+-show_entries stream=width,height -of csv=p=0:s=x
+
+# 修改后（读取尺寸 + 旋转元数据）：
+-show_entries stream=width,height,side_data_list,tag:rotate -of json
+```
+
+#### 旋转检测优先级
+
+1. `side_data_list[].rotation` — 现代 ffmpeg 的 displaymatrix 方式
+2. `tags.rotate` — 旧版兼容方式
+
+#### 宽高交换逻辑
+
+```python
+if rotation in (90, -90, 270, -270):
+    w, h = h, w
+```
+
+### 影响范围
+
+- 服务端合成和本地合成两条路径均已修复
+- 仅影响 `layout_mode=source`（"与原视频一致"）选项
+- 无旋转元数据的视频行为不变（rotation=0 时不交换宽高）
+- 向后兼容
+
+### 验证建议
+
+1. 准备一个竖屏拍摄的视频（手机 9:16）
+2. 进入「智能混剪」→ 镜头分割 → 镜头重组
+3. 输出画幅选择"与原视频一致"
+4. 确认合成后视频为竖屏（1080x1920），而非横屏（1920x1080）
+
+---
+
+## #011 声音样本"根据音频生成文案"时客户端闪退
+
+**日期**：2026-08-27  
+**文件**：`studio/gui/voice_samples_page.py`  
+**方法**：`_generate_ref_text()`（第 400 行）  
+**严重级别**：高（客户端闪退）
+
+### 问题描述
+
+用户在「声音样本」页面，点击"根据音频生成/更新参考文案"按钮时，客户端闪退。
+
+### 根因分析
+
+#### 问题 1：局部定义的 QThread 子类导致 PySide6 元对象系统崩溃
+
+`RemoteAsrSampleWorker` 类定义在 `_generate_ref_text()` 方法内部：
+
+```python
+def _generate_ref_text(self, wav_path, sample_id):
+    ...
+    class RemoteAsrSampleWorker(BaseWorker):  # ← 局部类！
+        finished = Signal(list)
+        error = Signal(str)
+        ...
+```
+
+PySide6 对局部定义的 QThread 子类处理信号时，元对象系统（QMetaObject）可能不稳定，导致信号发射时访问已失效的类元数据，引发进程崩溃。
+
+#### 问题 2：`on_finished` 回调无异常保护
+
+```python
+def on_finished(segments):
+    self.status_label.setText(...)  # ← 如果任何操作抛异常，直接崩溃
+    from utils.asr_client import segments_to_plain
+    plain_text = segments_to_plain(segments)  # ← 无 try/except
+    ...
+```
+
+如果 `segments_to_plain` 或其他操作抛异常，没有 try/except 捕获，会导致未处理异常传播，可能引发崩溃。
+
+### 修复方案
+
+1. **将 `RemoteAsrSampleWorker` 移到模块顶层**：避免局部类的元对象问题
+2. **在 `on_finished` 回调中添加 try/except**：捕获所有异常，弹出错误对话框而非崩溃
+3. **移除冗余的 `error = Signal(str)`**：`BaseWorker` 已提供 `error` 信号，子类重复声明可能导致信号连接混乱
+
+### 影响范围
+
+- 仅影响声音样本页面的 ASR 转写功能
+- 不改变任何业务逻辑，仅调整代码结构和异常处理
+- 向后兼容
+
+### 验证建议
+
+1. 进入「声音样本」页面
+2. 添加一个音频样本
+3. 点击"根据音频生成/更新参考文案"
+4. 预期：不再闪退；服务端异常时弹出错误对话框
 
 ---
 

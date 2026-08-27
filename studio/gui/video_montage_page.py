@@ -2653,10 +2653,12 @@ class VideoMontagePage(BasePage):
         self.concat_worker.start()
 
     def _probe_first_clip_resolution(self, clips):
-        """探测第一个有效镜头的分辨率，用于 layout_mode=source 时回传给服务端。
+        """探测第一个有效镜头的显示分辨率（已考虑旋转），用于 layout_mode=source 时回传给服务端。
 
         服务端 montage_concat 只认 width/height，不认 layout_mode，所以 source 模式
         需要客户端主动把第一个镜头的宽高传过去，才能保持"与原视频一致"的行为。
+        注意：手机竖拍视频 stream 存的是横屏像素（如 1920x1080），但带 rotate=90 元数据，
+        必须读取旋转角度后交换宽高，才能得到正确的显示分辨率。
         """
         for clip in clips:
             if not os.path.isfile(clip):
@@ -2666,8 +2668,8 @@ class VideoMontagePage(BasePage):
                 cmd = [
                     ffprobe, "-v", "error",
                     "-select_streams", "v:0",
-                    "-show_entries", "stream=width,height",
-                    "-of", "csv=p=0:s=x",
+                    "-show_entries", "stream=width,height,side_data_list,tag:rotate",
+                    "-of", "json",
                     clip,
                 ]
                 r = run(
@@ -2675,10 +2677,39 @@ class VideoMontagePage(BasePage):
                     creationflags=CREATE_NO_WINDOW, timeout=15,
                 )
                 if r.returncode == 0 and r.stdout.strip():
-                    parts = r.stdout.strip().split("x")
-                    if len(parts) == 2:
-                        return int(parts[0]), int(parts[1])
-            except (OSError, subprocess.SubprocessError):
+                    import json as _json
+                    data = _json.loads(r.stdout)
+                    streams = data.get("streams", [])
+                    if not streams:
+                        continue
+                    s = streams[0]
+                    w = int(s.get("width", 0) or 0)
+                    h = int(s.get("height", 0) or 0)
+                    if w <= 0 or h <= 0:
+                        continue
+                    # 检测旋转角度：优先从 side_data 读，回退到 tag:rotate
+                    rotation = 0
+                    # side_data_list 中 displaymatrix 的 rotation 字段
+                    for sd in (s.get("side_data_list") or []):
+                        rot_val = sd.get("rotation")
+                        if rot_val is not None:
+                            try:
+                                rotation = int(float(rot_val))
+                            except (TypeError, ValueError):
+                                pass
+                            break
+                    if rotation == 0:
+                        tag_rot = s.get("tags", {}).get("rotate")
+                        if tag_rot:
+                            try:
+                                rotation = int(float(tag_rot))
+                            except (TypeError, ValueError):
+                                pass
+                    # 90/270 度旋转时交换宽高
+                    if rotation in (90, -90, 270, -270):
+                        w, h = h, w
+                    return w, h
+            except (OSError, subprocess.SubprocessError, Exception):
                 pass
         return 0, 0
 

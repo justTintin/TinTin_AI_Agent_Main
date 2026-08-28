@@ -119,9 +119,9 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table = QTableWidget()
         self.main_page.split_result_table.setWordWrap(False)
         self.main_page.split_result_table.verticalHeader().setDefaultSectionSize(30)
-        self.main_page.split_result_table.setColumnCount(9)
+        self.main_page.split_result_table.setColumnCount(10)
         self.main_page.split_result_table.setHorizontalHeaderLabels(
-            ["", "序号", "视频片段", "景别", "时长", "主要画面", "产品", "型号", "评分"])
+            ["", "序号", "视频片段", "景别", "时长", "画幅", "主要画面", "产品", "型号", "评分"])
         self.main_page.split_result_table.setSelectionBehavior(QAbstractItemView.SelectRows)  # noqa: E501
         self.main_page.split_result_table.setMinimumHeight(180)
         self.main_page.split_result_table.itemDoubleClicked.connect(self.main_page._preview_table_item)  # noqa: E501
@@ -138,13 +138,15 @@ class Step1SplitView(BaseStepView):
         self.main_page.split_result_table.setColumnWidth(3, 60)
         header.setSectionResizeMode(4, QHeaderView.Fixed)
         self.main_page.split_result_table.setColumnWidth(4, 50)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
-        header.setSectionResizeMode(6, QHeaderView.Interactive)
-        self.main_page.split_result_table.setColumnWidth(6, 80)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.main_page.split_result_table.setColumnWidth(5, 70)
+        header.setSectionResizeMode(6, QHeaderView.Stretch)
         header.setSectionResizeMode(7, QHeaderView.Interactive)
         self.main_page.split_result_table.setColumnWidth(7, 80)
-        header.setSectionResizeMode(8, QHeaderView.Fixed)
-        self.main_page.split_result_table.setColumnWidth(8, 50)
+        header.setSectionResizeMode(8, QHeaderView.Interactive)
+        self.main_page.split_result_table.setColumnWidth(8, 80)
+        header.setSectionResizeMode(9, QHeaderView.Fixed)
+        self.main_page.split_result_table.setColumnWidth(9, 50)
         header.setStretchLastSection(False)
 
         card_layout.addWidget(self.main_page.split_result_table)

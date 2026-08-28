@@ -53,6 +53,7 @@ class ServerSplitWorker(BaseWorker):
         self.image_duration = image_duration
         self.analyze = analyze
         self.shot_meta = []  # 逐镜分析结果（finished 之后 analysis_ready emit）
+        self.source_resolution = None  # 服务端返回的原片分辨率（用于镜头重组透传）
         self._aborted = False
 
     def abort(self):
@@ -133,6 +134,10 @@ class ServerSplitWorker(BaseWorker):
                      else f"[性能监控][分割] 上传+服务端响应完成: 耗时 {_upload_elapsed:.2f}s")
 
             shots = resp.get("shots") or []
+            # 保存服务端返回的原片分辨率（用于镜头重组时透传）
+            self.source_resolution = resp.get("source_resolution")
+            if self.source_resolution:
+                log.info(f"[服务端分割] 原片分辨率: {self.source_resolution}")
             if not shots:
                 self.stage.emit("服务端未检测到镜头切点")
                 self.progress.emit(100)

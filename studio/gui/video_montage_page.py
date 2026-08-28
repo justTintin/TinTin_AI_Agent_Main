@@ -1264,22 +1264,80 @@ class VideoMontagePage(BasePage):
                     dur_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 4, dur_item)
 
-                    # Col 5: 主要画面 (description, editable)
+                    # Col 5: 画幅 (resolution) — 从缓存或探测第一个片段获取
+                    resolution_text = ""
+                    if cached and cached.get("resolution"):
+                        resolution_text = cached["resolution"]
+                    elif not getattr(self, "_probed_resolution", None):
+                        # 首次探测：从第一个片段获取分辨率（后续片段复用）
+                        try:
+                            from utils.platform_utils import find_ffprobe
+                            ffprobe = find_ffprobe()
+                            if not os.path.isfile(ffprobe):
+                                ffprobe = find_ffmpeg().replace("ffmpeg", "ffprobe")
+                            cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
+                                   "-show_entries", "stream=width,height",
+                                   "-of", "csv=p=0:s=x", norm_path]
+                            r = run(cmd, capture_output=True, text=True,
+                                    creationflags=CREATE_NO_WINDOW, timeout=10)
+                            if r.returncode == 0 and r.stdout.strip():
+                                parts = r.stdout.strip().split("x")
+                                if len(parts) == 2:
+                                    w, h = int(parts[0]), int(parts[1])
+                                    # 检查旋转元数据
+                                    cmd2 = [ffprobe, "-v", "error", "-select_streams", "v:0",
+                                            "-show_entries", "stream=side_data_list,tag:rotate",
+                                            "-of", "json", norm_path]
+                                    r2 = run(cmd2, capture_output=True, text=True,
+                                             creationflags=CREATE_NO_WINDOW, timeout=10)
+                                    if r2.returncode == 0 and r2.stdout.strip():
+                                        import json as _json
+                                        d2 = _json.loads(r2.stdout)
+                                        s2 = (d2.get("streams") or [{}])[0]
+                                        rot = 0
+                                        for sd in (s2.get("side_data_list") or []):
+                                            rv = sd.get("rotation")
+                                            if rv is not None:
+                                                try: rot = int(float(rv))
+                                                except: pass
+                                                break
+                                        if rot == 0:
+                                            tr = s2.get("tags", {}).get("rotate")
+                                            if tr:
+                                                try: rot = int(float(tr))
+                                                except: pass
+                                        if rot in (90, -90, 270, -270):
+                                            w, h = h, w
+                                    resolution_text = f"{w}x{h}"
+                                    self._probed_resolution = resolution_text
+                                    # 回写缓存
+                                    if cached:
+                                        cached["resolution"] = resolution_text
+                        except Exception:
+                            pass
+                    elif getattr(self, "_probed_resolution", None):
+                        resolution_text = self._probed_resolution
+                    res_item = QTableWidgetItem(resolution_text)
+                    res_item.setFlags(res_item.flags() & ~Qt.ItemIsEditable)
+                    res_item.setTextAlignment(Qt.AlignCenter)
+                    self.split_result_table.setItem(idx, 5, res_item)
+
+                    # Col 6: 主要画面 (description, editable)
                     desc_item = QTableWidgetItem(desc)
                     desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 5, desc_item)
+                    self.split_result_table.setItem(idx, 6, desc_item)
 
-                    # Col 6: 产品
+                    # Col 7: 产品
                     prod_item = QTableWidgetItem(cached.get("product", "") if cached else "")  # noqa: E501
                     prod_item.setFlags(prod_item.flags() & ~Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 6, prod_item)
+                    self.split_result_table.setItem(idx, 7, prod_item)
 
-                    # Col 7: 型号
+                    # Col 8: 型号
                     model_item = QTableWidgetItem(cached.get("model", "") if cached else "")  # noqa: E501
                     model_item.setFlags(model_item.flags() & ~Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 7, model_item)
+                    self.split_result_table.setItem(idx, 8, model_item)
 
-                    # Col 8: 评分 — 命中缓存则回填，否则等待服务端分析
+                    # Col 9: 评分 — 命中缓存则回填，否则等待服务端分析
                     cached_score = cached.get("score") if cached else None
                     if cached_score is not None:
                         score_item = QTableWidgetItem(f"{cached_score:.1f}" if cached_score >= 0 else "—")  # noqa: E501
@@ -1293,7 +1351,7 @@ class VideoMontagePage(BasePage):
                         score_item = QTableWidgetItem("—")
                     score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
                     score_item.setTextAlignment(Qt.AlignCenter)
-                    self.split_result_table.setItem(idx, 8, score_item)
+                    self.split_result_table.setItem(idx, 9, score_item)
 
                     # 已命中缓存的镜头不进后台评分队列（已有评分，避免重复调服务端）
                     if not cached:
@@ -2247,7 +2305,7 @@ class VideoMontagePage(BasePage):
                 self._play_video(path)
     # [8·事件回调]  _on_table_cell_changed
     def _on_table_cell_changed(self, row, col):
-        if col == 5:  # 主要画面列（可编辑）
+        if col == 6:  # 主要画面列（可编辑）
             file_item = self.split_result_table.item(row, 2)
             desc_item = self.split_result_table.item(row, col)
             if file_item and desc_item:
@@ -2285,7 +2343,7 @@ class VideoMontagePage(BasePage):
                     if hasattr(self, "rewritten_srt_display"):
                         lines = []
                         for r in range(self.split_result_table.rowCount()):
-                            d_item = self.split_result_table.item(r, 5)
+                            d_item = self.split_result_table.item(r, 6)
                             if d_item:
                                 lines.append(d_item.text().strip())
                         self.rewritten_srt_display.setPlainText("\n".join(lines))
@@ -2804,7 +2862,16 @@ class VideoMontagePage(BasePage):
         if layout_mode == "horizontal":
             width, height = 1920, 1080
         elif layout_mode == "source":
-            width, height = self._probe_first_clip_resolution(selected_clips)
+            # 优先使用服务端分割时返回的原片分辨率，回退到本地探测
+            src_res = getattr(self, "_source_resolution", None)
+            if src_res and isinstance(src_res, (list, tuple)) and len(src_res) == 2:
+                width, height = int(src_res[0]), int(src_res[1])
+            elif src_res and isinstance(src_res, str) and "x" in src_res:
+                parts = src_res.split("x")
+                if len(parts) == 2:
+                    width, height = int(parts[0]), int(parts[1])
+            else:
+                width, height = self._probe_first_clip_resolution(selected_clips)
             if width <= 0 or height <= 0:
                 width, height = 1080, 1920
 
@@ -4413,8 +4480,9 @@ class VideoMontagePage(BasePage):
                 it.setForeground(QBrush())
     # [2·基础设施]  _go_next_to_step2
     def _go_next_to_step2(self):
-        """点击下一步：从表格checkbox同步选中状态，再进入镜头重组。"""
+        """点击下一步：从表格 checkbox 同步选中状态，再进入镜头重组。"""
         self._sync_step1_checkboxes_to_clips()
+        self._detect_and_show_source_resolution()
         self._go_to_step(1)
     # [3·分割]  _sync_step1_checkboxes_to_clips
     def _sync_step1_checkboxes_to_clips(self):
@@ -4453,6 +4521,76 @@ class VideoMontagePage(BasePage):
             })
         self._available_concat_clips = new_clips
         self._update_concat_count_lbl()
+
+    # [2·基础设施]  _detect_and_show_source_resolution
+    def _detect_and_show_source_resolution(self):
+        """检测分割片段的原始画幅并显示在镜头重组 UI 上，同时连接画幅切换信号。"""
+        # 1. 优先使用服务端分割时返回的原片分辨率
+        resolution_text = ""
+        src_res = getattr(self, "_source_resolution", None)
+        if src_res:
+            if isinstance(src_res, (list, tuple)) and len(src_res) == 2:
+                resolution_text = f"{int(src_res[0])}x{int(src_res[1])}"
+            elif isinstance(src_res, str) and "x" in src_res:
+                resolution_text = src_res
+        # 2. 回退到本地缓存或探测
+        if not resolution_text:
+            resolution_text = getattr(self, "_probed_resolution", None) or ""
+        if not resolution_text:
+            cache = getattr(self, "split_clips_cache", {})
+            for norm_path, item in cache.items():
+                if isinstance(item, dict) and item.get("resolution"):
+                    resolution_text = item["resolution"]
+                    break
+        if not resolution_text:
+            tbl = getattr(self, "split_result_table", None)
+            if tbl and tbl.rowCount() > 0:
+                file_item = tbl.item(0, 2)
+                if file_item:
+                    path = file_item.data(Qt.UserRole)
+                    if path and os.path.isfile(path):
+                        w, h = self._probe_first_clip_resolution([path])
+                        if w > 0 and h > 0:
+                            resolution_text = f"{w}x{h}"
+                            self._probed_resolution = resolution_text
+        # 2. 更新 UI 标签
+        lbl = getattr(self, "lbl_source_resolution", None)
+        if lbl:
+            if resolution_text:
+                lbl.setText(f"原片: {resolution_text}")
+                # 更新 combo 第一项的提示
+                combo = getattr(self, "layout_combo", None)
+                if combo and combo.count() > 0:
+                    combo.setItemText(0, f"与原视频一致 ({resolution_text})")
+            else:
+                lbl.setText("原片: 未知")
+        # 3. 连接画幅切换信号，更新标签显示
+        combo = getattr(self, "layout_combo", None)
+        if combo:
+            try:
+                combo.currentIndexChanged.disconnect(self._on_layout_combo_changed)
+            except (TypeError, RuntimeError):
+                pass
+            combo.currentIndexChanged.connect(self._on_layout_combo_changed)
+
+    # [2·基础设施]  _on_layout_combo_changed
+    def _on_layout_combo_changed(self, index):
+        """画幅切换时更新提示标签，让用户知道实际输出的分辨率。"""
+        combo = getattr(self, "layout_combo", None)
+        lbl = getattr(self, "lbl_source_resolution", None)
+        if not combo or not lbl:
+            return
+        mode = combo.currentData()
+        resolution_text = getattr(self, "_probed_resolution", None) or ""
+        if mode == "source":
+            if resolution_text:
+                lbl.setText(f"输出: {resolution_text} (与原片一致)")
+            else:
+                lbl.setText("输出: 1080x1920 (原片未知，回退竖屏)")
+        elif mode == "vertical":
+            lbl.setText("输出: 1080x1920 (竖屏)")
+        elif mode == "horizontal":
+            lbl.setText("输出: 1920x1080 (横屏)")
     # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):
         sp_root = self._montage_splits_root()

@@ -322,6 +322,11 @@ class Step1SplitController(QObject):
         is_local = item.get("kind") == "local"
         video_path = item.get("path") or ""
         fname = item.get("display") or os.path.basename(video_path) or ""
+        # 保存服务端返回的原片分辨率（用于镜头重组时透传）
+        src_res = getattr(self.worker, "source_resolution", None)
+        if src_res:
+            self.main_page._source_resolution = src_res
+            log.info(f"[合并分割] {fname} 原片分辨率: {src_res}")
         if count > 0:
             self._merged_split_ok += 1
             log.info(f"[合并分割] {fname} 分割出 {count} 个镜头")

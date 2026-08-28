@@ -193,7 +193,7 @@ def transcribe_remote(
         try:
             ensure_url = f"{base}/models/ensure/whisper"
             log.info(f"[ASR][{task_id}] 确保模型加载: {ensure_url}")
-            er = resilient_post(ensure_url, timeout=60, service="whisper", circuit_breaker=False)  # noqa: E501
+            er = resilient_post(ensure_url, timeout=180, service="whisper", circuit_breaker=False)  # noqa: E501
             log.info(f"[ASR][{task_id}] 模型加载状态: HTTP {er.status_code}")
         except requests.exceptions.RequestException as e:
             log.warning(f"[ASR][{task_id}] 确保模型加载失败(继续尝试转写): {e}")

@@ -61,6 +61,12 @@ class Step2ConcatView(BaseStepView):
         self.main_page.layout_combo.addItem("横屏 (1920x1080 宽屏)", "horizontal")
         self.main_page.layout_combo.setCurrentIndex(0)
         row_params1.addWidget(self.main_page.layout_combo)
+        # 原片画幅提示标签（由客户端自动检测填充）
+        self.main_page.lbl_source_resolution = QLabel("")
+        self.main_page.lbl_source_resolution.setObjectName("muted_text")
+        self.main_page.lbl_source_resolution.setStyleSheet("color: #f1c40f; font-size: 11px; margin-left: 4px;")
+        self.main_page.lbl_source_resolution.setToolTip("分割片段检测到的原始画幅，选择'与原视频一致'时将使用此分辨率")
+        row_params1.addWidget(self.main_page.lbl_source_resolution)
 
         row_params1.addSpacing(15)
         self.main_page.lbl_duration_limit = QLabel("时长限制:")

@@ -49,6 +49,23 @@ class PunctuationLLMWorker(BaseWorker):
         except Exception as e:
             self.error.emit(str(e))
 
+
+class RemoteAsrSampleWorker(BaseWorker):
+    """远程 ASR 转写 Worker（模块级定义，避免局部类导致 PySide6 元对象系统崩溃）。"""
+    finished = Signal(list)
+
+    def __init__(self, audio_path):
+        super().__init__()
+        self.audio_path = audio_path
+
+    def do_work(self):
+        from utils.asr_client import read_asr_url, transcribe_remote
+        segments = transcribe_remote(
+            self.audio_path, read_asr_url(),
+            language="",
+        )
+        self.finished.emit(segments)
+
 def load_voice_samples():
     os.makedirs(VOICE_SAMPLES_DIR, exist_ok=True)
     if not os.path.exists(METADATA_PATH):
@@ -84,7 +101,9 @@ class VoiceSamplesPage(BasePage):
         super().__init__(parent_widget, main_window)
         self._media_player = None
         self._audio_output = None
-        self.transcribe_workers = {}
+        self.transcribe_workers = {}  # sample_id -> RemoteAsrSampleWorker
+        # 保存当前 ASR 回调的上下文（避免局部闭包导致 PySide6 崩溃）
+        self._asr_callback_ctx = {}  # sample_id -> {"segments": ..., "wav_path": ...}
 
     def setup(self):
         # Main layout
@@ -422,39 +441,30 @@ class VoiceSamplesPage(BasePage):
 
         self.status_label.setText(f"正在识别样本音频文本 (ID: {sample_id})...")
 
-        # 远程 ASR worker：transcribe_remote → segments → segments_to_plain
-        class RemoteAsrSampleWorker(BaseWorker):
-            finished = Signal(list)
-            error = Signal(str)
+        # 保存回调上下文到实例变量（避免局部闭包导致 PySide6 跨线程崩溃）
+        self._asr_callback_ctx[sample_id] = {"wav_path": wav_path}
 
-            def __init__(self, audio_path):
-                super().__init__()
-                self.audio_path = audio_path
-
-            def do_work(self):
-                try:
-                    from utils.asr_client import read_asr_url, transcribe_remote
-                    segments = transcribe_remote(
-                        self.audio_path, read_asr_url(),
-                        language="",
-                    )
-                    self.finished.emit(segments)
-                except Exception as e:
-                    self.error.emit(str(e))
-
+        # 使用模块级定义的 RemoteAsrSampleWorker
         worker = RemoteAsrSampleWorker(wav_path)
         self.transcribe_workers[sample_id] = worker
 
-        def on_finished(segments):
+        # 连接信号到实例方法（非局部闭包），确保 PySide6 跨线程调用安全
+        worker.finished.connect(lambda segs, sid=sample_id: self._on_asr_finished(sid, segs))
+        worker.error.connect(lambda err, sid=sample_id: self._on_asr_error(sid, err))
+        worker.start()
+
+    # ── ASR 回调（实例方法，避免局部闭包崩溃） ──
+
+    def _on_asr_finished(self, sample_id, segments):
+        """ASR 转写完成回调（由 Qt 信号跨线程调度到主线程）。"""
+        try:
             self.status_label.setText("完成： 识别参考音频文本完成")
             from utils.asr_client import segments_to_plain
             plain_text = segments_to_plain(segments)
 
-            # 识别结果为空（音频无人声 / 服务端未返回内容）：给出提示，不静默保存空文案
             if not plain_text.strip():
                 self.status_label.setText("注意： 未识别到文字")
-                if sample_id in self.transcribe_workers:
-                    del self.transcribe_workers[sample_id]
+                self._cleanup_asr_worker(sample_id)
                 self._load_table_data()
                 QMessageBox.warning(
                     self.parent_widget, "未识别到文字",
@@ -463,48 +473,66 @@ class VoiceSamplesPage(BasePage):
                 )
                 return
 
-            def save_text(text_val):
-                samples = load_voice_samples()
-                for s in samples:
-                    if s.get("id") == sample_id:
-                        s["ref_text"] = text_val
-                        break
-                save_voice_samples(samples)
-
-                if sample_id in self.transcribe_workers:
-                    del self.transcribe_workers[sample_id]
-
-                self._load_table_data()
-
             llm_model = self.main_window.ai_config.get("llm_model", "deepseek-chat")
 
             if llm_model and plain_text.strip():
                 self.status_label.setText("正在使用 AI 模型自动优化断句与标点...")
                 self.punc_worker = PunctuationLLMWorker(llm_model, plain_text)
-
-                def on_punc_done(punctuated_text):
-                    save_text(punctuated_text)
-
-                def on_punc_err(err):
-                    log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
-                    save_text(plain_text)
-
-                self.punc_worker.finished.connect(on_punc_done)
-                self.punc_worker.error.connect(on_punc_err)
+                # 用默认参数保存，避免闭包捕获问题
+                self._punc_plain_text = plain_text
+                self._punc_sample_id = sample_id
+                self.punc_worker.finished.connect(self._on_punc_done)
+                self.punc_worker.error.connect(self._on_punc_err)
                 self.punc_worker.start()
             else:
-                save_text(plain_text)
-
-        def on_error(err):
-            self.status_label.setText("失败： 识别文本失败")
-            if sample_id in self.transcribe_workers:
-                del self.transcribe_workers[sample_id]
+                self._save_ref_text(sample_id, plain_text)
+        except Exception as e:
+            log.error(f"ASR 回调处理异常: {e}", exc_info=True)
+            self._cleanup_asr_worker(sample_id)
             self._load_table_data()
-            QMessageBox.critical(self.parent_widget, "识别文本失败", f"无法从音频中提取文本：\n{err}")
+            QMessageBox.critical(
+                self.parent_widget, "处理异常",
+                f"转写结果处理时发生错误：\n{e}"
+            )
 
-        worker.finished.connect(on_finished)
-        worker.error.connect(on_error)
-        worker.start()
+    def _on_asr_error(self, sample_id, err):
+        """ASR 转写失败回调。"""
+        self.status_label.setText("失败： 识别文本失败")
+        self._cleanup_asr_worker(sample_id)
+        self._load_table_data()
+        QMessageBox.critical(self.parent_widget, "识别文本失败", f"无法从音频中提取文本：\n{err}")
+
+    def _on_punc_done(self, punctuated_text):
+        """标点优化完成回调。"""
+        sample_id = getattr(self, "_punc_sample_id", None)
+        if sample_id:
+            self._save_ref_text(sample_id, punctuated_text)
+
+    def _on_punc_err(self, err):
+        """标点优化失败回调，回退到原始文本。"""
+        log.warning(f"AI 添加标点失败: {err}，使用原始识别文本。")
+        sample_id = getattr(self, "_punc_sample_id", None)
+        plain_text = getattr(self, "_punc_plain_text", "")
+        if sample_id and plain_text:
+            self._save_ref_text(sample_id, plain_text)
+
+    def _save_ref_text(self, sample_id, text_val):
+        """保存参考文案到元数据。"""
+        samples = load_voice_samples()
+        for s in samples:
+            if s.get("id") == sample_id:
+                s["ref_text"] = text_val
+                break
+        save_voice_samples(samples)
+        self._cleanup_asr_worker(sample_id)
+        self._load_table_data()
+
+    def _cleanup_asr_worker(self, sample_id):
+        """清理 ASR worker 和回调上下文。"""
+        if sample_id in self.transcribe_workers:
+            del self.transcribe_workers[sample_id]
+        if sample_id in self._asr_callback_ctx:
+            del self._asr_callback_ctx[sample_id]
 
     def _clean_srt_to_text(self, srt_content):
         lines = srt_content.split('\n')

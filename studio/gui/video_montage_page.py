@@ -820,28 +820,93 @@ class VideoMontagePage(BasePage):
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
+        """获取片段时长列表。
+
+        优先级：
+        1. 从文件名解析时间戳（服务端返回的片段名已包含起止时间）
+        2. 从缓存读取
+        3. 用 cv2 读取（仅当文件名无法解析且缓存未命中时）
+        """
         if hasattr(self, "temp_scenes") and self.temp_scenes and len(self.temp_scenes) == len(files):  # noqa: E501
             return self.temp_scenes
 
-        import cv2
+        # 缓存已计算的时长，避免重复 cv2 读取
+        if not hasattr(self, "_clip_duration_cache"):
+            self._clip_duration_cache = {}
+
         scenes = []
         current_time = 0.0
+        need_cv2_fallback = []
+
+        # 第一遍：优先从文件名解析时长（零 CPU 开销）
         for f in files:
-            # f 可能是文件名或完整路径
+            fname = os.path.basename(f) if not os.path.isabs(f) else os.path.basename(f)
             p = f if os.path.isabs(f) else os.path.join(splits_dir, f)
-            cap = cv2.VideoCapture(p)
+            norm_p = os.path.abspath(p)
+
+            # 尝试从文件名解析时间戳（格式：_shot_XXX_HH-MM-SS,mmm_HH-MM-SS,mmm_）
+            parsed = self._parse_split_filename(fname)
             duration = 0.0
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                if fps > 0:
-                    duration = frame_count / fps
-                cap.release()
+            if parsed:
+                _idx, start_str, end_str, _desc = parsed
+                _s = self._srt_ts_to_seconds(start_str)
+                _e = self._srt_ts_to_seconds(end_str)
+                if _s is not None and _e is not None and _e > _s:
+                    duration = _e - _s
+
+            # 文件名无法解析时，尝试从缓存读取
+            if duration <= 0 and norm_p in self._clip_duration_cache:
+                duration = self._clip_duration_cache[norm_p]
+
             if duration <= 0:
-                # cv2 读不了（10-bit/特殊编码）时用 ffprobe 兜底，避免时长全 0
-                duration = get_media_duration(p)
+                # 需要 cv2 兜底，先记录下来
+                need_cv2_fallback.append((f, p, norm_p))
+                duration = 0.0  # 占位
+
             scenes.append((current_time, current_time + duration))
             current_time += duration
+
+        # 第二遍：仅对文件名无法解析且缓存未命中的片段用 cv2 读取
+        if need_cv2_fallback:
+            import cv2
+            for f, p, norm_p in need_cv2_fallback:
+                cap = cv2.VideoCapture(p)
+                duration = 0.0
+                if cap.isOpened():
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    if fps > 0:
+                        duration = frame_count / fps
+                    cap.release()
+                if duration <= 0:
+                    # cv2 读不了（10-bit/特殊编码）时用 ffprobe 兜底
+                    duration = get_media_duration(p)
+                # 写入缓存
+                self._clip_duration_cache[norm_p] = duration
+                # 更新 scenes 中对应项（需要重新计算累积时间）
+                idx = files.index(f)
+                # 重新计算从该位置开始的累积时间
+                new_scenes = []
+                t = 0.0
+                for i, ff in enumerate(files):
+                    if i < idx:
+                        new_scenes.append(scenes[i])
+                        t = scenes[i][1]
+                    elif i == idx:
+                        new_scenes.append((t, t + duration))
+                        t += duration
+                    else:
+                        # 后续片段需要重新计算
+                        break
+                # 更新后续片段的累积时间
+                for i in range(idx + 1, len(files)):
+                    old_start, old_end = scenes[i]
+                    old_dur = old_end - old_start
+                    new_scenes.append((t, t + old_dur))
+                    t += old_dur
+                scenes = new_scenes
+                current_time = t
+
         return scenes
     # [3·分割]  _parse_split_filename
     def _parse_split_filename(self, filename):
@@ -1154,9 +1219,8 @@ class VideoMontagePage(BasePage):
                             duration_sec = float(cached.get("duration") or 0.0)
                         except (TypeError, ValueError):
                             duration_sec = 0.0
-                    if duration_sec <= 0 and os.path.isfile(norm_path):
-                        # 文件名时间戳异常（如全 0）时直接探测片段文件
-                        duration_sec = get_media_duration(norm_path)
+                    # 不再在 UI 主线程调用 get_media_duration()（会 spawn ffprobe 子进程导致卡死）
+                    # 时长为 0 时显示 "—"，后续由后台异步评分时补充
 
                     # 缓存先占位（后台异步评分）；命中缓存则预填已有字段
                     self.split_clips_cache[norm_path] = {
@@ -1200,22 +1264,80 @@ class VideoMontagePage(BasePage):
                     dur_item.setTextAlignment(Qt.AlignCenter)
                     self.split_result_table.setItem(idx, 4, dur_item)
 
-                    # Col 5: 主要画面 (description, editable)
+                    # Col 5: 画幅 (resolution) — 从缓存或探测第一个片段获取
+                    resolution_text = ""
+                    if cached and cached.get("resolution"):
+                        resolution_text = cached["resolution"]
+                    elif not getattr(self, "_probed_resolution", None):
+                        # 首次探测：从第一个片段获取分辨率（后续片段复用）
+                        try:
+                            from utils.platform_utils import find_ffprobe
+                            ffprobe = find_ffprobe()
+                            if not os.path.isfile(ffprobe):
+                                ffprobe = find_ffmpeg().replace("ffmpeg", "ffprobe")
+                            cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
+                                   "-show_entries", "stream=width,height",
+                                   "-of", "csv=p=0:s=x", norm_path]
+                            r = run(cmd, capture_output=True, text=True,
+                                    creationflags=CREATE_NO_WINDOW, timeout=10)
+                            if r.returncode == 0 and r.stdout.strip():
+                                parts = r.stdout.strip().split("x")
+                                if len(parts) == 2:
+                                    w, h = int(parts[0]), int(parts[1])
+                                    # 检查旋转元数据
+                                    cmd2 = [ffprobe, "-v", "error", "-select_streams", "v:0",
+                                            "-show_entries", "stream=side_data_list,tag:rotate",
+                                            "-of", "json", norm_path]
+                                    r2 = run(cmd2, capture_output=True, text=True,
+                                             creationflags=CREATE_NO_WINDOW, timeout=10)
+                                    if r2.returncode == 0 and r2.stdout.strip():
+                                        import json as _json
+                                        d2 = _json.loads(r2.stdout)
+                                        s2 = (d2.get("streams") or [{}])[0]
+                                        rot = 0
+                                        for sd in (s2.get("side_data_list") or []):
+                                            rv = sd.get("rotation")
+                                            if rv is not None:
+                                                try: rot = int(float(rv))
+                                                except: pass
+                                                break
+                                        if rot == 0:
+                                            tr = s2.get("tags", {}).get("rotate")
+                                            if tr:
+                                                try: rot = int(float(tr))
+                                                except: pass
+                                        if rot in (90, -90, 270, -270):
+                                            w, h = h, w
+                                    resolution_text = f"{w}x{h}"
+                                    self._probed_resolution = resolution_text
+                                    # 回写缓存
+                                    if cached:
+                                        cached["resolution"] = resolution_text
+                        except Exception:
+                            pass
+                    elif getattr(self, "_probed_resolution", None):
+                        resolution_text = self._probed_resolution
+                    res_item = QTableWidgetItem(resolution_text)
+                    res_item.setFlags(res_item.flags() & ~Qt.ItemIsEditable)
+                    res_item.setTextAlignment(Qt.AlignCenter)
+                    self.split_result_table.setItem(idx, 5, res_item)
+
+                    # Col 6: 主要画面 (description, editable)
                     desc_item = QTableWidgetItem(desc)
                     desc_item.setFlags(desc_item.flags() | Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 5, desc_item)
+                    self.split_result_table.setItem(idx, 6, desc_item)
 
-                    # Col 6: 产品
+                    # Col 7: 产品
                     prod_item = QTableWidgetItem(cached.get("product", "") if cached else "")  # noqa: E501
                     prod_item.setFlags(prod_item.flags() & ~Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 6, prod_item)
+                    self.split_result_table.setItem(idx, 7, prod_item)
 
-                    # Col 7: 型号
+                    # Col 8: 型号
                     model_item = QTableWidgetItem(cached.get("model", "") if cached else "")  # noqa: E501
                     model_item.setFlags(model_item.flags() & ~Qt.ItemIsEditable)
-                    self.split_result_table.setItem(idx, 7, model_item)
+                    self.split_result_table.setItem(idx, 8, model_item)
 
-                    # Col 8: 评分 — 命中缓存则回填，否则等待服务端分析
+                    # Col 9: 评分 — 命中缓存则回填，否则等待服务端分析
                     cached_score = cached.get("score") if cached else None
                     if cached_score is not None:
                         score_item = QTableWidgetItem(f"{cached_score:.1f}" if cached_score >= 0 else "—")  # noqa: E501
@@ -1229,7 +1351,7 @@ class VideoMontagePage(BasePage):
                         score_item = QTableWidgetItem("—")
                     score_item.setFlags(score_item.flags() & ~Qt.ItemIsEditable)
                     score_item.setTextAlignment(Qt.AlignCenter)
-                    self.split_result_table.setItem(idx, 8, score_item)
+                    self.split_result_table.setItem(idx, 9, score_item)
 
                     # 已命中缓存的镜头不进后台评分队列（已有评分，避免重复调服务端）
                     if not cached:
@@ -2183,7 +2305,7 @@ class VideoMontagePage(BasePage):
                 self._play_video(path)
     # [8·事件回调]  _on_table_cell_changed
     def _on_table_cell_changed(self, row, col):
-        if col == 5:  # 主要画面列（可编辑）
+        if col == 6:  # 主要画面列（可编辑）
             file_item = self.split_result_table.item(row, 2)
             desc_item = self.split_result_table.item(row, col)
             if file_item and desc_item:
@@ -2221,7 +2343,7 @@ class VideoMontagePage(BasePage):
                     if hasattr(self, "rewritten_srt_display"):
                         lines = []
                         for r in range(self.split_result_table.rowCount()):
-                            d_item = self.split_result_table.item(r, 5)
+                            d_item = self.split_result_table.item(r, 6)
                             if d_item:
                                 lines.append(d_item.text().strip())
                         self.rewritten_srt_display.setPlainText("\n".join(lines))
@@ -2589,10 +2711,12 @@ class VideoMontagePage(BasePage):
         self.concat_worker.start()
 
     def _probe_first_clip_resolution(self, clips):
-        """探测第一个有效镜头的分辨率，用于 layout_mode=source 时回传给服务端。
+        """探测第一个有效镜头的显示分辨率（已考虑旋转），用于 layout_mode=source 时回传给服务端。
 
         服务端 montage_concat 只认 width/height，不认 layout_mode，所以 source 模式
         需要客户端主动把第一个镜头的宽高传过去，才能保持"与原视频一致"的行为。
+        注意：手机竖拍视频 stream 存的是横屏像素（如 1920x1080），但带 rotate=90 元数据，
+        必须读取旋转角度后交换宽高，才能得到正确的显示分辨率。
         """
         for clip in clips:
             if not os.path.isfile(clip):
@@ -2602,8 +2726,8 @@ class VideoMontagePage(BasePage):
                 cmd = [
                     ffprobe, "-v", "error",
                     "-select_streams", "v:0",
-                    "-show_entries", "stream=width,height",
-                    "-of", "csv=p=0:s=x",
+                    "-show_entries", "stream=width,height,side_data_list,tag:rotate",
+                    "-of", "json",
                     clip,
                 ]
                 r = run(
@@ -2611,10 +2735,39 @@ class VideoMontagePage(BasePage):
                     creationflags=CREATE_NO_WINDOW, timeout=15,
                 )
                 if r.returncode == 0 and r.stdout.strip():
-                    parts = r.stdout.strip().split("x")
-                    if len(parts) == 2:
-                        return int(parts[0]), int(parts[1])
-            except (OSError, subprocess.SubprocessError):
+                    import json as _json
+                    data = _json.loads(r.stdout)
+                    streams = data.get("streams", [])
+                    if not streams:
+                        continue
+                    s = streams[0]
+                    w = int(s.get("width", 0) or 0)
+                    h = int(s.get("height", 0) or 0)
+                    if w <= 0 or h <= 0:
+                        continue
+                    # 检测旋转角度：优先从 side_data 读，回退到 tag:rotate
+                    rotation = 0
+                    # side_data_list 中 displaymatrix 的 rotation 字段
+                    for sd in (s.get("side_data_list") or []):
+                        rot_val = sd.get("rotation")
+                        if rot_val is not None:
+                            try:
+                                rotation = int(float(rot_val))
+                            except (TypeError, ValueError):
+                                pass
+                            break
+                    if rotation == 0:
+                        tag_rot = s.get("tags", {}).get("rotate")
+                        if tag_rot:
+                            try:
+                                rotation = int(float(tag_rot))
+                            except (TypeError, ValueError):
+                                pass
+                    # 90/270 度旋转时交换宽高
+                    if rotation in (90, -90, 270, -270):
+                        w, h = h, w
+                    return w, h
+            except (OSError, subprocess.SubprocessError, Exception):
                 pass
         return 0, 0
 
@@ -2709,7 +2862,16 @@ class VideoMontagePage(BasePage):
         if layout_mode == "horizontal":
             width, height = 1920, 1080
         elif layout_mode == "source":
-            width, height = self._probe_first_clip_resolution(selected_clips)
+            # 优先使用服务端分割时返回的原片分辨率，回退到本地探测
+            src_res = getattr(self, "_source_resolution", None)
+            if src_res and isinstance(src_res, (list, tuple)) and len(src_res) == 2:
+                width, height = int(src_res[0]), int(src_res[1])
+            elif src_res and isinstance(src_res, str) and "x" in src_res:
+                parts = src_res.split("x")
+                if len(parts) == 2:
+                    width, height = int(parts[0]), int(parts[1])
+            else:
+                width, height = self._probe_first_clip_resolution(selected_clips)
             if width <= 0 or height <= 0:
                 width, height = 1080, 1920
 
@@ -2762,6 +2924,21 @@ class VideoMontagePage(BasePage):
         clip_urls = self._manifest_clip_urls()
         if clip_urls:
             self.stage_label.setText(f" 正在提交服务端合成（本地镜头 {len(selected_clips)} 个 + 素材检索地址 {len(clip_urls)} 个）...")  # noqa: E501
+
+        # 保存本地回退所需参数（服务端 402 等异常时自动回退）
+        self._server_concat_fallback_params = {
+            "selected_clips": list(selected_clips),
+            "out_montage_dir": out_montage_dir,
+            "recombine_mode": recombine_mode,
+            "target_clip_count": target_clip_count,
+            "batch_count": batch_count,
+            "randomness": randomness,
+            "selected_descriptions_list": selected_descriptions_list,
+            "beat_times": beat_times,
+            "music_path": music_path,
+            "music_range": music_range,
+        }
+
         self.concat_worker = MontageConcatServerWorker(
             local_output_path=local_output_path,
             clips=list(selected_clips),
@@ -2775,6 +2952,7 @@ class VideoMontagePage(BasePage):
         self.concat_worker.concat_finished.connect(lambda p: self._on_concat_finished([p]), type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.error.connect(self._on_concat_error, type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.task_id_obtained.connect(self._on_concat_task_id, type=Qt.QueuedConnection)  # noqa: E501
+        self.concat_worker.fallback_to_local.connect(self._on_server_concat_fallback, type=Qt.QueuedConnection)  # noqa: E501
         self.concat_worker.start()
 
 
@@ -2985,6 +3163,16 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("失败： 排列失败")
         self._show_long_error("排列错误", f"处理过程中发生错误：\n{err}")
+    # [5·拼接合成]  _on_server_concat_fallback
+    def _on_server_concat_fallback(self, reason):
+        """服务端合成不可用（402 等），自动回退到本地合成。"""
+        log.info(f"[montage_concat] 服务端回退本地合成: {reason}")
+        self.stage_label.setText(f"注意： {reason}")
+        params = getattr(self, "_server_concat_fallback_params", None)
+        if not params:
+            self._on_concat_error("服务端回退本地合成，但缺少必要参数")
+            return
+        self._launch_local_concat_worker(**params)
 
 
     # --- Step 3 Voice synthesis execution ---
@@ -4292,8 +4480,9 @@ class VideoMontagePage(BasePage):
                 it.setForeground(QBrush())
     # [2·基础设施]  _go_next_to_step2
     def _go_next_to_step2(self):
-        """点击下一步：从表格checkbox同步选中状态，再进入镜头重组。"""
+        """点击下一步：从表格 checkbox 同步选中状态，再进入镜头重组。"""
         self._sync_step1_checkboxes_to_clips()
+        self._detect_and_show_source_resolution()
         self._go_to_step(1)
     # [3·分割]  _sync_step1_checkboxes_to_clips
     def _sync_step1_checkboxes_to_clips(self):
@@ -4332,6 +4521,76 @@ class VideoMontagePage(BasePage):
             })
         self._available_concat_clips = new_clips
         self._update_concat_count_lbl()
+
+    # [2·基础设施]  _detect_and_show_source_resolution
+    def _detect_and_show_source_resolution(self):
+        """检测分割片段的原始画幅并显示在镜头重组 UI 上，同时连接画幅切换信号。"""
+        # 1. 优先使用服务端分割时返回的原片分辨率
+        resolution_text = ""
+        src_res = getattr(self, "_source_resolution", None)
+        if src_res:
+            if isinstance(src_res, (list, tuple)) and len(src_res) == 2:
+                resolution_text = f"{int(src_res[0])}x{int(src_res[1])}"
+            elif isinstance(src_res, str) and "x" in src_res:
+                resolution_text = src_res
+        # 2. 回退到本地缓存或探测
+        if not resolution_text:
+            resolution_text = getattr(self, "_probed_resolution", None) or ""
+        if not resolution_text:
+            cache = getattr(self, "split_clips_cache", {})
+            for norm_path, item in cache.items():
+                if isinstance(item, dict) and item.get("resolution"):
+                    resolution_text = item["resolution"]
+                    break
+        if not resolution_text:
+            tbl = getattr(self, "split_result_table", None)
+            if tbl and tbl.rowCount() > 0:
+                file_item = tbl.item(0, 2)
+                if file_item:
+                    path = file_item.data(Qt.UserRole)
+                    if path and os.path.isfile(path):
+                        w, h = self._probe_first_clip_resolution([path])
+                        if w > 0 and h > 0:
+                            resolution_text = f"{w}x{h}"
+                            self._probed_resolution = resolution_text
+        # 2. 更新 UI 标签
+        lbl = getattr(self, "lbl_source_resolution", None)
+        if lbl:
+            if resolution_text:
+                lbl.setText(f"原片: {resolution_text}")
+                # 更新 combo 第一项的提示
+                combo = getattr(self, "layout_combo", None)
+                if combo and combo.count() > 0:
+                    combo.setItemText(0, f"与原视频一致 ({resolution_text})")
+            else:
+                lbl.setText("原片: 未知")
+        # 3. 连接画幅切换信号，更新标签显示
+        combo = getattr(self, "layout_combo", None)
+        if combo:
+            try:
+                combo.currentIndexChanged.disconnect(self._on_layout_combo_changed)
+            except (TypeError, RuntimeError):
+                pass
+            combo.currentIndexChanged.connect(self._on_layout_combo_changed)
+
+    # [2·基础设施]  _on_layout_combo_changed
+    def _on_layout_combo_changed(self, index):
+        """画幅切换时更新提示标签，让用户知道实际输出的分辨率。"""
+        combo = getattr(self, "layout_combo", None)
+        lbl = getattr(self, "lbl_source_resolution", None)
+        if not combo or not lbl:
+            return
+        mode = combo.currentData()
+        resolution_text = getattr(self, "_probed_resolution", None) or ""
+        if mode == "source":
+            if resolution_text:
+                lbl.setText(f"输出: {resolution_text} (与原片一致)")
+            else:
+                lbl.setText("输出: 1080x1920 (原片未知，回退竖屏)")
+        elif mode == "vertical":
+            lbl.setText("输出: 1080x1920 (竖屏)")
+        elif mode == "horizontal":
+            lbl.setText("输出: 1920x1080 (横屏)")
     # [3·分割]  _open_splits_dir
     def _open_splits_dir(self):
         sp_root = self._montage_splits_root()
@@ -5143,23 +5402,21 @@ class VideoMontagePage(BasePage):
                 dur = float(cache_item.get("duration") or 0.0)
             except (TypeError, ValueError):
                 dur = 0.0
+        # 优先读 split_clips_cache（_build_precompose_plans 后台线程已预填），
+        # 避免在 UI 主线程对每个镜头 spawn ffprobe 子进程导致卡死。
+        if dur <= 0 and path:
+            norm = os.path.abspath(path)
+            cache = getattr(self, "split_clips_cache", {})
+            cached = cache.get(norm)
+            if cached and isinstance(cached, dict) and cached.get("duration", 0) > 0:
+                dur = cached["duration"]
         if dur <= 0 and time_str and "-->" in time_str:
             s = self._srt_ts_to_seconds(time_str.split("-->")[0])
             e = self._srt_ts_to_seconds(time_str.split("-->")[1])
             if s is not None and e is not None:
                 dur = max(0.0, e - s)
-        if dur <= 0 and path and os.path.isfile(path):
-            dur = get_media_duration(path)
-            if dur > 0:
-                # 无条件回写缓存（无缓存条目则新建），保证下次切换方案直接读缓存不再 ffprobe
-                try:
-                    norm = os.path.abspath(path)
-                    cache = getattr(self, "split_clips_cache", {})
-                    if norm not in cache or not isinstance(cache.get(norm), dict):
-                        cache[norm] = {}
-                    cache[norm]["duration"] = dur
-                except (KeyError, TypeError, AttributeError):
-                    pass
+        # 不再在 UI 主线程调用 get_media_duration()（会 spawn ffprobe 子进程导致卡死）
+        # 时长为 0 时显示 "—"，后续由后台异步评分时补充
         return f"{dur:.1f}s" if dur > 0 else "—"
     # [2·基础设施]  _refresh_sources_for_plan
     def _refresh_sources_for_plan(self, plan_index):
@@ -5366,17 +5623,15 @@ class VideoMontagePage(BasePage):
         if not self._preview_sequence_clips:
             return
         clip = self._preview_sequence_clips[self._preview_sequence_idx]
-        from PySide6.QtCore import QUrl
-        self.preview_player.stop()
+        from PySide6.QtCore import QUrl, QTimer as _QT  # noqa: N814
         # 记录待加载片段（若已有待加载则覆盖，防止连播快速切换时旧定时器串号）
         self._pending_play_clip = clip
-        # 清空旧源触发 NoMedia
-        self.preview_player.setSource(QUrl())
-        # 兜底：若 Qt 未触发 NoMedia（文件占用/解码异常），200ms 后直接加载，避免永远不播
-        from PySide6.QtCore import QTimer as _QT  # noqa: N814
+        # 停止旧定时器
         if self._pending_play_timer is not None:
             self._pending_play_timer.stop()
-        self._pending_play_timer = _QT.singleShot(200, self._on_preview_no_media)
+        # 用 QTimer 延迟执行 stop + setSource，避免在 UI 主线程同步调用导致卡死
+        # （Windows Media Foundation 后端的 stop()/setSource() 可能阻塞）
+        self._pending_play_timer = _QT.singleShot(50, self._do_play_sequence_clip)
 
     def _on_preview_no_media(self):
         """mediaStatusChanged == NoMedia 时回调：加载待播放片段。"""
@@ -5405,6 +5660,23 @@ class VideoMontagePage(BasePage):
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")  # noqa: E501
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
+
+    def _do_play_sequence_clip(self):
+        """实际执行播放序列片段（由定时器延迟调用，避免 UI 卡死）。"""
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
+                return
+        except (ImportError, ModuleNotFoundError):
+            return
+        clip = getattr(self, "_pending_play_clip", "")
+        if not clip:
+            return
+        from PySide6.QtCore import QUrl
+        # 先停止当前播放（异步执行，不阻塞 UI）
+        self.preview_player.stop()
+        # 清空旧源，触发 NoMedia 信号，然后加载新文件
+        self.preview_player.setSource(QUrl())
     def _get_video_scene_sources(self, path):
         """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
         sources_file = os.path.splitext(path)[0] + "_sources.txt"
@@ -5880,12 +6152,14 @@ class VideoMontagePage(BasePage):
                     self.btn_preview_play.setIcon(mdi_icon("play"))
             elif status == QMediaPlayer.NoMedia:
                 # 旧源已释放，加载待播放片段（信号驱动，避免固定延时不可靠）
-                self._on_preview_no_media()
-
+                # 仅当有待播放片段时才加载，避免无限循环
+                if getattr(self, "_pending_play_clip", ""):
+                    self._on_preview_no_media()
+    
             elif status == QMediaPlayer.InvalidMedia:  # noqa: SIM102
                 # 当前片段无法播放，跳过并尝试下一个
                 if self._preview_sequence_clips:
-                    log.warning(f"[预览] 无法播放片段: {self._preview_sequence_clips[self._preview_sequence_idx]}")  # noqa: E501
+                    log.warning(f"[预览] 无法播放片段：{self._preview_sequence_clips[self._preview_sequence_idx]}")  # noqa: E501
                     QTimer.singleShot(50, self._skip_to_next_preview_clip)
         except (OSError, RuntimeError):
             pass

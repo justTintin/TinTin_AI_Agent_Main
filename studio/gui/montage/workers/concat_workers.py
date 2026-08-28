@@ -51,8 +51,11 @@ class VideoConcatWorker(BaseWorker):
         self.lut_path = (lut_path or "").strip()
 
     def _probe_resolution(self, clip):
-        """用 ffprobe 读取视频显示分辨率（已考虑旋转），失败返回 None。"""
-        import re as _re
+        """用 ffprobe 读取视频显示分辨率（已考虑旋转），失败返回 None。
+
+        手机竖拍视频 stream 存的是横屏像素（如 1920x1080），但带 rotate=90 元数据，
+        必须读取旋转角度后交换宽高，才能得到正确的显示分辨率。
+        """
         try:
             from utils.platform_utils import find_ffprobe
             ffprobe = find_ffprobe()
@@ -61,14 +64,43 @@ class VideoConcatWorker(BaseWorker):
                 ffprobe = ff.replace("ffmpeg", "ffprobe")
             cf = CREATE_NO_WINDOW
             cmd = [ffprobe, "-v", "error", "-select_streams", "v:0",
-                   "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", clip]
+                   "-show_entries", "stream=width,height,side_data_list,tag:rotate",
+                   "-of", "json", clip]
             r = _run_proc(cmd, capture_output=True, text=True,
                                creationflags=cf, timeout=15)
-            m = _re.search(r"(\d+)x(\d+)", (r.stdout or "").strip())
-            if m:
-                w, h = int(m.group(1)), int(m.group(2))
-                if w > 0 and h > 0:
-                    return w, h
+            if r.returncode != 0 or not (r.stdout or "").strip():
+                return None
+            import json as _json
+            data = _json.loads(r.stdout)
+            streams = data.get("streams", [])
+            if not streams:
+                return None
+            s = streams[0]
+            w = int(s.get("width", 0) or 0)
+            h = int(s.get("height", 0) or 0)
+            if w <= 0 or h <= 0:
+                return None
+            # 检测旋转角度：优先从 side_data 读，回退到 tag:rotate
+            rotation = 0
+            for sd in (s.get("side_data_list") or []):
+                rot_val = sd.get("rotation")
+                if rot_val is not None:
+                    try:
+                        rotation = int(float(rot_val))
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            if rotation == 0:
+                tag_rot = s.get("tags", {}).get("rotate")
+                if tag_rot:
+                    try:
+                        rotation = int(float(tag_rot))
+                    except (TypeError, ValueError):
+                        pass
+            # 90/270 度旋转时交换宽高
+            if rotation in (90, -90, 270, -270):
+                w, h = h, w
+            return w, h
         except (OSError, subprocess.SubprocessError) as e:
             log.warning(f"探测原视频分辨率失败: {e}")
         return None

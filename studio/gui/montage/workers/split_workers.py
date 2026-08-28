@@ -53,6 +53,7 @@ class ServerSplitWorker(BaseWorker):
         self.image_duration = image_duration
         self.analyze = analyze
         self.shot_meta = []  # 逐镜分析结果（finished 之后 analysis_ready emit）
+        self.source_resolution = None  # 服务端返回的原片分辨率（用于镜头重组透传）
         self._aborted = False
 
     def abort(self):
@@ -65,6 +66,8 @@ class ServerSplitWorker(BaseWorker):
         return cut_video(self.video_path, start, end, out)
 
     def run(self):
+        import time as _time
+        _perf_start = _time.perf_counter()
         try:
             self.stage.emit("正在调用服务端镜头分割（分割+逐镜分析）…")
             self.progress.emit(10)
@@ -105,32 +108,53 @@ class ServerSplitWorker(BaseWorker):
 
             file_size = (os.path.getsize(self.video_path)
                          if self.video_path and os.path.isfile(self.video_path) else 0)
-            log.info(f"[服务端镜头分割] 开始请求: /montage/split "
-                     f"file={self.video_path or '-'} size={file_size} "
-                     f"material_id={self.material_id or '-'} clip_url={self.clip_url or '-'}")  # noqa: E501
+            file_size_mb = file_size / (1024 * 1024)
+            log.info(f"[性能监控][分割] ===== 开始 =====")
+            log.info(f"[性能监控][分割] 文件: {os.path.basename(self.video_path or '')}  "
+                     f"大小: {file_size_mb:.2f} MB  "
+                     f"服务端: {self.server_url}")
+            log.info(f"[性能监控][分割] 开始上传 + 请求服务端 /montage/split ...")
+            _upload_start = _time.perf_counter()
             try:
                 resp = split(self.server_url, files, data, 590)  # type: ignore[arg-type]
             except requests.exceptions.RequestException as e:
-                log.error(f"[服务端镜头分割] 请求异常: {type(e).__name__}: {e}")
+                _upload_elapsed = _time.perf_counter() - _upload_start
+                log.error(f"[性能监控][分割] 上传/请求失败: 耗时 {_upload_elapsed:.2f}s  错误: {type(e).__name__}: {e}")
                 raise
             finally:
                 if files:
                     with contextlib.suppress(Exception):
                         files["file"][1].close()
 
+            _upload_elapsed = _time.perf_counter() - _upload_start
+            _total_elapsed = _time.perf_counter() - _perf_start
+            log.info(f"[性能监控][分割] 上传+服务端响应完成: 耗时 {_upload_elapsed:.2f}s  "
+                     f"(总耗时 {_total_elapsed:.2f}s)  "
+                     f"速度: {file_size_mb / _upload_elapsed:.2f} MB/s" if _upload_elapsed > 0
+                     else f"[性能监控][分割] 上传+服务端响应完成: 耗时 {_upload_elapsed:.2f}s")
+
             shots = resp.get("shots") or []
+            # 保存服务端返回的原片分辨率（用于镜头重组时透传）
+            self.source_resolution = resp.get("source_resolution")
+            if self.source_resolution:
+                log.info(f"[服务端分割] 原片分辨率: {self.source_resolution}")
             if not shots:
                 self.stage.emit("服务端未检测到镜头切点")
                 self.progress.emit(100)
+                log.info(f"[性能监控][分割] 服务端未检测到镜头切点, 总耗时 {_time.perf_counter() - _perf_start:.2f}s")
                 self.analysis_ready.emit([])
                 self.finished.emit(self.output_dir, 0, [])
                 return
 
+            log.info(f"[性能监控][分割] 服务端返回 {len(shots)} 个镜头, 开始下载片段...")
             self.progress.emit(50)
             self.stage.emit(f"服务端检测到 {len(shots)} 个镜头，正在下载服务端裁好的片段…")
             self.shot_meta = []
             scenes = []
             created = 0
+            _download_start = _time.perf_counter()
+            _download_ok = 0
+            _download_fail = 0
             for sh in shots:
                 start = float(sh.get("start_sec") or 0)
                 end = float(sh.get("end_sec") or start)
@@ -158,6 +182,7 @@ class ServerSplitWorker(BaseWorker):
                 if ok:
                     scenes.append((start, end))
                     created += 1
+                    _download_ok += 1
                     self.shot_meta.append({
                         "filename": os.path.basename(out),
                         "shot_index": idx,
@@ -166,12 +191,23 @@ class ServerSplitWorker(BaseWorker):
                         "description": sh.get("description") or "",
                     })
                 else:
+                    _download_fail += 1
                     log.warning(f"[服务端分割] 片段生成失败，跳过: {fname}")
+            _download_elapsed = _time.perf_counter() - _download_start
+            _total_elapsed = _time.perf_counter() - _perf_start
+            log.info(f"[性能监控][分割] 片段下载完成: 成功 {_download_ok} 个, 失败 {_download_fail} 个,  "
+                     f"下载耗时 {_download_elapsed:.2f}s,  总耗时 {_total_elapsed:.2f}s")
             if not created:
                 raise RuntimeError("服务端分割返回镜头但片段获取失败，请检查网络/ffmpeg")
 
             self.progress.emit(100)
             self.stage.emit("分割导出完成（服务端分割+分析，片段已下载）")
+            log.info(f"[性能监控][分割] ===== 完成 =====  "
+                     f"镜头数: {created}  总耗时: {_total_elapsed:.2f}s  "
+                     f"(上传+处理: {_upload_elapsed:.2f}s, 下载: {_download_elapsed:.2f}s)  "
+                     f"文件大小: {file_size_mb:.2f} MB  "
+                     f"上传+处理速度: {file_size_mb / _upload_elapsed:.2f} MB/s" if _upload_elapsed > 0
+                     else f"[性能监控][分割] ===== 完成 =====  镜头数: {created}  总耗时: {_total_elapsed:.2f}s")
             self.analysis_ready.emit(list(self.shot_meta))
             self.finished.emit(self.output_dir, created, scenes)
             self.busy.emit(False)

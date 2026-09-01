@@ -38,8 +38,12 @@ class Step1SplitView(BaseStepView):
         self.main_page.folder_path_input.setVisible(False)
 
         from gui.common_widgets import DropZone as _DropZone
-        self.main_page.drop_zone = _DropZone(("mp4", "mov", "avi", "mkv", "flv", "webm", "m4v"),  # noqa: E501
-                                               hint="拖入视频素材 或 点击选择")
+        from gui.montage.utils_media import VIDEO_EXTS
+        # allow_dirs：文件夹也可以直接拖进来（页面递归遍历子文件夹收集全部视频）
+        self.main_page.drop_zone = _DropZone(
+            VIDEO_EXTS,
+            hint="拖入素材文件夹（自动遍历子文件夹内全部视频） 或 点击选择文件夹",
+            allow_dirs=True)
         self.main_page.drop_zone.clicked.connect(self.main_page._select_folder)
         self.main_page.drop_zone.file_dropped.connect(self.main_page._on_drop_videos)
         card_layout.addWidget(self.main_page.drop_zone)

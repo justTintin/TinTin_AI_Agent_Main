@@ -18,6 +18,21 @@ from utils.base_worker import BaseWorker
 from utils.logger_utils import log
 from utils.montage_client import concat, download_result
 
+# 服务端报“找不到自己刚接收的镜头文件”的特征串（服务端内部故障，客户端重试无意义）
+_SERVER_LOST_UPLOAD_MARKERS = ("素材不存在", "filenotfounderror", "no such file or directory")
+
+
+def _looks_like_server_lost_upload(error_msg):
+    """判断服务端错误是否属于“上传文件落盘后自己找不到”。
+
+    典型形态：`素材不存在: <服务端部署路径>/uploads/montage/concat_xxx/clip_001.mp4`。
+    常见于服务端把 multipart 按原始文件名落盘、而合成引擎按 clip_%03d 取文件，
+    或上传目录基准与解析基准不是同一个常量（跨部署路径）。
+    与镜头内容/客户端参数无关，回退本地合成即可绕过。
+    """
+    low = (error_msg or "").lower()
+    return any(m in low for m in _SERVER_LOST_UPLOAD_MARKERS)
+
 
 class MontageConcatServerWorker(BaseWorker):
     """服务端 montage_concat 合成 Worker。
@@ -145,6 +160,14 @@ class MontageConcatServerWorker(BaseWorker):
 
             if status in ("failed", "error"):
                 error_msg = task.get("error_msg") or task.get("error") or "未知错误"
+                # 服务端找不到自己刚接收的镜头文件 → 服务端内部问题，直接回退本地合成。
+                # 仅在所有片段都是本地上传（无 material:// 需服务端解析）时回退，
+                # 否则本地合成会缺掉素材库片段，静默产出错片。
+                if not self.clip_urls and _looks_like_server_lost_upload(error_msg):
+                    log.warning(f"[montage_concat] 服务端丢失自身上传文件，回退本地合成: {error_msg[:300]}")  # noqa: E501
+                    self.fallback_to_local.emit(
+                        "服务端合成失败（服务端找不到自己接收的镜头文件，属服务端问题），已自动回退到本地合成")  # noqa: E501
+                    return
                 raise RuntimeError(f"服务端合成失败：{error_msg}")
 
             self.stage.emit(f"服务端合成中... {status} ({progress}%)")

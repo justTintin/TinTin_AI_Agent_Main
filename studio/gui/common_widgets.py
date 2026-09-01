@@ -1,13 +1,17 @@
 """公共可复用控件。
 
 DropZone：可拖入文件或点击触发的放置区（无业务逻辑，行为由信号连接方决定）。
-  - file_dropped(list)：拖入的文件路径列表（已按 exts 过滤）
+  - file_dropped(list)：拖入的路径列表（已按 exts 过滤；allow_dirs=True 时目录原样放行）
   - clicked()：鼠标左键点击
 用法：
     dz = DropZone((".mp4", ".mov"), min_height=100, hint="拖入视频 或 点击选择")
     dz.file_dropped.connect(lambda paths: handle(paths))
     dz.clicked.connect(open_picker)
+    # 允许把文件夹整体拖进来（由使用方负责遍历展开）：
+    dz = DropZone((".mp4",), hint="拖入素材文件夹 或 点击选择", allow_dirs=True)
 """
+import os
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
 
@@ -16,18 +20,21 @@ class DropZone(QFrame):
     """可拖入文件或点击触发的放置区。
 
     拖入时按 exts 过滤出本地文件路径并发出 file_dropped(list)；
-    鼠标左键点击发出 clicked()。组件自身不处理业务，
-    由使用方连接信号决定后续行为（如添加素材、上传、预览）。
+    allow_dirs=True 时文件夹也一并放行（信号只负责把路径交出去，
+    递归遍历由使用方决定）；鼠标左键点击发出 clicked()。
+    组件自身不处理业务，由使用方连接信号决定后续行为（如添加素材、上传、预览）。
     """
     file_dropped = Signal(list)
     clicked = Signal()
 
-    def __init__(self, exts, hint="拖入文件 或 点击选择", min_height=100, parent=None):
+    def __init__(self, exts, hint="拖入文件 或 点击选择", min_height=100, parent=None,
+                 allow_dirs=False):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setObjectName("drop_zone")
         self.setMinimumHeight(min_height)
         self._exts = tuple(("." + e.lstrip(".")).lower() for e in exts)
+        self._allow_dirs = allow_dirs
         self.setStyleSheet("""
             #drop_zone {
                 background: #1c1c24; border: 2px dashed #3a3a48;
@@ -72,7 +79,11 @@ class DropZone(QFrame):
 
     # ── 内部 ──
     def _accepts(self, path):
-        return bool(path) and path.lower().endswith(self._exts)
+        if not path:
+            return False
+        if self._allow_dirs and os.path.isdir(path):
+            return True
+        return path.lower().endswith(self._exts)
 
     def _set_active(self, active):
         if active:

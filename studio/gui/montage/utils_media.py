@@ -26,6 +26,49 @@ class _patched_Popen(subprocess.Popen):  # noqa: N801
 subprocess.Popen = _patched_Popen  # type: ignore[misc]
 
 
+# Step1 原始素材支持的视频扩展名（点击选择与拖拽展开共用同一套过滤）
+VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v")
+
+# 单次导入素材数量上限：防止误选整个媒体库/磁盘根目录时把上万个文件塞进列表卡死 UI
+MAX_SOURCE_VIDEOS = 500
+
+# 遍历素材文件夹时跳过的子目录名：混剪流程自身产出的派生目录，
+# 避免把上一次生成的镜头片段/配音/成片当成原始素材再喂回流程。
+_DERIVED_DIR_NAMES = {"splits", "output", "outputs", "final", "dubbed", "bgm", "temp", "montage_cache"}
+
+
+def _natural_key(path):
+    """目录 + 文件名自然序排序键：文件名里的数字按数值比较（shot_2 排在 shot_10 前）。"""
+    parts = re.split(r"(\d+)", os.path.basename(path).lower())
+    return (os.path.dirname(path).lower(),
+            tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in parts))
+
+
+def collect_video_files(root, exts=VIDEO_EXTS, limit=MAX_SOURCE_VIDEOS):
+    """递归收集 root 及其所有子文件夹内的视频文件（Step1「选择素材文件夹」用）。
+
+    - 跳过隐藏/系统目录（名字以 . 或 $ 开头）与混剪派生目录（splits/outputs/…），
+      避免把已分割出的镜头片段当成原始素材再次导入；
+    - 结果按「目录 + 文件名自然序」排序，达到 limit 即停止遍历（安全上限）。
+
+    root 不存在或不是目录时返回空列表（空路径直接返回空，不能回退到当前工作目录）；
+    返回的均为绝对路径。
+    """
+    root_abs = os.path.abspath(root) if root else ""
+    if not root_abs or not os.path.isdir(root_abs):
+        return []
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root_abs):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith((".", "$")) and d.lower() not in _DERIVED_DIR_NAMES]
+        for fn in filenames:
+            if fn.lower().endswith(tuple(exts)):
+                found.append(os.path.abspath(os.path.join(dirpath, fn)))
+                if len(found) >= limit:
+                    return sorted(found, key=_natural_key)
+    return sorted(found, key=_natural_key)
+
+
 def safe_source_name(video_path, max_len=40):
     """视频文件 → 统一的短源名（splits 目录名 / 片段文件名 / srt 名共用）。
 

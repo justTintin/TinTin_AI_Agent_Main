@@ -243,10 +243,9 @@ class Step2ConcatView(BaseStepView):
         res_layout.addWidget(player_container, 1)
 
         # Wire preview player components on main page
+        # 双播放器的信号路由已在 VideoMontagePage.__init__ 统一连接，这里只登记视频输出控件并绑定当前播放器。
+        self.main_page._preview_video_widget = self.main_page.preview_video_widget
         self.main_page.preview_player.setVideoOutput(self.main_page.preview_video_widget)  # noqa: E501
-        self.main_page.preview_player.positionChanged.connect(self.main_page._on_preview_position_changed)  # noqa: E501
-        self.main_page.preview_player.durationChanged.connect(self.main_page._on_preview_duration_changed)  # noqa: E501
-        self.main_page.preview_player.mediaStatusChanged.connect(self.main_page._on_preview_media_status_changed)  # noqa: E501
 
         card_layout.addWidget(result_box)
         layout.addWidget(card, 1)

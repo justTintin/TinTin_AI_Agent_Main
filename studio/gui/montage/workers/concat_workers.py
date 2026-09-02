@@ -753,7 +753,8 @@ class VideoDubbingWorker(BaseWorker):
     finished = Signal(dict)  # Outputs a dict mapping: original_video_path -> dubbed_video_path  # noqa: E501
 
     def __init__(self, tasks, add_subtitles=True, length_modes=None,
-                 fancy_text=False, fancy_style="gold", fancy_words=None):
+                 fancy_text=False, fancy_style="gold", fancy_words=None,
+                 subtitle_font=""):
         super().__init__()
         self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)  # noqa: E501
         self.add_subtitles = add_subtitles
@@ -761,6 +762,66 @@ class VideoDubbingWorker(BaseWorker):
         self.fancy_text = fancy_text
         self.fancy_style = fancy_style
         self.fancy_words = fancy_words or []  # list of strings to overlay
+        # 字幕字体族名（来自服务端 /config/fonts 的 family）；空=用默认微软雅黑
+        self.subtitle_font = (subtitle_font or "").strip()
+
+    def _resolve_subtitle_font_path(self):
+        """把选定的字体族名解析为 drawtext 可用的字体文件路径（已转义盘符冒号）。
+
+        服务端 /config/fonts 只给元信息（没有字体文件下载端点），因此本地烧制只能按
+        「同名且本机已装」近似解析；解析不到则回退微软雅黑。真正按服务端字体烧制
+        需服务端支持（见 docs/服务端字幕烧制与字体参数需求.md）。
+        """
+        family = self.subtitle_font
+        if family:
+            path = self._lookup_windows_font_file(family)
+            if path:
+                # drawtext 滤镜里盘符冒号需转义；统一用正斜杠避开反斜杠转义歧义
+                return path.replace("\\", "/").replace(":", "\\:")
+            log.info(f"[字幕字体] 本机未找到字体族「{family}」对应字体文件，回退微软雅黑")  # noqa: E501
+        for cand in ("C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyh.ttf"):
+            if os.path.exists(cand):
+                return cand.replace(":", "\\:")
+        return "msyh"
+
+    @staticmethod
+    def _lookup_windows_font_file(family):
+        """按字体族名从 Windows 注册表找本机字体文件绝对路径；找不到返回 ""。
+
+        不用 Qt：PySide6 6.6 的 QFontDatabase.font() 返回 QFont（无 stylePath，拿不到
+        字体文件），且 families() 里系统字体多以本地化名注册，按英文名匹配不到。
+
+        注册表值名形如 "Microsoft YaHei (TrueType)" → 去括号后的前缀是族名；但系统
+        自带字体常注册为**复合族名**（如 "Microsoft YaHei & Microsoft YaHei UI"、
+        "SimSun & MS Gothic"），所以要按 " & " 拆分逐段比较，不能只比整个前缀；
+        拆分后仍是精确匹配，因此不会误选 "Microsoft YaHei Bold" 这类字重。
+        """
+        if not family or os.name != "nt":
+            return ""
+        try:
+            import winreg
+        except ImportError:
+            return ""
+        fonts_dir = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts")
+        target = family.strip().lower()
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(root, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts") as key:  # noqa: E501
+                    for i in range(winreg.QueryInfoKey(key)[1]):
+                        try:
+                            name, value, _ = winreg.EnumValue(key, i)
+                        except OSError:
+                            continue
+                        reg_family = name.rsplit(" (", 1)[0].strip()
+                        parts = {p.strip().lower() for p in reg_family.split("&") if p.strip()}
+                        if target not in parts:
+                            continue
+                        full = os.path.join(fonts_dir, str(value))
+                        if os.path.isfile(full):
+                            return full
+            except OSError:
+                continue
+        return ""
 
     @staticmethod
     def _load_timing_sidecar(voice_wav_path):
@@ -813,10 +874,9 @@ class VideoDubbingWorker(BaseWorker):
                     video_label = "v_padded"
 
                 if self.add_subtitles and text:
-                    # Resolve Microsoft YaHei font path on Windows
-                    font_path = "C\\:/Windows/Fonts/msyh.ttc"
-                    if not os.path.exists("C:/Windows/Fonts/msyh.ttc"):
-                        font_path = "msyh"
+                    # 字幕字体：优先用用户在「口播配音」选的服务端字体（同名解析本机字体文件），
+                    # 解析不到再回退微软雅黑。
+                    font_path = self._resolve_subtitle_font_path()
 
                     # 优先使用逐句 TTS 的真实句级时间轴（字幕与语音精确同步）
                     timing = self._load_timing_sidecar(voice_wav_path)

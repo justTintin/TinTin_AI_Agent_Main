@@ -16,8 +16,20 @@ import testutil
 
 testutil.ensure_studio_on_path()
 
-from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker  # noqa: E402
+from gui.montage.workers.montage_concat_server_worker import (  # noqa: E402
+    MontageConcatServerWorker,
+    _looks_like_server_lost_upload,
+)
 from utils import scheduled_task_client as stc  # noqa: E402
+
+# 真实服务端回传的错误（上传目录基准/落盘文件名不一致）
+_SERVER_LOST_UPLOAD_MSG = (
+    "素材不存在: /home/tintin/Project/TinTin_AI_Agent_Server (V2.0)/server/api/../uploads/"
+    "montage/concat_15afe52b1b2b/clip_001.mp4\nTraceback (most recent call last):\n"
+    "  File \"/home/freya/Project/TinTin_AI_Agent_Server/server/workers/montage_compose.py\", "
+    "line 67, in _resolve_to_local\n    raise FileNotFoundError(f\"素材不存在: {url_or_path}\")\n"
+    "FileNotFoundError: 素材不存在: .../clip_001.mp4"
+)
 
 
 class TestMontageConcatWorker(unittest.TestCase):
@@ -90,6 +102,44 @@ class TestMontageConcatWorker(unittest.TestCase):
                         return_value={"status": "ok"}), self.assertRaises(RuntimeError):
             w._submit_concat()
 
+    def test_poll_result_endpoint_new_contract(self):
+        """新契约（2026-09 服务端）：concat 任务不在 unified 表，
+        GET /montage/concat/result/{id} 未完成 404、完成 200 直出 mp4。"""
+        w = self._worker(source_clips=["src_1.mp4"], task_id="146")
+        content = b"v" * 2048
+
+        def _fake_download(url, path, timeout):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(content)
+            return path
+
+        # unified 返回的是撞名的历史 editor_render 任务 → 必须被忽略
+        stale = {"id": "146", "task_type": "editor_render", "status": "completed",
+                 "result": {"output_url": "/editor/render/146/result"}}
+        with mock.patch.object(stc, "get_task", return_value=stale), \
+                 mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                            side_effect=_fake_download) as mg:
+            w.do_work()
+        url = mg.call_args.args[0]
+        self.assertIn("/montage/concat/result/146", url)
+        self.assertNotIn("/editor/render", url)
+        self.assertEqual(os.path.getsize(self.out), len(content))
+        src_file = os.path.splitext(self.out)[0] + "_sources.txt"
+        with open(src_file, encoding="utf-8") as f:
+            self.assertEqual(f.read().splitlines(), ["src_1.mp4"])
+
+    def test_result_endpoint_timeout_raises(self):
+        """新契约：unified 拿不到任务且结果端点一直 404 → 达到总超时后报错（不无限轮）。"""
+        w = self._worker(task_id="task-dead")
+        w._RESULT_POLL_TIMEOUT = 0  # 立即超时
+        with mock.patch.object(stc, "get_task", return_value=None), \
+                 mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                            return_value=None), \
+                 self.assertRaises(RuntimeError) as ctx:
+            w.do_work()
+        self.assertIn("超时", str(ctx.exception))
+
     def test_poll_download_and_sources(self):
         w = self._worker(source_clips=["src_1.mp4", "src_2.mp4"], task_id="task-1")
         completed = {"status": "completed", "progress": 100,
@@ -122,6 +172,36 @@ class TestMontageConcatWorker(unittest.TestCase):
                  self.assertRaises(RuntimeError) as ctx:
                     w.do_work()
         self.assertIn("boom", str(ctx.exception))
+
+    def test_server_lost_upload_falls_back_to_local(self):
+        """服务端找不到自己接收的镜头文件 → 不报错，回退本地合成。"""
+        w = self._worker(task_id="task-457")
+        reasons = []
+        w.fallback_to_local.connect(reasons.append)
+        with mock.patch.object(stc, "get_task",
+                               return_value={"status": "failed", "error_msg": _SERVER_LOST_UPLOAD_MSG}):
+            w.do_work()  # 不应抛异常
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("本地合成", reasons[0])
+
+    def test_server_lost_upload_with_material_urls_still_raises(self):
+        """含 material:// 片段时不能回退（本地没有那些素材，会静默缺镜头）。"""
+        w = self._worker(task_id="task-458", clip_urls=["material://m_1"])
+        reasons = []
+        w.fallback_to_local.connect(reasons.append)
+        with mock.patch.object(stc, "get_task",
+                               return_value={"status": "failed", "error_msg": _SERVER_LOST_UPLOAD_MSG}), \
+                 self.assertRaises(RuntimeError) as ctx:
+                    w.do_work()
+        self.assertIn("素材不存在", str(ctx.exception))
+        self.assertEqual(reasons, [])
+
+    def test_looks_like_server_lost_upload(self):
+        self.assertTrue(_looks_like_server_lost_upload(_SERVER_LOST_UPLOAD_MSG))
+        self.assertTrue(_looks_like_server_lost_upload("FileNotFoundError: no such file or directory"))  # noqa: E501
+        self.assertFalse(_looks_like_server_lost_upload("boom"))
+        self.assertFalse(_looks_like_server_lost_upload(""))
+        self.assertFalse(_looks_like_server_lost_upload(None))
 
     def test_download_too_small_raises(self):
         w = self._worker(task_id="task-y")

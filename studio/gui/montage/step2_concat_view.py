@@ -122,6 +122,21 @@ class Step2ConcatView(BaseStepView):
         self.main_page.transition_combo.setFixedWidth(100)
         self.main_page.transition_combo.setToolTip("镜头之间的转场动画效果（剪映常用转场）")
         row_params2.addWidget(self.main_page.transition_combo)
+
+        row_params2.addSpacing(15)
+        self.main_page.lbl_edge_speedup = QLabel("出入场加速:")
+        row_params2.addWidget(self.main_page.lbl_edge_speedup)
+        self.main_page.edge_speedup_combo = QComboBox()
+        for _txt, _val in (("不加速", 1.0), ("1.2 倍", 1.2), ("1.5 倍", 1.5),
+                           ("2 倍", 2.0), ("2.5 倍", 2.5), ("3 倍", 3.0)):
+            self.main_page.edge_speedup_combo.addItem(_txt, _val)
+        self.main_page.edge_speedup_combo.setCurrentIndex(0)
+        self.main_page.edge_speedup_combo.setFixedWidth(90)
+        self.main_page.edge_speedup_combo.setToolTip(
+            "识别为「入场/出场」景别的镜头按此倍速加速播放（中景/特写不受影响）。\n"
+            "景别来自素材文件夹/文件名命名（入场、出场、中景、特写）；\n"
+            "走服务端合成时生效；本地回退合成不支持加速；无景别标注的素材无效果。")
+        row_params2.addWidget(self.main_page.edge_speedup_combo)
         row_params2.addStretch()
         params_group_layout.addLayout(row_params2)
 
@@ -243,10 +258,9 @@ class Step2ConcatView(BaseStepView):
         res_layout.addWidget(player_container, 1)
 
         # Wire preview player components on main page
+        # 双播放器的信号路由已在 VideoMontagePage.__init__ 统一连接，这里只登记视频输出控件并绑定当前播放器。
+        self.main_page._preview_video_widget = self.main_page.preview_video_widget
         self.main_page.preview_player.setVideoOutput(self.main_page.preview_video_widget)  # noqa: E501
-        self.main_page.preview_player.positionChanged.connect(self.main_page._on_preview_position_changed)  # noqa: E501
-        self.main_page.preview_player.durationChanged.connect(self.main_page._on_preview_duration_changed)  # noqa: E501
-        self.main_page.preview_player.mediaStatusChanged.connect(self.main_page._on_preview_media_status_changed)  # noqa: E501
 
         card_layout.addWidget(result_box)
         layout.addWidget(card, 1)

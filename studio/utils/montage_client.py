@@ -62,6 +62,41 @@ def beat(server_url: str, files: list, data: dict | None = None,
         raise
 
 
+def list_fonts(server_url: str, timeout: int = 15) -> list:
+    """GET /config/fonts — 拉取服务端字体库列表。
+
+    响应形如 {"fonts": [{"id","family","filename","stored_as","file_path",
+    "source_path","size","installed"}], "total": N}，返回 fonts 列表；
+    失败或未配置地址返回 []（调用方按「无字体可选」降级，不阻断流程）。
+    """
+    if not server_url:
+        return []
+    url = f"{server_url}/config/fonts"
+    try:
+        r = http_get(url, timeout=timeout)
+        r.raise_for_status()
+        data = r.json() or {}
+        if isinstance(data, list):  # 兼容直接返回数组的形态
+            return data
+        fonts = data.get("fonts")
+        return fonts if isinstance(fonts, list) else []
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+        log.error(f"[montage] list_fonts 失败: {e}")
+        return []
+
+
+def scan_fonts(server_url: str, directory: str, timeout: int = 60) -> dict:
+    """POST /config/fonts/scan — 让服务端扫描指定目录并导入字体。返回响应 dict。"""
+    url = f"{server_url}/config/fonts/scan"
+    try:
+        r = http_post(url, data={"directory": directory}, timeout=timeout)
+        r.raise_for_status()
+        return r.json() or {}
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+        log.error(f"[montage] scan_fonts 失败: {e}")
+        raise
+
+
 def result_url(server_url: str, task_id: str, variant: int | None = None) -> str:
     """构造 /montage/result/{task_id}[/{variant}] 下载 URL。"""
     if not server_url:

@@ -33,6 +33,13 @@ from gui.montage.dialogs import (
 # 导入 utils_media 会触发 subprocess.Popen 无黑框 monkey-patch（Windows），必须在任何
 # subprocess 调用前完成；下面的 Worker/页面 import 链都会用到 subprocess。
 from gui.montage.utils_media import (
+    MAX_SOURCE_VIDEOS,
+    SHOT_TYPE_COLORS,
+    SHOT_TYPE_LABELS,
+    VIDEO_EXTS,
+    apply_shot_layout_order,
+    classify_shot_type,
+    collect_video_files,
     compute_clip_hash,
     compute_clip_quality,
     find_ffmpeg,
@@ -40,6 +47,7 @@ from gui.montage.utils_media import (
     get_media_duration,
     parse_srt,
     parse_srt_to_descriptions,
+    safe_source_name,
 )
 from gui.montage.widgets import DoubleClickLineEdit, ReorderableClipsTable
 from gui.montage.workers.concat_workers import FinalMixWorker, VideoConcatWorker, VideoDubbingWorker
@@ -79,7 +87,7 @@ from PySide6.QtWidgets import (
 from utils import scheduled_task_client as stc
 from utils.base_worker import BaseWorker
 from utils.ffmpeg_utils import CREATE_NO_WINDOW, run
-from utils.file_dialog_utils import pick_file, pick_files, pick_save_file
+from utils.file_dialog_utils import pick_directory, pick_file, pick_files, pick_save_file
 from utils.gui_icons import mdi_button, mdi_icon
 from utils.logger_utils import log
 from utils.montage_cache import (
@@ -160,10 +168,23 @@ class VideoMontagePage(BasePage):
         self._bgm_audio_output = QAudioOutput()
         self._bgm_player.setAudioOutput(self._bgm_audio_output)
 
-        # Preview Player dedicated setup
+        # Preview Player dedicated setup（双播放器缓冲：切换正在播放的片段时不阻塞主线程）
         self.preview_player = QMediaPlayer()
         self.preview_audio_output = QAudioOutput()
         self.preview_player.setAudioOutput(self.preview_audio_output)
+        # 备用播放器：新片段先加载进备用播放器，就绪后把视频输出瞬间切过去，
+        # 再在后台销毁旧会话，避免 Windows Media Foundation 的 setSource/stop
+        # 在 GUI 主线程同步拆除活跃会话导致「播放中切换卡死」。
+        self._preview_standby_player = QMediaPlayer()
+        self._preview_standby_audio = QAudioOutput()
+        self._preview_standby_audio.setMuted(True)
+        self._preview_standby_player.setAudioOutput(self._preview_standby_audio)
+        self._preview_video_widget = None
+        self._preview_pending_clip = ""  # 备用播放器预加载中、待换出的目标片段
+        for _pv in (self.preview_player, self._preview_standby_player):
+            _pv.positionChanged.connect(lambda pos, _o=_pv: self._route_preview_position(pos, _o))
+            _pv.durationChanged.connect(lambda dur, _o=_pv: self._route_preview_duration(dur, _o))
+            _pv.mediaStatusChanged.connect(lambda st, _o=_pv: self._route_preview_status(st, _o))
 
         # Final Preview Player dedicated setup
         self.final_preview_player = QMediaPlayer()
@@ -172,6 +193,10 @@ class VideoMontagePage(BasePage):
 
         # Split clips metadata cache
         self.split_clips_cache = {}
+        # 镜头→景别缓存（按源视频命名识别，见 _shot_type_for_clip）
+        self._clip_shot_type_cache = {}
+        # 源视频「目录名→景别」映射（随 video_list 变更失效，见 _source_shot_type_map）
+        self._source_shot_type_cache = None
 
         # Step 2 precompose state
         self.precompose_plans = []
@@ -183,8 +208,11 @@ class VideoMontagePage(BasePage):
         self._preview_auto_advance = True  # 序列预览：默认自动连播（各片段合计约 30s）；切换方案卡顿另因 _clip_duration_text 重复 ffprobe，已修复回写缓存  # noqa: E501
 
         # Conditionally initialized attributes (for mypy type inference)
-        self._pending_play_timer: Any = None
         self._pending_play_clip: str = ""
+        self._play_request_id: int = 0  # 预览播放请求代号（用于丢弃过期的延迟回调）
+        self._last_preview_load_clip: str = ""  # 上一次尝试加载的片段（防同一文件反复重试）
+        self._preview_load_retry: int = 0
+        self._releasing_preview: bool = False  # 预览会话释放中标志（屏蔽信号重入换源，防 WMF 拆会话死锁）
         self._pending_final_preview_timer: Any = None
         self._pending_final_preview_path: str = ""
         self._media_player: Any = None
@@ -194,6 +222,11 @@ class VideoMontagePage(BasePage):
         self.highlight_worker: Any = None
         self._plan_worker: Any = None
         self.batch_rewrite_worker: Any = None
+        # 服务端字体库（GET /config/fonts）：下拉框 itemData 只存 font_id，完整 dict 另建映射
+        self._server_fonts: list = []
+        self._server_fonts_by_id: dict = {}
+        self._fonts_worker: Any = None
+        self._fonts_loaded: bool = False
     # [1·初始化]  setup
     def setup(self):
         # Main layout
@@ -332,12 +365,12 @@ class VideoMontagePage(BasePage):
         if hasattr(self, "_bgm_player") and self._bgm_player:
             self._stop_bgm_play()
         if hasattr(self, "preview_player") and self.preview_player:
-            self.preview_player.stop()
-            # 取消待加载片段的 pending timer，防止页面离开后回调访问已销毁对象导致堆损坏
-            if self._pending_play_timer is not None:
-                self._pending_play_timer.stop()
-                self._pending_play_timer = None
+            # 离开预览场景：停播并释放会话（顺便放开片段文件句柄）
+            self._release_preview_sessions("切步骤")
+            # 作废待加载片段的延迟回调（防止页面离开后 singleShot 仍触发播旧片段）
+            self._play_request_id = getattr(self, "_play_request_id", 0) + 1
             self._pending_play_clip = ""
+            self._preview_pending_clip = ""
         if hasattr(self, "final_preview_player") and self.final_preview_player:
             self.final_preview_player.stop()
         if hasattr(self, "_media_player") and self._media_player:
@@ -433,6 +466,9 @@ class VideoMontagePage(BasePage):
         if saved_url:
             self.api_url_input.setText(saved_url)
         self._populate_ref_audio_samples()
+        # 字幕字体列表来自服务端，进 Step3 预拉一次（后台线程，不阻塞 UI）
+        if not getattr(self, "_fonts_loaded", False):
+            self._refresh_server_fonts()
 
     # ==================== PAGE 0: SMART SPLIT ====================
     # ==================== PAGE 1: CLIP ASSEMBLY ====================
@@ -443,6 +479,12 @@ class VideoMontagePage(BasePage):
         path = item.text().strip()
         if not path:
             return
+        # 按文件夹/文件名识别景别（入场/出场/中景/特写）：颜色+悬停双重可见；
+        # 未按命名规范归档的素材不标注（保持默认色），编排时当中间镜头处理。
+        st = classify_shot_type(path)
+        if st:
+            item.setToolTip(f"{path}\n景别：{SHOT_TYPE_LABELS[st]}")
+            item.setForeground(QBrush(QColor(SHOT_TYPE_COLORS[st])))
     # [9·其他]  _show_video_context_menu
     def _show_video_context_menu(self, pos):
         item = self.video_list.itemAt(pos)
@@ -462,6 +504,7 @@ class VideoMontagePage(BasePage):
         self.video_list.takeItem(row)
         if getattr(self, "processing_video_path", "") == path:
             self.processing_video_path = ""
+        self._invalidate_shot_type_caches()
         # 终止正在运行的分割/挑精华 worker，避免后台残留导致后续操作被静默拦截
         self._kill_running_workers()
         self._refresh_source_root_hint()
@@ -512,7 +555,13 @@ class VideoMontagePage(BasePage):
         except (ValueError, TypeError):
             common_dir = os.path.dirname(os.path.abspath(paths[0]))
         self.folder_path_input.setText(common_dir)
-    # [2·基础设施]  _select_folder
+    # [2·基础设施]  _invalidate_shot_type_caches
+    def _invalidate_shot_type_caches(self):
+        """素材列表变更后失效景别缓存（_shot_type_for_clip / _source_shot_type_map）。"""
+        self._clip_shot_type_cache = {}
+        self._source_shot_type_cache = None
+
+    # [2·基础设施]  _add_paths_to_video_list
     def _add_paths_to_video_list(self, paths):
         """把一批本地视频路径加入 video_list（去重），供选择/拖拽共用入口。
 
@@ -534,6 +583,8 @@ class VideoMontagePage(BasePage):
             self.video_list.addItem(it)
             self._decorate_video_item_widget(it)
             added += 1
+        if added:
+            self._invalidate_shot_type_caches()
         if True:
             self._ensure_montage_job()
             self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
@@ -544,30 +595,78 @@ class VideoMontagePage(BasePage):
         log.info(f"[DIAG _add_paths] paths={len(paths)} added={added} list_count={self.video_list.count()}")  # noqa: E501
         return added
 
+    # [2·基础设施]  _on_drop_videos
     def _on_drop_videos(self, paths):
-        """拖放区拖入视频的回调：去重加入列表并刷新。"""
+        """拖放区拖入素材的回调：文件夹递归展开为全部视频，去重加入列表并刷新。"""
         if not paths:
             return
-        added = self._add_paths_to_video_list(list(paths))
+        files = self._expand_dropped_paths(paths)
+        if not files:
+            if hasattr(self, "stage_label"):
+                self.stage_label.setText("拖入的内容里没有可用的视频文件。")
+            return
+        added = self._add_paths_to_video_list(files)
         if hasattr(self, "stage_label"):
             self.stage_label.setText(
                 f"已新增 {added} 个素材到列表。" if added else "所选素材已在列表中，无新增。")
 
+    # [2·基础设施]  _expand_dropped_paths
+    @staticmethod
+    def _expand_dropped_paths(paths):
+        """拖入路径 → 视频文件列表（目录按子文件夹递归遍历，文件按扩展名过滤）。
+
+        同时拖入文件夹和夹内视频时只保留一份（保持拖入顺序，去重交给绝对路径）。
+        """
+        files = []
+        seen = set()
+        for p in paths:
+            if os.path.isdir(p):
+                candidates = collect_video_files(p)
+            elif p.lower().endswith(VIDEO_EXTS):
+                candidates = [os.path.abspath(p)]
+            else:
+                continue
+            for fp in candidates:
+                if fp not in seen:
+                    seen.add(fp)
+                    files.append(fp)
+        return files
+
+    # [2·基础设施]  _select_folder
     def _select_folder(self):
-        file_paths, _ = pick_files(
-            self.parent_widget,
-            "选择视频素材",
-            "",
-            "视频文件 (*.mp4 *.mov *.avi *.mkv *.flv *.webm *.m4v);;所有文件 (*.*)"
-        )
+        """选择素材文件夹：递归遍历该文件夹（含全部子文件夹）下的视频加入素材列表。
+
+        以往要逐层进入存放视频的末级目录再多选文件，现在选一个顶层目录即可
+        把整批素材一次导入（跳过隐藏目录与 splits/outputs 等混剪派生目录）。
+        """
+        folder = pick_directory(self.parent_widget, "选择视频素材文件夹（含子文件夹全部导入）", "")
+        if not folder:
+            return
+        file_paths = collect_video_files(folder)
         if not file_paths:
+            self.stage_label.setText("该文件夹（含子文件夹）内未找到视频文件。")
+            QMessageBox.information(
+                self.parent_widget, "未发现视频",
+                f"在所选文件夹及其子文件夹中未找到视频文件。\n{folder}\n"
+                f"支持格式：{', '.join(VIDEO_EXTS)}")
+            log.info(f"[DIAG _select_folder] folder={folder} scanned=0")
             return
         added = self._add_paths_to_video_list(file_paths)
-        log.info(f"[DIAG _select_folder] selected={len(file_paths)} added={added}")
-        if added == 0:
-            self.stage_label.setText("所选素材已在列表中，无新增。")
+        log.info(f"[DIAG _select_folder] folder={folder} scanned={len(file_paths)} added={added}")
+        if len(file_paths) >= MAX_SOURCE_VIDEOS:
+            self.stage_label.setText(
+                f"扫描已达单次上限 {MAX_SOURCE_VIDEOS} 个，仅导入前面的素材，建议按子目录分开选。")
+        elif added == 0:
+            self.stage_label.setText("该文件夹的视频已在列表中，无新增。")
         else:
-            self.stage_label.setText(f"已新增 {added} 个素材到列表。")
+            # 景别分布统计：让用户在导入时就知道命名/归档是否被正确识别
+            counts = {}
+            for _p in file_paths:
+                _key = SHOT_TYPE_LABELS.get(classify_shot_type(_p), "未标注")
+                counts[_key] = counts.get(_key, 0) + 1
+            dist = "、".join(f"{k} {v}" for k, v in counts.items())
+            self.stage_label.setText(
+                f"已遍历文件夹，新增 {added} 个素材到列表（共扫描 {len(file_paths)} 个｜景别分布：{dist}）。")
 
     @staticmethod
     def _is_local_file_item(item):
@@ -733,10 +832,24 @@ class VideoMontagePage(BasePage):
         self._last_merged_splits_dirs = []
         self.external_clip_urls = []
         self.split_clips_list = []
+        # 同时清空「已添加的素材列表」及其源目录与派生缓存（只移出列表/清内存态，不删原始素材文件）。
+        # 之前只删了磁盘任务目录与分割结果表，video_list 未清，导致点「清空混剪缓存」后素材仍留在列表。
+        if hasattr(self, "video_list"):
+            self.video_list.clear()
+        if hasattr(self, "folder_path_input"):
+            self.folder_path_input.clear()
+        self.split_clips_cache = {}
+        self.split_descriptions = {}
+        self._clip_duration_cache = {}
+        if hasattr(self, "_clip_shot_type_cache"):
+            self._invalidate_shot_type_caches()
+        self.processing_video_path = ""
+        self.temp_scenes = []
+        self._available_concat_clips = []
         if hasattr(self, "split_result_table"):
             self.split_result_table.setRowCount(0)
-        self.stage_label.setText(f"已清空混剪缓存（{removed} 个任务目录）")
-        log.info(f"[智能混剪] 用户清空混剪缓存，移除 {removed} 个任务目录")
+        self.stage_label.setText(f"已清空混剪缓存（{removed} 个任务目录），素材列表已重置")
+        log.info(f"[智能混剪] 用户清空混剪缓存，移除 {removed} 个任务目录，并重置素材列表")
 
     def set_external_materials(self, materials):
         """从「素材检索」带入多个素材（仅本地/NAS 可访问路径会加入）。
@@ -803,6 +916,7 @@ class VideoMontagePage(BasePage):
                     common_dir = os.path.dirname(os.path.abspath(paths[0]))
             if common_dir:
                 self.folder_path_input.setText(common_dir)
+            self._invalidate_shot_type_caches()
             self._ensure_montage_job()
             self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
             self.processing_video_path = ""
@@ -820,12 +934,13 @@ class VideoMontagePage(BasePage):
 
     # [3·分割]  _get_split_scenes_times
     def _get_split_scenes_times(self, splits_dir, files):
-        """获取片段时长列表。
+        """获取片段起止时间列表（累积时间轴）。
 
-        优先级：
+        时长来源优先级（全部避免在 UI 主线程批量 ffprobe/cv2，防卡死）：
         1. 从文件名解析时间戳（服务端返回的片段名已包含起止时间）
-        2. 从缓存读取
-        3. 用 cv2 读取（仅当文件名无法解析且缓存未命中时）
+        2. 从 _clip_duration_cache 读取
+        3. cv2 兜底：仅当待兜底片段数 ≤ _CV2_FALLBACK_MAX 时同步读取，超出则时长留空(0)，
+           由后台异步评分补充（绝不在主线程对大量片段跑 cv2/ffprobe）。
         """
         if hasattr(self, "temp_scenes") and self.temp_scenes and len(self.temp_scenes) == len(files):  # noqa: E501
             return self.temp_scenes
@@ -834,78 +949,62 @@ class VideoMontagePage(BasePage):
         if not hasattr(self, "_clip_duration_cache"):
             self._clip_duration_cache = {}
 
-        scenes = []
-        current_time = 0.0
-        need_cv2_fallback = []
+        # 单次刷新允许 cv2 兜底探测的最大片段数：超过则跳过 cv2，避免主线程长时间阻塞
+        _CV2_FALLBACK_MAX = 8  # noqa: N806
 
-        # 第一遍：优先从文件名解析时长（零 CPU 开销）
-        for f in files:
-            fname = os.path.basename(f) if not os.path.isabs(f) else os.path.basename(f)
+        # 第一遍：解析文件名 / 读缓存，得到每个片段的时长（0 表示待兜底）
+        durations: list[float] = []
+        pending_cv2: list[tuple[int, str]] = []  # (下标, 绝对路径)
+        for i, f in enumerate(files):
+            fname = os.path.basename(f)
             p = f if os.path.isabs(f) else os.path.join(splits_dir, f)
             norm_p = os.path.abspath(p)
 
+            duration = 0.0
             # 尝试从文件名解析时间戳（格式：_shot_XXX_HH-MM-SS,mmm_HH-MM-SS,mmm_）
             parsed = self._parse_split_filename(fname)
-            duration = 0.0
             if parsed:
                 _idx, start_str, end_str, _desc = parsed
                 _s = self._srt_ts_to_seconds(start_str)
                 _e = self._srt_ts_to_seconds(end_str)
                 if _s is not None and _e is not None and _e > _s:
                     duration = _e - _s
-
             # 文件名无法解析时，尝试从缓存读取
-            if duration <= 0 and norm_p in self._clip_duration_cache:
-                duration = self._clip_duration_cache[norm_p]
-
             if duration <= 0:
-                # 需要 cv2 兜底，先记录下来
-                need_cv2_fallback.append((f, p, norm_p))
-                duration = 0.0  # 占位
+                duration = self._clip_duration_cache.get(norm_p, 0.0)
 
-            scenes.append((current_time, current_time + duration))
-            current_time += duration
+            durations.append(duration)
+            if duration <= 0:
+                pending_cv2.append((i, norm_p))
 
-        # 第二遍：仅对文件名无法解析且缓存未命中的片段用 cv2 读取
-        if need_cv2_fallback:
+        # 第二遍：仅对少量无法从文件名/缓存得到时长的片段用 cv2 兜底（有界，防卡死）
+        # 不再用 ffprobe（get_media_duration）兜底——那会在主线程 spawn 子进程导致 (Not Responding)。
+        if pending_cv2 and len(pending_cv2) <= _CV2_FALLBACK_MAX:
             import cv2
-            for f, p, norm_p in need_cv2_fallback:
-                cap = cv2.VideoCapture(p)
+            for i, norm_p in pending_cv2:
                 duration = 0.0
-                if cap.isOpened():
-                    fps = cap.get(cv2.CAP_PROP_FPS)
-                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                    if fps > 0:
-                        duration = frame_count / fps
-                    cap.release()
-                if duration <= 0:
-                    # cv2 读不了（10-bit/特殊编码）时用 ffprobe 兜底
-                    duration = get_media_duration(p)
-                # 写入缓存
-                self._clip_duration_cache[norm_p] = duration
-                # 更新 scenes 中对应项（需要重新计算累积时间）
-                idx = files.index(f)
-                # 重新计算从该位置开始的累积时间
-                new_scenes = []
-                t = 0.0
-                for i, ff in enumerate(files):
-                    if i < idx:
-                        new_scenes.append(scenes[i])
-                        t = scenes[i][1]
-                    elif i == idx:
-                        new_scenes.append((t, t + duration))
-                        t += duration
-                    else:
-                        # 后续片段需要重新计算
-                        break
-                # 更新后续片段的累积时间
-                for i in range(idx + 1, len(files)):
-                    old_start, old_end = scenes[i]
-                    old_dur = old_end - old_start
-                    new_scenes.append((t, t + old_dur))
-                    t += old_dur
-                scenes = new_scenes
-                current_time = t
+                try:
+                    cap = cv2.VideoCapture(norm_p)
+                    if cap.isOpened():
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                        if fps > 0:
+                            duration = frame_count / fps
+                        cap.release()
+                except Exception:  # cv2 读取异常不得冒泡到 UI
+                    duration = 0.0
+                if duration > 0:
+                    durations[i] = duration
+                    self._clip_duration_cache[norm_p] = duration
+        elif pending_cv2:
+            log.info(f"[分割时长] {len(pending_cv2)} 个片段文件名无时间戳且无缓存，超过 cv2 兜底上限 {_CV2_FALLBACK_MAX}，跳过同步探测（时长留空由后台异步补）")  # noqa: E501
+
+        # 单次累积成时间轴（不再对每个兜底片段 O(n²) 重算）
+        scenes = []
+        current_time = 0.0
+        for dur in durations:
+            scenes.append((current_time, current_time + dur))
+            current_time += dur
 
         return scenes
     # [3·分割]  _parse_split_filename
@@ -2589,6 +2688,9 @@ class VideoMontagePage(BasePage):
         _dl = duration_limit
         _tc = target_clip_count
         _out_dir = out_montage_dir
+        # 景别映射必须在主线程预取（_shot_type_for_clip 要读 video_list 控件），
+        # 后台线程只做纯计算
+        _st = self._collect_clip_shot_types(_clips)
 
         def _plan_work():
             return self._build_precompose_plans(
@@ -2597,6 +2699,7 @@ class VideoMontagePage(BasePage):
                 batch_count=_bc,
                 randomness=_rv,
                 duration_limit_sec=_dl,
+                shot_types=_st,
             )
 
         def _plan_done(plan_clips_list):
@@ -2886,6 +2989,38 @@ class VideoMontagePage(BasePage):
             "preset": "superfast",
         }
 
+        # 字幕烧制与字体偏好：随 options 全量摊平进 multipart form（见
+        # montage_concat_server_worker._submit_concat 的 {k: str(v) ...}）。
+        # 服务端目前尚未声明这些字段，多传会被 FastAPI 忽略；按
+        # docs/服务端字幕烧制与字体参数需求.md 加好后即自动生效。
+        _font_id, _font_name = self._selected_subtitle_font()
+        options["burn_subtitle"] = bool(
+            getattr(self, "chk_add_subtitles", None) and self.chk_add_subtitles.isChecked())
+        if _font_id:
+            options["font_id"] = _font_id
+        if _font_name:
+            options["fontname"] = _font_name
+
+        # 景别标注：随 options 摊平为 form 字段 clip_shot_types（JSON：文件名→景别），
+        # 服务端按 docs/服务端景别分类与镜头编排需求.md 实现编排/加速后即生效；
+        # 未支持时 FastAPI 忽略该字段，不影响现有合成。
+        try:
+            _st_payload = {
+                os.path.basename(c): self._shot_type_for_clip(c)
+                for c in selected_clips if c
+            }
+            if any(_st_payload.values()):
+                options["clip_shot_types"] = json.dumps(_st_payload, ensure_ascii=False)
+        except (OSError, ValueError, TypeError) as _e:
+            log.warning(f"[montage_concat] 景别标注生成失败（忽略）: {_e}")
+
+        # 出入场加速倍速（服务端字段 edge_speedup）：仅当用户选择加速时发送。
+        # 服务端只对 clip_shot_types 里 entrance/exit 的片段应用 setpts/atempo；
+        # 未启用景别标注时发送该字段无效果（无入口可判定哪些片段加速）。
+        _edge_speed = self._selected_edge_speedup()
+        if _edge_speed > 1.0:
+            options["edge_speedup"] = _edge_speed
+
         # 卡点 / LUT 当前服务端接口不支持，回退本地处理
         if recombine_mode == "beat" and beat_times:
             self.stage_label.setText("注意： 卡点模式暂不支持服务端合成，回退到本地合成")
@@ -3167,6 +3302,8 @@ class VideoMontagePage(BasePage):
     def _on_server_concat_fallback(self, reason):
         """服务端合成不可用（402 等），自动回退到本地合成。"""
         log.info(f"[montage_concat] 服务端回退本地合成: {reason}")
+        if self._selected_edge_speedup() > 1.0:
+            reason += "（注意：本地回退合成不支持出入场加速，该设置在本次回退中不生效）"
         self.stage_label.setText(f"注意： {reason}")
         params = getattr(self, "_server_concat_fallback_params", None)
         if not params:
@@ -3466,6 +3603,106 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("失败： 合成失败")
         self._show_long_error("人声合成错误", f"处理过程中发生错误：\n{err}")
+    # [6·配音]  服务端字体库（GET /config/fonts）
+    def _refresh_server_fonts(self):
+        """从服务端拉取字体列表填充「字幕字体」下拉框。
+
+        必须在后台线程做：同步 HTTP 放在 UI 主线程会卡住界面（本项目已多次踩此坑）。
+        失败/未配服务端地址时降级为空列表，不阻断配音与烧字幕流程。
+        """
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return
+        if self._fonts_worker is not None and self._fonts_worker.isRunning():
+            return
+        server_url = stc._server_url()
+        if not server_url:
+            self._populate_font_combo([])
+            if self.stage_label:
+                self.stage_label.setText("未配置服务端地址，字幕将使用默认字体")
+            return
+
+        keep_id = str(combo.currentData() or "")
+        combo.setEnabled(False)
+        if self.stage_label:
+            self.stage_label.setText("正在从服务端加载字体列表…")
+
+        from utils.montage_client import list_fonts
+        from utils.thread_worker import TaskWorker
+
+        def _done(fonts, _combo=combo, _keep=keep_id):
+            try:
+                _combo.setEnabled(True)
+            except RuntimeError:  # 页面已销毁
+                return
+            self._populate_font_combo(fonts or [], keep_id=_keep)
+            self._fonts_loaded = True
+            n = len(self._server_fonts)
+            if self.stage_label:
+                self.stage_label.setText(
+                    f"已从服务端加载 {n} 个字体" if n else "服务端未返回字体，字幕将使用默认字体")  # noqa: E501
+
+        def _err(e):
+            with contextlib.suppress(RuntimeError):
+                combo.setEnabled(True)
+            self._populate_font_combo([])
+            log.warning(f"拉取服务端字体列表失败: {e}")
+            if self.stage_label:
+                self.stage_label.setText("拉取服务端字体失败，字幕将使用默认字体")
+
+        self._fonts_worker = TaskWorker(list_fonts, server_url)
+        self._fonts_worker.finished.connect(_done, type=Qt.QueuedConnection)
+        self._fonts_worker.error.connect(_err, type=Qt.QueuedConnection)
+        self._fonts_worker.start()
+
+    def _populate_font_combo(self, fonts, keep_id=""):
+        """把服务端字体写入下拉框：itemData 存 font_id，dict 放 _server_fonts_by_id。"""
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return
+        self._server_fonts = [f for f in (fonts or []) if isinstance(f, dict)]
+        self._server_fonts_by_id = {}
+        items = [("默认（不指定字体）", "")]
+        seen_family = set()
+        for f in self._server_fonts:
+            fid = str(f.get("id") or "").strip()
+            family = str(f.get("family") or f.get("filename") or "").strip()
+            if not fid or not family:
+                continue
+            self._server_fonts_by_id[fid] = f
+            # 同族名多个字重/文件时追加文件名区分
+            label = f"{family}（{f.get('filename')}）" if family in seen_family else family
+            seen_family.add(family)
+            items.append((label, fid))
+        combo.setItems(items)
+        idx = 0
+        for i in range(combo.count()):
+            if str(combo.itemData(i) or "") == (keep_id or ""):
+                idx = i
+                break
+        combo.setCurrentIndex(idx)
+
+    def _selected_subtitle_font(self):
+        """返回当前选定的 (font_id, fontname)；未选或无列表时返回 ("", "")。"""
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return "", ""
+        fid = str(combo.currentData() or "")
+        if not fid:
+            return "", ""
+        f = self._server_fonts_by_id.get(fid) or {}
+        return fid, str(f.get("family") or "")
+
+    def _selected_edge_speedup(self):
+        """UI 选中的出入场加速倍速（Step2 下拉框）；未初始化/异常回退 1.0=不加速。"""
+        combo = getattr(self, "edge_speedup_combo", None)
+        if combo is None:
+            return 1.0
+        try:
+            return float(combo.currentData() or 1.0)
+        except (TypeError, ValueError):
+            return 1.0
+
     # [7·混音导出]  _start_dubbing_videos
     def _start_dubbing_videos(self):
         if self.dub_worker and self.dub_worker.isRunning():
@@ -3521,7 +3758,8 @@ class VideoMontagePage(BasePage):
 
         self.dub_worker = VideoDubbingWorker(
             tasks, add_subtitles=add_subs, length_modes=self.voice_length_mode,
-            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words)
+            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words,
+            subtitle_font=self._selected_subtitle_font()[1] if add_subs else "")
         self.dub_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.dub_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
         self.dub_worker.finished.connect(self._on_dubbing_finished)
@@ -4771,7 +5009,14 @@ class VideoMontagePage(BasePage):
                 if desc:
                     self.split_descriptions[norm_path] = desc
 
-                clip_dur = get_media_duration(norm_path)
+                # 不再在 UI 主线程对每个片段调用 get_media_duration()（会 spawn ffprobe
+                # 子进程导致卡死）；时长由起止时间戳推算，缺失时读缓存，仍无则留空由后台异步补。
+                _s_sec = self._srt_ts_to_seconds(start_str)
+                _e_sec = self._srt_ts_to_seconds(end_str)
+                clip_dur = (max(0.0, _e_sec - _s_sec)
+                            if (_s_sec is not None and _e_sec is not None) else 0.0)
+                if clip_dur <= 0:
+                    clip_dur = float(getattr(self, "_clip_duration_cache", {}).get(norm_path, 0.0) or 0.0)  # noqa: E501
 
                 cached = self.split_clips_cache.get(norm_path, {})
                 score = cached.get("score", None)
@@ -4926,7 +5171,56 @@ class VideoMontagePage(BasePage):
     def _score_clip(self, clip_path):
         return -1
     # [5·拼接合成]  _build_precompose_plans
-    def _build_precompose_plans(self, clips: list[str], target_clip_count: int, batch_count: int, randomness: str, duration_limit_sec: float) -> list:  # noqa: E501
+    # [5·拼接合成]  _shot_type_for_clip
+    def _shot_type_for_clip(self, clip_path):
+        """镜头片段 → 景别键（entrance/exit/medium/closeup，未识别返回 ""）。
+
+        片段自身名（clip_001.mp4 等）不带景别，归属看源视频：片段目录名是
+        safe_source_name(源视频)，查「目录名→景别」映射（单遍历素材列表懒构建，
+        防止每个未缓存片段都全量扫 video_list 做 isfile stat —— 大量片段时
+        O(片段数×素材数) 次磁盘访问会卡死主线程，同 #020 家族）；
+        查不到归属再按片段自身路径兕底。结果缓存（含空值）。
+        """
+        ap = os.path.abspath(clip_path or "")
+        if not ap:
+            return ""
+        cache = getattr(self, "_clip_shot_type_cache", None)
+        if cache is None:
+            cache = self._clip_shot_type_cache = {}
+        if ap in cache:
+            return cache[ap]
+        st = ""
+        parent = os.path.basename(os.path.dirname(ap))
+        if parent:
+            st = self._source_shot_type_map().get(parent, "")
+        if not st:
+            st = classify_shot_type(ap)
+        cache[ap] = st
+        return st
+
+    def _source_shot_type_map(self):
+        """{safe_source_name(源视频): 景别} 映射（懒构建+缓存，单次遍历素材列表）。"""
+        mapping = getattr(self, "_source_shot_type_cache", None)
+        if mapping is not None:
+            return mapping
+        mapping = {}
+        for i in range(self.video_list.count()):
+            it = self.video_list.item(i)
+            if it is None or not self._is_local_file_item(it):
+                continue
+            v = it.text().strip()
+            if not v:
+                continue
+            mapping.setdefault(safe_source_name(v), classify_shot_type(v))
+        self._source_shot_type_cache = mapping
+        return mapping
+
+    # [5·拼接合成]  _collect_clip_shot_types
+    def _collect_clip_shot_types(self, clips):
+        """批量取镜头景别映射（主线程调，供后台建方案/提交体使用）。"""
+        return {os.path.abspath(c): self._shot_type_for_clip(c) for c in clips if c}
+
+    def _build_precompose_plans(self, clips: list[str], target_clip_count: int, batch_count: int, randomness: str, duration_limit_sec: float, shot_types: dict | None = None) -> list:  # noqa: E501
         base: list[str] = [os.path.abspath(c) for c in clips if c]
         if not base:
             return []
@@ -4978,64 +5272,73 @@ class VideoMontagePage(BasePage):
             if randomness == "high":
                 random.shuffle(deck)
             seq: list[str] = []
-            seq_hashes: list[str] = []      # 已入列的镜头 hash
-            seq_qualities: list[float] = []    # 已入列的镜头质量分
-            total_dur = 0.0
-            _safety = 0
-            while len(seq) < target_clip_count:
-                _safety += 1
-                if _safety > target_clip_count * 6:
-                    break
-                if cursor >= len(deck):
-                    cursor = 0
-                    if randomness != "low":
-                        random.shuffle(deck)
-                need = target_clip_count - len(seq)
-                take = min(need, len(deck) - cursor)
-                if take <= 0:
-                    break
-                batch_slice = deck[cursor:cursor + take]
-                for clip in batch_slice:
-                    if max_total > 0:
-                        clip_dur = self._get_clip_duration(clip)
-                        if total_dur + clip_dur > max_total and len(seq) > 0:
-                            break
-                        total_dur += clip_dur
-
-                    h = _hash(clip)
-                    q = _quality(clip)
-
-                    # ── 去重检查：和已入列镜头比较 ──
-                    replaced = False
-                    for j, prev_h in enumerate(seq_hashes):
-                        if _hamming(h, prev_h) < SIMILARITY_THRESHOLD:
-                            prev_q = seq_qualities[j]
-                            if q > prev_q and q > 0:
-                                # 新镜头更好 → 替换旧镜头
-                                log.info(f"[去重] 替换: {os.path.basename(clip)} (q={q}) → {os.path.basename(seq[j])} (q={prev_q})")  # noqa: E501
-                                seq[j] = clip
-                                seq_hashes[j] = h
-                                seq_qualities[j] = q
-                                replaced = True
-                            else:
-                                # 新镜头不如旧的 → 跳过
-                                log.info(f"[去重] 跳过相似镜头: {os.path.basename(clip)} (q={q}) vs {os.path.basename(seq[j])} (q={prev_q})")  # noqa: E501
-                                replaced = True
-                            break
-
-                    if not replaced:
-                        seq.append(clip)
-                        seq_hashes.append(h)
-                        seq_qualities.append(q)
-
-                    if max_total > 0 and total_dur >= max_total:
-                        break
-                cursor += take
+            seq_hashes: list = []      # 已入列的镜头 hash
+            seq_qualities: list = []   # 已入列的镜头质量分
+            total_dur = 0.0            # 仅累计「真正入列」片段的时长
+            scanned = 0
+            ci = cursor
+            # 候选扫描上限：预算填不满时避免无限循环
+            max_scan = max(len(deck) * 3, target_clip_count * 3, 1)
+            while len(seq) < target_clip_count and scanned < max_scan:
                 if max_total > 0 and total_dur >= max_total:
                     break
-            if len(seq) < target_clip_count and not max_total:
+                scanned += 1
+                clip = deck[ci % len(deck)]
+                ci += 1
+                clip_dur = self._get_clip_duration(clip) if max_total > 0 else 0.0
+                # 时长预算：非首个片段且放不下 → 继续试更短的（不 break 整批，避免远未填满就停）
+                if max_total > 0 and seq and total_dur + clip_dur > max_total:
+                    continue
+
+                h = _hash(clip)
+                q = _quality(clip)
+
+                # ── 去重：与已入列镜头高度相似则跳过/择优替换 ──
+                dup_idx = -1
+                for j, prev_h in enumerate(seq_hashes):
+                    if _hamming(h, prev_h) < SIMILARITY_THRESHOLD:
+                        dup_idx = j
+                        break
+                if dup_idx >= 0:
+                    prev_q = seq_qualities[dup_idx]
+                    if q > prev_q and q > 0:
+                        # 新镜头更好 → 替换旧镜头，时长预算按「新-旧」差额调整
+                        log.info(f"[去重] 替换: {os.path.basename(clip)} (q={q}) → {os.path.basename(seq[dup_idx])} (q={prev_q})")  # noqa: E501
+                        if max_total > 0:
+                            old_dur = self._get_clip_duration(seq[dup_idx])
+                            total_dur += (clip_dur - old_dur)
+                        seq[dup_idx] = clip
+                        seq_hashes[dup_idx] = h
+                        seq_qualities[dup_idx] = q
+                    else:
+                        # 新镜头不如旧的 → 跳过（不计入时长，修复「预算被丢弃片段吃掉」导致成片偏短）
+                        log.info(f"[去重] 跳过相似镜头: {os.path.basename(clip)} (q={q}) vs {os.path.basename(seq[dup_idx])} (q={prev_q})")  # noqa: E501
+                    continue
+
+                # 正常入列：只有这里才累加时长
+                seq.append(clip)
+                seq_hashes.append(h)
+                seq_qualities.append(q)
+                if max_total > 0:
+                    total_dur += clip_dur
+            cursor = ci % len(deck)
+            # 无时长上限时：补足到目标镜头数（与原逻辑一致，允许循环取用）
+            if max_total <= 0 and len(seq) < target_clip_count and unique:
                 while len(seq) < target_clip_count:
                     seq.append(random.choice(unique))
+            # 兕底：极端情况（全部相似/时长解析异常）下至少保证 1 个镜头
+            if not seq and unique:
+                seq.append(unique[0] if randomness == "low" else random.choice(unique))
+            # 景别编排：入场镜头放头部、出场镜头放尾部，中景/特写（含未标注）
+            # 居中混排；无任何出入场标注时保持原序不变。
+            # shot_types 由主线程预传入（Worker 线程不能碰 Qt 控件反查素材列表），
+            # 缺项按片段自身路径纯字符串匹配兕底。
+            _st_map = dict(shot_types or {})
+            for _c in seq:
+                if _c not in _st_map:
+                    _st_map[_c] = classify_shot_type(_c)
+            if any(_st_map.get(_c) for _c in seq):
+                seq = apply_shot_layout_order(seq, _st_map)
             plans.append({"clips": seq, "deleted_flags": [False] * len(seq), "mode": "random"})  # noqa: E501
         log.info(f"[DIAG _build_precompose_plans] target={target_clip_count} batch={batch_count} total_clips={len(unique)} plans={len(plans)} plan_sizes={[len(p['clips']) for p in plans]}")  # type: ignore[arg-type]  # noqa: E501
         return plans
@@ -5570,15 +5873,58 @@ class VideoMontagePage(BasePage):
         self._refresh_sources_for_plan(idx)
         self._update_confirm_all_button()
         self._start_sequence_preview_for_plan(idx)
+    # [5·拼接合成]  _stop_preview_playback
+    def _stop_preview_playback(self):
+        """停止预览播放并复位控件（两个播放器一并停止）。"""
+        self._preview_sequence_clips = []
+        self._pending_play_clip = ""
+        self._preview_pending_clip = ""
+        self._play_request_id = getattr(self, "_play_request_id", 0) + 1
+        self._release_preview_sessions("停播")
+        self.preview_overlay_label.hide()
+        self.btn_preview_play.setIcon(mdi_icon("play"))
+
+    # [5·拼接合成]  _release_preview_sessions
+    def _release_preview_sessions(self, reason="停播"):
+        """停止两个播放器并清源，释放片段媒体会话与文件句柄。
+
+        只能在「没有画面在渲染」时调（停播/切步骤）：WMF 拆会话是 GUI 线程同步
+        操作，播放中拆会卡住主线程，所以双播放器换手退役的播放器不在切换时拆，
+        统一由这里兜底释放。
+
+        释放前必须先作废所有待播状态并置「正在释放」标志：stop()/setSource() 会
+        同步抛 mediaStatusChanged(NoMedia)，若此时仍留有 _pending_play_clip /
+        _preview_sequence_clips / _preview_pending_clip，信号槽会重入
+        _load_preview_clip 再对同一个正在被拆的播放器 setSource，WMF 同步拆两个
+        会话直接死锁（切步骤离开预览时必现，日志只剩「清源 开始」无耗时行）。
+        """
+        from PySide6.QtCore import QUrl
+        from PySide6.QtMultimedia import QMediaPlayer
+        self._releasing_preview = True
+        self._preview_sequence_clips = []
+        self._pending_play_clip = ""
+        self._preview_pending_clip = ""
+        self._play_request_id = getattr(self, "_play_request_id", 0) + 1
+        try:
+            for _attr in ("preview_player", "_preview_standby_player"):
+                _p = getattr(self, _attr, None)
+                if _p is None:
+                    continue
+                try:
+                    _p.stop()
+                    # 只要还挂着一个源（含已播完的 EndOfMedia）就清掉，否则文件句柄始终不释放
+                    if _p.mediaStatus() not in (QMediaPlayer.NoMedia, QMediaPlayer.InvalidMedia):
+                        self._timed_mf(f"{reason}清源({_attr})", _p.setSource, QUrl())
+                except (RuntimeError, OSError):
+                    pass
+        finally:
+            self._releasing_preview = False
+
     # [5·拼接合成]  _start_sequence_preview_for_plan
     def _start_sequence_preview_for_plan(self, plan_index):
-        self.preview_player.stop()
         self._preview_sequence_clips = []
         if plan_index < 0 or plan_index >= len(self.precompose_plans):
-            self._preview_sequence_clips = []
-            self.preview_player.stop()
-            self.preview_overlay_label.hide()
-            self.btn_preview_play.setIcon(mdi_icon("play"))
+            self._stop_preview_playback()
             return
         plan = self.precompose_plans[plan_index]
         clips = list(plan.get("clips") or [])
@@ -5590,9 +5936,7 @@ class VideoMontagePage(BasePage):
                 active_clips.append(os.path.abspath(clip))
         self._preview_sequence_clips = active_clips
         if not active_clips:
-            self.preview_player.stop()
-            self.preview_overlay_label.hide()
-            self.btn_preview_play.setIcon(mdi_icon("play"))
+            self._stop_preview_playback()
             return
         self._preview_sequence_idx = 0
         self._play_current_sequence_clip()
@@ -5600,9 +5944,7 @@ class VideoMontagePage(BasePage):
     def _start_sequence_preview(self, clips, start_idx=0):
         self._preview_sequence_clips = [os.path.abspath(p) for p in clips if p and os.path.exists(p)]  # noqa: E501
         if not self._preview_sequence_clips:
-            self.preview_player.stop()
-            self.preview_overlay_label.hide()
-            self.btn_preview_play.setIcon(mdi_icon("play"))
+            self._stop_preview_playback()
             return
         self._preview_sequence_idx = max(0, min(start_idx, len(self._preview_sequence_clips) - 1))  # noqa: E501
         self._play_current_sequence_clip()
@@ -5623,45 +5965,209 @@ class VideoMontagePage(BasePage):
         if not self._preview_sequence_clips:
             return
         clip = self._preview_sequence_clips[self._preview_sequence_idx]
-        from PySide6.QtCore import QUrl, QTimer as _QT  # noqa: N814
+        from PySide6.QtCore import QTimer as _QT  # noqa: N814
         # 记录待加载片段（若已有待加载则覆盖，防止连播快速切换时旧定时器串号）
         self._pending_play_clip = clip
-        # 停止旧定时器
-        if self._pending_play_timer is not None:
-            self._pending_play_timer.stop()
-        # 用 QTimer 延迟执行 stop + setSource，避免在 UI 主线程同步调用导致卡死
-        # （Windows Media Foundation 后端的 stop()/setSource() 可能阻塞）
-        self._pending_play_timer = _QT.singleShot(50, self._do_play_sequence_clip)
+        # 自增代号：旧的延迟回调执行时会先比对代号，不匹配则直接丢弃，
+        # 避免快速连续点击时多个 singleShot 串号播错镜头
+        self._play_request_id = getattr(self, "_play_request_id", 0) + 1
+        req_id = self._play_request_id
+        # 用 QTimer 延迟执行换源+播放，避免在列表点击槽函数里同步调用导致卡死
+        _QT.singleShot(50, lambda: self._do_play_sequence_clip(req_id))
+        # 兜底 watchdog：3s 后仍未加载成功则记日志，便于定位“预览黑屏”类问题
+        _QT.singleShot(3000, self._warn_if_preview_stuck)
+
+    def _warn_if_preview_stuck(self):
+        """预览看门狗：3s 后仍无媒体且无待加载片段，说明加载链断了（打日志便于定位）。"""
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
+                return
+        except (ImportError, ModuleNotFoundError):
+            return
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if (getattr(self, "_preview_sequence_clips", [])
+                    and not getattr(self, "_pending_play_clip", "")
+                    and self.preview_player.mediaStatus() == QMediaPlayer.NoMedia):
+                log.warning("[预览] 3s 内未成功加载任何片段，预览区保持黑屏（检查解码器/文件路径）")  # noqa: E501
+        except (RuntimeError, ImportError, ModuleNotFoundError):
+            pass
 
     def _on_preview_no_media(self):
         """mediaStatusChanged == NoMedia 时回调：加载待播放片段。"""
-        # 回调来自 pending timer 或信号：用 shiboken 确认对象未销毁，避免访问已释放内存
+        clip = getattr(self, "_pending_play_clip", "")
+        self._pending_play_clip = ""
+        if clip:
+            self._load_preview_clip(clip)
+
+    def _load_preview_clip(self, clip):
+        """加载并播放一个预览片段：空闲直接换源；正在播放则走双播放器缓冲换源，避免主线程卡死。"""
+        # 回调可能来自定时器或 Qt 信号：用 shiboken 确认对象未销毁
         # （不用 isVisible()：步骤切换时页面可能不可见但播放应继续）
         try:
             import shiboken6 as _sb
             if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
-                self._pending_play_clip = ""
                 return
         except (ImportError, ModuleNotFoundError):
-            self._pending_play_clip = ""
             return
-        if self._pending_play_timer is not None:
-            self._pending_play_timer.stop()
-            self._pending_play_timer = None
-        clip = getattr(self, "_pending_play_clip", "")
-        self._pending_play_clip = ""
         if not clip or not os.path.isfile(clip):
+            log.warning(f"[预览] 待播放片段不存在: {clip}")
             return
+        # 防循环：同一个片段连续加载失败（解码器不支持/文件损坏）时停止重试，
+        # 避免信号与兜底加载互相触发导致 CPU 飙升 / 主线程卡死
+        if getattr(self, "_last_preview_load_clip", "") == clip:
+            self._preview_load_retry = getattr(self, "_preview_load_retry", 0) + 1
+        else:
+            self._last_preview_load_clip = clip
+            self._preview_load_retry = 0
+        if self._preview_load_retry >= 3:
+            log.warning(f"[预览] 片段反复加载失败，停止重试: {clip}")
+            self._last_preview_load_clip = ""
+            self._preview_load_retry = 0
+            return
+        active = self.preview_player
+        # 当前播放器空闲（首次加载 / 已停止）：没有活跃会话可拆，直接换源，不阻塞
+        if self._is_player_idle(active):
+            self._preview_pending_clip = ""
+            self._apply_source_and_play(active, clip)
+            self._update_preview_overlay()
+            return
+        # 正在播放：把新片段加载进备用播放器，就绪后由 _on_standby_media_status 换出
+        standby = self._preview_standby_player
         from PySide6.QtCore import QUrl
-        self.preview_player.setSource(QUrl.fromLocalFile(clip))
-        self.preview_player.play()
+        self._preview_pending_clip = clip
+        # 备用播放器若残留上次会话，直接 setSource 替换（不在点击路径上调 stop()，避免阻塞）
+        self._timed_mf(f"备用换源 {os.path.basename(clip)}", standby.setSource, QUrl.fromLocalFile(clip))
+        # 兜底：若备用迟迟不报就绪（MF 慢/异常），800ms 后强制换出，避免停在旧画面
+        QTimer.singleShot(800, self._force_swap_if_pending)
+
+    # [5·拼接合成]  _timed_mf
+    def _timed_mf(self, tag, fn, *args):
+        """执行一次播放器调用并留痕耗时。
+
+        Windows WMF 后端的换源/释放媒体会话是在 GUI 线程同步做的，是「预览卡死」
+        的高发点；先打「开始」再打耗时，万一调用直接死锁，app.log 里只剩「开始」
+        没有耗时行，就能定位到卡在哪一步。
+        """
+        log.info(f"[预览] {tag} 开始")
+        t0 = time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            ms = (time.perf_counter() - t0) * 1000.0
+            if ms >= 300:
+                log.warning(f"[预览][耗时] {tag} 阻塞主线程 {ms:.0f}ms")
+            else:
+                log.info(f"[预览][耗时] {tag} {ms:.0f}ms")
+
+    # [5·拼接合成]  _is_player_idle
+    def _is_player_idle(self, player):
+        """播放器是否处于「无活跃渲染会话」（此时在它自身上换源不会阻塞主线程）。
+
+        EndOfMedia 也算空闲：片段自然播完时 WMF 已自行停止渲染，同一个播放器
+        直接换下一个片段就是普通播放列表用法；若把它当「正在播放」去走双播放器
+        换手，就要拆旧会话，而新画面此时正在向同一个控件渲染——连播到第 2 个
+        镜头时卡死就出在这里。
+        """
+        from PySide6.QtMultimedia import QMediaPlayer
+        try:
+            if player.mediaStatus() in (QMediaPlayer.NoMedia, QMediaPlayer.InvalidMedia,
+                                        QMediaPlayer.EndOfMedia):
+                return True
+            # 已停止（stop() 不会把 mediaStatus 改回 NoMedia）同样没有活跃会话
+            return player.playbackState() == QMediaPlayer.StoppedState
+        except (RuntimeError, OSError):
+            return True
+
+    def _apply_source_and_play(self, player, clip):
+        from PySide6.QtCore import QUrl
+        self._timed_mf(f"换源 {os.path.basename(clip)}", player.setSource, QUrl.fromLocalFile(clip))
+        player.play()
+
+    def _update_preview_overlay(self):
         self.btn_preview_play.setIcon(mdi_icon("pause"))
         total = len(self._preview_sequence_clips)
         self.preview_overlay_label.setText(f"镜头 {self._preview_sequence_idx + 1}/{total}")  # noqa: E501
         self.preview_overlay_label.adjustSize()
         self.preview_overlay_label.show()
 
-    def _do_play_sequence_clip(self):
+    # [5·拼接合成]  双播放器信号路由（两个播放器共用一套槽，按来源对象分发）
+    def _route_preview_position(self, pos, src):
+        if src is self.preview_player:
+            self._on_preview_position_changed(pos)
+
+    def _route_preview_duration(self, dur, src):
+        if src is self.preview_player:
+            self._on_preview_duration_changed(dur)
+
+    def _route_preview_status(self, status, src):
+        # 释放会话期间屏蔽所有状态回调：否则 stop()/setSource() 触发的 NoMedia 会
+        # 重入 _load_preview_clip，对正在被拆的播放器再次换源 → WMF 同步拆会话死锁
+        if getattr(self, "_releasing_preview", False):
+            return
+        if src is self.preview_player:
+            self._on_preview_media_status_changed(status)
+        elif src is self._preview_standby_player:
+            self._on_standby_media_status(status)
+
+    def _on_standby_media_status(self, status):
+        """备用播放器加载就绪 → 把画面瞬间切过去；加载失败 → 退回直接换源。"""
+        from PySide6.QtMultimedia import QMediaPlayer
+        if not getattr(self, "_preview_pending_clip", ""):
+            return
+        if status in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia):
+            self._do_preview_swap()
+        elif status == QMediaPlayer.InvalidMedia:
+            # 备用加载失败：宁可短暂阻塞也要在当前播放器上出画面
+            clip = self._preview_pending_clip
+            self._preview_pending_clip = ""
+            self._apply_source_and_play(self.preview_player, clip)
+            self._update_preview_overlay()
+
+    def _force_swap_if_pending(self):
+        """备用迟迟未报就绪时的兜底换出。"""
+        try:
+            import shiboken6 as _sb
+            if not (_sb.isValid(self) and _sb.isValid(self.preview_player)):
+                return
+        except (ImportError, ModuleNotFoundError):
+            return
+        if getattr(self, "_preview_pending_clip", ""):
+            self._do_preview_swap()
+
+    def _do_preview_swap(self):
+        """把画面输出从当前播放器瞬间切到已就绪的备用播放器，旧播放器退为备用。"""
+        clip = getattr(self, "_preview_pending_clip", "")
+        if not clip:
+            return
+        self._preview_pending_clip = ""
+        standby = self._preview_standby_player
+        old = self.preview_player
+        widget = self._preview_video_widget
+        # 把画面输出切到备用并播放（备用无活跃会话，setVideoOutput/play 不阻塞）
+        if widget is not None:
+            with contextlib.suppress(RuntimeError, OSError):
+                self._timed_mf("换手 setVideoOutput", standby.setVideoOutput, widget)
+        self._preview_standby_audio.setMuted(False)
+        self._timed_mf("换手 play", standby.play)
+        # 角色互换：备用转正，原活跃退为备用（连同音频输出一起换，保持播放器↔音频配对）
+        self.preview_player, self._preview_standby_player = standby, old
+        self.preview_audio_output, self._preview_standby_audio = self._preview_standby_audio, self.preview_audio_output
+        # 退役播放器：静音 + pause() + 摘掉画面输出，三者都不拆媒体会话，故不阻塞。
+        # 关键：不在切换时释放它的会话（原先是 QTimer(120) → setSource(QUrl())）——
+        # WMF 拆会话是 GUI 线程同步操作，而此刻新活跃播放器正向同一个 QVideoWidget
+        # 渲染，拆旧会话会与它抢 sink，直接把主线程挂住（连播到第 2 个镜头时
+        # 标题栏 Not Responding 即此）。旧会话留到下次把它当备用播放器换源时顺带
+        # 替换（那时它已摘离画面），或由 _stop_preview_playback / 切步骤时兜底释放。
+        self._preview_standby_audio.setMuted(True)
+        with contextlib.suppress(RuntimeError, OSError):
+            old.pause()
+        with contextlib.suppress(RuntimeError, OSError):
+            self._timed_mf("退役摘画面", old.setVideoOutput, None)
+        self._update_preview_overlay()
+
+    def _do_play_sequence_clip(self, req_id=None):
         """实际执行播放序列片段（由定时器延迟调用，避免 UI 卡死）。"""
         try:
             import shiboken6 as _sb
@@ -5669,14 +6175,15 @@ class VideoMontagePage(BasePage):
                 return
         except (ImportError, ModuleNotFoundError):
             return
+        # 过期回调（用户已点到其他片段）直接丢弃
+        if req_id is not None and req_id != getattr(self, "_play_request_id", 0):
+            return
         clip = getattr(self, "_pending_play_clip", "")
         if not clip:
             return
-        from PySide6.QtCore import QUrl
-        # 先停止当前播放（异步执行，不阻塞 UI）
-        self.preview_player.stop()
-        # 清空旧源，触发 NoMedia 信号，然后加载新文件
-        self.preview_player.setSource(QUrl())
+        self._pending_play_clip = ""
+        self._load_preview_clip(clip)
+
     def _get_video_scene_sources(self, path):
         """读取某组合视频的 _sources.txt，返回源镜头路径列表。"""
         sources_file = os.path.splitext(path)[0] + "_sources.txt"
@@ -6110,9 +6617,7 @@ class VideoMontagePage(BasePage):
         elif clips:
             self._start_sequence_preview(clips, 0)
         else:
-            self.preview_player.stop()
-            self.preview_overlay_label.hide()
-            self.btn_preview_play.setIcon(mdi_icon("play"))
+            self._stop_preview_playback()
     # [8·事件回调]  _toggle_preview_video
     def _toggle_preview_video(self):
         from PySide6.QtMultimedia import QMediaPlayer
@@ -6131,6 +6636,10 @@ class VideoMontagePage(BasePage):
     # [8·事件回调]  _on_preview_duration_changed
     def _on_preview_duration_changed(self, duration):
         self.preview_slider.setRange(0, duration)
+        # 成功拿到时长 = 媒体已真正加载，重置预览加载重试计数
+        if duration > 0:
+            self._last_preview_load_clip = ""
+            self._preview_load_retry = 0
     # [8·事件回调]  _on_preview_media_status_changed
     def _on_preview_media_status_changed(self, status):
         try:

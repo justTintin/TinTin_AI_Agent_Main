@@ -22,6 +22,12 @@
 | #012 | 2026-08-27 | 声音样本 | Whisper 模型加载接口超时（服务端问题，客户端临时增加超时） |
 | #013 | 2026-08-27 | 智能混剪 | 分割片段表格新增"画幅"列，方便镜头重组设置输出画幅 |
 | #014 | 2026-08-27 | 智能混剪 | 镜头重组自动检测原片画幅并传递给服务端 |
+| #019 | 2026-09-01 | 智能混剪 | 镜头重组预览：切步骤/停播释放会话时信号重入换源导致 WMF 死锁 |
+| #020 | 2026-09-01 | 智能混剪 | 智能分割刷新链在主线程逐片段跑 ffprobe/cv2 导致未响应 |
+| #021 | 2026-09-01 | 智能混剪 | 点「清空混剪缓存」后已添加的素材列表未清空 |
+| #022 | 2026-09-01 | 智能混剪 | 镜头重组设 30s 但成片只有 17-20s（选片预算被丢弃片段吃掉+提前 break） |
+| #023 | 2026-09-02 | 智能混剪 | 服务端改版后 concat 轮询撞名 unified 旧任务致下载失败，适配 result 端点新契约 |
+| #024 | 2026-09-02 | 智能混剪 | 景别归属反查逐片段全量扫素材列表（O(n²) 次 isfile stat）+ concat 轮询旧契约路径无超时 |
 
 ---
 
@@ -1053,6 +1059,483 @@ PySide6 的跨线程信号槽机制对局部函数闭包的支持不稳定。当
 3. 观察画幅 combo 旁是否显示"原片: WxH"
 4. 切换画幅选项，观察标签是否实时更新
 5. 确认合成视频，检查输出分辨率是否正确
+
+---
+
+## #015 预生成后点击列表项无法预览镜头（预览区一直黑屏）
+
+**日期**：2026-08-28  
+**文件**：`studio/gui/video_montage_page.py`  
+**方法**：`_play_current_sequence_clip()` / `_do_play_sequence_clip()` / `_on_preview_no_media()` / `_start_sequence_preview_for_plan()`  
+**严重级别**：高（核心预览功能不可用）
+
+### 问题描述
+
+「镜头重组」完成预生成后，单击预合成视频列表项，右侧「视频播放预览」区域一直黑屏：
+播放按钮停在 ▶、进度条不动，任何镜头画面都看不到（只能双击用系统播放器打开）。
+
+### 根因分析
+
+镜头切换被实现成一条「靠 Qt 信号接力」的链：
+
+```
+_play_current_sequence_clip()   → 记下 _pending_play_clip，50ms 后回调
+  └─ _do_play_sequence_clip()   → preview_player.stop()
+                                 → setSource(QUrl())   ← 期望触发 NoMedia 信号
+                                     └─ _on_preview_media_status_changed(NoMedia)
+                                         └─ 仅当 _pending_play_clip 非空时 → _on_preview_no_media() → 真正加载片段
+```
+
+但 `QMediaPlayer` 的 `mediaStatusChanged` **只在状态发生跳变时才发信号**。用隔离探针
+（PySide6 6.6.3）实测确认：
+
+- 播放器已处于 `NoMedia`（刚进入第②步、`_go_to_step()` 里刚 `stop()` 过、或上一次加载失败）时，
+  `setSource(QUrl())` 不产生任何状态跳变 → **不发 NoMedia 信号**；
+- `stop()` 本身也**不会**把状态改为 `NoMedia`（实测停留在 `LoadedMedia`）。
+
+于是 `_on_preview_no_media()` 永远不会被调用，待加载片段被无限期挂起 → 预览区保持黑屏。
+该缺陷由 #008 引入的条件判断（`if _pending_play_clip: _on_preview_no_media()`）与 #007 的
+「stop + 清源 + 等信号」方案叠加暴露：首次点击必定落在 NoMedia 状态，因此必定黑屏。
+
+### 修复方案
+
+不再依赖 NoMedia 信号接力，改为**直接换源**（Qt6 下 `setSource()` 自身会释放上一个片段并重新加载，
+实测状态链 `LoadedMedia → BufferingMedia → BufferedMedia` 正常走完，无需先 `stop()`）：
+
+1. 新增 `_load_preview_clip(clip)`：集中做「校验文件 → 换源 → play → 更新按钮/镜头角标」。
+2. `_do_play_sequence_clip(req_id)` 直接调用它，不再 `stop() + setSource(QUrl()) + 等信号`。
+3. `_on_preview_no_media()` 保留为 NoMedia 信号的兜底入口，内部同样转调 `_load_preview_clip()`。
+4. 引入 `_play_request_id` 代号：延迟回调执行时比对代号，过期回调（用户已点到其他片段）直接丢弃，
+   替代原先保存 `QTimer.singleShot()` 返回值的写法（该返回值是临时 QTimer，跨回调持有有被提前析构的风险）。
+5. `_start_sequence_preview_for_plan()` 去掉换镜头前的无条件 `preview_player.stop()`（会先清成 NoMedia
+   再走已失效的信号接力）；新增 `_stop_preview_playback()` 统一处理「无片段可播」的停止 + 复位。
+6. `InvalidMedia` 残留态仍先 `stop() + setSource(QUrl())` 清掉，再换源。
+7. 防死循环：同一文件连续加载失败累计 3 次即停止重试（拿到有效 `durationChanged` 后计数归零），
+   避免信号与兜底互相触发重现 #008 的 CPU 飙升。
+8. 新增 `_warn_if_preview_stuck()` 看门狗：3s 内没加载上任何片段时打 WARNING 日志，便于后续定位。
+
+### 影响范围
+
+- 仅影响「镜头重组」步骤右侧预览播放器的片段加载/切换链路
+- 不改变预生成、确认合成、配音等任何业务流程
+- 同时消除原方案中 `stop()` 在切换时被调用两次带来的主线程阻塞风险（#007 的遗留面）
+
+### 验证建议
+
+1. 进入「智能混剪」→ 完成镜头分割 → 「镜头重组」点击「镜头重组」生成预合成方案
+2. **首次**单击列表中的预合成视频 → 预览区应立即出现画面并开始播放，角标显示「镜头 1/N」
+3. 连续快速点击不同方案 → 画面跟随切换，不卡死、不错播
+4. 右键删除某个镜头使方案无有效片段 → 预览停止且按钮回到 ▶，不报错
+5. 观察任务管理器 CPU 占用应平稳
+
+---
+
+## #016 镜头重组预览：播放中途切换另一条预合成导致页面卡死（双播放器缓冲）
+
+**日期**：2026-08-31  
+**文件**：`studio/gui/video_montage_page.py`、`studio/gui/montage/step2_concat_view.py`  
+**方法**：`_load_preview_clip()` / `_do_preview_swap()` / `_on_standby_media_status()` / `_teardown_retired_player()`  
+**严重级别**：高（预览切换卡死）
+
+### 问题描述
+
+预生成后单击列表项预览正常（#015 已修），但当某条预合成视频**播放到一半**时改点另一条，浏览页面会卡死。
+
+### 根因分析
+
+排除法：`_refresh_sources_for_plan` 中 `_score_clip` 直接返回 -1、`_clip_duration_text` 已不再 ffprobe（#004），表格填充是纯内存操作且与“是否播放”无关，不是卡死源。
+
+真正卡死在 `preview_player.setSource(新片段)`：`preview_player` 是**单个** `QMediaPlayer`，Qt6 在 Windows 用 Media Foundation 后端，对一个**正在播放的会话**调用 `setSource()` 会在 GUI 主线程**同步 flush/销毁旧 media session**，1080p/HEVC 片段可达几百 ms～数秒 → 卡死。空闲/暂停时无活跃会话，切换很快——这止好解释了“播放到一半才卡”。#015 去掉显式 `stop()` 只把阻塞从 `stop()` 挪到了 `setSource()`，单播放器架构下无法根治。
+
+### 修复方案（双播放器缓冲）
+
+新增一个隐藏的备用播放器 `preview_player`/`_preview_standby_player` 乒乓复用：
+
+1. `_load_preview_clip`：当前播放器空闲（首次/已停）→ 直接换源；正在播放 → 把新片段 `setSource` 到备用播放器（备用无活跃会话，不阻塞）。
+2. `_on_standby_media_status`：备用达到 `LoadedMedia/BufferedMedia` → `_do_preview_swap`。
+3. `_do_preview_swap`：把 `QVideoWidget` 输出瞬间 `setVideoOutput` 切到备用并 `play()`，然后互换 `preview_player`/`_preview_standby_player` 与对应音频引用（静音切换）。
+4. 退役播放器先 `pause()`+静音（非阻塞，立即停止解码不占 CPU），再 `QTimer.singleShot(120, _teardown_retired_player)` 延后 `setSource(QUrl())` 释放会话——**会话释放的耗时被挪到新画面已显示之后**，不再卡在点击上。
+5. 两个播放器的 `positionChanged/durationChanged/mediaStatusChanged` 统一在 `__init__` 接路由 `_route_preview_*`，按来源对象（`src is self.preview_player`）分发，避免重复连接与串号；step2_concat_view 只保留 `setVideoOutput` 并登记 `_preview_video_widget`。
+6. `_force_swap_if_pending`（800ms）与 `InvalidMedia` 退回直接换源作为兜底；`_stop_preview_playback`/`_go_to_step` 一并停两个播放器并清 `_preview_pending_clip`。
+
+### 影响范围
+
+- 仅影响镜头重组右侧预览播放器的换源/切换链；不改预生成、确认合成、配音等业务。
+- 首次加载仍走单播放器直连路径（无额外开销）。
+
+### 验证建议
+
+1. 智能混剪 → 镜头重组 → 生成预合成方案
+2. 单击一条预览，等播放到一半 → 改点另一条 → 应瞬间切到新画面不卡死
+3. 连续快速点击多条 → 不崩溃、不错播
+4. 真实客户端需重启一次加载新代码（Windows MF 行为与 offscreen 测试后端不同，需在客户端环境验收）
+
+---
+
+## #017 镜头重组预览：自动连播到第 2 个镜头时页面卡死（退役会话与新画面抢 sink）
+
+**日期**：2026-08-31  
+**文件**：`studio/gui/video_montage_page.py`、`tests/unit/test_video_montage_page.py`  
+**方法**：`_is_player_idle()` / `_do_preview_swap()` / `_load_preview_clip()` / `_stop_preview_playback()` / `_release_preview_sessions()`  
+**严重级别**：高（连播必现卡死，标题栏 Not Responding）
+
+### 问题描述
+
+#016 的双播放器缓冲解决了「播放中途改点另一条方案」，但**什么都不点**、只让序列自动连播时，
+第 1 个镜头播完进入第 2 个镜头的瞬间页面又卡死了：画面已经显示「镜头 2/4」的新片段，
+标题栏随即进入 (Not Responding)，CPU 只有 1%（主线程被挂住，不是在空转）。
+
+### 根因分析
+
+连播走的是 #016 的换手分支：`_is_player_idle()` 只把 `NoMedia/InvalidMedia` 当空闲，
+而片段自然播完时状态是 `StoppedState + EndOfMedia`，于是被当成「正在播放」→ 走备用播放器
+加载 → `_do_preview_swap()` → 最后一步 `QTimer.singleShot(120, _teardown_retired_player)`
+在 GUI 主线程对退役播放器做 `setSource(QUrl())` 释放会话。
+
+问题在于：此刻新转正的播放器**正在向同一个 `QVideoWidget`（同一个 QVideoSink）渲染**，
+WMF 释放旧会话要同步拆掉绑定在该 sink 上的视频分配器，两个会话抢 sink → 主线程直接挂住。
+所以卡顿点被推迟到「新画面出来之后 120ms」，看起来就像连播到第 2 个镜头才卡。
+
+### 修复方案
+
+1. **连播不再换手**：`_is_player_idle()` 把 `EndOfMedia`（以及 `stop()` 后的 `StoppedState`）
+   也判为空闲——片段播完时 WMF 已自行停止渲染，在同一个播放器上直接换下一个片段就是普通
+   播放列表用法，没有活跃会话要拆。这样连播路径完全不进 `_do_preview_swap()`。
+2. **切换时不拆旧会话**：`_do_preview_swap()` 去掉 `QTimer(120) → setSource(QUrl())` 的延后释放
+   （删除 `_teardown_retired_player()`），改为「静音 + `pause()` + `setVideoOutput(None)` 摘画面」。
+   旧会话留到下次把它当备用播放器换源时顺带替换（那时它已与画面无关），一次换源只做一次 unload。
+3. **兜底释放**：新增 `_release_preview_sessions(reason)`，在 `_stop_preview_playback()` 与
+   `_go_to_step()`（没有画面在渲染的时刻）统一 stop + 清源，及时放开片段文件句柄，
+   避免回到 Step1 重新分割同名镜头时被占用。
+4. **留痕**：新增 `_timed_mf(tag, fn, *args)` 包住所有可能同步阻塞的播放器调用（换源/换手/摘画面/清源），
+   先打「开始」再打耗时，≥300ms 记 WARNING。真死锁时日志只剩「开始」行，可直接定位卡在哪一步。
+5. 补 `tests/unit/test_video_montage_page.py` 固化 `_is_player_idle` 判定表（EndOfMedia/Stopped 为空闲，
+   Playing/Paused 非空闲，对象已销毁按空闲处理）。
+
+### 影响范围
+
+- 仅影响镜头重组右侧预览播放器的连播与切换链；不改预生成、确认合成、配音等业务。
+- 「播放中途改点另一条」仍走双播放器缓冲（Paused/Playing 有活跃会话时不原地换源）。
+- 退役播放器在下次复用前会保留一个已暂停会话（最多 1 个），由停播/切步骤兜底释放。
+
+### 验证建议
+
+1. 智能混剪 → 镜头重组 → 生成预合成方案 → 单击一条方案，**不做任何操作**等它连播
+2. 预期：第 1 个镜头播完自动到第 2、3、4 个，标题栏不出现 (Not Responding)
+3. 播放中途改点另一条方案 → 仍能瞬间切换不卡死
+4. 若仍卡，取 `studio/.runtime/logs/app.log` 里 `[预览]` 与 `[预览][耗时]` 行：
+   只剩「开始」没有耗时行的那一步就是新的阻塞点
+
+---
+
+## #018 确认合成视频：服务端报「素材不存在」导致流程阻断（自动回退本地合成）
+
+**日期**：2026-08-31  
+**文件**：`studio/gui/montage/workers/montage_concat_server_worker.py`、`tests/unit/test_montage_concat_worker.py`、`docs/server_issue_montage_concat_clip_not_found.md`  
+**方法**：`_poll_and_download()` / `_looks_like_server_lost_upload()`  
+**严重级别**：高（「确认合成视频」必现失败，用户无法出片）
+
+### 问题描述
+
+镜头重组 → 确认合成视频 → 提交 `POST /montage/concat` 本身返回 200（`clip_count: 4`），
+但 3 秒后轮询到 `failed`，弹出「排列错误」对话框，内容是服务端的 Python traceback：
+
+```
+FileNotFoundError: 素材不存在:
+/home/tintin/Project/TinTin_AI_Agent_Server (V2.0)/server/api/../uploads/montage/concat_15afe52b1b2b/clip_001.mp4
+```
+
+### 根因分析
+
+**服务端内部缺陷，客户端无法修**：服务端收下 4 个镜头并建好工作目录，却在自己的上传目录里
+找不到它们。两条线索：（一）traceback 的代码在 `/home/freya/Project/TinTin_AI_Agent_Server/`，
+而报错路径在 `/home/tintin/Project/TinTin_AI_Agent_Server (V2.0)/server/api/../uploads`（未规范化的
+陈年绝对路径，跨部署后指到另一份代码）；（二）引擎按 `clip_%03d.mp4` 取文件，而客户端按契约
+上传的是原始文件名（含中文/空格/逗号）。`/montage/split` 同样走 multipart 上传且一切正常，
+说明只有 concat 的工作目录解析是坏的。详见 `docs/server_issue_montage_concat_clip_not_found.md`。
+
+客户端侧原有机制只对 **402** 自动回退本地合成，本类错误直接 `raise` 弹 traceback 对话框，
+整条流程被卡死。
+
+### 修复方案
+
+1. 新增可单测的判定函数 `_looks_like_server_lost_upload(error_msg)`：命中
+   「素材不存在 / FileNotFoundError / no such file or directory」即认定为服务端丢失自身上传文件。
+2. `_poll_and_download()` 的 `failed` 分支：若命中上述判定 **且本次不含 `material://` 片段**，
+   不再抛异常，而是 `emit fallback_to_local(...)` 并 `return`，由页面既有的
+   `_on_server_concat_fallback()` 用同一批本地镜头走本地 ffmpeg 合成（与 #002 的 402 回退同一机制）。
+3. 含 `material://`（素材库地址，只有服务端能解析）时**不回退**，仍如实报错——
+   本地没那些素材，回退会静默缺镜头、产出错片，比报错更糟。
+4. 回退时以 WARNING 记录服务端原始 `error_msg`（前 300 字），便于对账。
+5. 补 3 个单测：回退触发 / 含 material:// 仍抛错 / 判定函数本身（含空值）。
+
+### 影响范围
+
+- 仅影响服务端合成任务报 `failed` 后的分支；提交失败、下载失败、产物过小等错误路径不变。
+- 不改变本地合成逻辑与输出命名（`_sources.txt` 等照旧）。
+- 服务端修好后无需客户端改动即自动恢复服务端出片（只有命中该错误特征才回退）。
+
+### 验证建议
+
+1. 智能混剪 → 镜头重组 → 确认合成视频
+2. 预期：状态栏显示「服务端合成失败（服务端找不到自己接收的镜头文件，属服务端问题），
+   已自动回退到本地合成」，随后本地合成正常出片，不再弹 traceback 对话框
+3. 若素材列表含「素材检索」带入的 `material://` 条目 → 仍应弹原错误（不能静默缺镜头）
+4. 需重启客户端加载新代码
+
+---
+
+## #019 镜头重组预览：切步骤/停播释放会话时信号重入换源导致 WMF 死锁
+
+**日期**：2026-09-01  
+**文件**：`studio/gui/video_montage_page.py`、`tests/unit/test_video_montage_page.py`  
+**方法**：`_release_preview_sessions()` / `_route_preview_status()`  
+**严重级别**：高（离开预览时必现，标题栏 Not Responding，CPU≈0%）
+
+### 问题描述
+
+在「智能混剪 → 镜头重组」单击查看/连播镜头后，切换到其它步骤（或触发停播）时，Python 进程直接卡死：
+标题栏 (Not Responding)，任务管理器 CPU 长期 0%（主线程被挂住，非空转）。
+`app.log` 末尾停在：
+
+```
+[预览] 切步骤清源(preview_player) 开始
+[预览][耗时] 切步骤清源(preview_player) 32ms
+[预览] 切步骤清源(_preview_standby_player) 开始   ← 只有「开始」，无耗时行 = 死锁在这一步
+```
+
+### 根因分析
+
+#017 把 `_release_preview_sessions()` 当作「没有画面在渲染时」的安全兜底释放点，但漏了**信号重入**：
+
+1. `_go_to_step()` 先调 `_release_preview_sessions("切步骤")`，之后才清 `_pending_play_clip`/`_preview_pending_clip`
+   （而 `_stop_preview_playback()` 是先清再调，两条入口顺序不一致）。
+2. 释放循环里对第一个播放器 `_p.stop()` 时，Windows WMF 在 GUI 线程**同步**抛 `mediaStatusChanged(NoMedia)`。
+3. 该信号经 `_route_preview_status` → `_on_preview_media_status_changed`，因 `_pending_play_clip` 仍非空，
+   重入 `_on_preview_no_media()` → `_load_preview_clip()`，对一个**正在被拆会话**的播放器再次 `setSource()`。
+4. 两个会话在同一线程上互相抢拆 → `setSource(QUrl())` 直接死锁（表现为清到第二个播放器时卡住）。
+
+即：`_release_preview_sessions` 本身不是「无渲染就安全」，只要待播状态未作废，stop() 的信号就会重入换源。
+
+### 修复方案
+
+1. **释放前作废所有待播状态**：`_release_preview_sessions()` 开头即清空 `_preview_sequence_clips`、
+   `_pending_play_clip`、`_preview_pending_clip` 并自增 `_play_request_id`（丢弃过期 singleShot 回调），
+   使两条调用入口（切步骤 / 停播）行为一致，不再依赖调用方提前清理。
+2. **释放期屏蔽状态回调**：新增 `self._releasing_preview` 标志，释放期间置 True（`try/finally` 复位）；
+   `_route_preview_status()` 在标志为真时直接 `return`，杜绝 stop()/setSource() 触发的 NoMedia 重入换源。
+3. 补 3 个单测（`tests/unit/test_video_montage_page.py`）：释放后作废待播状态并复位标志；
+   释放期间无任何状态回调重入（模拟 stop() 同步抛 NoMedia）；非释放期 active/standby 仍各自正常路由。
+
+### 影响范围
+
+- 仅影响镜头重组预览会话的释放路径（`_go_to_step` 切步骤、`_stop_preview_playback` 停播）。
+- 正常连播/换手的信号处理不受影响：`_releasing_preview` 仅在同步释放循环内为真，循环结束即复位。
+- 退役播放器的会话仍被释放（文件句柄照常放开）。
+
+### 验证建议
+
+1. 智能混剪 → 镜头重组 → 生成预合成方案 → 单击一条方案播放/连播
+2. 播放过程中点「下一步」或切到其它步骤 → 页面应正常切换，不再 (Not Responding)
+3. 取 `app.log`：`[预览] *清源* 开始` 后应都有对应 `[预览][耗时]` 行，不再只剩「开始」
+4. 需重启客户端加载新代码（Windows MF 行为与 offscreen 后端不同，须在真机验收）
+
+---
+
+## #020 智能分割刷新链在主线程逐片段跑 ffprobe/cv2 导致未响应
+
+**日期**：2026-09-01  
+**文件**：`studio/gui/video_montage_page.py`  
+**方法**：`_get_split_scenes_times()` / `_scan_concat_src_dir()`  
+**严重级别**：高（Step1 点素材/每个视频分割完成时必现卡顿，片段多时 (Not Responding)）
+
+### 问题描述
+
+「智能混剪 → 镜头智能分割」中，单击素材项、或批量分割每完成一个视频时，界面卡顿乃至 (Not Responding)；
+片段越多越明显（几十个片段可卡数十秒）。
+
+### 根因分析
+
+分割本身跑在后台 `ServerSplitWorker`，不阻塞；卡死来自**主线程刷新回调里循环探测时长**：
+
+1. `_check_split_clips_exist()`（`video_list.itemClicked` 槽 + 每次分割完成后 `QTimer` 触发）末尾会调
+   `_scan_concat_src_dir()`（L1465），而后者对每个片段调 `get_media_duration()`（ffprobe，timeout=10s），
+   N 个片段 = N 次串行子进程，全在主线程。#004 只删了 `_check_split_clips_exist` 自己循环里的 ffprobe，
+   但它末尾又调了 `_scan_concat_src_dir`，ffprobe 从这条路径绕回来了。
+2. `_get_split_scenes_times()` 在文件名无时间戳且缓存未命中时，对每个片段 `cv2.VideoCapture` 读取，
+   读不出再 `get_media_duration()`（ffprobe）兜底；且每命中一个兜底片段就重算整表（0(n²)）。
+
+### 修复方案
+
+1. `_scan_concat_src_dir()`：删除逐片段 `get_media_duration()`，改为由已算出的 `start_str`/`end_str`
+   时间戳推算时长（`_srt_ts_to_seconds`），缺失时读 `_clip_duration_cache`，仍无则留 0 由后台异步补。
+2. `_get_split_scenes_times()`：重写为两遍——第一遍文件名/缓存得时长，第二遍只对**少量**（≤ `_CV2_FALLBACK_MAX=8`）
+   待兜底片段用 cv2，**彻底去掉主线程 ffprobe 兜底**；超过上限则时长留空由后台补；最后单次累积成轴，
+   消除 O(n²) 重算。
+
+### 影响范围
+
+- 仅影响 Step1 分割结果刷新与 Step2 镜头扫描的时长计算；时长缺失时显示“—”，不阻塞后续流程。
+- 服务端文件名含时间戳的正常链路（重命名后）零开销；异常命名也不会再卡主线程（cv2 有界 + 无 ffprobe）。
+- 未改动分割/合成/预览业务逻辑。
+
+### 验证建议
+
+1. 智能混剪 → 镜头智能分割 → 选含多个视频的文件夹 → 开始分割
+2. 预期：分割完成回填表格、单击素材项切换时不再 (Not Responding)；任务管理器 CPU 平稳
+3. 需重启客户端加载新代码
+
+---
+
+## #021 点「清空混剪缓存」后已添加的素材列表未清空
+
+**日期**：2026-09-01  
+**文件**：`studio/gui/video_montage_page.py`  
+**方法**：`_clear_montage_cache()`  
+**严重级别**：中（功能不一致，按钮文案声称清「素材清单」但实际未清列表）
+
+### 问题描述
+
+在「智能混剪 → 镜头智能分割」点击「清空混剪缓存」，状态栏提示“已清空混剪缓存（N 个任务目录）”，
+但上方「已选择的原始视频素材」列表（`video_list`）仍保留之前添加的素材，未随缓存一同清空。
+
+### 根因分析
+
+`_clear_montage_cache()` 只调了 `clear_montage_cache()`（删磁盘任务目录）并重置了
+`_montage_job_id`/`split_clips_list`/`split_result_table` 等派生数据，但漏清了：
+`video_list`（已添加素材列表）、`folder_path_input`（源目录）、`split_clips_cache`、
+`split_descriptions`、`_clip_duration_cache`、`processing_video_path`、`temp_scenes`、`_available_concat_clips`。
+`video_list` 是纯内存 UI 态（由 `_select_folder`/拖拽/`set_external_materials` 填充，无持久化恢复），
+不主动 `clear()` 就一直显示。
+
+### 修复方案
+
+在 `_clear_montage_cache()` 确认删除后，除原有重置外，额外 `video_list.clear()`、`folder_path_input.clear()`
+并重置上述内存派生缓存（仅移出列表/清内存态，不删任何原始素材文件）。
+
+### 影响范围
+
+- 仅影响「清空混剪缓存」按钮的重置范围；不改变分割/合成/预览业务逻辑。
+- 与按钮现有文案“清除…素材清单”语义对齐。
+
+### 验证建议
+
+1. 智能混剪 → 选择/拖入多个素材→ 点「清空混剪缓存」→ 确认
+2. 预期：上方素材列表与下方分割结果表同时清空，状态栏提示“素材列表已重置”
+3. 原始素材文件在磁盘上仍存在（未被删除）
+
+---
+
+## #022 镜头重组：设 30s 但成片只有 17-20s（选片预算被丢弃片段吃掉 + 提前 break）
+
+**日期**：2026-09-01  
+**文件**：`studio/gui/video_montage_page.py`  
+**方法**：`_build_precompose_plans()`  
+**严重级别**：高（成片时长与「时长限制」配置严重不符）
+
+### 问题描述
+
+镜头重组设置时长限制 30s，实际合成出来只有 17-20s。预合成方案每条只有 3-4 个镜头。
+
+### 根因分析
+
+合成阶段（服务端/本地）只是拼接选中片段，不按时长裁剪；问题出在选片贪心循环：
+
+1. **预算被丢弃片段吃掉**：`total_dur += clip_dur` 在去重判定之前执行，被“相似”丢弃、
+  根本没进 `seq` 的片段其时长也已计入 `total_dur`。电商素材相似镜头多，预算虚高→提前判定“快满”
+  而停止，实际选中片段总长远小于 30s。
+2. **放不下就 break 整批**：`if total_dur + clip_dur > max_total and len(seq) > 0: break`，遇到一个比
+  剩余预算长的片段就直接停止整批，不再尝试后面能放下的更短片段。
+
+### 修复方案
+
+重写填充循环：
+1. `total_dur` 只累加「真正入列」的片段；择优替换时按「新-旧」时长差额调整预算。
+2. 放不下改为 `continue` 继续试更短的片段（尽力填满到上限），而非 `break` 整批。
+3. 保留「无时长上限时补足到 target_clip_count」与「至少 1 个镜头」的兜底；用 `max_scan` 防无限循环。
+
+### 影响范围
+
+- 仅影响随机洗牌模式的预合成选片；文案匹配(script)/卡点(beat)模式不走此函数。
+- 时长限制仍是「上限」（max_total=limit×1.1），但现在会尽力填满到接近上限而非远未填满就停。
+
+### 验证建议
+
+1. 智能混剪 → 镜头重组 → 设时长限制 30s → 生成预合成方案
+2. 预期：每条方案的镜头数明显增多，总时长贴近 30s（含转场重叠后实际略短属正常）
+3. 需重启客户端加载新代码
+
+---
+
+## #023 服务端改版后 concat 轮询撞名 unified 旧任务致下载失败
+
+**日期**：2026-09-02  
+**文件**：`studio/gui/montage/workers/montage_concat_server_worker.py`  
+**方法**：`_poll_and_download()` / 新增 `_consume_unified_task()` / `_poll_result_endpoint()`  
+**严重级别**：高（服务端合成必现失败，报「下载后的成片文件无效或过小」）
+
+### 问题描述
+
+联调景别编排（#022 后续需求）时发现：服务端改版后 `POST /montage/concat` 返回的任务 ID
+与 `/tasks/unified` 里历史 `editor_render` 任务的 ID 序列**撞名**（如 id=145/148 都命中 7 月的
+老渲染任务）。旧轮询逻辑拿撞名任务的 `result.output_url`（`/editor/render/145/result`）去下载，
+404 后报「下载后的成片文件无效或过小」。
+
+### 根因分析
+
+新服务端契约：concat 任务**不再注册 unified 任务表**，改为
+`GET /montage/concat/result/{task_id}` 兼作状态与结果——未完成 404（JSON detail
+「拼接结果不存在或尚未完成」），完成 200 直出 video/mp4（实测确认）。客户端仍按
+`GET /tasks/unified/{id}` 轮询，而该接口对任何整数 ID 都可能命中历史任务。
+
+### 修复
+
+轮询分派：
+1. unified 命中且 `task_type` 含 `montage`（或无 `task_type`）→ 旧契约处理
+   （原逻辑抽到 `_consume_unified_task`，保留向后兼容）；
+2. unified 命中但 `task_type` 不符（撞名）→ 忽略，改轮 `GET /montage/concat/result/{id}`：
+   200 落盘完成、404 继续轮、总超时 60 分钟（`_RESULT_POLL_TIMEOUT`）；
+3. unified 未命中 → 同样走结果端点轮询。
+
+### 回归
+
+`tests/unit/test_montage_concat_worker.py` 新增 2 例：
+- `test_poll_result_endpoint_new_contract`：unified 返回撞名 editor_render → 必须走
+  `/montage/concat/result/{id}` 下载且忽略 `/editor/render` URL；
+- `test_result_endpoint_timeout_raises`：结果端点一直 404 → 总超时报错（不无限轮）。
+
+另用真实服务端 e2e 验证（红/绿/蓝纯色片段，倒序上传）：无景别字段时顺序不变（≈7.5s），
+带 `clip_shot_types + shot_layout + edge_speedup=2` 时重排为 入场(红,1.25s)→中景(绿,2.5s)
+→出场(蓝,1.25s)（实测 5.03s，首帧红/尾帧蓝）。
+
+---
+
+## #024 景别归属反查逐片段全量扫素材列表 + concat 轮询旧契约路径无超时
+
+**日期**：2026-09-02  
+**文件**：`studio/gui/video_montage_page.py`、`studio/gui/montage/workers/montage_concat_server_worker.py`  
+**方法**：`_shot_type_for_clip()` / `_source_shot_type_map()` / `_poll_and_download()`  
+**严重级别**：高（片段多时主线程卡顿乃至未响应；Worker 无限轮询）
+
+### 问题描述与根因
+
+1. `_shot_type_for_clip()` 每个缓存未命中的片段都全量遍历 `video_list`（≤500 项），
+   且每项 `_is_local_file_item` 会做 `os.path.isfile()` 磁盘 stat。`_collect_clip_shot_types()`
+   在主线程对全部勾选片段逐个调用，最坏 O(片段数×素材数) 次 stat
+   （2000 片段×500 素材=100 万次），与 #020 同族——本地盘卡数秒，网络盘直接未响应。
+2. `_poll_and_download()` 旧契约路径（`_consume_unified_task` 返回 False 后 `continue`）
+   跳过超时检查：服务端任务永远停在 running 时 worker 无限轮询、合成按钮永久禁用。
+
+### 修复
+
+1. 新增 `_source_shot_type_map()`：`{safe_source_name(源视频): 景别}` 映射懒构建+缓存
+   （单次遍历素材列表），`_shot_type_for_clip()` 改为 O(1) 查表；
+   新增 `_invalidate_shot_type_caches()`，在素材列表四个变更点（新增/移除/素材检索带入/清空缓存）失效。
+2. 超时检查移到轮询循环顶部，对所有路径（新/旧契约）生效（60 分钟总超时）。
+
+### 回归
+
+`test_video_montage_page.py` 新增 `TestShotTypeForClip` 4 例（归属解析/兕底/映射只构建一次/失效重建）。
 
 ---
 

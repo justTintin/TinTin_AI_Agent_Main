@@ -26,6 +26,70 @@ class _patched_Popen(subprocess.Popen):  # noqa: N801
 subprocess.Popen = _patched_Popen  # type: ignore[misc]
 
 
+# Step1 原始素材支持的视频扩展名（点击选择与拖拽展开共用同一套过滤）
+VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".flv", ".webm", ".m4v")
+
+# 单次导入素材数量上限：防止误选整个媒体库/磁盘根目录时把上万个文件塞进列表卡死 UI
+MAX_SOURCE_VIDEOS = 500
+
+# 遍历素材文件夹时跳过的子目录名：混剪流程自身产出的派生目录，
+# 避免把上一次生成的镜头片段/配音/成片当成原始素材再喂回流程。
+_DERIVED_DIR_NAMES = {"splits", "output", "outputs", "final", "dubbed", "bgm", "temp", "montage_cache"}
+
+# 景别分类关键词（大小写不敏感子串匹配）。与 docs/服务端景别分类与镜头编排需求.md
+# 保持一致；如需新增景别/关键词，两侧同步修改。
+# 注意：不用 "enter"/"in" 这类易误伤的短词（如 center 会误中 enter）。
+SHOT_TYPE_KEYWORDS = {
+    "entrance": ("入场", "进场", "开场", "entrance"),
+    "exit": ("出场", "离场", "退场", "收尾", "exit"),
+    "medium": ("中景", "medium shot", "medium_shot"),
+    "closeup": ("特写", "closeup", "close-up", "close_up"),
+}
+
+# 景别键 → 中文名（UI 展示与文档用）
+SHOT_TYPE_LABELS = {"entrance": "入场", "exit": "出场", "medium": "中景", "closeup": "特写"}
+
+# 景别键 → 列表项前景色（素材列表里一眼区分景别；未标注保持默认色）
+SHOT_TYPE_COLORS = {
+    "entrance": "#2ecc71",   # 绿：入场
+    "exit": "#e67e22",       # 橙：出场
+    "medium": "#3498db",     # 蓝：中景
+    "closeup": "#9b59b6",    # 紫：特写
+}
+
+
+def _natural_key(path):
+    """目录 + 文件名自然序排序键：文件名里的数字按数值比较（shot_2 排在 shot_10 前）。"""
+    parts = re.split(r"(\d+)", os.path.basename(path).lower())
+    return (os.path.dirname(path).lower(),
+            tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in parts))
+
+
+def collect_video_files(root, exts=VIDEO_EXTS, limit=MAX_SOURCE_VIDEOS):
+    """递归收集 root 及其所有子文件夹内的视频文件（Step1「选择素材文件夹」用）。
+
+    - 跳过隐藏/系统目录（名字以 . 或 $ 开头）与混剪派生目录（splits/outputs/…），
+      避免把已分割出的镜头片段当成原始素材再次导入；
+    - 结果按「目录 + 文件名自然序」排序，达到 limit 即停止遍历（安全上限）。
+
+    root 不存在或不是目录时返回空列表（空路径直接返回空，不能回退到当前工作目录）；
+    返回的均为绝对路径。
+    """
+    root_abs = os.path.abspath(root) if root else ""
+    if not root_abs or not os.path.isdir(root_abs):
+        return []
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root_abs):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith((".", "$")) and d.lower() not in _DERIVED_DIR_NAMES]
+        for fn in filenames:
+            if fn.lower().endswith(tuple(exts)):
+                found.append(os.path.abspath(os.path.join(dirpath, fn)))
+                if len(found) >= limit:
+                    return sorted(found, key=_natural_key)
+    return sorted(found, key=_natural_key)
+
+
 def safe_source_name(video_path, max_len=40):
     """视频文件 → 统一的短源名（splits 目录名 / 片段文件名 / srt 名共用）。
 
@@ -50,6 +114,55 @@ def safe_source_name(video_path, max_len=40):
 def find_ffmpeg():
     from utils.platform_utils import find_ffmpeg as _ff
     return _ff()
+
+
+def classify_shot_type(path):
+    """按「文件夹/文件命名」识别素材景别（入场/出场/中景/特写）。
+
+    用途：镜头重组编排（入场放头部、出场放尾部，中景/特写混排中间）
+    与出入场镜头加速。识别到的景别随合成提交传给服务端
+    （见 docs/服务端景别分类与镜头编排需求.md）。
+
+    规则：
+    - 关键词为大小写不敏感的子串匹配（见 SHOT_TYPE_KEYWORDS）；
+    - 优先匹配文件名（去扩展名），其次父目录由深到浅逐级匹配，命中即返回；
+    - 均未命中返回 ""（未标注，编排时当中间镜头处理）。
+    """
+    if not path:
+        return ""  # 空路径直接返回，不能回退到 abspath("")=CWD 误判当前目录名
+    full = os.path.abspath(path)
+    if full == os.sep:
+        return ""
+    # 匹配顺序：文件名 → 父目录由深到浅（离文件越近越具体）
+    segs = [os.path.splitext(os.path.basename(full))[0]]
+    dirs = [d for d in os.path.dirname(full).split(os.sep) if d]
+    segs.extend(reversed(dirs))
+    for seg in segs:
+        low = seg.lower()
+        for st, kws in SHOT_TYPE_KEYWORDS.items():
+            if any(kw in low for kw in kws):
+                return st
+    return ""
+
+
+def apply_shot_layout_order(seq, shot_types):
+    """按景别编排镜头顺序：入场放头部、出场放尾部，其余（含未标注）居中混排。
+
+    - 各分组内保持原相对顺序（稳定排序，不额外洗牌，中景/特写天然交错）；
+    - 没有任何入场/出场标注时原样返回（不影响无景别素材的既有行为）。
+
+    shot_types: {片段路径: 景别键}，缺失或 "" 一律归入中间段。
+    """
+    clips = list(seq or [])
+    if not clips:
+        return clips
+    heads = [c for c in clips if shot_types.get(c) == "entrance"]
+    tails = [c for c in clips if shot_types.get(c) == "exit"]
+    if not heads and not tails:
+        return clips
+    middle = [c for c in clips
+              if shot_types.get(c) not in ("entrance", "exit")]
+    return heads + middle + tails
 
 
 def get_media_duration(filepath):

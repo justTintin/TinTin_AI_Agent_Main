@@ -34,7 +34,11 @@ from gui.montage.dialogs import (
 # subprocess 调用前完成；下面的 Worker/页面 import 链都会用到 subprocess。
 from gui.montage.utils_media import (
     MAX_SOURCE_VIDEOS,
+    SHOT_TYPE_COLORS,
+    SHOT_TYPE_LABELS,
     VIDEO_EXTS,
+    apply_shot_layout_order,
+    classify_shot_type,
     collect_video_files,
     compute_clip_hash,
     compute_clip_quality,
@@ -43,6 +47,7 @@ from gui.montage.utils_media import (
     get_media_duration,
     parse_srt,
     parse_srt_to_descriptions,
+    safe_source_name,
 )
 from gui.montage.widgets import DoubleClickLineEdit, ReorderableClipsTable
 from gui.montage.workers.concat_workers import FinalMixWorker, VideoConcatWorker, VideoDubbingWorker
@@ -188,6 +193,10 @@ class VideoMontagePage(BasePage):
 
         # Split clips metadata cache
         self.split_clips_cache = {}
+        # 镜头→景别缓存（按源视频命名识别，见 _shot_type_for_clip）
+        self._clip_shot_type_cache = {}
+        # 源视频「目录名→景别」映射（随 video_list 变更失效，见 _source_shot_type_map）
+        self._source_shot_type_cache = None
 
         # Step 2 precompose state
         self.precompose_plans = []
@@ -213,6 +222,11 @@ class VideoMontagePage(BasePage):
         self.highlight_worker: Any = None
         self._plan_worker: Any = None
         self.batch_rewrite_worker: Any = None
+        # 服务端字体库（GET /config/fonts）：下拉框 itemData 只存 font_id，完整 dict 另建映射
+        self._server_fonts: list = []
+        self._server_fonts_by_id: dict = {}
+        self._fonts_worker: Any = None
+        self._fonts_loaded: bool = False
     # [1·初始化]  setup
     def setup(self):
         # Main layout
@@ -452,6 +466,9 @@ class VideoMontagePage(BasePage):
         if saved_url:
             self.api_url_input.setText(saved_url)
         self._populate_ref_audio_samples()
+        # 字幕字体列表来自服务端，进 Step3 预拉一次（后台线程，不阻塞 UI）
+        if not getattr(self, "_fonts_loaded", False):
+            self._refresh_server_fonts()
 
     # ==================== PAGE 0: SMART SPLIT ====================
     # ==================== PAGE 1: CLIP ASSEMBLY ====================
@@ -462,6 +479,12 @@ class VideoMontagePage(BasePage):
         path = item.text().strip()
         if not path:
             return
+        # 按文件夹/文件名识别景别（入场/出场/中景/特写）：颜色+悬停双重可见；
+        # 未按命名规范归档的素材不标注（保持默认色），编排时当中间镜头处理。
+        st = classify_shot_type(path)
+        if st:
+            item.setToolTip(f"{path}\n景别：{SHOT_TYPE_LABELS[st]}")
+            item.setForeground(QBrush(QColor(SHOT_TYPE_COLORS[st])))
     # [9·其他]  _show_video_context_menu
     def _show_video_context_menu(self, pos):
         item = self.video_list.itemAt(pos)
@@ -481,6 +504,7 @@ class VideoMontagePage(BasePage):
         self.video_list.takeItem(row)
         if getattr(self, "processing_video_path", "") == path:
             self.processing_video_path = ""
+        self._invalidate_shot_type_caches()
         # 终止正在运行的分割/挑精华 worker，避免后台残留导致后续操作被静默拦截
         self._kill_running_workers()
         self._refresh_source_root_hint()
@@ -531,6 +555,12 @@ class VideoMontagePage(BasePage):
         except (ValueError, TypeError):
             common_dir = os.path.dirname(os.path.abspath(paths[0]))
         self.folder_path_input.setText(common_dir)
+    # [2·基础设施]  _invalidate_shot_type_caches
+    def _invalidate_shot_type_caches(self):
+        """素材列表变更后失效景别缓存（_shot_type_for_clip / _source_shot_type_map）。"""
+        self._clip_shot_type_cache = {}
+        self._source_shot_type_cache = None
+
     # [2·基础设施]  _add_paths_to_video_list
     def _add_paths_to_video_list(self, paths):
         """把一批本地视频路径加入 video_list（去重），供选择/拖拽共用入口。
@@ -553,6 +583,8 @@ class VideoMontagePage(BasePage):
             self.video_list.addItem(it)
             self._decorate_video_item_widget(it)
             added += 1
+        if added:
+            self._invalidate_shot_type_caches()
         if True:
             self._ensure_montage_job()
             self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
@@ -627,8 +659,14 @@ class VideoMontagePage(BasePage):
         elif added == 0:
             self.stage_label.setText("该文件夹的视频已在列表中，无新增。")
         else:
+            # 景别分布统计：让用户在导入时就知道命名/归档是否被正确识别
+            counts = {}
+            for _p in file_paths:
+                _key = SHOT_TYPE_LABELS.get(classify_shot_type(_p), "未标注")
+                counts[_key] = counts.get(_key, 0) + 1
+            dist = "、".join(f"{k} {v}" for k, v in counts.items())
             self.stage_label.setText(
-                f"已遍历文件夹，新增 {added} 个素材到列表（共扫描 {len(file_paths)} 个）。")
+                f"已遍历文件夹，新增 {added} 个素材到列表（共扫描 {len(file_paths)} 个｜景别分布：{dist}）。")
 
     @staticmethod
     def _is_local_file_item(item):
@@ -803,6 +841,8 @@ class VideoMontagePage(BasePage):
         self.split_clips_cache = {}
         self.split_descriptions = {}
         self._clip_duration_cache = {}
+        if hasattr(self, "_clip_shot_type_cache"):
+            self._invalidate_shot_type_caches()
         self.processing_video_path = ""
         self.temp_scenes = []
         self._available_concat_clips = []
@@ -876,6 +916,7 @@ class VideoMontagePage(BasePage):
                     common_dir = os.path.dirname(os.path.abspath(paths[0]))
             if common_dir:
                 self.folder_path_input.setText(common_dir)
+            self._invalidate_shot_type_caches()
             self._ensure_montage_job()
             self._last_merged_splits_dirs = self._collect_merged_splits_dirs()
             self.processing_video_path = ""
@@ -2647,6 +2688,9 @@ class VideoMontagePage(BasePage):
         _dl = duration_limit
         _tc = target_clip_count
         _out_dir = out_montage_dir
+        # 景别映射必须在主线程预取（_shot_type_for_clip 要读 video_list 控件），
+        # 后台线程只做纯计算
+        _st = self._collect_clip_shot_types(_clips)
 
         def _plan_work():
             return self._build_precompose_plans(
@@ -2655,6 +2699,7 @@ class VideoMontagePage(BasePage):
                 batch_count=_bc,
                 randomness=_rv,
                 duration_limit_sec=_dl,
+                shot_types=_st,
             )
 
         def _plan_done(plan_clips_list):
@@ -2944,6 +2989,38 @@ class VideoMontagePage(BasePage):
             "preset": "superfast",
         }
 
+        # 字幕烧制与字体偏好：随 options 全量摊平进 multipart form（见
+        # montage_concat_server_worker._submit_concat 的 {k: str(v) ...}）。
+        # 服务端目前尚未声明这些字段，多传会被 FastAPI 忽略；按
+        # docs/服务端字幕烧制与字体参数需求.md 加好后即自动生效。
+        _font_id, _font_name = self._selected_subtitle_font()
+        options["burn_subtitle"] = bool(
+            getattr(self, "chk_add_subtitles", None) and self.chk_add_subtitles.isChecked())
+        if _font_id:
+            options["font_id"] = _font_id
+        if _font_name:
+            options["fontname"] = _font_name
+
+        # 景别标注：随 options 摊平为 form 字段 clip_shot_types（JSON：文件名→景别），
+        # 服务端按 docs/服务端景别分类与镜头编排需求.md 实现编排/加速后即生效；
+        # 未支持时 FastAPI 忽略该字段，不影响现有合成。
+        try:
+            _st_payload = {
+                os.path.basename(c): self._shot_type_for_clip(c)
+                for c in selected_clips if c
+            }
+            if any(_st_payload.values()):
+                options["clip_shot_types"] = json.dumps(_st_payload, ensure_ascii=False)
+        except (OSError, ValueError, TypeError) as _e:
+            log.warning(f"[montage_concat] 景别标注生成失败（忽略）: {_e}")
+
+        # 出入场加速倍速（服务端字段 edge_speedup）：仅当用户选择加速时发送。
+        # 服务端只对 clip_shot_types 里 entrance/exit 的片段应用 setpts/atempo；
+        # 未启用景别标注时发送该字段无效果（无入口可判定哪些片段加速）。
+        _edge_speed = self._selected_edge_speedup()
+        if _edge_speed > 1.0:
+            options["edge_speedup"] = _edge_speed
+
         # 卡点 / LUT 当前服务端接口不支持，回退本地处理
         if recombine_mode == "beat" and beat_times:
             self.stage_label.setText("注意： 卡点模式暂不支持服务端合成，回退到本地合成")
@@ -3225,6 +3302,8 @@ class VideoMontagePage(BasePage):
     def _on_server_concat_fallback(self, reason):
         """服务端合成不可用（402 等），自动回退到本地合成。"""
         log.info(f"[montage_concat] 服务端回退本地合成: {reason}")
+        if self._selected_edge_speedup() > 1.0:
+            reason += "（注意：本地回退合成不支持出入场加速，该设置在本次回退中不生效）"
         self.stage_label.setText(f"注意： {reason}")
         params = getattr(self, "_server_concat_fallback_params", None)
         if not params:
@@ -3524,6 +3603,106 @@ class VideoMontagePage(BasePage):
         self.progress_bar.setValue(0)
         self.stage_label.setText("失败： 合成失败")
         self._show_long_error("人声合成错误", f"处理过程中发生错误：\n{err}")
+    # [6·配音]  服务端字体库（GET /config/fonts）
+    def _refresh_server_fonts(self):
+        """从服务端拉取字体列表填充「字幕字体」下拉框。
+
+        必须在后台线程做：同步 HTTP 放在 UI 主线程会卡住界面（本项目已多次踩此坑）。
+        失败/未配服务端地址时降级为空列表，不阻断配音与烧字幕流程。
+        """
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return
+        if self._fonts_worker is not None and self._fonts_worker.isRunning():
+            return
+        server_url = stc._server_url()
+        if not server_url:
+            self._populate_font_combo([])
+            if self.stage_label:
+                self.stage_label.setText("未配置服务端地址，字幕将使用默认字体")
+            return
+
+        keep_id = str(combo.currentData() or "")
+        combo.setEnabled(False)
+        if self.stage_label:
+            self.stage_label.setText("正在从服务端加载字体列表…")
+
+        from utils.montage_client import list_fonts
+        from utils.thread_worker import TaskWorker
+
+        def _done(fonts, _combo=combo, _keep=keep_id):
+            try:
+                _combo.setEnabled(True)
+            except RuntimeError:  # 页面已销毁
+                return
+            self._populate_font_combo(fonts or [], keep_id=_keep)
+            self._fonts_loaded = True
+            n = len(self._server_fonts)
+            if self.stage_label:
+                self.stage_label.setText(
+                    f"已从服务端加载 {n} 个字体" if n else "服务端未返回字体，字幕将使用默认字体")  # noqa: E501
+
+        def _err(e):
+            with contextlib.suppress(RuntimeError):
+                combo.setEnabled(True)
+            self._populate_font_combo([])
+            log.warning(f"拉取服务端字体列表失败: {e}")
+            if self.stage_label:
+                self.stage_label.setText("拉取服务端字体失败，字幕将使用默认字体")
+
+        self._fonts_worker = TaskWorker(list_fonts, server_url)
+        self._fonts_worker.finished.connect(_done, type=Qt.QueuedConnection)
+        self._fonts_worker.error.connect(_err, type=Qt.QueuedConnection)
+        self._fonts_worker.start()
+
+    def _populate_font_combo(self, fonts, keep_id=""):
+        """把服务端字体写入下拉框：itemData 存 font_id，dict 放 _server_fonts_by_id。"""
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return
+        self._server_fonts = [f for f in (fonts or []) if isinstance(f, dict)]
+        self._server_fonts_by_id = {}
+        items = [("默认（不指定字体）", "")]
+        seen_family = set()
+        for f in self._server_fonts:
+            fid = str(f.get("id") or "").strip()
+            family = str(f.get("family") or f.get("filename") or "").strip()
+            if not fid or not family:
+                continue
+            self._server_fonts_by_id[fid] = f
+            # 同族名多个字重/文件时追加文件名区分
+            label = f"{family}（{f.get('filename')}）" if family in seen_family else family
+            seen_family.add(family)
+            items.append((label, fid))
+        combo.setItems(items)
+        idx = 0
+        for i in range(combo.count()):
+            if str(combo.itemData(i) or "") == (keep_id or ""):
+                idx = i
+                break
+        combo.setCurrentIndex(idx)
+
+    def _selected_subtitle_font(self):
+        """返回当前选定的 (font_id, fontname)；未选或无列表时返回 ("", "")。"""
+        combo = getattr(self, "subtitle_font_combo", None)
+        if combo is None:
+            return "", ""
+        fid = str(combo.currentData() or "")
+        if not fid:
+            return "", ""
+        f = self._server_fonts_by_id.get(fid) or {}
+        return fid, str(f.get("family") or "")
+
+    def _selected_edge_speedup(self):
+        """UI 选中的出入场加速倍速（Step2 下拉框）；未初始化/异常回退 1.0=不加速。"""
+        combo = getattr(self, "edge_speedup_combo", None)
+        if combo is None:
+            return 1.0
+        try:
+            return float(combo.currentData() or 1.0)
+        except (TypeError, ValueError):
+            return 1.0
+
     # [7·混音导出]  _start_dubbing_videos
     def _start_dubbing_videos(self):
         if self.dub_worker and self.dub_worker.isRunning():
@@ -3579,7 +3758,8 @@ class VideoMontagePage(BasePage):
 
         self.dub_worker = VideoDubbingWorker(
             tasks, add_subtitles=add_subs, length_modes=self.voice_length_mode,
-            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words)
+            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words,
+            subtitle_font=self._selected_subtitle_font()[1] if add_subs else "")
         self.dub_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.dub_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
         self.dub_worker.finished.connect(self._on_dubbing_finished)
@@ -4991,7 +5171,56 @@ class VideoMontagePage(BasePage):
     def _score_clip(self, clip_path):
         return -1
     # [5·拼接合成]  _build_precompose_plans
-    def _build_precompose_plans(self, clips: list[str], target_clip_count: int, batch_count: int, randomness: str, duration_limit_sec: float) -> list:  # noqa: E501
+    # [5·拼接合成]  _shot_type_for_clip
+    def _shot_type_for_clip(self, clip_path):
+        """镜头片段 → 景别键（entrance/exit/medium/closeup，未识别返回 ""）。
+
+        片段自身名（clip_001.mp4 等）不带景别，归属看源视频：片段目录名是
+        safe_source_name(源视频)，查「目录名→景别」映射（单遍历素材列表懒构建，
+        防止每个未缓存片段都全量扫 video_list 做 isfile stat —— 大量片段时
+        O(片段数×素材数) 次磁盘访问会卡死主线程，同 #020 家族）；
+        查不到归属再按片段自身路径兕底。结果缓存（含空值）。
+        """
+        ap = os.path.abspath(clip_path or "")
+        if not ap:
+            return ""
+        cache = getattr(self, "_clip_shot_type_cache", None)
+        if cache is None:
+            cache = self._clip_shot_type_cache = {}
+        if ap in cache:
+            return cache[ap]
+        st = ""
+        parent = os.path.basename(os.path.dirname(ap))
+        if parent:
+            st = self._source_shot_type_map().get(parent, "")
+        if not st:
+            st = classify_shot_type(ap)
+        cache[ap] = st
+        return st
+
+    def _source_shot_type_map(self):
+        """{safe_source_name(源视频): 景别} 映射（懒构建+缓存，单次遍历素材列表）。"""
+        mapping = getattr(self, "_source_shot_type_cache", None)
+        if mapping is not None:
+            return mapping
+        mapping = {}
+        for i in range(self.video_list.count()):
+            it = self.video_list.item(i)
+            if it is None or not self._is_local_file_item(it):
+                continue
+            v = it.text().strip()
+            if not v:
+                continue
+            mapping.setdefault(safe_source_name(v), classify_shot_type(v))
+        self._source_shot_type_cache = mapping
+        return mapping
+
+    # [5·拼接合成]  _collect_clip_shot_types
+    def _collect_clip_shot_types(self, clips):
+        """批量取镜头景别映射（主线程调，供后台建方案/提交体使用）。"""
+        return {os.path.abspath(c): self._shot_type_for_clip(c) for c in clips if c}
+
+    def _build_precompose_plans(self, clips: list[str], target_clip_count: int, batch_count: int, randomness: str, duration_limit_sec: float, shot_types: dict | None = None) -> list:  # noqa: E501
         base: list[str] = [os.path.abspath(c) for c in clips if c]
         if not base:
             return []
@@ -5097,9 +5326,19 @@ class VideoMontagePage(BasePage):
             if max_total <= 0 and len(seq) < target_clip_count and unique:
                 while len(seq) < target_clip_count:
                     seq.append(random.choice(unique))
-            # 兜底：极端情况（全部相似/时长解析异常）下至少保证 1 个镜头
+            # 兕底：极端情况（全部相似/时长解析异常）下至少保证 1 个镜头
             if not seq and unique:
                 seq.append(unique[0] if randomness == "low" else random.choice(unique))
+            # 景别编排：入场镜头放头部、出场镜头放尾部，中景/特写（含未标注）
+            # 居中混排；无任何出入场标注时保持原序不变。
+            # shot_types 由主线程预传入（Worker 线程不能碰 Qt 控件反查素材列表），
+            # 缺项按片段自身路径纯字符串匹配兕底。
+            _st_map = dict(shot_types or {})
+            for _c in seq:
+                if _c not in _st_map:
+                    _st_map[_c] = classify_shot_type(_c)
+            if any(_st_map.get(_c) for _c in seq):
+                seq = apply_shot_layout_order(seq, _st_map)
             plans.append({"clips": seq, "deleted_flags": [False] * len(seq), "mode": "random"})  # noqa: E501
         log.info(f"[DIAG _build_precompose_plans] target={target_clip_count} batch={batch_count} total_clips={len(unique)} plans={len(plans)} plan_sizes={[len(p['clips']) for p in plans]}")  # type: ignore[arg-type]  # noqa: E501
         return plans

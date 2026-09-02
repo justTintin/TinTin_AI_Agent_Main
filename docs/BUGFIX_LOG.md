@@ -26,6 +26,8 @@
 | #020 | 2026-09-01 | 智能混剪 | 智能分割刷新链在主线程逐片段跑 ffprobe/cv2 导致未响应 |
 | #021 | 2026-09-01 | 智能混剪 | 点「清空混剪缓存」后已添加的素材列表未清空 |
 | #022 | 2026-09-01 | 智能混剪 | 镜头重组设 30s 但成片只有 17-20s（选片预算被丢弃片段吃掉+提前 break） |
+| #023 | 2026-09-02 | 智能混剪 | 服务端改版后 concat 轮询撞名 unified 旧任务致下载失败，适配 result 端点新契约 |
+| #024 | 2026-09-02 | 智能混剪 | 景别归属反查逐片段全量扫素材列表（O(n²) 次 isfile stat）+ concat 轮询旧契约路径无超时 |
 
 ---
 
@@ -1462,6 +1464,78 @@ FileNotFoundError: 素材不存在:
 1. 智能混剪 → 镜头重组 → 设时长限制 30s → 生成预合成方案
 2. 预期：每条方案的镜头数明显增多，总时长贴近 30s（含转场重叠后实际略短属正常）
 3. 需重启客户端加载新代码
+
+---
+
+## #023 服务端改版后 concat 轮询撞名 unified 旧任务致下载失败
+
+**日期**：2026-09-02  
+**文件**：`studio/gui/montage/workers/montage_concat_server_worker.py`  
+**方法**：`_poll_and_download()` / 新增 `_consume_unified_task()` / `_poll_result_endpoint()`  
+**严重级别**：高（服务端合成必现失败，报「下载后的成片文件无效或过小」）
+
+### 问题描述
+
+联调景别编排（#022 后续需求）时发现：服务端改版后 `POST /montage/concat` 返回的任务 ID
+与 `/tasks/unified` 里历史 `editor_render` 任务的 ID 序列**撞名**（如 id=145/148 都命中 7 月的
+老渲染任务）。旧轮询逻辑拿撞名任务的 `result.output_url`（`/editor/render/145/result`）去下载，
+404 后报「下载后的成片文件无效或过小」。
+
+### 根因分析
+
+新服务端契约：concat 任务**不再注册 unified 任务表**，改为
+`GET /montage/concat/result/{task_id}` 兼作状态与结果——未完成 404（JSON detail
+「拼接结果不存在或尚未完成」），完成 200 直出 video/mp4（实测确认）。客户端仍按
+`GET /tasks/unified/{id}` 轮询，而该接口对任何整数 ID 都可能命中历史任务。
+
+### 修复
+
+轮询分派：
+1. unified 命中且 `task_type` 含 `montage`（或无 `task_type`）→ 旧契约处理
+   （原逻辑抽到 `_consume_unified_task`，保留向后兼容）；
+2. unified 命中但 `task_type` 不符（撞名）→ 忽略，改轮 `GET /montage/concat/result/{id}`：
+   200 落盘完成、404 继续轮、总超时 60 分钟（`_RESULT_POLL_TIMEOUT`）；
+3. unified 未命中 → 同样走结果端点轮询。
+
+### 回归
+
+`tests/unit/test_montage_concat_worker.py` 新增 2 例：
+- `test_poll_result_endpoint_new_contract`：unified 返回撞名 editor_render → 必须走
+  `/montage/concat/result/{id}` 下载且忽略 `/editor/render` URL；
+- `test_result_endpoint_timeout_raises`：结果端点一直 404 → 总超时报错（不无限轮）。
+
+另用真实服务端 e2e 验证（红/绿/蓝纯色片段，倒序上传）：无景别字段时顺序不变（≈7.5s），
+带 `clip_shot_types + shot_layout + edge_speedup=2` 时重排为 入场(红,1.25s)→中景(绿,2.5s)
+→出场(蓝,1.25s)（实测 5.03s，首帧红/尾帧蓝）。
+
+---
+
+## #024 景别归属反查逐片段全量扫素材列表 + concat 轮询旧契约路径无超时
+
+**日期**：2026-09-02  
+**文件**：`studio/gui/video_montage_page.py`、`studio/gui/montage/workers/montage_concat_server_worker.py`  
+**方法**：`_shot_type_for_clip()` / `_source_shot_type_map()` / `_poll_and_download()`  
+**严重级别**：高（片段多时主线程卡顿乃至未响应；Worker 无限轮询）
+
+### 问题描述与根因
+
+1. `_shot_type_for_clip()` 每个缓存未命中的片段都全量遍历 `video_list`（≤500 项），
+   且每项 `_is_local_file_item` 会做 `os.path.isfile()` 磁盘 stat。`_collect_clip_shot_types()`
+   在主线程对全部勾选片段逐个调用，最坏 O(片段数×素材数) 次 stat
+   （2000 片段×500 素材=100 万次），与 #020 同族——本地盘卡数秒，网络盘直接未响应。
+2. `_poll_and_download()` 旧契约路径（`_consume_unified_task` 返回 False 后 `continue`）
+   跳过超时检查：服务端任务永远停在 running 时 worker 无限轮询、合成按钮永久禁用。
+
+### 修复
+
+1. 新增 `_source_shot_type_map()`：`{safe_source_name(源视频): 景别}` 映射懒构建+缓存
+   （单次遍历素材列表），`_shot_type_for_clip()` 改为 O(1) 查表；
+   新增 `_invalidate_shot_type_caches()`，在素材列表四个变更点（新增/移除/素材检索带入/清空缓存）失效。
+2. 超时检查移到轮询循环顶部，对所有路径（新/旧契约）生效（60 分钟总超时）。
+
+### 回归
+
+`test_video_montage_page.py` 新增 `TestShotTypeForClip` 4 例（归属解析/兕底/映射只构建一次/失效重建）。
 
 ---
 

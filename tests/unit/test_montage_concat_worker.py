@@ -102,6 +102,44 @@ class TestMontageConcatWorker(unittest.TestCase):
                         return_value={"status": "ok"}), self.assertRaises(RuntimeError):
             w._submit_concat()
 
+    def test_poll_result_endpoint_new_contract(self):
+        """新契约（2026-09 服务端）：concat 任务不在 unified 表，
+        GET /montage/concat/result/{id} 未完成 404、完成 200 直出 mp4。"""
+        w = self._worker(source_clips=["src_1.mp4"], task_id="146")
+        content = b"v" * 2048
+
+        def _fake_download(url, path, timeout):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(content)
+            return path
+
+        # unified 返回的是撞名的历史 editor_render 任务 → 必须被忽略
+        stale = {"id": "146", "task_type": "editor_render", "status": "completed",
+                 "result": {"output_url": "/editor/render/146/result"}}
+        with mock.patch.object(stc, "get_task", return_value=stale), \
+                 mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                            side_effect=_fake_download) as mg:
+            w.do_work()
+        url = mg.call_args.args[0]
+        self.assertIn("/montage/concat/result/146", url)
+        self.assertNotIn("/editor/render", url)
+        self.assertEqual(os.path.getsize(self.out), len(content))
+        src_file = os.path.splitext(self.out)[0] + "_sources.txt"
+        with open(src_file, encoding="utf-8") as f:
+            self.assertEqual(f.read().splitlines(), ["src_1.mp4"])
+
+    def test_result_endpoint_timeout_raises(self):
+        """新契约：unified 拿不到任务且结果端点一直 404 → 达到总超时后报错（不无限轮）。"""
+        w = self._worker(task_id="task-dead")
+        w._RESULT_POLL_TIMEOUT = 0  # 立即超时
+        with mock.patch.object(stc, "get_task", return_value=None), \
+                 mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
+                            return_value=None), \
+                 self.assertRaises(RuntimeError) as ctx:
+            w.do_work()
+        self.assertIn("超时", str(ctx.exception))
+
     def test_poll_download_and_sources(self):
         w = self._worker(source_clips=["src_1.mp4", "src_2.mp4"], task_id="task-1")
         completed = {"status": "completed", "progress": 100,

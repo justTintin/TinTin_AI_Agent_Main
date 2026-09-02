@@ -209,10 +209,31 @@ class Step3VoiceView(BaseStepView):
 
         # Subtitle option checkbox
         row_subtitle_opt = QHBoxLayout()
-        self.main_page.chk_add_subtitles = QCheckBox("在配音视频中同时添加/烧录字幕 (逐行按时间显示, 字号随视频高度自适应, 白色 50%透明背景)")  # noqa: E501
+        row_subtitle_opt.setSpacing(8)
+        row_subtitle_opt.setAlignment(Qt.AlignVCenter)
+        self.main_page.chk_add_subtitles = QCheckBox("烧制字幕（逐行按时间显示，字号随视频高度自适应，白色 50% 透明背景）")  # noqa: E501
         self.main_page.chk_add_subtitles.setChecked(False)
-        self.main_page.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")  # noqa: E501
+        self.main_page.chk_add_subtitles.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.main_page.chk_add_subtitles.setToolTip(
+            "字幕字体取自服务端字体库（GET /config/fonts）。\n"
+            "走服务端合成时，会把 font_id / fontname / burn_subtitle 一并提交给服务端烧制；\n"
+            "服务端尚未支持该参数时，回退到本地 ffmpeg 烧制（按同名解析本机已装字体）。")
         row_subtitle_opt.addWidget(self.main_page.chk_add_subtitles)
+
+        row_subtitle_opt.addSpacing(12)
+        row_subtitle_opt.addWidget(QLabel("字幕字体:"))
+        self.main_page.subtitle_font_combo = SearchableComboBox(placeholder="输入字体名搜索…")  # noqa: E501
+        self.main_page.subtitle_font_combo.setMinimumWidth(230)
+        self.main_page.subtitle_font_combo.setToolTip("字体列表来自服务端 /config/fonts，可输入关键字过滤")  # noqa: E501
+        row_subtitle_opt.addWidget(self.main_page.subtitle_font_combo)
+
+        self.main_page.btn_refresh_fonts = mdi_button("刷新字体", "refresh")
+        self.main_page.btn_refresh_fonts.setObjectName("secondary_button")
+        self.main_page.btn_refresh_fonts.setStyleSheet("padding: 4px 10px; font-size: 12px;")
+        self.main_page.btn_refresh_fonts.setToolTip("重新从服务端拉取字体列表")
+        self.main_page.btn_refresh_fonts.clicked.connect(self.main_page._refresh_server_fonts)  # noqa: E501
+        row_subtitle_opt.addWidget(self.main_page.btn_refresh_fonts)
+        row_subtitle_opt.addStretch()
         card_layout.addLayout(row_subtitle_opt)
 
         # 花字选项

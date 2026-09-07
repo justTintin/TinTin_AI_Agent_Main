@@ -1,0 +1,411 @@
+{
+  "source_draft": "D:\\缓存区\\JianyingPro Drafts\\9月1日 (2)",
+  "extracted_at": "2026-09-04",
+  "note": "来自剪映 11.3 key_value.json 素材使用记录；material_id 即花字素材ID（effect_id）",
+  "fancy_by_category": {
+    "热门": [
+      {
+        "material_id": "7362142403416952115",
+        "name": "粉色发光",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "1A715C43-5AF5-47d9-8E2C-4EF876D503AA"
+      },
+      {
+        "material_id": "7405124477803171124",
+        "name": "紫色立体文字",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "2BD24A7C-FDF5-4751-BED6-B0FE164F34D1"
+      },
+      {
+        "material_id": "7347627316031311115",
+        "name": "赛博朋克故障字",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "423444A0-CCF2-4dcc-8F0B-EC12C7C57EBF"
+      },
+      {
+        "material_id": "7312709252928277812",
+        "name": "薄荷冰花字",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "54118592-D52E-48e1-9BC4-BD361D8D58ED"
+      },
+      {
+        "material_id": "7506824081531243801",
+        "name": "红色紫色渐变立体描边花字",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "7506824081531243801"
+      },
+      {
+        "material_id": "7604155458005503257",
+        "name": "春节复古火焰",
+        "subcategory": "text_special_effect",
+        "category": "热门",
+        "category_id": "10721",
+        "is_vip": "1",
+        "segment_id": "7604155458005503257"
+      }
+    ],
+    "heycan_search_text": [
+      {
+        "material_id": "7405801186286259466",
+        "name": "科技感朋克发光立体标题花字",
+        "subcategory": "text_special_effect",
+        "category": "heycan_search_text",
+        "category_id": "heycan_search_text",
+        "is_vip": "1",
+        "segment_id": "41A30D74-0E57-40cb-AD6E-D4DDC3AA3A07"
+      },
+      {
+        "material_id": "7012784721700703525",
+        "name": "科技蓝色花字",
+        "subcategory": "text_special_effect",
+        "category": "heycan_search_text",
+        "category_id": "heycan_search_text",
+        "is_vip": "0",
+        "segment_id": "4EDDD219-6E4F-47ba-95DC-59AAFF59D53A"
+      }
+    ],
+    "综艺感": [
+      {
+        "material_id": "7405902936175381787",
+        "name": "蓝色纹理花字",
+        "subcategory": "text_special_effect",
+        "category": "综艺感",
+        "category_id": "5914008",
+        "is_vip": "1",
+        "segment_id": "4D1C0579-FA51-4c85-90DB-AAF90B776B5B"
+      },
+      {
+        "material_id": "7561689330641702168",
+        "name": "紫蓝黄波点纹理综艺花字",
+        "subcategory": "text_special_effect",
+        "category": "综艺感",
+        "category_id": "5914008",
+        "is_vip": "1",
+        "segment_id": "6BB2F375-0EA2-45cd-9EB4-2A8D865D858E"
+      }
+    ],
+    "纹理": [
+      {
+        "material_id": "7651858381233229081",
+        "name": "蓝火焰发光纹理花字",
+        "subcategory": "text_special_effect",
+        "category": "纹理",
+        "category_id": "5914009",
+        "is_vip": "1",
+        "segment_id": "70592303-BA8C-4d19-A6AA-C8181C59A0B2"
+      },
+      {
+        "material_id": "7571667147445947673",
+        "name": "双层描边蓝色图案花字",
+        "subcategory": "text_special_effect",
+        "category": "纹理",
+        "category_id": "5914009",
+        "is_vip": "1",
+        "segment_id": "7571667147445947673"
+      }
+    ],
+    "蓝色": [
+      {
+        "material_id": "7495216846946274584",
+        "name": "蓝色渐变阴影立体花字",
+        "subcategory": "text_special_effect",
+        "category": "蓝色",
+        "category_id": "10725",
+        "is_vip": "1",
+        "segment_id": "7495216846946274584"
+      }
+    ],
+    "🍉夏日": [
+      {
+        "material_id": "7495312625169911065",
+        "name": "综艺风蓝色立体描边花字",
+        "subcategory": "text_special_effect",
+        "category": "🍉夏日",
+        "category_id": "5914419",
+        "is_vip": "1",
+        "segment_id": "7495312625169911065"
+      }
+    ],
+    "🍁秋日": [
+      {
+        "material_id": "7527336771223407934",
+        "name": "花字",
+        "subcategory": "text_special_effect",
+        "category": "🍁秋日",
+        "category_id": "5913989",
+        "is_vip": "1",
+        "segment_id": "7527336771223407934"
+      }
+    ]
+  },
+  "text_templates": [
+    {
+      "material_id": "7349028965538860329",
+      "name": "赛博朋克故障风推荐图标",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "06FD529F-30BB-438c-9F09-3DFE92A6F929"
+    },
+    {
+      "material_id": "7503828966675860760",
+      "name": "综艺情绪-谁懂啊",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "23BE4BBF-6A2C-4f7d-96C1-2C8EBF8E1726"
+    },
+    {
+      "material_id": "7634860195524463897",
+      "name": "科技数码-性能天花板",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "24987D7C-1EF3-4018-9390-AE1117FDFB84"
+    },
+    {
+      "material_id": "7634569203470798104",
+      "name": "智能数码开箱",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "3A18A014-E314-4b4d-865D-E6C632217CB3"
+    },
+    {
+      "material_id": "7090495856817736995",
+      "name": "科技012",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "526CD102-AAAC-49a5-B38D-E01B017F88B3"
+    },
+    {
+      "material_id": "7293898659400338714",
+      "name": "双11带货 引导 推荐购买",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "5489458D-5793-451b-9DC6-2958D67D4FDE"
+    },
+    {
+      "material_id": "7611860630232141080",
+      "name": "重点来啦",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "60C9CC2F-4923-488d-AC25-68FFFF0D7D08"
+    },
+    {
+      "material_id": "7440023594438053139",
+      "name": "购物节喇叭喊话文本-薅羊毛啦",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "6F6D9708-F846-485a-8179-7C97D8CF4819"
+    },
+    {
+      "material_id": "7342529855923211557",
+      "name": "仿3D带货购物性价比高立体字体",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7342529855923211557"
+    },
+    {
+      "material_id": "7351332137951431963",
+      "name": "赛博科技-精准操控系统",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7351332137951431963"
+    },
+    {
+      "material_id": "7351352108802641161",
+      "name": "赛博科技-性能优势介绍",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7351352108802641161"
+    },
+    {
+      "material_id": "7434560304853290278",
+      "name": "穿搭-超百搭",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7434560304853290278"
+    },
+    {
+      "material_id": "7502286965644201240",
+      "name": "520心动时刻",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7502286965644201240"
+    },
+    {
+      "material_id": "7508251180619910424",
+      "name": "电商-新品首发",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7508251180619910424"
+    },
+    {
+      "material_id": "7572788825429347646",
+      "name": "注意",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7572788825429347646"
+    },
+    {
+      "material_id": "7611905831956663614",
+      "name": "划重点",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7611905831956663614"
+    },
+    {
+      "material_id": "7634078804973210905",
+      "name": "科技数码-流畅度拉满",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "7634078804973210905"
+    },
+    {
+      "material_id": "7630068044148100377",
+      "name": "网感类-解锁隐藏吃法",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "00904C05-E128-4ba8-A538-3712CF2FE87D"
+    },
+    {
+      "material_id": "7535059208765476121",
+      "name": "回购率UP",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "0",
+      "segment_id": "00E6B73F-2816-4f6e-9C0E-18603F8BFBF7"
+    },
+    {
+      "material_id": "7523266482915134782",
+      "name": "美妆-颜值飙升",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "22C4910D-B5EC-419f-85FE-BF4451377BC8"
+    },
+    {
+      "material_id": "7348350533800938788",
+      "name": "赛博朋克风测评时间",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "387A1A52-6E36-47b4-B882-8716B6626DA2"
+    },
+    {
+      "material_id": "7438832505052007718",
+      "name": "好物推荐-强烈安利",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": "4A7472EF-FB06-41d2-8D51-58D40F3BB5A3"
+    },
+    {
+      "material_id": "7325752562496326963",
+      "name": "蓝色3c产品信息",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "0",
+      "segment_id": "6885BEC5-DBFC-4ac7-AA50-55DCD183B8E7"
+    },
+    {
+      "material_id": "7304228718191349033",
+      "name": "超显瘦大胆穿表达情绪文字",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": ""
+    },
+    {
+      "material_id": "7535017657851235646",
+      "name": "立即下单",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "0",
+      "segment_id": ""
+    },
+    {
+      "material_id": "7535087943875218713",
+      "name": "数智新生活",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "0",
+      "segment_id": ""
+    },
+    {
+      "material_id": "7570591932892597528",
+      "name": "芜湖",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": ""
+    },
+    {
+      "material_id": "7645254021095247129",
+      "name": "电商-热销爆款",
+      "subcategory": "text_template",
+      "category": "",
+      "category_id": "",
+      "is_vip": "1",
+      "segment_id": ""
+    }
+  ],
+  "other": []
+}

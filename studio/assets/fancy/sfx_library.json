@@ -1,0 +1,61 @@
+{
+  "note": "花字音效库：来自剪映音效面板，file 相对 assets/fancy/；模板 sound.file 引用",
+  "items": [
+    {
+      "sfx_id": "6896680544193563912",
+      "name": "叮铃～魔法音效",
+      "file": "sfx/叮铃～魔法音效.mp3",
+      "source": "jianying",
+      "md5": "b9f7ca5b6cc8e01736d2d1017f9f2c90",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896679322715819278",
+      "name": "任务完成",
+      "file": "sfx/任务完成.mp3",
+      "source": "jianying",
+      "md5": "93a6b50a8e0fec1cbf71e8283a3d0caa",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896679322724109576",
+      "name": "叮叮叮",
+      "file": "sfx/叮叮叮.mp3",
+      "source": "jianying",
+      "md5": "0a6d062a6406cc92499ec9babac2e185",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896679799100656904",
+      "name": "“呼”的转场音效",
+      "file": "sfx/“呼”的转场音效.mp3",
+      "source": "jianying",
+      "md5": "249bf13f91735789e519cd940682ff6d",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896679322715786510",
+      "name": "啵1",
+      "file": "sfx/啵1.mp3",
+      "source": "jianying",
+      "md5": "5bb4c18515e6059da16432af0db0f1dc",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896679333541285133",
+      "name": "滴，提示音",
+      "file": "sfx/滴，提示音.mp3",
+      "source": "jianying",
+      "md5": "0f20dc8e92167f5567ed6033214d07f6",
+      "added": "2026-09-04"
+    },
+    {
+      "sfx_id": "6896680544193481992",
+      "name": "仙尘音效",
+      "file": "sfx/仙尘音效.mp3",
+      "source": "jianying",
+      "md5": "3b06bd9e49ba9786418e3e54d0a61795",
+      "added": "2026-09-04"
+    }
+  ]
+}

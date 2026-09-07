@@ -2,6 +2,7 @@
 import contextlib
 import os
 import random
+import re
 import shutil
 import subprocess
 import traceback
@@ -25,6 +26,287 @@ class _TranscodeSkip(Exception):  # noqa: N818
     """标准化转码单个镜头时，因文件损坏/不可读/转码失败而需跳过。
     携带的提示文案会原样 emit 到 stage 信号，供 UI 展示。"""
 
+
+# ── 剪映安全框（safe area）：所有花字/字幕必须落在该区域内，避免被平台 UI
+# 遮挡或出框。依据剪映竖屏(9:16)默认安全框：左右各约 8% 宽、顶部约 8% 高、
+# 底部约 10% 高（底部更大，避开抖音点赞/评论交互区）。
+SAFE_X = 0.08        # 左右安全边距（相对宽度）
+SAFE_TOP = 0.08      # 顶部安全边距（相对高度）
+SAFE_BOTTOM = 0.10   # 底部安全边距（相对高度）
+# 字幕：字号相对高度（再大一号）+ 底边距安全框下沿 2%（整体上移）
+SUB_FONT_SCALE = 0.035
+SUB_BOTTOM_GAP = 0.02
+# 字幕自动折行：单行超过 SUB_MAX_LINE_WEIGHT 等效字（中文=1、ASCII≈0.55）
+# 自动折为多行上下堆叠（均衡断点，优先在空格/标点处断开）；行距相对高度
+SUB_MAX_LINE_WEIGHT = 13.0
+SUB_ASCII_WEIGHT = 0.55
+SUB_LINE_GAP = 0.012
+_SUB_BREAK_CHARS = set("，。！？、；：,.!?;: \t")
+
+_SAFE_X_EXPR = f"w*{SAFE_X}"
+_SAFE_TOP_EXPR = f"h*{SAFE_TOP}"
+_SAFE_BOTTOM_EDGE = f"h*(1-{SAFE_BOTTOM})"        # 安全框下沿 y 表达式
+_SAFE_BOTTOM_ANCHOR = f"{_SAFE_BOTTOM_EDGE}-text_h-h*{SUB_BOTTOM_GAP}"  # 元素底边贴框
+
+# 花字出现位置 → drawtext x/y 表达式（fontsize=h*0.08，text_w/text_h 为花字自身尺寸）。
+# 全部落在剪映安全框内：顶部 y=SAFE_TOP、左右 x=SAFE_X、底部元底边=安全框下沿-1%。
+# 与 docs/服务端花字烧制需求.md 保持一致。
+FANCY_POSITIONS = {
+    "upper_middle": {"label": "中上", "x": "(w-text_w)/2", "y": "h*0.3"},
+    "top":          {"label": "顶部居中", "x": "(w-text_w)/2", "y": _SAFE_TOP_EXPR},
+    "center":       {"label": "画面正中", "x": "(w-text_w)/2", "y": "(h-text_h)/2"},
+    "bottom":       {"label": "底部居中", "x": "(w-text_w)/2", "y": _SAFE_BOTTOM_ANCHOR},
+    "top_left":     {"label": "左上角", "x": _SAFE_X_EXPR, "y": _SAFE_TOP_EXPR},
+    "top_right":    {"label": "右上角", "x": f"w-text_w-{_SAFE_X_EXPR}", "y": _SAFE_TOP_EXPR},  # noqa: E501
+    "bottom_left":  {"label": "左下角", "x": _SAFE_X_EXPR, "y": _SAFE_BOTTOM_ANCHOR},
+    "bottom_right": {"label": "右下角", "x": f"w-text_w-{_SAFE_X_EXPR}", "y": _SAFE_BOTTOM_ANCHOR},  # noqa: E501
+}
+
+# 花字出现时机：跟随对应字幕行，提前 FANCY_LEAD_SEC 秒出现、该行字幕结束时消失；
+# 该行文案无卖点时不出现，等待下一个花字时机。
+FANCY_LEAD_SEC = 0.3
+FANCY_MAX_LEN = 10     # 花字内容最大字符数（价格/参数串超出截断）
+# 花字重叠消解：两个花字时间窗过近会在同一位置重叠渲染——
+# FANCY_MIN_GAP_SEC 相邻花字最小间隔；FANCY_MIN_DISPLAY_SEC 压缩前一个
+# 结束时间的下限（低于它宁可丢弃后一个），规则见 resolve_fancy_overlaps。
+FANCY_MIN_GAP_SEC = 0.05
+FANCY_MIN_DISPLAY_SEC = 0.4
+FANCY_MAX_PER_VIDEO = 3  # 每条视频花字数量上限（卖点 2-3 个，不足则有多少用多少）
+
+# ── 卖点提取（花字内容自动取自口播文案，不再手动输入）──
+# 优先级：价格 > 数字参数 > 关键词。与 docs/服务端花字烧制需求.md 2.3 同步维护。
+# 1) 价格：如「只要199元」「低至59.9元」
+_FANCY_PRICE_RE = re.compile(r"(?:仅|只要|低至|到手|券后)?\d+(?:\.\d+)?元")
+# 2) 数字参数：前置修饰 0-4 字 + 数字 + 已知单位（白名单，长词在前），如「续航70小时」「8000DPI」「仅重59克」
+_FANCY_UNIT = ("小时|分钟|秒钟|毫安时|毫安|mAh|千克|公斤|kg|KG|Kg|千瓦|kW|毫伏|mV|"
+               "毫米|厘米|分米|英寸|千米|公里|km|cm|mm|克|瓦|伏|升|毫升|ml|mL|"
+               "赫兹|Hz|kHz|分贝|dB|℃|°C|%|％|DPI|dpi|天|周|月|年|米|寸|度|W|V|G|g|L|倍|核|轴|键|帧|级|档|声")  # noqa: E501
+_FANCY_NUM_RE = re.compile(rf"[\u4e00-\u9fa5A-Za-z]{{0,4}}\d+(?:\.\d+)?(?:{_FANCY_UNIT})")
+# 3) 关键词卖点：无数字的强卖点词（按行内首个命中取词）
+_FANCY_KEYWORDS = (
+    "超轻", "超薄", "超长续航", "超静音", "大容量", "快充", "闪充", "无线充电",
+    "防水", "防尘", "降噪", "折叠", "便携", "旗舰", "爆款", "新款", "限量",
+    "免打孔", "免安装", "持久续航", "高清", "巨幕", "一机多用",
+    "电量持久", "电量充足", "放电均衡", "不易漏液", "输出稳定", "经久耐用", "密封性",
+    "平价",
+)
+
+
+def extract_fancy_word(line_text):
+    """从单行文案提取一个卖点作为花字内容（价格 > 数字参数 > 关键词）。
+
+    无卖点返回 ""，调用方跳过该行（不产生花字时机）。
+    """
+    words = extract_fancy_words_in_line(line_text, limit=1)
+    return words[0] if words else ""
+
+
+def extract_fancy_words_in_line(line_text, limit=FANCY_MAX_PER_VIDEO):
+    """单行内提取多个卖点（按出现位置排序）：价格×n + 数字参数×n + 关键词。
+
+    口播文案常为一整行（无换行），每行只取 1 个会漏掉大部分卖点；
+    这里按正则 finditer 收集行内全部命中，区间重叠去重（价格优先），
+    按位置排序后取前 limit 个。"""
+    t = (line_text or "")
+    if not t.strip():
+        return []
+    hits = []  # (start, end, word)
+    for m in _FANCY_PRICE_RE.finditer(t):
+        hits.append((m.start(), m.end(), m.group(0)[:FANCY_MAX_LEN]))
+    for m in _FANCY_NUM_RE.finditer(t):
+        if any(s <= m.start() < e or s < m.end() <= e for s, e, _ in hits):
+            continue  # 与价格区间重叠（如「只要199元」同时命中参数）
+        hits.append((m.start(), m.end(), m.group(0)[:FANCY_MAX_LEN]))
+
+    def _occupied(pos):
+        return any(s <= pos < e for s, e, _ in hits)
+
+    for kw in _FANCY_KEYWORDS:
+        if len(hits) >= limit:
+            break  # 已凑够上限，无需再扫关键词
+        pos = t.find(kw)
+        while pos != -1:
+            if not _occupied(pos):
+                hits.append((pos, pos + len(kw), kw))
+                break
+            pos = t.find(kw, pos + 1)
+    hits.sort(key=lambda h: h[0])
+    words = []
+    for _s, _e, w in hits:
+        if w and (not words or words[-1] != w):
+            words.append(w)
+        if len(words) >= limit:
+            break
+    return words
+
+
+def extract_fancy_words_from_text(text, max_words=FANCY_MAX_PER_VIDEO):
+    """整段文案提取卖点花字：逐行（行内多卖点），保持行序，跨行累计到 max_words。
+
+    供两处使用：① VideoDubbingWorker 烧制时的花字事件；② Step3 UI 的
+    「花字预览」（让用户在文案侧看见每个视频将生成哪些花字）。
+    """
+    words = []
+    for line in (text or "").splitlines():
+        for w in extract_fancy_words_in_line(line, limit=max_words - len(words)):
+            if w and (not words or words[-1] != w):
+                words.append(w)
+            if len(words) >= max_words:
+                return words
+    return words
+
+
+def resolve_fancy_overlaps(events, min_gap=FANCY_MIN_GAP_SEC,
+                           min_display=FANCY_MIN_DISPLAY_SEC):
+    """消解花字时间窗重叠：按开始时间排序后，优先压缩前一花字的结束时间，
+
+    压不动（会低于最短显示时长）则丢弃后一个。
+
+    重叠来源：① 前一花字随字幕行结束才消失，后一花字提前 FANCY_LEAD_SEC
+    出现——字幕行衔接紧密（间隔 < 0.3s）时时间窗交叠；② 行内多卖点均分
+    时间窗时最短显示约束 max(s+0.2, e) 使后段越界压到下一段。
+    服务端烧制需保持同一规则（见 docs/服务端花字烧制需求.md 2.3）。
+    """
+    out = []
+    for word, s, e in sorted(events, key=lambda ev: (ev[1], ev[2])):
+        # 仅严格交叠（s < pe）才算重叠：背靠背（s == pe）是行内多卖点依次
+        # 出现的正常形态，between 含端点的 1 帧交叠可忽略
+        if out and s < out[-1][2]:
+            prev_word, ps, pe = out[-1]
+            # 优先压缩前一花字：结束提前到 next.start - gap，但不短于最短显示
+            new_pe = max(s - min_gap, ps + min_display)
+            if new_pe < pe:
+                out[-1] = (prev_word, ps, new_pe)
+            if s < out[-1][2] + min_gap:
+                continue  # 压不动（或压完仍重叠）→ 丢弃后一个，保先到的
+        out.append((word, s, e))
+    return out
+
+
+_SUB_PRON_RE = re.compile(r"(?<=[0-9A-Za-z])\([^\(\)]{1,12}\)")
+
+
+def _strip_pron_annotation(text):
+    """去掉读音标注括号：555(三五)电池 → 555电池。
+
+    读音标注供 TTS 用（voice_workers._preprocess_tts_text 把括号内作为
+    读法替换），字幕/花字显示原文；仅当括号前紧贴字母/数字时识别。
+    """
+    return _SUB_PRON_RE.sub("", text or "")
+
+
+def _sub_line_weight(text):
+    """字幕行等效宽度：中文/全角=1，ASCII/半角≈0.55。"""
+    return sum(SUB_ASCII_WEIGHT if ord(c) < 0x2E80 else 1.0 for c in text)
+
+
+def _is_ascii_alnum(ch):
+    return ch.isascii() and ch.isalnum()
+
+
+# 量词/单位字：数字后紧跟这些字时不可作为字幕分段断点（如 199|元、59|克，
+# 数字与单位是一个词，拆开观感割裂）
+_SUB_UNIT_CHARS = set("元角分厘克千克吨斤两米寸升瓦伏安时天年月日号度倍颗粒枚张片支盒包瓶罐箱袋页行站次趟遍")  # noqa: E501
+
+
+def _bad_sub_boundary(chars, i):
+    """字幕分段禁断边界：英数连续串中间、数字后紧跟量词单位（199|元）。"""
+    a, b = chars[i - 1], chars[i]
+    if _is_ascii_alnum(a) and _is_ascii_alnum(b):
+        return True
+    if a.isdigit() and b in _SUB_UNIT_CHARS:
+        return True
+    return False
+
+
+def _snap_break(chars, prefer, lo):
+    """断点选择（按优先级）：
+
+    1. prefer±2 内的空格/标点（吸附，断点跳过分隔符）；
+    2. prefer±2 内不在英文/数字连续串中间的字符边界（如 中|8000、DPI|调，
+       杜绝 8000|DPI 硬切）；
+    3. 全行范围内离 prefer 最近的非英文数字内部边界（兑底）；
+    纯英文/数字长串（无任何可用边界）返回 None 由调用方硬切。
+    """
+    best = None
+    for i in range(max(lo + 1, prefer - 2), min(len(chars) - 1, prefer + 2) + 1):
+        if chars[i] in _SUB_BREAK_CHARS or chars[i - 1] in _SUB_BREAK_CHARS:
+            dist = abs(i - prefer)
+            if best is None or dist < best[0]:
+                best = (dist, i)
+    if best is not None:
+        i = best[1]
+        if chars[i] in _SUB_BREAK_CHARS:
+            i += 1  # 断点跳过分隔符
+        return i
+    # 2) ±3 内的可用边界（不在英数连续串中间、不拆数字+量词，如 9|元）
+    for i in range(max(lo + 1, prefer - 3), min(len(chars) - 1, prefer + 3) + 1):
+        if not _bad_sub_boundary(chars, i):
+            return i
+    # 3) 全范围最近的可用边界
+    best = None
+    for i in range(lo + 1, len(chars)):
+        if not _bad_sub_boundary(chars, i):
+            dist = abs(i - prefer)
+            if best is None or dist < best[0]:
+                best = (dist, i)
+    return best[1] if best else None
+
+
+def wrap_subtitle_line(line_text):
+    """超长字幕行自动折行（剪映竖屏安全框内单行约容 13 个等效字）。
+
+    - 不超宽：返回 [原行]；
+    - 超宽：按等效宽度均衡拆成多行，断点优先吸附到空格/标点（如
+      「续航持久伴闯关 GPW3手感真带劲」→「续航持久伴闯关」/「GPW3手感真带劲」，
+      不会在 GPW3 中间硬断）；空行返回 []。
+    """
+    text = (line_text or "").strip()
+    if not text:
+        return []
+    total = _sub_line_weight(text)
+    if total <= SUB_MAX_LINE_WEIGHT:
+        return [text]
+    # 按上限-1 计算段数：断点不能落在英文/数字连续串中间（离散性会让
+    # 某段超出均值），留 1 字余量保证吸附/回退后每段仍 ≤ 上限
+    n_parts = max(2, int(-(-total // max(1.0, SUB_MAX_LINE_WEIGHT - 1.0))))
+    chars = list(text)
+    weights = [SUB_ASCII_WEIGHT if ord(c) < 0x2E80 else 1.0 for c in chars]
+    # 每个字符之前的累计宽度（断点候选基准）
+    cum_before = []
+    acc = 0.0
+    for w in weights:
+        cum_before.append(acc)
+        acc += w
+
+    bounds = [0]
+    for part in range(1, n_parts):
+        target = total * part / n_parts
+        lo = bounds[-1] + 1
+        if lo >= len(chars):
+            break
+        # 兑底：任意字符边界里离 target 最近的
+        boundary = min(range(lo, len(chars)), key=lambda i: abs(cum_before[i] - target))
+        b = boundary
+        # 优先：±2 范围内的空格/标点/非英数内部断点（_snap_break）
+        snapped = _snap_break(chars, boundary, bounds[-1])
+        if snapped is not None and bounds[-1] < snapped < len(chars):
+            b = snapped
+        # 段宽约束：吸附/回退候选不得让前段超过单行上限（均衡边界天然最接近）
+        lo_w = cum_before[bounds[-1]]
+        if cum_before[b] - lo_w > SUB_MAX_LINE_WEIGHT + 1e-9 \
+                and cum_before[boundary] - lo_w <= SUB_MAX_LINE_WEIGHT + 1e-9:
+            b = boundary
+        b = min(b, len(chars) - 1)
+        bounds.append(b)
+    bounds.append(len(chars))
+
+    parts = []
+    for b0, b1 in zip(bounds, bounds[1:]):
+        seg = "".join(chars[b0:b1]).strip(" ，,、")
+        if seg:
+            parts.append(seg)
+    return parts or [text]
 
 
 class VideoConcatWorker(BaseWorker):
@@ -754,16 +1036,28 @@ class VideoDubbingWorker(BaseWorker):
 
     def __init__(self, tasks, add_subtitles=True, length_modes=None,
                  fancy_text=False, fancy_style="gold", fancy_words=None,
-                 subtitle_font=""):
+                 subtitle_font="", fancy_position="upper_middle",
+                 subtitle_box_opacity=0.5, fancy_template=None):
         super().__init__()
         self.tasks = tasks  # list of tuples: (video_path, voice_wav_path, output_video_path, text)  # noqa: E501
         self.add_subtitles = add_subtitles
         self.length_modes = length_modes or {}  # video_path -> "video" or "audio"
         self.fancy_text = fancy_text
         self.fancy_style = fancy_style
-        self.fancy_words = fancy_words or []  # list of strings to overlay
+        # 兼容保留：花字内容已改为自动从口播文案提取卖点（见 extract_fancy_word），
+        # 该参数不再参与渲染，仅为老调用方兼容保留。
+        self.fancy_words = fancy_words or []
         # 字幕字体族名（来自服务端 /config/fonts 的 family）；空=用默认微软雅黑
         self.subtitle_font = (subtitle_font or "").strip()
+        # 花字出现位置（见 FANCY_POSITIONS）；未知值回退默认中上
+        self.fancy_position = fancy_position if fancy_position in FANCY_POSITIONS else "upper_middle"
+        # 花字模板（样式+音效+时机，见 utils/fancy_templates.py）；None=自定义样式
+        self.fancy_template = fancy_template if isinstance(fancy_template, dict) else None
+        # 字幕背景不透明度（黑色背景，0=无背景框，1=全黑）；异常值回退 0.5（历史默认）
+        try:
+            self.subtitle_box_opacity = min(1.0, max(0.0, float(subtitle_box_opacity)))
+        except (TypeError, ValueError):
+            self.subtitle_box_opacity = 0.5
 
     def _resolve_subtitle_font_path(self):
         """把选定的字体族名解析为 drawtext 可用的字体文件路径（已转义盘符冒号）。
@@ -858,6 +1152,13 @@ class VideoDubbingWorker(BaseWorker):
                 length_mode = self.length_modes.get(video_path, "video")
                 video_dur = get_media_duration(video_path)
                 audio_dur = get_media_duration(voice_wav_path)
+                # 输入视频预检：ffprobe 读不出时长 = 文件不完整/损坏
+                #（如服务端成片下载中断导致 moov 缺失）。立即报明确错误，
+                # 不带坏文件进 ffmpeg（否则报 moov atom not found 难以定位）。
+                if video_dur <= 0:
+                    raise RuntimeError(
+                        f"输入视频无法读取（文件可能不完整或损坏，常见原因为服务端"
+                        f"成片下载中断）：{video_path}\n请重新执行镜头合成后再配音。")
                 use_audio_length = (length_mode == "audio" and audio_dur > video_dur > 0)  # noqa: E501
                 extra_dur = audio_dur - video_dur if use_audio_length else 0.0
                 display_dur = audio_dur if use_audio_length else video_dur
@@ -867,18 +1168,17 @@ class VideoDubbingWorker(BaseWorker):
                 video_label = "0:v"
                 audio_label = "1:a:0"
                 need_audio_speed = (not use_audio_length and audio_dur > video_dur > 0)
+                sound_specs: list = []      # 花字模板音效 [(路径, 延迟ms)]
 
                 if use_audio_length:
                     # Extend video with last frame clone to match audio length
                     video_filters.append(f"[{video_label}]tpad=stop_mode=clone:stop_duration={extra_dur:.3f}[v_padded]")  # noqa: E501
                     video_label = "v_padded"
 
-                if self.add_subtitles and text:
-                    # 字幕字体：优先用用户在「口播配音」选的服务端字体（同名解析本机字体文件），
-                    # 解析不到再回退微软雅黑。
-                    font_path = self._resolve_subtitle_font_path()
-
-                    # 优先使用逐句 TTS 的真实句级时间轴（字幕与语音精确同步）
+                # 逐句时间轴（字幕烧制与花字跟字幕时机共用）：优先使用逐句 TTS 的
+                # 真实句级时间轴（字幕与语音精确同步）；无时间轴按字数比例估算（旧行为）
+                sub_lines, sub_starts, sub_ends = [], [], []
+                if (self.add_subtitles or self.fancy_text) and text:
                     timing = self._load_timing_sidecar(voice_wav_path)
                     if timing:
                         raw_lines = [str(t["text"]).strip() for t in timing]
@@ -906,27 +1206,89 @@ class VideoDubbingWorker(BaseWorker):
                             line_starts.append(t0)
                             line_ends.append(t1)
                             cum_t = t1
+                    sub_lines = [_strip_pron_annotation(x) for x in raw_lines]
+                    sub_starts, sub_ends = line_starts, line_ends
 
-                    # Build drawtext filters
+                if self.add_subtitles and text and sub_lines:
+                    # 字幕字体：优先用用户在「口播配音」选的服务端字体（同名解析本机字体文件），
+                    # 解析不到再回退微软雅黑。
+                    font_path = self._resolve_subtitle_font_path()
+
+                    # Build drawtext filters（背景不透明度可配：0=无背景框）
+                    # 超长行不再多行堆叠（同屏 2-3 行观感太长）：按配音时间窗把
+                    # 长句切成多个短字幕段依次显示——段文本用 wrap_subtitle_line
+                    # 的均衡断点（标点/空格优先），段时长按各段等效字数占比切分
+                    # 行时间窗（有句级时间戳时即克隆配音的节奏），任意时刻只挂一行。
+                    box_str = (f"box=1:boxcolor=black@{self.subtitle_box_opacity:.2f}:boxborderw=6:"
+                               if self.subtitle_box_opacity > 0 else "")
                     drawtexts = []
-                    for i, line_text in enumerate(raw_lines):
-                        start_t = line_starts[i]
-                        end_t = line_ends[i]
-                        escaped = line_text.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
-                        dt = (
-                            f"drawtext=fontfile='{font_path}':"
-                            f"text='{escaped}':"
-                            f"fontsize=h*0.025:fontcolor=white:"
-                            f"box=1:boxcolor=black@0.5:boxborderw=6:"
-                            f"x=(w-text_w)/2:y=h-text_h-h*0.06:"
-                            f"enable='between(t,{start_t:.3f},{end_t:.3f})'"
-                        )
-                        drawtexts.append(dt)
+                    y_expr = f"{_SAFE_BOTTOM_EDGE}-text_h-h*{SUB_BOTTOM_GAP}"
+                    for i, line_text in enumerate(sub_lines):
+                        start_t = sub_starts[i]
+                        end_t = max(start_t + 0.2, sub_ends[i])
+                        parts = wrap_subtitle_line(line_text)
+                        if len(parts) == 1:
+                            segs = [(parts[0], start_t, end_t)]
+                        else:
+                            # 长句拆段：时长按等效字数占比切行时间窗
+                            weights = [_sub_line_weight(p) for p in parts]
+                            total_w = sum(weights) or float(len(parts))
+                            cum = start_t
+                            segs = []
+                            for k, part in enumerate(parts):
+                                seg_end = (end_t if k == len(parts) - 1
+                                           else cum + (end_t - start_t) * weights[k] / total_w)  # noqa: E501
+                                segs.append((part, cum, seg_end))
+                                cum = seg_end
+                        for part, seg_start, seg_end in segs:
+                            escaped = part.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
+                            dt = (
+                                f"drawtext=fontfile='{font_path}':"
+                                f"text='{escaped}':"
+                                f"fontsize=h*{SUB_FONT_SCALE}:fontcolor=white:"
+                                f"{box_str}"
+                                f"x=(w-text_w)/2:"
+                                f"y={y_expr}:"
+                                f"enable='between(t,{seg_start:.3f},{seg_end:.3f})'"
+                            )
+                            drawtexts.append(dt)
                     video_filters.append(f"[{video_label}]{','.join(drawtexts)}[v]")
                     video_label = "v"
 
-                # 花字叠加（关键信息加重提醒，大号彩色描边特效文字）
-                if self.fancy_text and self.fancy_words and display_dur > 0:
+                # 花字叠加（关键信息加重提醒，大号彩色描边特效文字）：
+                # 内容自动从口播文案提取卖点（价格>数字参数>关键词，行内多卖点，
+                # 规则见 extract_fancy_words_in_line），每条视频最多 FANCY_MAX_PER_VIDEO
+                # 个；时机跟随对应字幕行——提前 FANCY_LEAD_SEC 秒出现、该行字幕结束即
+                # 消失；行内多个卖点时把该行时间窗均分依次出现；无卖点的行不出现。
+                fancy_events = []  # [(花字内容, 开始秒, 结束秒)]
+                if self.fancy_text and sub_lines and display_dur > 0:
+                    quota = FANCY_MAX_PER_VIDEO
+                    for li, line_text in enumerate(sub_lines):
+                        if quota <= 0:
+                            break
+                        words = extract_fancy_words_in_line(line_text, limit=quota)
+                        if not words:
+                            continue
+                        ws = max(0.0, sub_starts[li] - FANCY_LEAD_SEC)
+                        we = max(ws + 0.2, min(sub_ends[li], display_dur))
+                        if len(words) == 1:
+                            fancy_events.append((words[0], ws, we))
+                        else:
+                            # 行内多卖点：时间窗均分依次出现（首段保持提前量）
+                            seg = (we - ws) / len(words)
+                            for wi, w in enumerate(words):
+                                s = ws if wi == 0 else ws + wi * seg
+                                e = ws + (wi + 1) * seg if wi < len(words) - 1 else we
+                                fancy_events.append((w, s, max(s + 0.2, e)))
+                        quota -= len(words)
+                    if fancy_events:
+                        # 重叠消解：字幕行衔接紧/行内多卖点时时间窗会交叠，
+                        # 同位置同时渲染两个花字会重叠——统一压缩/去重。
+                        fancy_events = resolve_fancy_overlaps(fancy_events)
+                    if not fancy_events:
+                        log.info("[花字] 口播文案中未提取到卖点（价格/数字参数/关键词），本次不叠加花字")  # noqa: E501
+
+                if self.fancy_text and fancy_events:
                     font_path = "C\\:/Windows/Fonts/msyhbd.ttc"
                     if not os.path.exists("C:/Windows/Fonts/msyhbd.ttc"):
                         font_path = "C\\:/Windows/Fonts/msyh.ttc"
@@ -944,28 +1306,78 @@ class VideoDubbingWorker(BaseWorker):
                         "yellow_red":    "fontcolor=0xFFFF00:borderw=5:bordercolor=0xCC0000:shadowx=2:shadowy=2:shadowcolor=0x000000@0.8",  # noqa: E501
                     }
                     style_str = fancy_styles.get(self.fancy_style, fancy_styles["gold"])
+                    # 模板优先：选了花字模板时，样式以模板的 drawtext 串为准
+                    if self.fancy_template and self.fancy_template.get("style"):
+                        style_str = str(self.fancy_template["style"])
+
+                    # 模板音效：每个花字出现时刻把音效混入配音轨（adelay 对齐 + amix）。
+                    # 音效文件缺失时静默跳过（模板可先只用样式，音效后补）。
+                    from utils.fancy_templates import get_fancy_sound_gain_db, get_fancy_sound_path  # noqa: E501
+                    sound_specs: list[tuple[str, int]] = []  # (绝对路径, 延迟ms)
+                    if self.fancy_template:
+                        _sfx = get_fancy_sound_path(self.fancy_template)
+                        if _sfx:
+                            _gain = get_fancy_sound_gain_db(self.fancy_template)
+                            sound_specs = []  # 下方算出各花字时刻后填充
+                    else:
+                        _sfx = ""
+                        _gain = -6.0
+
+                    # 花字位置：drawtext x/y 表达式（与 docs/服务端花字烧制需求.md 一致）。
+                    # 底部两个位置抬高到 h*0.15，避免与底部逐行字幕（y=h-text_h-h*0.06）重叠。
+                    pos = FANCY_POSITIONS[self.fancy_position]
+                    pos_x, pos_y = pos["x"], pos["y"]
 
                     fancy_drawtexts = []
-                    # 每个花字在整个视频时长内均匀分布轮换显示
-                    n_words = len(self.fancy_words)
-                    if n_words > 0:
-                        seg_dur = display_dur / n_words
-                        for wi, word in enumerate(self.fancy_words):
-                            word = word.strip()
-                            if not word:
-                                continue
-                            ft_start = wi * seg_dur
-                            ft_end = min((wi + 1) * seg_dur, display_dur)
-                            escaped = word.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
-                            # 花字：大号字体，居中偏上，带描边和阴影
-                            dt = (
-                                f"drawtext=fontfile='{font_path}':"
-                                f"text='{escaped}':"
-                                f"fontsize=h*0.08:{style_str}:"
-                                f"x=(w-text_w)/2:y=h*0.3:"
-                                f"enable='between(t,{ft_start:.3f},{ft_end:.3f})'"
-                            )
-                            fancy_drawtexts.append(dt)
+                    # 入场动画：模板 jy_intro_anim 映射为本地通用动画
+                    # （fade 淡入/rise 上浮/slide 滑入/pop 弹跳），drawtext 用
+                    # alpha/x/y 的 t 表达式驱动；未选模板时默认淡入。
+                    # 动画时长 0.4s（pop 弹跳衰减稍长），从花字出现时刻起播。
+                    # 注意：动画时 x/y 由表达式提供（不能同时给静态 x/y，
+                    # 避免 drawtext 同名选项的覆盖行为不可靠）。
+                    _anim = "fade"
+                    if self.fancy_template:
+                        from utils.fancy_templates import get_fancy_anim  # noqa: E501
+                        _anim = get_fancy_anim(self.fancy_template)
+                    _anim_dur = 0.4
+                    for word, ft_start, ft_end in fancy_events:
+                        escaped = word.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace(',', '\\,')  # noqa: E501
+                        # 动画选项：alpha 淡入 + 按类型的 x/y 位移；s=出现时刻。
+                        # x/y 必须成对提供（drawtext 默认 x/y=0，缺一个就跑位）
+                        anim_parts = []
+                        s = f"{ft_start:.3f}"
+                        x_expr = y_expr = ""
+                        if _anim == "fade":
+                            anim_parts.append(
+                                f"alpha='if(lt(t,{s}+{_anim_dur}),(t-{s})/{_anim_dur},1)'")
+                        elif _anim == "rise":
+                            anim_parts.append(
+                                f"alpha='if(lt(t,{s}+{_anim_dur}),(t-{s})/{_anim_dur},1)'")
+                            y_expr = f"({pos_y})-(1-min((t-{s})/{_anim_dur},1))*h*0.04"
+                        elif _anim == "slide":
+                            anim_parts.append(
+                                f"alpha='if(lt(t,{s}+{_anim_dur}),(t-{s})/{_anim_dur},1)'")
+                            x_expr = f"({pos_x})+(1-min((t-{s})/{_anim_dur},1))*w*0.10"
+                        elif _anim == "pop":
+                            anim_parts.append(
+                                f"alpha='if(lt(t,{s}+0.15),(t-{s})/0.15,1)'")
+                            y_expr = (f"({pos_y})-abs(sin((t-{s})*14))*h*0.012"
+                                      f"*(1-min((t-{s})/0.7,1))")
+                        anim_str = (":" + ":".join(anim_parts)) if anim_parts else ""
+                        x_str = f"x='{x_expr}'" if x_expr else f"x={pos_x}"
+                        y_str = f"y='{y_expr}'" if y_expr else f"y={pos_y}"
+                        # 花字：大号字体，按所选位置摆放，带描边和阴影
+                        dt = (
+                            f"drawtext=fontfile='{font_path}':"
+                            f"text='{escaped}':"
+                            f"fontsize=h*0.08:{style_str}:"
+                            f"{x_str}:{y_str}:"
+                            f"enable='between(t,{ft_start:.3f},{ft_end:.3f})'"
+                            f"{anim_str}"
+                        )
+                        fancy_drawtexts.append(dt)
+                        if _sfx:
+                            sound_specs.append((_sfx, int(ft_start * 1000)))
                     if fancy_drawtexts:
                         video_filters.append(f"[{video_label}]{','.join(fancy_drawtexts)}[vf]")  # noqa: E501
                         video_label = "vf"
@@ -994,12 +1406,37 @@ class VideoDubbingWorker(BaseWorker):
                             video_filters.insert(0, f"[{video_label}]null[v]")
                             video_label = "v"
 
+                # 花字模板音效混入：在每个花字出现时刻叠加音效（adelay 对齐时间轴
+                # + amix 混入配音，normalize=0 防止人声被拉低）。必须在 atempo 之后
+                # 追加，保证延迟基于最终时间轴。
+                sound_input_paths: list[str] = []
+                if sound_specs:
+                    next_idx = 2  # 输入流：0=video, 1=voice，音效从 2 开始
+                    amix_in = f"[{audio_label}]"
+                    for si, (sfx_path, delay_ms) in enumerate(sound_specs):
+                        video_filters.append(
+                            f"[{next_idx}:a]adelay={delay_ms}:all=1,"
+                            f"volume={_gain:.1f}dB[s{si}]")
+                        amix_in += f"[s{si}]"
+                        sound_input_paths.append(sfx_path)
+                        next_idx += 1
+                    video_filters.append(
+                        f"{amix_in}amix=inputs={len(sound_specs) + 1}"
+                        f":normalize=0:duration=longest[a_mix]")
+                    audio_label = "a_mix"
+
                 if video_filters:
                     filter_complex = ";".join(video_filters)
-                    audio_map = f"[{audio_label}]" if audio_label == "a" else audio_label  # noqa: E501
+                    # 滤镜输出标签（无冒号）需要 [] 包裹；裸输入流（如 1:a:0）不加
+                    audio_map = (f"[{audio_label}]" if ":" not in audio_label
+                                 else audio_label)  # noqa: E501
                     cmd = [
                         ffmpeg_path, "-y", "-i", video_path,
                         "-i", voice_wav_path,
+                    ]
+                    for _sp in sound_input_paths:
+                        cmd += ["-i", _sp]
+                    cmd += [
                         "-filter_complex", filter_complex,
                         "-map", f"[{video_label}]", "-map", audio_map,
                         *get_video_encode_args(crf=23, preset="superfast"), "-c:a", "aac",  # noqa: E501

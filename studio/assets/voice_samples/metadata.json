@@ -47,5 +47,26 @@
         "filename": "六六 新.mp3",
         "ref_text": "再加上足足6000平方毫米的冰穹微生散热，整套散热系统压得住功耗，也控得住温度。平时打打王者、吃鸡，高帧率，满帧运行，毫无压力。就算你爱玩原神、星穹铁道，这些高负载的大作，它也能长时间稳稳兜住帧率，画面流畅，手感也只是温热，不会出现烫脚。",
         "path": "D:\\Project\\TinTin_AI_Agent_Main_0808\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\六六 新.mp3"
+    },
+    {
+        "id": "cd7f2591",
+        "name": "崔老师",
+        "filename": "崔老师.mp3",
+        "ref_text": "最近后台经常会有同学私信我，鼠标出现故障怎么办，鼠标该如何去保养。我分析了一下大家的故障原因，基本上都是相同的，我今天统一跟大家来说一下。很多人清理鼠标，特别爱拿湿巾，尤其在网吧里面，不太注重保养的。",
+        "path": "D:\\Project\\TinTin_AI_Agent_Main_0808\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\崔老师.mp3"
+    },
+    {
+        "id": "588ec33e",
+        "name": "猴哥",
+        "filename": "猴哥.mp3",
+        "ref_text": "办公打游戏只想用一只鼠标，罗技M550就够了。Smart Wheel智能滚轮，看长文档飞速滚，调参数逐行精准酷。蓝牙双模，电脑平板一键切换，不用拔接收器。按键做了静音处理，深夜点击不吵人。人体工学，我久了也不累。续航还特别顶，不用天天充。学生党办公游戏两头用，这只性价比真的高。",
+        "path": "D:\\Project\\TinTin_AI_Agent_Main_0808\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\猴哥.mp3"
+    },
+    {
+        "id": "8556b898",
+        "name": "皇上",
+        "filename": "皇上.mp3",
+        "ref_text": "以前打牌位，鼠标要么断连，要么没电，真的气到砸键盘。换了逻辑，扣4朱雀，95小时续航，一周一冲都够。Light风儿虽动，按下去脆得很，连点一晚上手不酸。很偶尔传感器指哪打哪，Light speed读线跟有线一样稳。滚轮是双模的，打游戏切刻度精准滚道具，双网页切无极飞滑，还支持左右倾斜运势。侧键全部可编程，FPS压枪，MOBA连招随便设。C口快充加无线充电，用过就回不去了。",
+        "path": "D:\\Project\\TinTin_AI_Agent_Main_0808\\TinTin_AI_Agent_Main\\studio\\assets\\voice_samples\\皇上.mp3"
     }
 ]

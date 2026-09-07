@@ -2,12 +2,13 @@
 
 封装 /montage/* 接口调用，GUI Worker 不直接拼 URL。
 """
+import contextlib
 import json
 import os
 
 import requests
 
-from utils.http_client import http_get, http_post
+from utils.http_client import http_delete, http_get, http_post
 from utils.logger_utils import log
 
 
@@ -136,3 +137,82 @@ def poll_unified(server_url: str, task_id: str, timeout: int = 15) -> dict | Non
     except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
         log.error(f"[montage] poll_unified 失败: {e}")
     return None
+
+
+# ── 花字模板库（docs/服务端花字烧制需求.md 3.3，二阶段可选接口）──────────────
+
+def list_fancy_templates(server_url: str, timeout: int = 15) -> list:
+    """GET /fancy/templates — 拉取服务端花字模板库列表。
+
+    未部署（404/405）或失败返回 []，调用方无法区分「空库」与「未部署」，
+    需要区分时看 upload 的报错。
+    """
+    if not server_url:
+        return []
+    url = f"{server_url}/fancy/templates"
+    try:
+        r = http_get(url, timeout=timeout)
+        if r.status_code in (404, 405):
+            log.info("[montage] /fancy/templates 未部署（服务端未实现 3.3）")
+            return []
+        r.raise_for_status()
+        data = r.json() or {}
+        # 服务端返回 {"items": [...]}（与 /scheduled/tasks 风格一致）；兼容 templates 键与裸数组
+        tpls = (data.get("templates") or data.get("items")) if isinstance(data, dict) else data
+        return tpls if isinstance(tpls, list) else []
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+        log.error(f"[montage] list_fancy_templates 失败: {e}")
+        return []
+
+
+def upload_fancy_templates(server_url: str, templates: list, sound_paths: dict | None = None,
+                           timeout: int = 120) -> dict:
+    """POST /fancy/templates — 批量导入花字模板（multipart）。
+
+    templates: 模板 dict 列表（不带 _path）；
+    sound_paths: {template_id: 本地音效绝对路径}，可选——有音效的模板随包上传，
+                 文件名带 template_id 前缀（服务端按 sound_map 关联回模板）。
+    返回响应 dict；服务端未部署该接口时抛 RuntimeError（消息含 404）。
+    """
+    if not server_url:
+        raise RuntimeError("未配置服务端地址")
+    url = f"{server_url}/fancy/templates"
+    data = {"templates": json.dumps(templates, ensure_ascii=False)}
+    sound_paths = sound_paths or {}
+    if sound_paths:
+        data["sound_map"] = json.dumps(
+            {tid: os.path.basename(p) for tid, p in sound_paths.items()},
+            ensure_ascii=False)
+    handles = []
+    try:
+        files = []
+        for tid, p in sound_paths.items():
+            if os.path.isfile(p):
+                f = open(p, "rb")
+                handles.append(f)
+                files.append(("sound_files", (f"{tid}__{os.path.basename(p)}", f)))
+        r = http_post(url, data=data, files=files or None, timeout=timeout)
+    finally:
+        for f in handles:
+            with contextlib.suppress(Exception):
+                f.close()
+    if r.status_code == 405:
+        raise RuntimeError(
+            "服务端 /fancy/templates 仅实现了查询（GET），未实现上传（POST）。"
+            "需服务端按 docs/服务端花字烧制需求.md 3.3 补充 POST 后才能同步。")
+    if r.status_code in (404, 405):
+        raise RuntimeError(
+            "服务端未部署花字模板库接口（/fancy/templates，HTTP 404）。"
+            "需服务端按 docs/服务端花字烧制需求.md 3.3 实现后才能同步。")
+    r.raise_for_status()
+    return r.json() or {}
+
+
+def delete_fancy_template(server_url: str, template_id: str, timeout: int = 15) -> dict:
+    """DELETE /fancy/templates/{template_id} — 下架服务端花字模板。返回响应 dict。"""
+    if not server_url:
+        raise RuntimeError("未配置服务端地址")
+    url = f"{server_url}/fancy/templates/{template_id}"
+    r = http_delete(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json() or {}

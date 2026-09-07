@@ -28,6 +28,7 @@
 | #022 | 2026-09-01 | 智能混剪 | 镜头重组设 30s 但成片只有 17-20s（选片预算被丢弃片段吃掉+提前 break） |
 | #023 | 2026-09-02 | 智能混剪 | 服务端改版后 concat 轮询撞名 unified 旧任务致下载失败，适配 result 端点新契约 |
 | #024 | 2026-09-02 | 智能混剪 | 景别归属反查逐片段全量扫素材列表（O(n²) 次 isfile stat）+ concat 轮询旧契约路径无超时 |
+| #025 | 2026-09-02 | 智能混剪 | 服务端成片截断（moov 缺失）溜过大小校验，配音时报 moov atom not found；下载后加 ffprobe 完整性校验+自动重下 |
 
 ---
 
@@ -1536,6 +1537,41 @@ FileNotFoundError: 素材不存在:
 ### 回归
 
 `test_video_montage_page.py` 新增 `TestShotTypeForClip` 4 例（归属解析/兕底/映射只构建一次/失效重建）。
+
+---
+
+## #025 服务端成片截断（moov 缺失）溜过校验，配音时报 moov atom not found
+
+**日期**：2026-09-02  
+**文件**：`studio/gui/montage/workers/montage_concat_server_worker.py`、`concat_workers.py`  
+**方法**：`_download()` / `_poll_result_endpoint()` / 新增 `_probe_video_ok()` / `_validate_downloaded_file()`；`VideoDubbingWorker.run()`  
+**严重级别**：高（服务端成片不可用，报错难以定位到根因）
+
+### 问题描述
+
+配音替换时报 `moov atom not found`：输入的 `montage_concat_server_*.mp4`（服务端合成
+下载的成片，本次在 Y: 网络盘）文件不完整——MP4 尾部的 moov 索引原子缺失。
+下载校验只查了「文件 > 1KB」，截断文件溜过校验，直到配音步骤才爆出难懂的 ffmpeg 原始报错。
+
+### 根因分析
+
+下载中断（网络盘不稳定/服务端重启，本次联调中服务端两次短暂无响应）或服务端产物本身
+异常，都会产生「大于 1KB 但缺 moov」的截断文件；客户端原有大小校验拦不住。
+
+### 修复
+
+1. **下载后完整性校验**：新增 `_probe_video_ok()`（ffprobe 能读出时长>0 才算完整，
+   无 ffprobe 环境退化为仅大小校验）；`_validate_downloaded_file()` 校验失败**自动重下一次**，
+   仍失败报明确错误（含根因提示）。`_download`（旧契约）与 `_poll_result_endpoint`（新契约）
+   两条下载路径都接入。
+2. **配音输入预检**：`VideoDubbingWorker.run()` 对每个输入视频先读时长，`<=0` 立即报
+   「输入视频无法读取（可能不完整/损坏，常见原因为服务端成片下载中断）+ 建议重新合成」，
+   不再带坏文件进 ffmpeg。
+
+### 回归
+
+`test_montage_concat_worker.py` 新增 3 例（校验重试后报错/合法通过/垃圾文件判 False）；
+另用真实 ffmpeg 产出的 mp4 做冒烟：合法 True、截断 False、垃圾 False。全量 48 单测通过。
 
 ---
 

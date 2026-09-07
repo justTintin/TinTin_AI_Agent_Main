@@ -82,6 +82,13 @@ class VoiceCloneWorker(BaseWorker):
         """
         import re
 
+        # 0. 读音标注：数字/字母串(中文读音) → 整体替换为读法（在数字转中文之前）。
+        #    例：「555(三五)电池」→ TTS 读「三五电池」；字幕侧由
+        #    concat_workers._strip_pron_annotation 剥掉括号显示原文「555电池」。
+        #    仅当括号前紧贴字母/数字串时才识别，避免误伤普通括号注释。
+        text = re.sub(r"([0-9A-Za-z][0-9A-Za-z.]*)\(([\u4e00-\u9fa5A-Za-z0-9]{1,12})\)",
+                      r"\2", text)
+
         CN_DIGITS = "零一二三四五六七八九"  # noqa: N806
 
         def int_to_cn(n: int) -> str:

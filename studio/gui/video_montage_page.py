@@ -33,6 +33,7 @@ from gui.montage.dialogs import (
 # 导入 utils_media 会触发 subprocess.Popen 无黑框 monkey-patch（Windows），必须在任何
 # subprocess 调用前完成；下面的 Worker/页面 import 链都会用到 subprocess。
 from gui.montage.utils_media import (
+    EDGE_CLIP_MAX_SEC,
     MAX_SOURCE_VIDEOS,
     SHOT_TYPE_COLORS,
     SHOT_TYPE_LABELS,
@@ -50,7 +51,8 @@ from gui.montage.utils_media import (
     safe_source_name,
 )
 from gui.montage.widgets import DoubleClickLineEdit, ReorderableClipsTable
-from gui.montage.workers.concat_workers import FinalMixWorker, VideoConcatWorker, VideoDubbingWorker
+from gui.montage.workers.concat_workers import (
+    FinalMixWorker, VideoConcatWorker, VideoDubbingWorker, extract_fancy_words_from_text)
 from gui.montage.workers.desc_workers import BatchGenerateDescriptionsWorker, LocalVisionDescWorker
 from gui.montage.workers.montage_concat_server_worker import MontageConcatServerWorker
 from gui.montage.workers.script_workers import (
@@ -60,10 +62,10 @@ from gui.montage.workers.script_workers import (
     SceneCopyWorker,
     ScriptMatchLLMWorker,
 )
-from gui.montage.workers.split_workers import BestClipWorker
+from gui.montage.workers.split_workers import BestClipWorker, EdgeClipTrimWorker
 from gui.montage.workers.voice_workers import VoiceCloneWorker
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QColor
+from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -99,6 +101,190 @@ from utils.montage_cache import (
     save_manifest,
 )
 from utils.os_utils import kill_process_tree
+
+
+class _FancyPreviewWorker(BaseWorker):
+    """后台批量生成花字模板预览图（ffmpeg drawtext 按模板 style 渲染样本字）。
+
+    45 个模板串行 ffmpeg（每个约 0.2s），主线程同步做会卡 UI，必须在后台。
+    已有缓存（previews/<template_id>.png）的直接复用。
+    """
+
+    finished = Signal(list)  # [(template_id, png_path), ...]
+
+    def __init__(self, ffmpeg_path, font_path):
+        super().__init__()
+        self._ffmpeg = ffmpeg_path
+        self._font = font_path
+
+    def do_work(self):
+        from utils.fancy_templates import ensure_template_preview, list_fancy_templates
+        results = []
+        for tpl in list_fancy_templates():
+            if self._stopped:
+                break
+            path = ensure_template_preview(tpl, self._ffmpeg, self._font)
+            if path:
+                results.append((tpl["template_id"], path))
+        self.finished.emit(results)
+
+
+class _PathProbeWorker(BaseWorker):
+    """后台探测预生成方案的网络盘文件：exists + 读口播文案预览。
+
+    成片常落在网络盘（U:/Y: 等映射共享）；SMB 会话僵死时主线程同步
+    os.path.exists()/open() 会阻塞数秒到永久（实测切换预览时整页未响应）。
+    因此存在性检查与 txt 预览读取都必须在后台线程做，结果回填缓存供
+    主线程同步查（未知视为存在，宽容不阻塞）。
+    """
+
+    finished = Signal(list)  # [{"path", "exists", "preview"}]
+
+    def __init__(self, jobs):
+        super().__init__()
+        self.jobs = list(jobs or [])  # [(path, txt_path)]
+
+    def do_work(self):
+        results = []
+        for path, txt_path in self.jobs:
+            if self._stopped:
+                break
+            exists = bool(path) and os.path.exists(path)
+            preview = ""
+            tooltip = ""
+            if txt_path:
+                try:
+                    if os.path.exists(txt_path) and os.path.getsize(txt_path) > 0:
+                        with open(txt_path, encoding="utf-8") as f:
+                            content = f.read().strip().replace("\n", " ")
+                        preview = content[:30] + ("…" if len(content) > 30 else "")
+                        tooltip = content[:200]
+                except (OSError, UnicodeDecodeError, ValueError):
+                    preview = ""
+                    tooltip = ""
+            results.append({"path": path, "exists": exists,
+                            "preview": preview, "tooltip": tooltip})
+        self.finished.emit(results)
+
+
+class _PlanPreviewDialog(QDialog):
+    """预生成方案预览弹窗（双击列表项打开）：独立播放器、手动切换镜头、无自动连播。
+
+    主页面嵌入式连播预览在频繁切换时反复触发 Windows WMF 换源/换手死锁
+    （整进程 Not Responding），改为独立弹窗 + 单播放器手动切换：不双播放器
+    乒乓、不清源、不自动连播，从根上避开全部已知死锁模式。
+    closeEvent 仅 pause 不拆会话（WMF 同步清源同样有卡死风险），
+    弹窗实例由页面复用，生命周期与页面一致。
+    """
+
+    def __init__(self, page):
+        super().__init__(page.parent_widget)
+        self._page = page
+        self._clips = []          # 可播放文件列表（成片模式只有 1 项）
+        self._idx = -1
+        self._plan_idx = -1
+        self.setWindowTitle("预览")
+        self.resize(520, 760)
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        from PySide6.QtMultimediaWidgets import QVideoWidget
+
+        lay = QVBoxLayout(self)
+        self._video = QVideoWidget(self)
+        lay.addWidget(self._video, 1)
+        self._info_label = QLabel("", self)
+        self._info_label.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self._info_label)
+        btn_row = QHBoxLayout()
+        self._btn_prev = QPushButton("上一个镜头")
+        self._btn_play = QPushButton("暂停")
+        self._btn_next = QPushButton("下一个镜头")
+        self._btn_copy = QPushButton("查看口播文案")
+        for b in (self._btn_prev, self._btn_play, self._btn_next, self._btn_copy):
+            btn_row.addWidget(b)
+        lay.addLayout(btn_row)
+
+        self._player = QMediaPlayer(self)
+        self._audio = QAudioOutput(self)
+        self._player.setAudioOutput(self._audio)
+        self._player.setVideoOutput(self._video)
+        self._btn_prev.clicked.connect(self._prev_clip)
+        self._btn_next.clicked.connect(self._next_clip)
+        self._btn_play.clicked.connect(self._toggle_play)
+        self._btn_copy.clicked.connect(self._show_copy)
+        self._btn_prev.setEnabled(False)
+        self._btn_next.setEnabled(False)
+
+    def open_plan(self, plan_index, clips, output_path):
+        """打开方案预览：有合成成片播成片，否则逐镜头手动切换预览。"""
+        self._plan_idx = plan_index
+        self.setWindowTitle(f"预览 - 预合成 {plan_index + 1}")
+        if output_path and os.path.exists(output_path):
+            self._clips = [output_path]
+            self._btn_prev.setEnabled(False)
+            self._btn_next.setEnabled(False)
+        else:
+            self._clips = [c for c in (clips or []) if c and os.path.exists(c)]
+            self._idx = 0
+            self._btn_prev.setEnabled(len(self._clips) > 1)
+            self._btn_next.setEnabled(len(self._clips) > 1)
+        self._play_current()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _update_info(self):
+        if not self._clips:
+            self._info_label.setText("无可用镜头文件")
+        elif len(self._clips) > 1:
+            self._info_label.setText(
+                f"镜头 {self._idx + 1}/{len(self._clips)}（手动切换预览，非最终成片）")
+        else:
+            self._info_label.setText("成片预览" if self._plan_idx >= 0 else "镜头预览")
+
+    def _play_current(self):
+        if not self._clips or not 0 <= self._idx < len(self._clips):
+            self._update_info()
+            return
+        self._update_info()
+        clip = self._clips[self._idx]
+        from PySide6.QtCore import QUrl
+        try:
+            self._player.pause()  # 轻量；避免播放中直接 setSource 的重 flush
+        except RuntimeError:
+            return
+        self._player.setSource(QUrl.fromLocalFile(clip))
+        self._player.play()
+
+    def _prev_clip(self):
+        if self._idx > 0:
+            self._idx -= 1
+            self._play_current()
+
+    def _next_clip(self):
+        if self._idx < len(self._clips) - 1:
+            self._idx += 1
+            self._play_current()
+
+    def _toggle_play(self):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._player.pause()
+            self._btn_play.setText("播放")
+        else:
+            self._player.play()
+            self._btn_play.setText("暂停")
+
+    def _show_copy(self):
+        if 0 <= self._plan_idx < len(self._page.precompose_plans):
+            self._page._view_assembled_copy(self._plan_idx)
+
+    def closeEvent(self, event):
+        # 只 pause 不拆会话：WMF 同步清源有卡死风险；弹窗常驻复用，无需释放
+        try:
+            self._player.pause()
+        except RuntimeError:
+            pass
+        super().closeEvent(event)
 
 
 class VideoMontagePage(BasePage):
@@ -201,6 +387,15 @@ class VideoMontagePage(BasePage):
         # Step 2 precompose state
         self.precompose_plans = []
         self.current_precompose_index = -1
+        # 网络盘探测缓存：成片常在 U:/Y: 等映射共享，SMB 僵死时主线程同步
+        # exists()/open() 会阻塞数秒到永久（实测切换预览时整页未响应），
+        # 所以存在性/文案预览一律后台线程探测后回填，主线程只读缓存（未知视为存在）。
+        self._path_exists_cache = {}   # abspath -> bool
+        self._copy_preview_cache = {}  # abspath(output_path) -> str（口播文案前 30 字，空串=未生成）
+        self._copy_tooltip_cache = {}  # abspath(output_path) -> str（口播文案前 200 字，tooltip 用）
+        self._path_probe_worker = None
+        self._fancy_preview_worker = None  # 花字模板预览图后台生成（单实例）
+        self._plan_preview_dialog = None  # 双击预览弹窗（单实例复用，独立播放器）
         self._confirming_plan_index = None
         self._confirm_queue = []
         self._preview_sequence_clips = []
@@ -213,6 +408,9 @@ class VideoMontagePage(BasePage):
         self._last_preview_load_clip: str = ""  # 上一次尝试加载的片段（防同一文件反复重试）
         self._preview_load_retry: int = 0
         self._releasing_preview: bool = False  # 预览会话释放中标志（屏蔽信号重入换源，防 WMF 拆会话死锁）
+        self._standby_loading: bool = False  # 备用换源进行中（屏蔽其状态信号，防 setSource 栈内同步 LoadedMedia 重入换手死锁）
+        self._swapping_preview: bool = False  # 换手进行中（防 pause/摘画面的同步状态信号重入换手）
+        self._current_preview_clip: str = ""  # 当前正在播放的片段（防同一片段重复加载）
         self._pending_final_preview_timer: Any = None
         self._pending_final_preview_path: str = ""
         self._media_player: Any = None
@@ -1504,6 +1702,88 @@ class VideoMontagePage(BasePage):
         else:
             self._available_concat_clips = []
             self._update_concat_count_lbl()
+        # 出入场超长片段自动裁剪（后台）：扫描到未处理的入场/出场超长片段时启动
+        self._maybe_trim_edge_clips()
+
+    # [3·分割]  _maybe_trim_edge_clips
+    def _maybe_trim_edge_clips(self):
+        """出入场超长片段自动裁剪：识别为入场/出场的分割片段超过
+
+        EDGE_CLIP_MAX_SEC 时，后台 Worker 裁剪（取中间时间段——产品通常在
+        镜头中间段），替换原文件并同步改写文件名时间戳；避免出入场素材
+        时间太长拖慢成片节奏。幂等：已裁剪的片段时长 ≤ 阈值，重扫不会再
+        触发；触发点挂在 _check_split_clips_exist 尾部（分割完成 QTimer /
+        用户点击列表均会经过）。
+        """
+        if getattr(self, "_edge_trim_running", False):
+            return
+        # 防死循环：连续 2 轮裁剪无产出（ffmpeg 失败/文件被占用）则停止自动重试
+        if getattr(self, "_edge_trim_fail_count", 0) >= 2:
+            return
+        dirs = list(getattr(self, "_last_merged_splits_dirs", []) or [])
+        if not dirs:
+            cur = getattr(self, "processing_video_path", "")
+            if cur:
+                dirs = [self._montage_per_video_splits_dir(cur)]
+        jobs = []
+        for d in dirs:
+            if not d or not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if not f.lower().endswith((".mp4", ".m4v")):
+                    continue
+                full = os.path.join(d, f)
+                st = classify_shot_type(full)
+                if st not in ("entrance", "exit"):
+                    continue
+                parsed = self._parse_split_filename(f)
+                if not parsed:
+                    continue
+                idx, s_str, e_str, desc = parsed
+                s = self._srt_ts_to_seconds(s_str)
+                e = self._srt_ts_to_seconds(e_str)
+                if s is None or e is None or (e - s) <= EDGE_CLIP_MAX_SEC + 0.01:
+                    continue
+                jobs.append((full, st, s, e, idx, desc))
+        if not jobs:
+            return
+        self._edge_trim_running = True
+        if hasattr(self, "stage_label"):
+            self.stage_label.setText(f"正在裁剪 {len(jobs)} 个超长出入场镜头（取中间时间段）…")  # noqa: E501
+        log.info(f"[出入场裁剪] 启动：{len(jobs)} 个片段待裁剪")
+        w = self.track_worker(EdgeClipTrimWorker(jobs, EDGE_CLIP_MAX_SEC))
+        w.finished.connect(self._on_edge_clips_trimmed)
+        w.error.connect(self._on_edge_clips_trim_error)
+        w.start()
+
+    # [3·分割]  _on_edge_clips_trimmed
+    def _on_edge_clips_trimmed(self, renamed):
+        """裁剪完成：迁移描述/缓存键到新路径并重扫分割列表。"""
+        self._edge_trim_running = False
+        if renamed:
+            old2new = {os.path.abspath(o): os.path.abspath(n) for o, n in renamed}
+            for cache in (self.split_descriptions, self.split_clips_cache):
+                for old in list(cache.keys()):
+                    if old in old2new:
+                        cache[old2new[old]] = cache.pop(old)
+            log.info(f"[出入场裁剪] 完成：{len(renamed)} 个片段已裁剪替换")
+            self._edge_trim_fail_count = 0
+        else:
+            self._edge_trim_fail_count = getattr(self, "_edge_trim_fail_count", 0) + 1
+            log.warning(f"[出入场裁剪] 本轮无产出（连续第 {self._edge_trim_fail_count} 次）")
+        if hasattr(self, "stage_label"):
+            self.stage_label.setText(
+                f"完成：已裁剪 {len(renamed)} 个超长出入场镜头。" if renamed
+                else "出入场镜头时长均正常，无需裁剪。")
+        # 重扫列表（新文件名/新时长），重扫尾部若还有残留超长片段会再次触发
+        QTimer.singleShot(200, self._check_split_clips_exist)
+
+    # [3·分割]  _on_edge_clips_trim_error
+    def _on_edge_clips_trim_error(self, err):
+        self._edge_trim_running = False
+        log.warning(f"[出入场裁剪] Worker 失败: {err}")
+        if hasattr(self, "stage_label"):
+            self.stage_label.setText("")
     # [3·分割]  _on_score_all_done (legacy: 本地评分已移除，保留兼容)
     def _on_score_all_done(self):
         self._pending_score_rows = []
@@ -1744,9 +2024,15 @@ class VideoMontagePage(BasePage):
                     }
                 """
             edit.setStyleSheet(style)
+            edit.setToolTip(
+                "读音标注：数字/字母后加括号写自定义读法，如 555(三五)电池。\n"
+                "配音按括号内读（三五），字幕/花字显示原文（555电池）。")
             edit.doubleClicked.connect(lambda r=i: self._on_edit_double_clicked(r))
 
             self.row_edits[i] = edit
+            # 花字预览：文案变动时把该视频将生成的花字写进行提示（勾选花字时）
+            edit.textChanged.connect(lambda r=i: self._update_row_fancy_preview(r))
+            self._update_row_fancy_preview(i)
 
             original_text = self.original_texts.get(filepath, "")
 
@@ -3000,6 +3286,15 @@ class VideoMontagePage(BasePage):
             options["font_id"] = _font_id
         if _font_name:
             options["fontname"] = _font_name
+        if options["burn_subtitle"]:
+            # 字幕样式覆盖（背景不透明度，0=无背景框）；服务端按
+            # docs/服务端字幕烧制与字体参数需求.md 3.1.1 的约定消费
+            try:
+                _box_opacity = float(self.subtitle_bg_combo.currentData())
+            except (AttributeError, TypeError, ValueError):
+                _box_opacity = 0.5
+            options["subtitle_style"] = json.dumps({"box_opacity": _box_opacity},
+                                                    ensure_ascii=False)
 
         # 景别标注：随 options 摊平为 form 字段 clip_shot_types（JSON：文件名→景别），
         # 服务端按 docs/服务端景别分类与镜头编排需求.md 实现编排/加速后即生效；
@@ -3020,6 +3315,39 @@ class VideoMontagePage(BasePage):
         _edge_speed = self._selected_edge_speedup()
         if _edge_speed > 1.0:
             options["edge_speedup"] = _edge_speed
+
+        # 花字（服务端字段 fancy_*，见 docs/服务端花字烧制需求.md 2.4/3.1）：
+        # 与字幕同模式——服务端未支持时 FastAPI 忽略多传字段，不影响现有合成；
+        # 选了花字模板时以 fancy_template 下发（模板 style/timing 优先于枚举字段），
+        # jy_effect_id 供服务端剪映通道使用；未选模板走 fancy_style/fancy_timing 枚举。
+        if getattr(self, "chk_fancy_text", None) and self.chk_fancy_text.isChecked():
+            options["fancy_enabled"] = True
+            try:
+                options["fancy_style"] = str(self.fancy_style_combo.currentData() or "gold")
+            except AttributeError:
+                options["fancy_style"] = "gold"
+            try:
+                options["fancy_position"] = str(
+                    self.fancy_position_combo.currentData() or "upper_middle")
+            except AttributeError:
+                options["fancy_position"] = "upper_middle"
+            # 客户端现行时机：花字内容自动从文案提取卖点、跟随字幕提前 0.3 秒（2.3）
+            options["fancy_timing"] = "subtitle_sync"
+            try:
+                from utils.fancy_templates import list_fancy_templates, serialize_for_task
+                _fid = (self.fancy_template_combo.currentData()
+                        if hasattr(self, "fancy_template_combo") else None)
+                if _fid:
+                    _tpl = next((t for t in list_fancy_templates()
+                                 if t.get("template_id") == _fid), None)
+                    _payload = serialize_for_task(_tpl)
+                    if _payload:
+                        options["fancy_template"] = _payload
+                    # 模板库 id（需求 3.3）：服务端已同步该模板时按库取，
+                    # 查不到回退内联 fancy_template，再回退枚举
+                    options["fancy_template_id"] = str(_fid)
+            except (OSError, ValueError, AttributeError) as _e:
+                log.warning(f"[montage_concat] 花字模板序列化失败（忽略）: {_e}")
 
         # 卡点 / LUT 当前服务端接口不支持，回退本地处理
         if recombine_mode == "beat" and beat_times:
@@ -3233,6 +3561,8 @@ class VideoMontagePage(BasePage):
                 plan = self.precompose_plans[idx]
                 plan["output_path"] = out_path
                 plan["confirmed"] = True
+                # 网络盘成片：后台探测存在性与口播文案，不阻塞主线程
+                self._probe_assembled_paths_async()
                 self.stage_label.setText(f"完成： 预合成 {idx + 1} 已确认合成")
                 # 只更新该条列表项文字，避免整表刷新触发预览重载/卡死
                 item = self.assembled_clips_list_widget.item(idx)
@@ -3719,15 +4049,26 @@ class VideoMontagePage(BasePage):
 
         # Build tasks: (video_path, voice_wav_path, output_video_path, text)
         tasks = []
+        # 字幕设置
         add_subs = self.chk_add_subtitles.isChecked()
+        # 字幕背景不透明度（黑色背景，0=无背景框）；异常回退 0.5（历史默认）
+        try:
+            _sub_box_opacity = float(self.subtitle_bg_combo.currentData())
+        except (AttributeError, TypeError, ValueError):
+            _sub_box_opacity = 0.5
         # 花字设置
         fancy_enabled = self.chk_fancy_text.isChecked() if hasattr(self, "chk_fancy_text") else False  # noqa: E501
         fancy_style = self.fancy_style_combo.currentData() if hasattr(self, "fancy_style_combo") else "gold"  # noqa: E501
-        fancy_words = []
-        if fancy_enabled and hasattr(self, "fancy_text_input"):
-            raw = self.fancy_text_input.text().strip()
-            if raw:
-                fancy_words = [w.strip() for w in raw.replace("，", ",").split(",") if w.strip()]  # noqa: E501
+        fancy_position = self.fancy_position_combo.currentData() if hasattr(self, "fancy_position_combo") else "upper_middle"  # noqa: E501
+        # 花字模板（样式+音效+时机）：选「自定义」时为 None，走原有样式下拉
+        fancy_template = None
+        if hasattr(self, "fancy_template_combo"):
+            _tid = self.fancy_template_combo.currentData()
+            if _tid:
+                from utils.fancy_templates import list_fancy_templates
+                fancy_template = next(
+                    (t for t in list_fancy_templates() if t.get("template_id") == _tid), None)  # noqa: E501
+        # 花字内容已改为 Worker 内自动从口播文案提取卖点，不再手动输入
         for vid, wav in self.generated_voice_paths.items():
             if os.path.exists(vid) and os.path.exists(wav):
                 out_vid_name = f"dubbed_{os.path.basename(vid)}"
@@ -3758,13 +4099,212 @@ class VideoMontagePage(BasePage):
 
         self.dub_worker = VideoDubbingWorker(
             tasks, add_subtitles=add_subs, length_modes=self.voice_length_mode,
-            fancy_text=fancy_enabled, fancy_style=fancy_style, fancy_words=fancy_words,
-            subtitle_font=self._selected_subtitle_font()[1] if add_subs else "")
+            fancy_text=fancy_enabled, fancy_style=fancy_style,
+            subtitle_font=self._selected_subtitle_font()[1] if add_subs else "",
+            fancy_position=fancy_position,
+            subtitle_box_opacity=_sub_box_opacity if add_subs else 0.5,
+            fancy_template=fancy_template)
         self.dub_worker.stage.connect(lambda t: self.stage_label.setText(t))
         self.dub_worker.progress.connect(lambda v: self.progress_bar.setValue(v))
         self.dub_worker.finished.connect(self._on_dubbing_finished)
         self.dub_worker.error.connect(self._on_dubbing_error)
         self.dub_worker.start()
+    # [3·口播配音]  _fancy_enabled
+    def _fancy_enabled(self):
+        """花字开关：未勾选时行内不展示花字预览提示。"""
+        return bool(getattr(self, "chk_fancy_text", None) and self.chk_fancy_text.isChecked())
+
+    # [3·口播配音]  _refresh_all_fancy_previews
+    def _refresh_all_fancy_previews(self):
+        """花字勾选状态变化 → 刷新所有行的花字预览提示。"""
+        for i in range(self.voice_table.rowCount()):
+            self._update_row_fancy_preview(i)
+
+    # [3·口播配音]  _update_row_fancy_preview
+    def _update_row_fancy_preview(self, row_idx):
+        """行内文案变动时，把该视频将生成的花字写进行提示（与烧制同一提取逻辑）。"""
+        edit = self.row_edits.get(row_idx)
+        if edit is None:
+            return
+        if not self._fancy_enabled():
+            if edit.toolTip().startswith("花字预览"):
+                edit.setToolTip("")
+            return
+        words = extract_fancy_words_from_text(edit.text())
+        tip = ("花字预览（随对应字幕提前 0.3 秒出现）："
+               + ("、".join(words) if words else "未提取到卖点，该视频不叠加花字"))
+        edit.setToolTip(tip)
+
+    # [3·口播配音]  _preview_fancy_words
+    def _preview_fancy_words(self):
+        """弹窗汇总：按当前每个视频的文案，预览将生成的花字（烧制同一提取逻辑）。"""
+        fancy_on = self._fancy_enabled()
+        rows = []
+        for i in range(self.voice_table.rowCount()):
+            item = self.voice_table.item(i, 1)
+            filepath = str(item.data(Qt.UserRole) or "") if item else ""
+            edit = self.row_edits.get(i)
+            text = edit.text().strip() if edit else ""
+            if not filepath and not text:
+                continue
+            words = extract_fancy_words_from_text(text)
+            rows.append((os.path.basename(filepath) or f"第 {i + 1} 行", text, words))
+        if not rows:
+            QMessageBox.information(self.parent_widget, "花字预览",
+                                    "当前没有视频/文案。请先在上方导入素材并填写文案。")
+            return
+        lines = []
+        n_word = 0
+        for name, text, words in rows:
+            if not text:
+                lines.append(f" {name}：（无文案，不克隆声音、不烧花字）")
+                continue
+            if words:
+                n_word += len(words)
+                ws = "、".join(words)
+            else:
+                ws = "（未提取到卖点，不叠加花字）"
+            suffix = "" if fancy_on else "   [未勾选「添加花字」，仅预览不生效]"
+            lines.append(f" {name}\n    花字：{ws}{suffix}")
+        head = f"共 {len(rows)} 个视频，预计烧制 {n_word} 个花字"
+        if not fancy_on:
+            head += "（未勾选「添加花字」）"
+        msg = QMessageBox(self.parent_widget)
+        msg.setWindowTitle("花字预览")
+        msg.setText(head)
+        msg.setInformativeText("\n".join(lines))
+        msg.setTextFormat(Qt.PlainText)
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec()
+
+    # [3·口播配音]  _start_fancy_preview_loader
+    def _start_fancy_preview_loader(self):
+        """后台生成花字模板预览图（幂等）；完成后回填下拉框图标与预览标签。"""
+        if self._fancy_preview_worker is not None and self._fancy_preview_worker.isRunning():
+            return
+        ffmpeg_path = find_ffmpeg()
+        if not ffmpeg_path:
+            return
+        # 预览字体：与花字烧制同源（微软雅黑优先）；注意不能用
+        # VideoDubbingWorker._resolve_subtitle_font_path（依赖 worker 实例的
+        # subtitle_font 属性，page 上没有）
+        from gui.montage.workers.concat_workers import VideoDubbingWorker
+        font_file = (VideoDubbingWorker._lookup_windows_font_file("微软雅黑")
+                     or VideoDubbingWorker._lookup_windows_font_file("Microsoft YaHei"))
+        if not font_file:
+            for cand in ("C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyh.ttf"):
+                if os.path.exists(cand):
+                    font_file = cand
+                    break
+        self._fancy_preview_worker = _FancyPreviewWorker(ffmpeg_path, font_file or "")
+        self._fancy_preview_worker.finished.connect(self._on_fancy_previews_ready)
+        self.track_worker(self._fancy_preview_worker)
+        self._fancy_preview_worker.start()
+    # [3·口播配音]  _on_fancy_previews_ready
+    def _on_fancy_previews_ready(self, results):
+        """预览图生成完成：回填下拉框项图标 + 刷新当前选中项的预览标签。"""
+        combo = getattr(self, "fancy_template_combo", None)
+        if combo is None:
+            return
+        path_by_id = {tid: p for tid, p in results or []}
+        from utils.fancy_templates import template_preview_path
+        for i in range(1, combo.count()):  # 跳过第 0 项「自定义」
+            tid = combo.itemData(i)
+            p = path_by_id.get(tid) or template_preview_path(str(tid or ""))
+            if p and os.path.isfile(p):
+                combo.setItemIcon(i, QIcon(p))
+        self._update_fancy_template_preview()
+
+    # [3·口播配音]  _update_fancy_template_preview
+    def _update_fancy_template_preview(self):
+        """模板选择变化/预览就绪 → 更新预览标签（模板样式渲染图，所见即所得）。"""
+        lbl = getattr(self, "fancy_template_preview_lbl", None)
+        combo = getattr(self, "fancy_template_combo", None)
+        if lbl is None or combo is None:
+            return
+        tid = combo.currentData()
+        if not tid:
+            lbl.setText("自定义样式\n（无预览）")
+            lbl.setToolTip("选「自定义」时使用下方样式枚举，无模板预览。")
+            return
+        from utils.fancy_templates import (
+            get_fancy_anim, get_fancy_sound_path, list_fancy_templates,
+            template_preview_path)
+        tpl = next((t for t in list_fancy_templates()
+                    if t.get("template_id") == tid), None)
+        p = template_preview_path(str(tid))
+        if p and os.path.isfile(p):
+            pm = QPixmap(p)
+            if not pm.isNull():
+                lbl.setPixmap(pm.scaled(
+                    lbl.width(), lbl.height(),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                lbl.setText("预览失败")
+        else:
+            lbl.setText("预览生成中…")
+        if tpl:
+            anim = get_fancy_anim(tpl)
+            anim_names = {"fade": "淡入", "rise": "上浮", "slide": "滑入",
+                          "pop": "弹跳", "none": "无动画"}
+            tip = (f"{tpl.get('name')}\n"
+                   f"入场动画：{anim_names.get(anim, anim)}"
+                   f"（剪映：{tpl.get('jy_intro_anim') or '无'}）\n"
+                   f"音效：{os.path.basename(get_fancy_sound_path(tpl)) if get_fancy_sound_path(tpl) else '无'}\n"
+                   f"时机：{tpl.get('timing') or 'subtitle_sync'}")
+            lbl.setToolTip(tip)
+
+    # [7·混音导出]  _sync_fancy_templates_to_server
+    def _sync_fancy_templates_to_server(self):
+        """把本机花字模板包增量同步到服务端模板库（POST /fancy/templates，需求 3.3）。"""
+        server = stc._server_url()
+        if not server:
+            QMessageBox.warning(self.parent_widget, "未配置服务端", "请先在设置中配置服务端地址。")
+            return
+
+        from utils.fancy_templates import (
+            get_fancy_sound_path, list_fancy_templates, serialize_for_task)
+        local = []
+        for t in list_fancy_templates(force_reload=True):
+            payload_str = serialize_for_task(t)
+            if payload_str:
+                local.append(json.loads(payload_str))
+        if not local:
+            QMessageBox.information(self.parent_widget, "无可同步模板",
+                                    "本机没有可同步的花字模板（assets/fancy/templates 为空）。")
+            return
+
+        from utils import montage_client
+        server_list = montage_client.list_fancy_templates(server)
+        existing = {str(t.get("template_id")) for t in server_list if isinstance(t, dict)}
+        missing = [t for t in local if str(t.get("template_id")) not in existing]
+        if not missing:
+            QMessageBox.information(self.parent_widget, "无需同步",
+                                    f"服务端已存在全部 {len(local)} 个花字模板。")
+            return
+
+        # 有本地音效文件的模板随包上传（供服务端烧制时混入，见需求 3.3）
+        sound_paths = {}
+        for t in missing:
+            sp = get_fancy_sound_path(t)
+            if sp:
+                sound_paths[t["template_id"]] = sp
+
+        self.stage_label.setText(f"正在同步花字模板到服务端（{len(missing)}/{len(local)}）...")
+        try:
+            montage_client.upload_fancy_templates(server, missing, sound_paths or None)
+        except RuntimeError as e:
+            QMessageBox.warning(self.parent_widget, "同步失败", str(e))
+            return
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self.parent_widget, "同步失败", f"上传模板时出错：\n{e}")
+            return
+        self.stage_label.setText(f"花字模板已同步到服务端（本次新增 {len(missing)} 个）")
+        QMessageBox.information(
+            self.parent_widget, "同步完成",
+            f"已上传 {len(missing)} 个花字模板到服务端模板库"
+            f"（服务端共 {len(existing) + len(missing)} 个）。")
+
     # [7·混音导出]  _on_dubbing_finished
     def _on_dubbing_finished(self, results):
         self.btn_synthesize_voice.setEnabled(True)
@@ -5240,6 +5780,10 @@ class VideoMontagePage(BasePage):
 
         plans = []
         cursor = 0
+        # 跨成片镜头使用计数：每个成片选片时优先用「使用次数最少」的镜头，
+        # 让全部镜头轮流上场——修复「不同成片用的镜头都一样」「出入场镜头
+        # 大部分一样」（素材少时每个片头都是同一个 entrance）的问题。
+        usage_count: dict = {}
 
         # 镜头缓存：hash + quality（同一视频只算一次）
         _hash_cache = {}
@@ -5271,6 +5815,9 @@ class VideoMontagePage(BasePage):
         for _i in range(batch_count):
             if randomness == "high":
                 random.shuffle(deck)
+            # 均衡排序：按使用次数升序稳定排序（同频保持当前 deck 相对序），
+            # 未用过的镜头自然排在最前被优先扫描；出入场镜头也随 seq 均衡轮换。
+            deck.sort(key=lambda c: usage_count.get(c, 0))
             seq: list[str] = []
             seq_hashes: list = []      # 已入列的镜头 hash
             seq_qualities: list = []   # 已入列的镜头质量分
@@ -5307,6 +5854,8 @@ class VideoMontagePage(BasePage):
                         if max_total > 0:
                             old_dur = self._get_clip_duration(seq[dup_idx])
                             total_dur += (clip_dur - old_dur)
+                        usage_count[seq[dup_idx]] = max(0, usage_count.get(seq[dup_idx], 0) - 1)
+                        usage_count[clip] = usage_count.get(clip, 0) + 1
                         seq[dup_idx] = clip
                         seq_hashes[dup_idx] = h
                         seq_qualities[dup_idx] = q
@@ -5319,13 +5868,15 @@ class VideoMontagePage(BasePage):
                 seq.append(clip)
                 seq_hashes.append(h)
                 seq_qualities.append(q)
+                usage_count[clip] = usage_count.get(clip, 0) + 1
                 if max_total > 0:
                     total_dur += clip_dur
             cursor = ci % len(deck)
-            # 无时长上限时：补足到目标镜头数（与原逻辑一致，允许循环取用）
+            # 无时长上限时：补足到目标镜头数（优先用使用次数最少的镜头，保持均衡）
             if max_total <= 0 and len(seq) < target_clip_count and unique:
                 while len(seq) < target_clip_count:
-                    seq.append(random.choice(unique))
+                    seq.append(min(unique, key=lambda c: (usage_count.get(c, 0), random.random())))
+                    usage_count[seq[-1]] = usage_count.get(seq[-1], 0) + 1
             # 兕底：极端情况（全部相似/时长解析异常）下至少保证 1 个镜头
             if not seq and unique:
                 seq.append(unique[0] if randomness == "low" else random.choice(unique))
@@ -5341,6 +5892,11 @@ class VideoMontagePage(BasePage):
                 seq = apply_shot_layout_order(seq, _st_map)
             plans.append({"clips": seq, "deleted_flags": [False] * len(seq), "mode": "random"})  # noqa: E501
         log.info(f"[DIAG _build_precompose_plans] target={target_clip_count} batch={batch_count} total_clips={len(unique)} plans={len(plans)} plan_sizes={[len(p['clips']) for p in plans]}")  # type: ignore[arg-type]  # noqa: E501
+        # 镜头均衡诊断：使用次数分布（验收「不同成片镜头轮换」用）
+        if usage_count:
+            _dist = sorted(usage_count.items(), key=lambda kv: -kv[1])
+            log.info("[镜头均衡] 使用次数分布: " + ", ".join(
+                f"{os.path.basename(k)}×{v}" for k, v in _dist[:10]))  # type: ignore[arg-type]  # noqa: E501
         return plans
     # [5·拼接合成]  _load_precompose_plans
     def _load_precompose_plans(self, plan_specs, out_montage_dir):
@@ -5469,12 +6025,14 @@ class VideoMontagePage(BasePage):
         dlg.exec_()
     # [4·文案脚本]  _assembled_has_copy
     def _assembled_has_copy(self, path):
-        """该组合视频是否已有同名 .txt 文案。"""
-        txt = os.path.splitext(path)[0] + ".txt"
-        try:
-            return os.path.exists(txt) and os.path.getsize(txt) > 0
-        except OSError:
+        """该组合视频是否已有同名 .txt 文案（只读后台探测缓存，未知视为有）。
+
+        网络盘僵死时同步 os.path.exists 会卡死主线程；未命中时宽容返回 True，
+        真正读写交给后续操作自己兜底。
+        """
+        if not path:
             return False
+        return self._copy_preview_cache.get(os.path.abspath(path), True) != ""
     # [4·文案脚本]  _save_script_meta
     def _save_script_meta(self, video_path, clips, brand="", product="", model_name="", extra=""):  # noqa: E501
         """保存脚本关联元数据（与 .txt 同名的 .meta.json）。"""
@@ -5511,31 +6069,37 @@ class VideoMontagePage(BasePage):
         return None
     # [4·文案脚本]  _assembled_copy_preview
     def _assembled_copy_preview(self, path):
-        """获取口播文案的文字预览（前30字）。
+        """获取口播文案的文字预览（前30字），只读后台探测缓存。
 
-        未生成口播文案（.txt 不存在）时返回占位提示，便于用户在列表里一眼看出
-        哪些视频还没生成口播文案。
+        未命中返回占位提示（不同步读文件——txt 与成片同目录，网络盘僵死时
+        open() 会卡死主线程）；后台探测完成后回填缓存并刷新列表行。
         """
         if not path:
             return "未生成口播文案"
-        txt = os.path.splitext(path)[0] + ".txt"
-        try:
-            if os.path.exists(txt) and os.path.getsize(txt) > 0:
-                with open(txt, encoding="utf-8") as f:
-                    content = f.read().strip().replace("\n", " ")
-                return content[:30] + ("…" if len(content) > 30 else "")
-        except OSError:
-            pass
-        return "未生成口播文案"
+        cached = self._copy_preview_cache.get(os.path.abspath(path))
+        if cached is None:
+            return "未生成口播文案"
+        return cached or "未生成口播文案"
     # [5·拼接合成]  _on_assembled_double_clicked
     def _on_assembled_double_clicked(self, item):
-        """双击预合成列表项：展示完整口播文案。"""
+        """双击预合成列表项：弹出预览弹窗（独立播放器，手动切换镜头，无自动连播）。
+
+        原单击自动连播在频繁切换时反复触发 WMF 换源/换手死锁（整进程
+        Not Responding），改为双击弹窗预览：独立播放器 + 手动上一个/下一个。
+        """
         idx = item.data(Qt.UserRole)
         if idx is None or idx < 0 or idx >= len(self.precompose_plans):
             return
-        path = (self.precompose_plans[idx].get("output_path") or "").strip()
-        if path and self._assembled_has_copy(path):
-            self._view_assembled_copy(idx)
+        plan = self.precompose_plans[idx]
+        clips = list(plan.get("clips") or [])
+        deleted_flags = list(plan.get("deleted_flags") or [])
+        active_clips = [os.path.abspath(c) for i, c in enumerate(clips)
+                        if not (i < len(deleted_flags) and deleted_flags[i])
+                        and c and os.path.exists(c)]
+        out_path = (plan.get("output_path") or "").strip()
+        if self._plan_preview_dialog is None:
+            self._plan_preview_dialog = _PlanPreviewDialog(self)
+        self._plan_preview_dialog.open_plan(idx, active_clips, out_path)
     # [4·文案脚本]  _refresh_assembled_copy_buttons
     def _refresh_assembled_copy_buttons(self):
         w = self.assembled_clips_list_widget
@@ -5559,24 +6123,62 @@ class VideoMontagePage(BasePage):
             file_text = os.path.basename(out_path) if out_path else f"{clip_count} 个镜头"
             item.setText(f"[{idx+1}] {file_text}  {status_txt}{copy_mark}")
             if has_copy:
-                txt = os.path.splitext(out_path)[0] + ".txt"
-                try:
-                    with open(txt, encoding="utf-8") as f:
-                        snippet = f.read(200).strip()
-                    item.setToolTip(snippet + ("..." if len(snippet) == 200 else ""))
-                except OSError:
-                    item.setToolTip("")
+                # tooltip 只读后台探测缓存（同网络盘原因，不在主线程 open 文件）
+                snippet = self._copy_tooltip_cache.get(os.path.abspath(out_path), "")
+                item.setToolTip(snippet + ("..." if len(snippet) == 200 else ""))
             else:
                 item.setToolTip("")
     # [5·拼接合成]  _collect_assembled_paths
     def _collect_assembled_paths(self):
-        """按列表顺序返回已确认合成的视频路径。"""
+        """按列表顺序返回已确认合成的视频路径。
+
+        存在性检查只读后台探测缓存（未知视为存在，宽容不阻塞）——
+        网络盘僵死时同步 os.path.exists 会卡死主线程（切换预览未响应实测）。
+        """
         paths = []
         for plan in self.precompose_plans:
             out_path = (plan.get("output_path") or "").strip()
-            if plan.get("confirmed") and out_path and os.path.exists(out_path):
+            if plan.get("confirmed") and out_path and self._path_exists_cache.get(
+                    os.path.abspath(out_path), True):
                 paths.append(out_path)
         return paths
+    # [5·拼接合成]  _probe_assembled_paths_async
+    def _probe_assembled_paths_async(self):
+        """后台探测已确认方案的成片存在性与口播文案（网络盘 I/O 不进主线程）。"""
+        jobs = []
+        for plan in self.precompose_plans:
+            out_path = (plan.get("output_path") or "").strip()
+            if not out_path:
+                continue
+            ap = os.path.abspath(out_path)
+            if ap not in self._path_exists_cache or ap not in self._copy_preview_cache:
+                jobs.append((ap, os.path.splitext(ap)[0] + ".txt"))
+        if not jobs:
+            return
+        if self._path_probe_worker is not None and self._path_probe_worker.isRunning():
+            return  # 上一轮还在跑；回填后如仍有缺口，下次触发会补探
+        self._path_probe_worker = _PathProbeWorker(jobs)
+        self._path_probe_worker.finished.connect(self._on_paths_probed)
+        self.track_worker(self._path_probe_worker)
+        self._path_probe_worker.start()
+
+    def _on_paths_probed(self, results):
+        """探测结果回填缓存并刷新受影响列表行（不整表重建，避免预览重载）。"""
+        changed = False
+        for r in results:
+            ap = r["path"]
+            if self._path_exists_cache.get(ap) is not r["exists"]:
+                changed = True
+            self._path_exists_cache[ap] = r["exists"]
+            if self._copy_preview_cache.get(ap) != r["preview"]:
+                changed = True
+            self._copy_preview_cache[ap] = r["preview"]
+            self._copy_tooltip_cache[ap] = r["tooltip"]
+        if changed:
+            self._refresh_assembled_copy_buttons()
+            self.btn_next_to_step_3.setEnabled(bool(self._collect_assembled_paths()))
+            self._update_confirm_all_button()
+
     # [4·文案脚本]  _gen_copy_for_plan
     def _gen_copy_for_plan(self, plan_index):
         if plan_index < 0 or plan_index >= len(self.precompose_plans):
@@ -5601,6 +6203,8 @@ class VideoMontagePage(BasePage):
             item = self.assembled_clips_list_widget.item(select_index)
             self.assembled_clips_list_widget.setCurrentItem(item)
             self._on_assembled_item_clicked(item)
+        # 重进步骤/重启恢复：补探缓存缺口（幂等，已缓存的路径不会重复探测）
+        self._probe_assembled_paths_async()
         self._update_confirm_all_button()
     # [9·其他]  _update_confirm_all_button
     def _update_confirm_all_button(self):
@@ -5828,7 +6432,6 @@ class VideoMontagePage(BasePage):
         self._mark_current_plan_dirty()
         self._refresh_sources_for_plan(idx)
         self.sources_detail_widget.selectRow(to_row)
-        self._start_sequence_preview_for_plan(idx)
     # [2·基础设施]  _on_source_context_menu
     def _on_source_context_menu(self, pos):
         row = self.sources_detail_widget.rowAt(pos.y())
@@ -5872,7 +6475,6 @@ class VideoMontagePage(BasePage):
         self._refresh_precompose_list(select_index=idx)
         self._refresh_sources_for_plan(idx)
         self._update_confirm_all_button()
-        self._start_sequence_preview_for_plan(idx)
     # [5·拼接合成]  _stop_preview_playback
     def _stop_preview_playback(self):
         """停止预览播放并复位控件（两个播放器一并停止）。"""
@@ -5897,6 +6499,11 @@ class VideoMontagePage(BasePage):
         _preview_sequence_clips / _preview_pending_clip，信号槽会重入
         _load_preview_clip 再对同一个正在被拆的播放器 setSource，WMF 同步拆两个
         会话直接死锁（切步骤离开预览时必现，日志只剩「清源 开始」无耗时行）。
+
+        两个播放器的 setSource(QUrl()) 拆会话【逐个延迟到独立事件循环 tick 串行
+        执行】：实测同一调用栈里接连拆两个会话，第二个会死锁在 WMF 内部
+        （2026-09-05 服务端结果返回时停播，日志只剩第二个「清源 开始」无耗时行，
+        标题栏 Not Responding）；拆栈 + 串行化后每个拆会话都在干净栈上执行。
         """
         from PySide6.QtCore import QUrl
         from PySide6.QtMultimedia import QMediaPlayer
@@ -5905,6 +6512,7 @@ class VideoMontagePage(BasePage):
         self._pending_play_clip = ""
         self._preview_pending_clip = ""
         self._play_request_id = getattr(self, "_play_request_id", 0) + 1
+        pending = []
         try:
             for _attr in ("preview_player", "_preview_standby_player"):
                 _p = getattr(self, _attr, None)
@@ -5914,11 +6522,25 @@ class VideoMontagePage(BasePage):
                     _p.stop()
                     # 只要还挂着一个源（含已播完的 EndOfMedia）就清掉，否则文件句柄始终不释放
                     if _p.mediaStatus() not in (QMediaPlayer.NoMedia, QMediaPlayer.InvalidMedia):
-                        self._timed_mf(f"{reason}清源({_attr})", _p.setSource, QUrl())
+                        pending.append((_attr, _p))
                 except (RuntimeError, OSError):
                     pass
-        finally:
-            self._releasing_preview = False
+        except (RuntimeError, OSError):
+            pass
+
+        def _release_next(items):
+            if not items:
+                self._releasing_preview = False
+                return
+            _attr, _p = items[0]
+            try:
+                self._timed_mf(f"{reason}清源({_attr})", _p.setSource, QUrl())
+            except (RuntimeError, OSError):
+                pass
+            # 下一个播放器的清源放到下一个事件循环 tick：不在同一个栈里嵌套拆会话
+            QTimer.singleShot(0, lambda: _release_next(items[1:]))
+
+        QTimer.singleShot(0, lambda: _release_next(pending))
 
     # [5·拼接合成]  _start_sequence_preview_for_plan
     def _start_sequence_preview_for_plan(self, plan_index):
@@ -6027,6 +6649,15 @@ class VideoMontagePage(BasePage):
             self._preview_load_retry = 0
             return
         active = self.preview_player
+        # 同一片段重复触发防护（双击/信号重发）：已在待加载或正在播放中直接忽略。
+        # 实测 12:07:01 与 12:07:03 对同一片段连续两次备用换源，第二次对刚退役的
+        # 播放器 setSource 同文件同步 LoadedMedia → 重入换手 → WMF 死锁（Not Responding）。
+        from PySide6.QtMultimedia import QMediaPlayer
+        if clip == getattr(self, "_preview_pending_clip", ""):
+            return
+        if (clip == getattr(self, "_current_preview_clip", "")
+                and active.playbackState() == QMediaPlayer.PlaybackState.PlayingState):
+            return
         # 当前播放器空闲（首次加载 / 已停止）：没有活跃会话可拆，直接换源，不阻塞
         if self._is_player_idle(active):
             self._preview_pending_clip = ""
@@ -6037,9 +6668,23 @@ class VideoMontagePage(BasePage):
         standby = self._preview_standby_player
         from PySide6.QtCore import QUrl
         self._preview_pending_clip = clip
-        # 备用播放器若残留上次会话，直接 setSource 替换（不在点击路径上调 stop()，避免阻塞）
-        self._timed_mf(f"备用换源 {os.path.basename(clip)}", standby.setSource, QUrl.fromLocalFile(clip))
-        # 兜底：若备用迟迟不报就绪（MF 慢/异常），800ms 后强制换出，避免停在旧画面
+        # 备用换源期间屏蔽其状态信号：setSource 同步抛 LoadedMedia（OS 缓存命中时
+        # 必现，如刚播过的片段）会在 setSource 自己的调用栈内重入 _do_preview_swap，
+        # 对换源中途的播放器 setVideoOutput+play → WMF 状态机混乱死锁。
+        self._standby_loading = True
+        try:
+            # 备用播放器若残留上次会话，直接 setSource 替换（不在点击路径上调 stop()，避免阻塞）
+            self._timed_mf(f"备用换源 {os.path.basename(clip)}", standby.setSource, QUrl.fromLocalFile(clip))
+        finally:
+            self._standby_loading = False
+        # setSource 返回后主动查一次状态：同步就绪（缓存命中）时立即在干净栈上换手，
+        # 不丢体验；未就绪走 800ms 兑底
+        from PySide6.QtMultimedia import QMediaPlayer
+        if (self._preview_pending_clip == clip
+                and standby.mediaStatus() in (QMediaPlayer.LoadedMedia, QMediaPlayer.BufferedMedia)):
+            self._do_preview_swap()
+            return
+        # 兑底：若备用迟迟不报就绪（MF 慢/异常），800ms 后强制换出，避免停在旧画面
         QTimer.singleShot(800, self._force_swap_if_pending)
 
     # [5·拼接合成]  _timed_mf
@@ -6083,6 +6728,7 @@ class VideoMontagePage(BasePage):
     def _apply_source_and_play(self, player, clip):
         from PySide6.QtCore import QUrl
         self._timed_mf(f"换源 {os.path.basename(clip)}", player.setSource, QUrl.fromLocalFile(clip))
+        self._current_preview_clip = clip
         player.play()
 
     def _update_preview_overlay(self):
@@ -6109,6 +6755,9 @@ class VideoMontagePage(BasePage):
         if src is self.preview_player:
             self._on_preview_media_status_changed(status)
         elif src is self._preview_standby_player:
+            # 备用换源进行中屏蔽：setSource 栈内同步 LoadedMedia 会重入换手（死锁）
+            if getattr(self, "_standby_loading", False):
+                return
             self._on_standby_media_status(status)
 
     def _on_standby_media_status(self, status):
@@ -6141,6 +6790,17 @@ class VideoMontagePage(BasePage):
         clip = getattr(self, "_preview_pending_clip", "")
         if not clip:
             return
+        # 防重入：pause()/摘画面会同步发状态信号，且调用可能来自 setSource 栈内
+        # （_standby_loading 已屏蔽备用路由，这里是双保险），不允许嵌套换手
+        if getattr(self, "_swapping_preview", False):
+            return
+        self._swapping_preview = True
+        try:
+            self._do_preview_swap_impl(clip)
+        finally:
+            self._swapping_preview = False
+
+    def _do_preview_swap_impl(self, clip):
         self._preview_pending_clip = ""
         standby = self._preview_standby_player
         old = self.preview_player
@@ -6159,12 +6819,13 @@ class VideoMontagePage(BasePage):
         # WMF 拆会话是 GUI 线程同步操作，而此刻新活跃播放器正向同一个 QVideoWidget
         # 渲染，拆旧会话会与它抢 sink，直接把主线程挂住（连播到第 2 个镜头时
         # 标题栏 Not Responding 即此）。旧会话留到下次把它当备用播放器换源时顺带
-        # 替换（那时它已摘离画面），或由 _stop_preview_playback / 切步骤时兜底释放。
+        # 替换（那时它已摘离画面），或由 _stop_preview_playback / 切步骤时兑底释放。
         self._preview_standby_audio.setMuted(True)
         with contextlib.suppress(RuntimeError, OSError):
             old.pause()
         with contextlib.suppress(RuntimeError, OSError):
             self._timed_mf("退役摘画面", old.setVideoOutput, None)
+        self._current_preview_clip = clip
         self._update_preview_overlay()
 
     def _do_play_sequence_clip(self, req_id=None):
@@ -6373,6 +7034,9 @@ class VideoMontagePage(BasePage):
             # 保存关联元数据
             clips = self._get_video_scene_sources(pth)
             self._save_script_meta(pth, clips, brand, product, model_name, extra)
+            # 文案重新生成 → 失效旧缓存并重探（异步，不阻塞）
+            self._copy_preview_cache.pop(os.path.abspath(pth), None)
+            self._probe_assembled_paths_async()
             self.stage_label.setText("完成： 口播文案已按画面生成并保存")
             self._refresh_assembled_copy_buttons()
             QMessageBox.information(
@@ -6524,6 +7188,10 @@ class VideoMontagePage(BasePage):
         """处理批量队列中的下一个组合视频（逐个串行调用大模型）。"""
         if not self._batch_copy_queue:
             self.btn_batch_scene_copy.setEnabled(True)
+            # 批量文案已重写 txt → 全部失效预览缓存并重探（异步，不阻塞主线程）
+            self._copy_preview_cache.clear()
+            self._copy_tooltip_cache.clear()
+            self._probe_assembled_paths_async()
             self._refresh_assembled_copy_buttons()
             # Refresh step-3 voice table so newly written .txt files are shown immediately  # noqa: E501
             self._do_scan_voice_video_dir()
@@ -6612,12 +7280,12 @@ class VideoMontagePage(BasePage):
         self._update_final_inputs_label()
 
         self._refresh_sources_for_plan(idx)
-        if 0 <= idx < len(self.precompose_plans):
-            self._start_sequence_preview_for_plan(idx)
-        elif clips:
-            self._start_sequence_preview(clips, 0)
-        else:
-            self._stop_preview_playback()
+        # 自动预览已移除（频繁切换触发 WMF 换源死锁）：单击只切换镜头明细，
+        # 预览改为双击弹窗（_PlanPreviewDialog）。只清连播队列让残留播放
+        # 自然停止，不主动 stop/清源（零 WMF 调用，杜绝卡死）。
+        self._preview_sequence_clips = []
+        self._pending_play_clip = ""
+        self._play_request_id = getattr(self, "_play_request_id", 0) + 1
     # [8·事件回调]  _toggle_preview_video
     def _toggle_preview_video(self):
         from PySide6.QtMultimedia import QMediaPlayer

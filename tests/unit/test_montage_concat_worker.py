@@ -118,6 +118,7 @@ class TestMontageConcatWorker(unittest.TestCase):
         stale = {"id": "146", "task_type": "editor_render", "status": "completed",
                  "result": {"output_url": "/editor/render/146/result"}}
         with mock.patch.object(stc, "get_task", return_value=stale), \
+                 mock.patch.object(MontageConcatServerWorker, "_probe_video_ok", return_value=True), \
                  mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
                             side_effect=_fake_download) as mg:
             w.do_work()
@@ -140,6 +141,37 @@ class TestMontageConcatWorker(unittest.TestCase):
             w.do_work()
         self.assertIn("超时", str(ctx.exception))
 
+    def test_validate_downloaded_file_retries_then_raises(self):
+        """成片完整性校验：截断文件（>1KB 但 ffprobe 读不出）→ 重下 1 次仍坏 → 明确报错。"""
+        w = self._worker(task_id="task-v")
+        os.makedirs(os.path.dirname(self.out), exist_ok=True)
+        with open(self.out, "wb") as f:
+            f.write(b"x" * 4096)  # 大小过檢但内容无效
+        with mock.patch.object(w, "_probe_video_ok", return_value=False), \
+                 mock.patch("gui.montage.workers.montage_concat_server_worker.download_result") as mg, \
+                 self.assertRaises(RuntimeError) as ctx:
+            w._validate_downloaded_file(redownload_url="http://srv/files/result.mp4")
+        self.assertIn("不完整或损坏", str(ctx.exception))
+        self.assertEqual(mg.call_count, 1)  # 自动重下了 1 次
+
+    def test_validate_downloaded_file_passes_valid(self):
+        w = self._worker(task_id="task-v2")
+        os.makedirs(os.path.dirname(self.out), exist_ok=True)
+        with open(self.out, "wb") as f:
+            f.write(b"x" * 4096)
+        with mock.patch.object(w, "_probe_video_ok", return_value=True):
+            w._validate_downloaded_file()  # 不抛异常
+
+    def test_probe_video_ok_rejects_garbage(self):
+        """_probe_video_ok：垃圾文件（无 moov）必须判 False。"""
+        bad = os.path.join(self.tmp, "bad.mp4")
+        with open(bad, "wb") as f:
+            f.write(b"x" * 4096)
+        # 不 mock：真实调 ffprobe（若环境无 ffprobe 则函数退化为 True，跳过断言）
+        from utils.platform_utils import find_ffprobe
+        if find_ffprobe() and os.path.isfile(find_ffprobe()):
+            self.assertFalse(MontageConcatServerWorker._probe_video_ok(bad))
+
     def test_poll_download_and_sources(self):
         w = self._worker(source_clips=["src_1.mp4", "src_2.mp4"], task_id="task-1")
         completed = {"status": "completed", "progress": 100,
@@ -152,6 +184,7 @@ class TestMontageConcatWorker(unittest.TestCase):
             return path
 
         with mock.patch.object(stc, "get_task", return_value=completed), \
+             mock.patch.object(MontageConcatServerWorker, "_probe_video_ok", return_value=True), \
              mock.patch("gui.montage.workers.montage_concat_server_worker.download_result",
                         side_effect=_fake_download) as mg:
             w.do_work()

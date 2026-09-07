@@ -182,3 +182,4 @@ studio/config/local_config.json
 
 # Local Codex tool config (not part of the product)
 .codex/
+/tests/**

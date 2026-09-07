@@ -19,8 +19,8 @@ import os
 
 import requests.exceptions
 from gui.base_page import BasePage
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import QDateTime, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPixmap
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -50,6 +50,7 @@ from utils import material_client
 from utils.base_worker import BaseWorker
 from utils.gui_icons import icon_button, mdi_icon, std_icon
 from utils.http_client import http_get
+from config.paths import OUTPUTS_DIR
 
 
 def _set_button_icon(btn, name):
@@ -127,6 +128,11 @@ def _fmt_ms(ms):
     return _fmt_sec(int(ms / 1000))
 
 
+def _ai_audio_dir():
+    """AI 生成音频的本地归档目录（outputs/ai_audio，用户可直接打开取用）。"""
+    return os.path.join(OUTPUTS_DIR, "ai_audio")
+
+
 class _AudioPreviewWorker(BaseWorker):
     """后台下载音频到本地临时文件，再交给 QMediaPlayer 播放。"""
     finished = Signal(str)  # 本地临时文件路径
@@ -148,6 +154,30 @@ class _AudioPreviewWorker(BaseWorker):
         cache_dir = os.path.join(tempfile.gettempdir(), "audio_preview")
         os.makedirs(cache_dir, exist_ok=True)
         path = os.path.join(cache_dir, f"{self.mid}{ext}")
+        with open(path, "wb") as f:
+            f.write(data)
+        self.finished.emit(path)
+
+
+class _GenSaveWorker(BaseWorker):
+    """把 AI 生成的音频下载到客户端本地 outputs/ai_audio/（生成即可离线播放/取用）。"""
+    finished = Signal(str)  # 本地文件完整路径
+
+    def __init__(self, url, base_path):
+        super().__init__()
+        self.url = url
+        self.base_path = base_path  # 不含扩展名
+
+    def do_work(self):
+        resp = http_get(self.url, timeout=60)
+        if resp.status_code != 200:
+            raise RuntimeError(f"服务端返回 HTTP {resp.status_code}")
+        data = resp.content
+        if not data:
+            raise RuntimeError("服务端返回空内容")
+        ext = _ext_from_content_type(resp.headers.get("Content-Type", ""))
+        path = self.base_path + ext
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             f.write(data)
         self.finished.emit(path)
@@ -1265,8 +1295,8 @@ class AudioMaterialPage(BasePage):
             url = alc.bgm_serve_url(audio_id)
         self._play_audio(audio_id, it.text(), url, self.lbl_voice_now)
 
-    def _play_audio(self, audio_id, name, url, status_label):
-        """统一的音频播放方法。"""
+    def _play_audio(self, audio_id, name, url, status_label=None):
+        """统一的音频播放方法（status_label 传 None 时不覆盖该区域显示）。"""
         if self._playing_mid is not None:
             self._stop_preview()
         if (self._preview_worker is not None
@@ -1277,13 +1307,47 @@ class AudioMaterialPage(BasePage):
         self._playing_name = name
         self._preview_mid = audio_id
         self.lbl_now_playing.setText(f"加载中: {name}…")
-        status_label.setText(f"加载中: {name}…")
+        if status_label is not None:
+            status_label.setText(f"加载中: {name}…")
         _set_button_icon(self.btn_play_pause, "play")
         self._update_play_button()
         self._preview_worker = _AudioPreviewWorker(url, audio_id)
         self._preview_worker.finished.connect(self._on_preview_ready)
         self._preview_worker.error.connect(self._on_preview_error)
         self._preview_worker.start()
+
+    def _play_local_file(self, audio_id, name, path):
+        """直接播放本地音频文件（AI 生成结果已归档到本地，无需再走服务端 URL）。"""
+        if not os.path.isfile(path):
+            return False
+        if self._playing_mid is not None:
+            self._stop_preview()
+        self._playing_mid = audio_id
+        self._playing_name = name
+        self._preview_mid = audio_id
+        self._pending_play = True
+        player = self._ensure_player()
+        player.setSource(QUrl.fromLocalFile(path))
+        if player.mediaStatus() == QMediaPlayer.MediaStatus.LoadedMedia:
+            self._pending_play = False
+            player.play()
+            self.lbl_now_playing.setText(f"播放中: {name}")
+        self.btn_stop.setEnabled(True)
+        self.slider_progress.setEnabled(True)
+        self._update_play_button()
+        return True
+
+    def _open_ai_audio_location(self, path):
+        """在资源管理器中打开 AI 生成音频的本地位置（选中该文件）。"""
+        if not path or not os.path.isfile(path):
+            QMessageBox.information(self.parent_widget, "提示",
+                                    "本地文件不存在（可能尚未保存完成）。")
+            return
+        import subprocess
+        try:
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        except OSError:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
 
     def _send_bgm_to_beat(self):
         row = self._bgm_table.currentRow()
@@ -1625,6 +1689,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_bgm_save.setEnabled(False)
         self.btn_ai_bgm_save.clicked.connect(self._on_save_bgm_to_lib)
         bgm_action_row.addWidget(self.btn_ai_bgm_save)
+        self.btn_ai_bgm_open = QPushButton(" 打开位置")
+        self.btn_ai_bgm_open.setObjectName("secondary_button")
+        self.btn_ai_bgm_open.setEnabled(False)
+        self.btn_ai_bgm_open.setToolTip("在资源管理器中打开生成的 BGM 本地文件（outputs/ai_audio）")
+        self.btn_ai_bgm_open.clicked.connect(
+            lambda: self._open_ai_audio_location(getattr(self, "_ai_bgm_local", "")))
+        bgm_action_row.addWidget(self.btn_ai_bgm_open)
         bgm_action_row.addStretch(1)
         bgm_layout.addLayout(bgm_action_row)
 
@@ -1674,6 +1745,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_sfx_save.setEnabled(False)
         self.btn_ai_sfx_save.clicked.connect(self._on_save_sfx_to_lib)
         sfx_action_row.addWidget(self.btn_ai_sfx_save)
+        self.btn_ai_sfx_open = QPushButton(" 打开位置")
+        self.btn_ai_sfx_open.setObjectName("secondary_button")
+        self.btn_ai_sfx_open.setEnabled(False)
+        self.btn_ai_sfx_open.setToolTip("在资源管理器中打开生成的音效本地文件（outputs/ai_audio）")
+        self.btn_ai_sfx_open.clicked.connect(
+            lambda: self._open_ai_audio_location(getattr(self, "_ai_sfx_local", "")))
+        sfx_action_row.addWidget(self.btn_ai_sfx_open)
         sfx_action_row.addStretch(1)
         sfx_layout.addLayout(sfx_action_row)
 
@@ -1705,12 +1783,35 @@ class AudioMaterialPage(BasePage):
         self._ai_bgm_result = data
         url = data.get("url") or data.get("audio_url") or data.get("file_url") or ""
         name = data.get("filename") or data.get("name") or "AI 生成 BGM"
-        self.ai_bgm_result_label.setText(
-            f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\nURL: {url}")
         self.btn_ai_bgm_play.setEnabled(bool(url))
         self.btn_ai_bgm_save.setEnabled(bool(url))
+        self.btn_ai_bgm_open.setEnabled(False)
         self._ai_bgm_url = url
         self._ai_bgm_name = name
+        self._ai_bgm_local = ""
+        if not url:
+            self.ai_bgm_result_label.setText(f"生成成功！{name}")
+            return
+        # 生成结果立即归档到客户端本地：播放/打开位置都用本地文件，不依赖服务端 URL
+        self.ai_bgm_result_label.setText(
+            f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\n正在保存到本地…")
+        ts = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
+        base = os.path.join(_ai_audio_dir(), f"ai_bgm_{ts}")
+        w = self.track_worker(_GenSaveWorker(url, base))
+        w.finished.connect(self._on_bgm_saved_local)
+        w.error.connect(self._on_bgm_saved_local_failed)
+        w.start()
+
+    def _on_bgm_saved_local(self, path):
+        self._ai_bgm_local = path
+        self.btn_ai_bgm_open.setEnabled(True)
+        self.ai_bgm_result_label.setText(
+            f"生成成功！已保存到本地（点击「打开位置」查看）：\n{path}")
+
+    def _on_bgm_saved_local_failed(self, msg):
+        url = getattr(self, "_ai_bgm_url", "")
+        self.ai_bgm_result_label.setText(
+            f"本地保存失败（{msg}）。\n仍可在线播放：{url}")
 
     def _on_gen_bgm_error(self, msg):
         self.btn_ai_bgm_gen.setEnabled(True)
@@ -1718,11 +1819,15 @@ class AudioMaterialPage(BasePage):
         self.ai_bgm_result_label.setText(f"BGM 生成失败：{msg}")
 
     def _on_play_ai_bgm(self):
-        url = getattr(self, "_ai_bgm_url", "")
         name = getattr(self, "_ai_bgm_name", "AI 生成 BGM")
+        local = getattr(self, "_ai_bgm_local", "")
+        if local and os.path.isfile(local):
+            self._play_local_file("ai_bgm", name, local)
+            return
+        url = getattr(self, "_ai_bgm_url", "")
         if not url:
             return
-        self._play_audio("ai_bgm", name, url, self.ai_bgm_result_label)
+        self._play_audio("ai_bgm", name, url)  # 本地未就绪时回退在线播放，不覆盖结果区
 
     def _on_save_bgm_to_lib(self):
         url = getattr(self, "_ai_bgm_url", "")
@@ -1733,6 +1838,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_bgm_save.setText("保存中...")
         from utils.thread_worker import TaskWorker as Worker
         def _do_upload():
+            local = getattr(self, "_ai_bgm_local", "")
+            if local and os.path.isfile(local):
+                # 本地已归档，直接上传，不再重复下载
+                r = alc.bgm_upload(local, tag="AI生成", scene="", mood="")
+                if r is None:
+                    raise RuntimeError("上传到库失败")
+                return r
             import tempfile
 
             import requests as req
@@ -1787,12 +1899,34 @@ class AudioMaterialPage(BasePage):
         self._ai_sfx_result = data
         url = data.get("url") or data.get("audio_url") or data.get("file_url") or ""
         name = data.get("name") or data.get("filename") or "AI 生成音效"
-        self.ai_sfx_result_label.setText(
-            f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\nURL: {url}")
         self.btn_ai_sfx_play.setEnabled(bool(url))
         self.btn_ai_sfx_save.setEnabled(bool(url))
+        self.btn_ai_sfx_open.setEnabled(False)
         self._ai_sfx_url = url
         self._ai_sfx_name = name
+        self._ai_sfx_local = ""
+        if not url:
+            self.ai_sfx_result_label.setText(f"生成成功！{name}")
+            return
+        self.ai_sfx_result_label.setText(
+            f"生成成功！{name}\n时长: {data.get('duration', '—')} 秒\n正在保存到本地…")
+        ts = QDateTime.currentDateTime().toString("yyyyMMdd_HHmmss")
+        base = os.path.join(_ai_audio_dir(), f"ai_sfx_{ts}")
+        w = self.track_worker(_GenSaveWorker(url, base))
+        w.finished.connect(self._on_sfx_saved_local)
+        w.error.connect(self._on_sfx_saved_local_failed)
+        w.start()
+
+    def _on_sfx_saved_local(self, path):
+        self._ai_sfx_local = path
+        self.btn_ai_sfx_open.setEnabled(True)
+        self.ai_sfx_result_label.setText(
+            f"生成成功！已保存到本地（点击「打开位置」查看）：\n{path}")
+
+    def _on_sfx_saved_local_failed(self, msg):
+        url = getattr(self, "_ai_sfx_url", "")
+        self.ai_sfx_result_label.setText(
+            f"本地保存失败（{msg}）。\n仍可在线播放：{url}")
 
     def _on_gen_sfx_error(self, msg):
         self.btn_ai_sfx_gen.setEnabled(True)
@@ -1800,11 +1934,15 @@ class AudioMaterialPage(BasePage):
         self.ai_sfx_result_label.setText(f"音效生成失败：{msg}")
 
     def _on_play_ai_sfx(self):
-        url = getattr(self, "_ai_sfx_url", "")
         name = getattr(self, "_ai_sfx_name", "AI 生成音效")
+        local = getattr(self, "_ai_sfx_local", "")
+        if local and os.path.isfile(local):
+            self._play_local_file("ai_sfx", name, local)
+            return
+        url = getattr(self, "_ai_sfx_url", "")
         if not url:
             return
-        self._play_audio("ai_sfx", name, url, self.ai_sfx_result_label)
+        self._play_audio("ai_sfx", name, url)  # 本地未就绪时回退在线播放，不覆盖结果区
 
     def _on_save_sfx_to_lib(self):
         url = getattr(self, "_ai_sfx_url", "")
@@ -1814,6 +1952,13 @@ class AudioMaterialPage(BasePage):
         self.btn_ai_sfx_save.setText("保存中...")
         from utils.thread_worker import TaskWorker as Worker
         def _do_upload():
+            local = getattr(self, "_ai_sfx_local", "")
+            if local and os.path.isfile(local):
+                # 本地已归档，直接上传分析入库，不再重复下载
+                r = alc.sfx_analyze(local)
+                if r is None:
+                    raise RuntimeError("音效分析入库失败")
+                return r
             import tempfile
 
             import requests as req

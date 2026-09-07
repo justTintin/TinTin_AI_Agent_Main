@@ -1,10 +1,12 @@
 """智能混剪 - 分割阶段 Worker：场景检测、挑精华、镜头评分。"""
 import contextlib
 import os
+import subprocess
 import traceback
 
 import requests.exceptions
-from gui.montage.utils_media import find_ffmpeg, format_seconds_to_srt_timestamp
+from gui.montage.utils_media import (
+    EDGE_CLIP_MAX_SEC, find_ffmpeg, format_seconds_to_srt_timestamp)
 from PySide6.QtCore import Signal
 from utils.api_error import ApiError
 from utils.base_worker import BaseWorker
@@ -815,4 +817,85 @@ class BeatVideoGenWorker(BaseWorker):
         if not saved or not os.path.isfile(local) or os.path.getsize(local) == 0:
             raise RuntimeError("下载文件为空")
         return local
+
+
+class EdgeClipTrimWorker(BaseWorker):
+    """出入场超长片段裁剪：识别为入场/出场的分割片段超过 EDGE_CLIP_MAX_SEC 时，
+
+    **取中间时间段**（产品通常在镜头中间段），ffmpeg 重编码替换原文件
+    （时间戳命名同步改写，描述段保留）——避免出入场素材时间太长拖慢成片
+    节奏；中景/特写/未标注片段不受影响。jobs: [(path, shot_type, start_sec, end_sec, idx, desc)]。
+    """
+    finished = Signal(list)  # [(old_path, new_path), ...]
+
+    def __init__(self, jobs, max_sec=None):
+        super().__init__()
+        self.jobs = list(jobs or [])
+        self.max_sec = float(max_sec if max_sec is not None else EDGE_CLIP_MAX_SEC)
+
+    @staticmethod
+    def _build_path(old_path, idx, start_sec, end_sec, desc):
+        """与 main_page._get_renamed_path 同命名规则（worker 线程不可触 Qt）。"""
+        dir_name = os.path.dirname(old_path)
+        base_name = os.path.basename(old_path)
+        idx_str = f"_shot_{idx:03d}"
+        if idx_str in base_name:
+            prefix = base_name.split(idx_str)[0]
+        else:
+            prefix = os.path.splitext(base_name)[0]
+            if "_shot_" in prefix:
+                prefix = prefix.split("_shot_")[0]
+        start_str = format_seconds_to_srt_timestamp(start_sec).replace(":", "-")
+        end_str = format_seconds_to_srt_timestamp(end_sec).replace(":", "-")
+        if desc:
+            return os.path.join(
+                dir_name, f"{prefix}_shot_{idx:03d}_{start_str}_{end_str}_{desc}.mp4")  # noqa: E501
+        return os.path.join(dir_name, f"{prefix}_shot_{idx:03d}_{start_str}_{end_str}.mp4")  # noqa: E501
+
+    def do_work(self):
+        renamed = []
+        for path, shot_type, start_sec, end_sec, idx, desc in self.jobs:
+            tmp = ""
+            try:
+                if not os.path.isfile(path):
+                    continue
+                dur = end_sec - start_sec
+                if dur <= self.max_sec + 0.01:
+                    continue
+                # 取中间时间段：产品通常在镜头中间段（头部是环境铺垫、尾部是收尾）
+                pad = (dur - self.max_sec) / 2.0
+                k_start = start_sec + pad
+                k_end = end_sec - pad
+                keep = k_end - k_start
+                if keep <= 0.2:
+                    continue
+                ffmpeg = find_ffmpeg()
+                tmp = path + ".trim_tmp.mp4"
+                cmd = [ffmpeg, "-y", "-ss", f"{k_start:.3f}", "-i", path,
+                       "-t", f"{keep:.3f}",
+                       "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                       "-c:a", "aac", "-avoid_negative_ts", "make_zero", tmp]
+                r = run(cmd, timeout=180)
+                if r.returncode != 0 or not os.path.isfile(tmp) \
+                        or os.path.getsize(tmp) < 1024:
+                    log.warning(f"[出入场裁剪] ffmpeg 失败跳过: {os.path.basename(path)}")  # noqa: E501
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp)
+                    continue
+                new_path = self._build_path(path, idx, k_start, k_end, desc)
+                if os.path.abspath(new_path) != os.path.abspath(path):
+                    os.replace(tmp, new_path)
+                    with contextlib.suppress(OSError):
+                        os.remove(path)
+                else:
+                    os.replace(tmp, path)
+                renamed.append((path, new_path))
+                log.info(f"[出入场裁剪] {shot_type} {os.path.basename(path)} "
+                         f"{dur:.1f}s → {keep:.1f}s")
+            except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+                log.warning(f"[出入场裁剪] 失败跳过 {os.path.basename(path)}: {e}")  # noqa: E501
+                if tmp and os.path.isfile(tmp):
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp)
+        self.finished.emit(renamed)
 

@@ -156,6 +156,32 @@ def sfx_serve_url(sfx_id: str) -> str:
 
 
 # ── AI 音频生成 ──────────────────────────────────────────────────────────
+def _fix_output_url(url: str) -> str:
+    """把服务端返回的 /output/... 媒体 URL 改写到当前 compute_server_url。
+
+    服务端 /audio/gen/* 返回的 url 曾硬编码旧服务器地址（192.168.111.31），
+    而生成文件实际落在当前服务端（.30）磁盘、旧服务器上并不存在（404）。
+    客户端统一按 compute_server_url 重建 /output/ 路径，服务端修复后此改写
+    自动变为幂等无害。
+    """
+    if not url:
+        return url
+    base = _server_url()
+    idx = url.find("/output/")
+    if base and idx != -1 and not url.startswith(base):
+        return base + url[idx:]
+    return url
+
+
+def _fix_gen_urls(data: dict | None) -> dict | None:
+    """对生成接口响应里的 url/audio_url/file_url 字段应用 _fix_output_url。"""
+    if isinstance(data, dict):
+        for k in ("url", "audio_url", "file_url"):
+            if data.get(k):
+                data[k] = _fix_output_url(data[k])
+    return data
+
+
 def gen_bgm(prompt: str, style: str = "auto", duration: int = 30,
             timeout: int = 120) -> dict | None:
     """POST /audio/gen/bgm — MusicGen 生成 BGM。"""
@@ -169,7 +195,7 @@ def gen_bgm(prompt: str, style: str = "auto", duration: int = 30,
             timeout=timeout,
         )
         if r.status_code == 200:
-            return r.json()
+            return _fix_gen_urls(r.json())
         log.warning(f"[audio_lib] gen_bgm → HTTP {r.status_code}: {r.text[:200]}")
     except requests.exceptions.RequestException as e:
         log.error(f"[audio_lib] gen_bgm 失败: {e}")
@@ -189,7 +215,7 @@ def gen_sfx(prompt: str, duration: int = 3,
             timeout=timeout,
         )
         if r.status_code == 200:
-            return r.json()
+            return _fix_gen_urls(r.json())
         log.warning(f"[audio_lib] gen_sfx → HTTP {r.status_code}: {r.text[:200]}")
     except requests.exceptions.RequestException as e:
         log.error(f"[audio_lib] gen_sfx 失败: {e}")
